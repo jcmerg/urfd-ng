@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both. Originally developed for the URF363 reflector.
 
-**urfd 4.12.4-dht** | tcd 0.4.0 | Dashboard v2.12.1
+**urfd 4.12.5-dht** | tcd 0.4.0 | Dashboard v2.12.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -850,6 +850,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.12.0**: "also on" names three modules at most and counts the rest (all of them in the tooltip); more than 8 modules get a compact keypad of 7 columns with the module name in the tooltip
 - **Dashboard v2.11.0**: The LCD follows the selected module key (who transmits there, or who was heard there last); without a selection it shows the transmission that started last, and "also on S" names the other modules on the air, in the LCD and the on-air line
 - **Dashboard v2.10.0**: Operator's first name next to the callsign in the LCD, the last-heard list, the on-air line and `/json/stations`; a speaker change shows within about two seconds (a small probe, `api/onair.php`, is polled every 1.5 s and triggers the reload); a smaller LCD; the theme switch keeps the top bar on one line
+- **SVXServer UDP heartbeat (4.12.5)**: urfd sends a node a UDP heartbeat when it sent it nothing for 15 s, like SvxReflector; it only answered the node's heartbeats, and SvxLink sends none while it talks, so it dropped the link after a transmission of 60 s ("UDP Heartbeat timeout")
 - **SVXServer nodes in the links (4.12.4)**: a SvxLink node is linked on the module of its selected TG, and while it selects none (SvxLink idles on TG 0) on the module of the first monitored TG that is mapped, so it shows in the links like an MMDVM hotspot; the entry follows TG map changes within 5 s
 - **SVXServer node list (4.12.3)**: the node info is read with the keys SvxLink really sends (`sw` + `swVer`, `nodeLocation`/`Location`, `Locator`, the `qth` sites of `node_info.json`), so the software and location are no longer empty; `svxs_peer_list` also returns `monitored_tgs` and `connected_since`
 - **Module node count without links (4.12.2)**: `<LinkedNodes>` counts only the nodes the status file lists; a link the reflector keeps to another server (MMDVMClient, DCS, DExtra, DPlus or YSF client, DCS peer) no longer adds one to each module it is mapped to
