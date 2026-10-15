@@ -43,9 +43,9 @@ $count = min($Reflector->NodeCount(), (int)$PageOptions['RepeatersPage']['LimitT
 for ($i = 0; $i < $count; $i++) {
     $node = $Reflector->Nodes[$i];
     list($flag, $country) = $Reflector->GetFlag($node->GetCallSign());
-    $name = $node->GetCallSign().($node->GetSuffix() != '' ? '-'.$node->GetSuffix() : '');
     echo '<tr>';
-    echo '<td class="cs"><a href="https://aprs.fi/'.rawurlencode($name).'" target="_blank" rel="noopener">'.h($node->GetCallSign()).'</a>';
+    // like the last heard list: the callsign leads to QRZ, without the suffix
+    echo '<td class="cs"><a href="https://www.qrz.com/db/'.rawurlencode(trim($node->GetCallSign())).'" target="_blank" rel="noopener">'.h($node->GetCallSign()).'</a>';
     if ($node->GetSuffix() != '') echo '<span class="sfx">-'.h($node->GetSuffix()).'</span>';
     if ($flag != '') echo '<span class="cc" title="'.h($country).'">'.h(strtoupper($flag)).'</span>';
     echo '</td>';
