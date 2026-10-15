@@ -59,6 +59,8 @@ COPY --from=builder /build/reflector/dbutil /usr/local/bin/dbutil
 
 # Copy dashboard
 COPY dashboard/ /var/www/urfd-dashboard/
+# live dashboard (coolacid), served as /live/
+COPY dashboard-ws/static/ /var/www/urfd-dashboard-ws/
 RUN chown -R www-data:www-data /var/www/urfd-dashboard /var/lib/xlxd-ch
 
 # Supervisord and nginx configs are injected at build time via --build-context

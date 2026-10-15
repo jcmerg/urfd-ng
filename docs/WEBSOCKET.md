@@ -29,6 +29,8 @@ location /ws {
 }
 ```
 
+The Docker image has this block in `docker/nginx-dashboard.conf` and also serves coolacid's live dashboard from `dashboard-ws/static/` as `/live/`, next to the PHP dashboard; its `config.js` points it at `/ws` on the same host and loads Vue from the folder.
+
 The browser connects with `new WebSocket("wss://" + location.host + "/ws")`; a subprotocol is optional (`urfd`).
 
 ## Connection lifecycle
