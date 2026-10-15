@@ -18,6 +18,9 @@
 
 
 #include <string.h>
+#include <fstream>
+#include <sstream>
+#include <ctime>
 
 #include "Global.h"
 #include "Utils.h"
@@ -30,9 +33,11 @@
 #include "DPlusClientProtocol.h"
 #include "YSFClientProtocol.h"
 #include "NXDNProtocol.h"
+#include "Notifier.h"
 
 CReflector::CReflector()
 {
+	m_StartedAt = std::time(nullptr);
 	m_EchoModule = ' ';
 	m_EchoHasHeader = false;
 }
@@ -375,9 +380,12 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 		stream->Push(std::move(DvHeader));
 		StatusChanged();
 
-		// notify
-		//OnStreamOpen(stream->GetUserCallsign());
-
+		CCallsign viaPeer = g_Reflector.GetCallsign();
+		CCallsign moduleCs;
+		moduleCs.SetCSModule(module);
+		auto *users = g_Reflector.GetUsers();
+		users->StationStarted(stream->GetUserCallsign(), client->GetCallsign(), moduleCs, viaPeer, client->GetProtocolName());
+		g_Reflector.ReleaseUsers();
 	}
 	return stream;
 }
@@ -413,8 +421,12 @@ void CReflector::CloseStream(std::shared_ptr<CPacketStream> stream)
 			// client no longer a master
 			client->NotAMaster();
 
-			// notify
-			//OnStreamClose(stream->GetUserCallsign());
+			CCallsign viaPeer = g_Reflector.GetCallsign();
+			CCallsign moduleCs;
+			moduleCs.SetCSModule(GetStreamModule(stream));
+			auto *users = g_Reflector.GetUsers();
+			users->StationStopped(stream->GetUserCallsign(), client->GetCallsign(), moduleCs, viaPeer, client->GetProtocolName());
+			g_Reflector.ReleaseUsers();
 
 			std::cout << "Closing stream of module " << GetStreamModule(stream) << std::endl;
 		}
@@ -584,15 +596,31 @@ void CReflector::MaintenanceThread()
 				// would throw on, ending urfd
 				jsonFile << jreport.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 				jsonFile.close();
-				std::rename(tmppath.c_str(), jsonpath.c_str());
+				if (0 == std::rename(tmppath.c_str(), jsonpath.c_str()))
+				{
+					// JSON snapshot written successfully; no file-reading dispatch (events are emitted upstream)
+				}
+				else
+				{
+					std::cerr << "Failed to rename " << tmppath << " to " << jsonpath << std::endl;
+				}
 			}
 		}
 
 
 		// and wait a bit and do something useful at the same time; a speaker change
-		// cuts the wait short, so the dashboard shows it within a tenth of a second
-		for (int i=0; i< XML_UPDATE_PERIOD*10 && keep_running && !m_StatusChanged.exchange(false); i++)
+		// cuts the wait short, so the dashboard shows it within a tenth of a second.
+		// We still run station inactivity cleanup during the wait period so a user that
+		// stops keying will eventually emit a station_stopped event even when no new
+		// packets arrive.
+		for (int i=0; i< XML_UPDATE_PERIOD*10 && keep_running; i++)
 		{
+			if (0 == (i % 10))
+			{
+				auto *users = GetUsers();
+				users->CleanupInactiveStations();
+				ReleaseUsers();
+			}
 			if (tcport)
 			{
 				g_TCServer.TryAccept(100); // probe dead sockets + non-blocking accept
@@ -601,6 +629,8 @@ void CReflector::MaintenanceThread()
 			{
 				std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			}
+			if (m_StatusChanged.exchange(false))
+				break;
 		}
 	}
 }

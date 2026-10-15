@@ -23,6 +23,8 @@
 #include "Global.h"
 #include "LogBuffer.h"
 #include "CurlGet.h"
+#include "Notifier.h"
+#include <nlohmann/json.hpp>
 
 #ifndef UTILITY
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -90,6 +92,27 @@ int main(int argc, char *argv[])
 	std::ofstream ofs(pidpath, std::ofstream::out);
 	ofs << getpid() << std::endl;
 	ofs.close();
+
+	// Dispatch uptime event so consumers know the process is up immediately.
+	// PID and pidfile are operational details and are intentionally not exposed.
+	try {
+	    const auto now = std::time(nullptr);
+	    const auto started = g_Reflector.GetStartedAt();
+	    nlohmann::json payload = {
+	        {"server_started", started},
+	        {"current_time", now},
+	        {"uptime_seconds", static_cast<std::int64_t>(now - started)}
+	    };
+
+	    CEvent ev;
+	    ev.event_type = "uptime_update";
+	    ev.timestamp = static_cast<std::int64_t>(now);
+	    ev.reflector_name = g_Configure.GetString(g_Keys.names.callsign);
+	    ev.payload = payload.dump();
+	    CNotifierManager::Instance().Dispatch(ev);
+	} catch (const std::exception &ex) {
+	    std::cerr << "Notifier: exception dispatching uptime_update: " << ex.what() << std::endl;
+	}
 
 	// main loop: reload config on SIGHUP, exit on SIGTERM/SIGINT
 	int sig;

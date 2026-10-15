@@ -74,6 +74,7 @@ public:
 
 	// get
 	const CCallsign &GetCallsign(void) const        { return m_Callsign; }
+	std::time_t GetStartedAt(void) const             { return m_StartedAt; }
 	CUsers  *GetUsers(void)                         { m_Users.Lock(); return &m_Users; }
 	void    ReleaseUsers(void)                      { m_Users.Unlock(); }
 
@@ -125,6 +126,7 @@ protected:
 
 	// identity
 	CCallsign   m_Callsign;
+	std::time_t m_StartedAt = 0;
 	std::string m_Modules, m_TCmodules;
 	std::string m_ConfigPath;
 

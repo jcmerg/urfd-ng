@@ -54,6 +54,7 @@ public:
 	static std::string OperatorName(const CCallsign &my);
 
 	// operators
+	CUser &operator=(const CUser &) = default;
 	bool operator ==(const CUser &) const;
 	bool operator <(const CUser &) const;
 

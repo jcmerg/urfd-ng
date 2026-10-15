@@ -19,6 +19,7 @@
 #pragma once
 
 #include <list>
+#include <map>
 #include <mutex>
 
 #include "User.h"
@@ -39,7 +40,7 @@ public:
 	// management
 	int    GetSize(void) const          { return (int)m_Users.size(); }
 	void   AddUser(const CUser &);
-	void   Clear(void)                  { m_Users.clear(); }
+	void   Clear(void)                  { m_Users.clear(); m_ActiveStations.clear(); }
 
 	// pass-through
 	std::list<CUser>::iterator begin()              { return m_Users.begin(); }
@@ -50,10 +51,15 @@ public:
 	// operation
 	void   Hearing(const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "");
 	void   Hearing(const CCallsign &, const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "");
+	void   StationStarted(const CCallsign &, const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "");
+	void   StationStopped(const CCallsign &, const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "");
+	void   CleanupInactiveStations(void);
 	void   Location(const CCallsign &, double lat, double lon);
 
 protected:
 	// data
-	std::mutex        m_Mutex;
-	std::list<CUser>  m_Users;
+	std::mutex                       m_Mutex;
+	std::list<CUser>                 m_Users;
+	std::map<std::string, CUser>      m_ActiveStations;
+	static constexpr std::time_t     kStationEndTimeoutSec = 90;
 };

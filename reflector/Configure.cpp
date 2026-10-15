@@ -88,6 +88,7 @@
 #define JENABLEDGID              "EnableDGID"
 #define JURL                     "URL"
 #define JUSRP                    "USRP"
+#define JWEBSOCKET               "Websocket"
 #define JWHITELISTPATH           "WhitelistPath"
 #define JXMLPATH                 "XmlPath"
 #define JYSF                     "YSF"
@@ -236,6 +237,8 @@ bool CConfigure::ReadData(const std::string &path)
 				section = ESection::svxserver;
 			else if (0 == hname.compare(JFILES))
 				section = ESection::files;
+			else if (0 == hname.compare(JWEBSOCKET))
+				section = ESection::websocket;
 			else if (0 == hname.compare(JDCSCLIENT))
 				section = ESection::dcsclient;
 			else if (0 == hname.compare("YSFClient"))
@@ -804,9 +807,58 @@ bool CConfigure::ReadData(const std::string &path)
 				else
 					badParam(key);
 				break;
+			case ESection::websocket:
+				if (!data.contains("Websocket") || !data["Websocket"].is_object())
+					data["Websocket"] = nlohmann::json::object();
+				if (!data.contains("websocket") || !data["websocket"].is_object())
+					data["websocket"] = nlohmann::json::object();
+				if (0 == key.compare("Enable"))
+				{
+					const bool enabled = IS_TRUE(value[0]);
+					data["Websocket"]["Enable"] = enabled;
+					data["websocket"]["enable"] = enabled;
+				}
+				else if (0 == key.compare("Port"))
+				{
+					const auto port = std::stoul(value);
+					data["Websocket"]["Port"] = port;
+					data["websocket"]["port"] = port;
+				}
+				else if (0 == key.compare("Bind"))
+				{
+					data["Websocket"]["Bind"] = value;
+					data["websocket"]["bind"] = value;
+				}
+				else if (0 == key.compare("MaxClients"))
+				{
+					const auto max = std::stoi(value);
+					data["Websocket"]["MaxClients"] = max;
+					data["websocket"]["maxclients"] = max;
+				}
+				else if (0 == key.compare("PerClientQueueLen"))
+				{
+					const auto max = std::stoi(value);
+					data["Websocket"]["PerClientQueueLen"] = max;
+					data["websocket"]["perclientqueuelen"] = max;
+				}
+				else if (0 == key.compare("PingIntervalSec"))
+				{
+					const auto valueSec = std::stoi(value);
+					data["Websocket"]["PingIntervalSec"] = valueSec;
+					data["websocket"]["ping_interval"] = valueSec;
+				}
+				else if (0 == key.compare("IdleTimeoutSec"))
+				{
+					const auto valueSec = std::stoi(value);
+					data["Websocket"]["IdleTimeoutSec"] = valueSec;
+					data["websocket"]["idle_timeout"] = valueSec;
+				}
+				else
+					badParam(key);
+				break;
 			default:
 				std::cout << "WARNING: parameter '" << line << "' defined before any [section]" << std::endl;
-		}
+			}
 
 	}
 	cfgfile.close();

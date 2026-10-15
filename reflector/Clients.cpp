@@ -19,6 +19,8 @@
 
 #include "Global.h"
 #include "Clients.h"
+#include "Notifier.h"
+#include <nlohmann/json.hpp>
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructor
@@ -63,6 +65,23 @@ void CClients::AddClient(std::shared_ptr<CClient> client)
 		std::cout << " on module " << client->GetReflectorModule();
 	}
 	std::cout << std::endl;
+
+	// Dispatch a client/node added event upstream so consumers get near-real-time updates
+	try {
+		CEvent ev;
+		ev.event_type = "client_added";
+		ev.timestamp = static_cast<std::int64_t>(std::time(nullptr));
+		ev.reflector_name = g_Configure.GetString(g_Keys.names.callsign);
+		nlohmann::json p;
+		p["callsign"] = client->GetCallsign().GetCS();
+		p["protocol"] = client->GetProtocolName();
+		p["reflector_module"] = std::string(1, client->GetReflectorModule());
+		p["connect_time"] = client->GetConnectTime();
+		ev.payload = p.dump();
+		CNotifierManager::Instance().Dispatch(ev);
+	} catch (const std::exception &ex) {
+		std::cerr << "Notifier: exception in AddClient dispatch: " << ex.what() << std::endl;
+	}
 }
 
 void CClients::RemoveClient(std::shared_ptr<CClient> client)
@@ -84,6 +103,22 @@ void CClients::RemoveClient(std::shared_ptr<CClient> client)
 					std::cout << " on module " << (*it)->GetReflectorModule();
 				}
 				std::cout << std::endl;
+				// Dispatch client/node removed event
+				try {
+				    CEvent ev;
+				    ev.event_type = "client_removed";
+				    ev.timestamp = static_cast<std::int64_t>(std::time(nullptr));
+				    ev.reflector_name = g_Configure.GetString(g_Keys.names.callsign);
+				    nlohmann::json p;
+				    p["callsign"] = (*it)->GetCallsign().GetCS();
+				    p["protocol"] = (*it)->GetProtocolName();
+				    p["reflector_module"] = std::string(1, (*it)->GetReflectorModule());
+				    p["last_heard_time"] = (*it)->GetLastHeardTime();
+				    ev.payload = p.dump();
+				    CNotifierManager::Instance().Dispatch(ev);
+				} catch (const std::exception &ex) {
+				    std::cerr << "Notifier: exception in RemoveClient dispatch: " << ex.what() << std::endl;
+				}
 				m_Clients.erase(it);
 				break;
 			}

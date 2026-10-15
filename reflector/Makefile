@@ -40,6 +40,17 @@ else
 CFLAGS += -DNO_DHT
 endif
 
+# Optional notifier backends
+ifeq ($(USE_MOSQUITTO), true)
+LDFLAGS += -lmosquitto
+CFLAGS += -DUSE_MOSQUITTO
+endif
+
+ifeq ($(USE_LIBWEBSOCKETS), true)
+LDFLAGS += -lwebsockets
+CFLAGS += -DUSE_LIBWEBSOCKETS
+endif
+
 SRCS = $(wildcard *.cpp)
 OBJS = $(SRCS:.cpp=.o)
 DEPS = $(SRCS:.cpp=.d)

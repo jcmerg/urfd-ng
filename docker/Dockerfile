@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     libcurl4-gnutls-dev \
     libopendht-dev \
+    libwebsockets-dev \
     nlohmann-json3-dev \
     libopus-dev \
     libssl-dev \
@@ -30,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl3t64-gnutls \
     libopendht3t64 \
     libopus0 \
+    libwebsockets19 \
     nginx \
     php-fpm \
     supervisor \
