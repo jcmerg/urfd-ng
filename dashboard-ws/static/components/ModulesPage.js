@@ -20,9 +20,18 @@ export default {
     boolText(value) {
       return value ? 'Yes' : 'No';
     },
+    // one urfd mapping as text, e.g. "MMDVMClient TG 26363 TS1" or "DCSClient C host:port (down)"
+    mappingText(mapping) {
+      if (!mapping || typeof mapping !== 'object') return String(mapping);
+      const parts = [mapping.protocol, mapping.type === 'TG' ? 'TG' : '', mapping.id, mapping.timeslot ? 'TS' + mapping.timeslot : '', mapping.remote_name];
+      let text = parts.filter((part) => part !== undefined && part !== null && part !== '').join(' ');
+      if (mapping.expires) text += ' (dynamic)';
+      if (mapping.connected === false) text += ' (down)';
+      return text;
+    },
     bridgeText(module) {
       const bridged = module.bridged_to || module.bridgedTo || module.mappings || module.bridge || '—';
-      if (Array.isArray(bridged)) return bridged.length ? bridged.join(', ') : '—';
+      if (Array.isArray(bridged)) return bridged.length ? bridged.map((mapping) => this.mappingText(mapping)).join(', ') : '—';
       if (bridged && typeof bridged === 'object') {
         const names = Object.keys(bridged).map((key) => bridged[key]);
         return names.length ? names.join(', ') : '—';

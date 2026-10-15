@@ -110,7 +110,7 @@ export default {
               </tr>
               <tr v-for="item in rows" :key="item.callsign + ':' + item.on_module + ':' + item.last_heard_time">
                 <td><span class="tag live" v-if="isActive(item)">TX</span></td>
-                <td class="callsign">{{ item.callsign }}</td>
+                <td class="callsign">{{ item.callsign }}<span v-if="item.name" class="muted"> {{ item.name }}</span></td>
                 <td><span class="module-chip">{{ item.on_module || '—' }}</span></td>
                 <td>{{ item.protocol || 'unknown' }}</td>
                 <td>{{ viaLabel(item) }}</td>
