@@ -72,7 +72,9 @@ public:
 		std::string callsign;
 		std::string ip;
 		std::set<uint32_t> subscribedTGs;   // the selected TG
+		std::set<uint32_t> monitoredTGs;
 		bool udpDiscovered;
+		time_t connectedSince;
 		SSvxNodeInfo nodeInfo;
 	};
 	std::vector<SConnectedPeer> GetConnectedPeers() const;
@@ -95,6 +97,7 @@ protected:
 		EAuthState authState = EAuthState::expect_proto_ver;
 		uint8_t challenge[20] = {};
 		bool sendFailed = false;  // a TCP send failed, the Task loop drops the peer
+		time_t connectedSince = 0; // wall clock time of the login
 
 		// UDP
 		CIp udpEndpoint;

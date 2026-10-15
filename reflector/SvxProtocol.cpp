@@ -542,6 +542,7 @@ void CSvxProtocol::OnPeerAuthResponse(uint32_t clientId, const std::vector<uint8
 	// Auth successful
 	peer.callsign = callsign;
 	peer.authState = SSvxPeer::EAuthState::connected;
+	peer.connectedSince = time(nullptr);
 
 	// Send MsgAuthOk
 	{
@@ -595,16 +596,47 @@ void CSvxProtocol::OnPeerNodeInfo(uint32_t clientId, const std::vector<uint8_t> 
 	try
 	{
 		auto j = nlohmann::json::parse(json);
-		if (j.contains("sw_ver") && j["sw_ver"].is_string())
-			peer.nodeInfo.software = j["sw_ver"].get<std::string>();
-		if (j.contains("rx_name") && j["rx_name"].is_string())
-			peer.nodeInfo.rxSiteName = j["rx_name"].get<std::string>();
-		if (j.contains("tx_name") && j["tx_name"].is_string())
-			peer.nodeInfo.txSiteName = j["tx_name"].get<std::string>();
-		if (j.contains("qth") && j["qth"].is_string())
-			peer.nodeInfo.qth = j["qth"].get<std::string>();
-		if (j.contains("location") && j["location"].is_string())
-			peer.nodeInfo.location = j["location"].get<std::string>();
+		// the first string among keys, "" if none is there
+		auto str = [](const nlohmann::json &o, std::initializer_list<const char *> keys) -> std::string
+		{
+			for (const char *k : keys)
+				if (o.contains(k) && o[k].is_string())
+					return o[k].get<std::string>();
+			return "";
+		};
+
+		// SvxLink adds "sw" and "swVer" to the contents of its NODE_INFO_FILE
+		std::string sw = str(j, {"sw"});
+		std::string swVer = str(j, {"swVer", "sw_ver"});
+		peer.nodeInfo.software = (sw.empty() || swVer.empty()) ? sw + swVer : sw + " " + swVer;
+		peer.nodeInfo.location = str(j, {"nodeLocation", "Location", "location"});
+		peer.nodeInfo.qth = str(j, {"Locator", "locator"});
+		// node_info.json of SvxLink: "qth" is an array of sites, each with "rx"
+		// and "tx" objects keyed by receiver/transmitter id
+		if (j.contains("qth") && j["qth"].is_array() && !j["qth"].empty() && j["qth"][0].is_object())
+		{
+			const auto &site = j["qth"][0];
+			if (peer.nodeInfo.qth.empty())
+				peer.nodeInfo.qth = str(site, {"name"});
+			auto firstName = [&str](const nlohmann::json &o) -> std::string
+			{
+				if (o.is_object())
+					for (const auto &el : o)
+						if (el.is_object())
+							return str(el, {"name"});
+				return "";
+			};
+			if (site.contains("rx"))
+				peer.nodeInfo.rxSiteName = firstName(site["rx"]);
+			if (site.contains("tx"))
+				peer.nodeInfo.txSiteName = firstName(site["tx"]);
+		}
+		else if (peer.nodeInfo.qth.empty())
+			peer.nodeInfo.qth = str(j, {"qth"});
+		if (peer.nodeInfo.rxSiteName.empty())
+			peer.nodeInfo.rxSiteName = str(j, {"rx_name"});
+		if (peer.nodeInfo.txSiteName.empty())
+			peer.nodeInfo.txSiteName = str(j, {"tx_name"});
 		if (j.contains("logics") && j["logics"].is_array())
 		{
 			peer.nodeInfo.logics.clear();
@@ -1729,7 +1761,9 @@ void CSvxProtocol::UpdatePeerSnapshot(void)
 		cp.ip = peer.udpDiscovered ? peer.udpEndpoint.GetAddress() : "";
 		if (peer.selectedTG)
 			cp.subscribedTGs.insert(peer.selectedTG);
+		cp.monitoredTGs = peer.monitoredTGs;
 		cp.udpDiscovered = peer.udpDiscovered;
+		cp.connectedSince = peer.connectedSince;
 		cp.nodeInfo = peer.nodeInfo;
 		result.push_back(std::move(cp));
 	}

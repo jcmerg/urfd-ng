@@ -1707,6 +1707,8 @@ nlohmann::json CAdminSocket::CmdSvxsPeerList(void)
 			for (uint32_t tg : p.subscribedTGs)
 				tgs.push_back(tg);
 			peer["subscribed_tgs"] = tgs;
+			peer["monitored_tgs"] = p.monitoredTGs;
+			peer["connected_since"] = (int64_t)p.connectedSince;
 
 			// node info if available
 			if (p.nodeInfo.populated)

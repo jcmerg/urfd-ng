@@ -414,7 +414,8 @@ function refreshSvxsPeerList() {
         tbody.empty();
         if (resp.status === 'ok' && resp.peers) {
             resp.peers.forEach(function(p) {
-                var tgs   = p.subscribed_tgs ? p.subscribed_tgs.join(', ') : '';
+                var tgs   = (p.subscribed_tgs && p.subscribed_tgs.length) ? p.subscribed_tgs.join(', ') : '-';
+                if (p.monitored_tgs && p.monitored_tgs.length) tgs += ' (monitor ' + p.monitored_tgs.join(', ') + ')';
                 var sw    = (p.node_info && p.node_info.software) ? p.node_info.software : '';
                 var udp   = p.udp_discovered ? 'Yes' : 'No';
                 var since = p.connected_since ? new Date(p.connected_since * 1000).toLocaleString() : '';
