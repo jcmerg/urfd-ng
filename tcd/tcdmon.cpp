@@ -420,7 +420,10 @@ int main(int argc, char *argv[])
 
 		// Header
 		attron(COLOR_PAIR(7) | A_BOLD);
-		mvprintw(0, 0, "TCD Transcoder Monitor");
+		{
+			std::string ver = json_str(last_json, "version");
+			mvprintw(0, 0, "TCD Transcoder Monitor%s%s", ver.empty() ? "" : " ", ver.c_str());
+		}
 		attroff(COLOR_PAIR(7) | A_BOLD);
 
 		// Reflector status

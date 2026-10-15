@@ -16,6 +16,7 @@
 #include "MonitorServer.h"
 #include "TcdStats.h"
 #include "Configure.h"
+#include "Version.h"
 #include "mongoose.h"
 
 extern CConfigure g_Conf;
@@ -83,7 +84,7 @@ std::string CMonitorServer::BuildStatsJson()
 	js << std::fixed;
 	js.precision(1);
 
-	js << "{\"modules\":{";
+	js << "{\"version\":\"" TCD_VERSION "\",\"modules\":{";
 	bool first = true;
 	for (char mod : g_Stats.module_letters)
 	{
@@ -164,7 +165,7 @@ std::string CMonitorServer::BuildStatsJson()
 	   << ",\"gain_dmr_reencode\":" << g_Stats.config.gain_dmr_reencode.load()
 	   << ",\"outgain_dstar\":" << g_Stats.config.outgain_dstar.load()
 	   << ",\"outgain_dmr\":" << g_Stats.config.outgain_dmr.load()
-	   << ",\"outgain_dmr_bitstream\":" << (g_Stats.config.outgain_dmr_bitstream.load() ? "true" : "false")
+	   << ",\"outgain_dmr_bitstream\":" << g_Stats.config.outgain_dmr_bitstream.load()
 	   << ",\"outgain_usrp\":" << g_Stats.config.outgain_usrp.load()
 	   << ",\"outgain_imbe\":" << g_Stats.config.outgain_imbe.load()
 	   << ",\"outgain_m17\":" << g_Stats.config.outgain_m17.load()
@@ -255,9 +256,9 @@ void CMonitorServer::HandleRest(struct mg_connection *c, struct mg_http_message 
 		float target, attack, release;
 		if (json_get_bool(hm->body.buf, hm->body.len, "enabled", enabled))
 			g_Stats.config.agc_enabled.store(enabled);
-		bool bitstream;
-		if (json_get_bool(hm->body.buf, hm->body.len, "outgain_dmr_bitstream", bitstream))
-			g_Stats.config.outgain_dmr_bitstream.store(bitstream);
+		int bitstream;
+		if (json_get_int(hm->body.buf, hm->body.len, "outgain_dmr_bitstream", bitstream))
+			g_Stats.config.outgain_dmr_bitstream.store(std::clamp(bitstream, -24, 0));
 		if (json_get_float(hm->body.buf, hm->body.len, "target", target))
 			g_Stats.config.agc_target.store(target);
 		if (json_get_float(hm->body.buf, hm->body.len, "attack", attack))
@@ -525,10 +526,10 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 				{
 					out << key << " = " << g_Stats.config.outgain_dmr.load() << "\n";
 					if (!bitstreamPresent)
-						out << "OutputGainDMRBitstream = " << (g_Stats.config.outgain_dmr_bitstream.load() ? "true" : "false") << "\n";
+						out << "OutputGainDMRBitstream = " << g_Stats.config.outgain_dmr_bitstream.load() << "\n";
 					continue;
 				}
-				if (key == "OutputGainDMRBitstream") { out << key << " = " << (g_Stats.config.outgain_dmr_bitstream.load() ? "true" : "false") << "\n"; continue; }
+				if (key == "OutputGainDMRBitstream") { out << key << " = " << g_Stats.config.outgain_dmr_bitstream.load() << "\n"; continue; }
 				if (key == "OutputGainUSRP")   { out << key << " = " << g_Stats.config.outgain_usrp.load() << "\n"; continue; }
 				if (key == "OutputGainIMBE")   { out << key << " = " << g_Stats.config.outgain_imbe.load() << "\n"; continue; }
 				if (key == "OutputGainM17")    { out << key << " = " << g_Stats.config.outgain_m17.load() << "\n"; continue; }

@@ -1449,7 +1449,7 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 	else
 	{
 		// the DVSI encoded audio of another codec: OutputGainDMR in the bitstream
-		if (g_Stats.config.outgain_dmr_bitstream.load(std::memory_order_relaxed))
+		if (BitstreamDmrDb() != 0)
 		{
 			uint8_t dmr_data[9];
 			memcpy(dmr_data, packet->GetDMRData(), 9);
@@ -1463,20 +1463,29 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 }
 
 // OutputGainDMR for audio that is encoded to DMR (not DMR -> DMR, which has
-// its own path): as a PCM gain before the encoder, or with
-// OutputGainDMRBitstream through b2 after it, so the encoder gets full level
+// its own path), split in two: OutputGainDMRBitstream dB of it through b2 after
+// the encoder, the rest as a PCM gain before it. The encoder works better with
+// more level, but b2 moves quiet frames in coarse steps, so all of it in b2 can
+// leave artifacts
+int CController::BitstreamDmrDb(void) const
+{
+	const int total = g_Stats.config.outgain_dmr.load(std::memory_order_relaxed);
+	const int bs = g_Stats.config.outgain_dmr_bitstream.load(std::memory_order_relaxed);
+	// never more than OutputGainDMR itself, and only an attenuation
+	return (total >= 0) ? 0 : std::max(bs, total);
+}
+
 int32_t CController::PcmDmrGainNum(void) const
 {
-	return g_Stats.config.outgain_dmr_bitstream.load(std::memory_order_relaxed) ? 256 : outgain_dmr_num;
+	const int bs = BitstreamDmrDb();
+	return bs ? calcNumerator(g_Stats.config.outgain_dmr.load(std::memory_order_relaxed) - bs) : outgain_dmr_num;
 }
 
 void CController::BitstreamDmrGain(uint8_t *ambe2, uint16_t streamId)
 {
-	if (!g_Stats.config.outgain_dmr_bitstream.load(std::memory_order_relaxed))
-		return;
-	const int db = g_Stats.config.outgain_dmr.load(std::memory_order_relaxed);
-	if (db != 0)
-		m_ambeGain.Process(ambe2, streamId, (float)db);
+	const int bs = BitstreamDmrDb();
+	if (bs != 0)
+		m_ambeGain.Process(ambe2, streamId, (float)bs);
 }
 
 void CController::Dump(const std::shared_ptr<CTranscoderPacket> p, const std::string &title) const

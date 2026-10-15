@@ -87,6 +87,7 @@ protected:
 
 	int32_t calcNumerator(int32_t db) const;
 	static void ApplyGain(int16_t *samples, int count, int32_t num);
+	int BitstreamDmrDb(void) const;
 	int32_t PcmDmrGainNum(void) const;
 	void BitstreamDmrGain(uint8_t *ambe2, uint16_t streamId);
 	bool DiscoverFtdiDevices(std::list<std::pair<std::string, std::string>> &found);

@@ -24,6 +24,7 @@
 #include "TcdStats.h"
 #include "MonitorServer.h"
 #include "StatsLogger.h"
+#include "Version.h"
 
 // the global objects
 CConfigure     g_Conf;
@@ -103,7 +104,7 @@ int main(int argc, char *argv[])
 	g_StatsLog.Configure(g_Conf.GetStatsLogEnabled(), g_Conf.GetStatsLogDir(), g_Conf.GetStatsLogRetain());
 	g_StatsLog.Start();
 
-	std::cout << "Hybrid Transcoder version 0.6.0 successfully started" << std::endl;
+	std::cout << "Hybrid Transcoder version " TCD_VERSION " successfully started" << std::endl;
 
 	pause();
 
