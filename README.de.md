@@ -863,6 +863,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.8.0**: Kein CallingHome mehr, der Reflektor trägt sich selbst ein; die Reflektorliste liest `$Directory` (mit Rückfall auf alte `$CallingHome`-Einstellungen); `/json/metadata` nimmt die Dashboard-URL aus dem XML des Reflektors
 - **Erweitertes XML/JSON**: Modul-Zuordnungen (statisch und dynamisch mit Laufzeit), Reflektor-Angaben, Protokollliste, Protokoll pro Nutzer, Array der dynamischen TGs
 - **Anzeige der Protokoll-Sperren**: Aktive Sperren als anklickbare Markierungen im Admin-Panel
+- **WebSocket (4.13.0)**: Live-Ereignisse für das Dashboard (Clients, Peers, sprechende Stationen, beim Verbinden der komplette Stand) auf `127.0.0.1:10102`, von nginx als `/ws` durchgereicht; basiert auf dem Notifier von Jason Kendall (coolacid), mit den Fixes aus dem Review (lws-Aufrufe nur in seinem Service-Thread, Verbindungen werden wirklich geschlossen, kein Log jedes Ereignisses), siehe [docs/WEBSOCKET.md](docs/WEBSOCKET.md)
 
 ### Transcoder (tcd)
 - **In diesem Repository**: tcd liegt mit seiner Historie in `tcd/`; es baut gegen die gemeinsamen urfd-Quellen (`TCPacketDef.h`, `TCSocket.*`) aus `../reflector`, beide Seiten sprechen also immer dasselbe Protokoll
