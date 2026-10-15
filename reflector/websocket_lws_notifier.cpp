@@ -64,10 +64,14 @@ static nlohmann::json BuildInitialConnectPayload()
 		moduleEntry["echo"] = g_Configure.Contains(g_Keys.echo.module) && g_Configure.GetString(g_Keys.echo.module)[0] == module;
 
 		moduleEntry["linked_nodes"] = nodeCount[module - 'A'];
+		moduleEntry["mappings"] = g_Reflector.GetModuleMappings(module);
 
 		auto stream = g_Reflector.GetStream(module);
 		if (stream && stream->IsOpen())
+		{
 			moduleEntry["on_air"] = stream->GetUserCallsign().GetCS();
+			moduleEntry["on_air_name"] = CUser::OperatorName(stream->GetUserCallsign());
+		}
 		else
 			moduleEntry["on_air"] = nullptr;
 
@@ -168,6 +172,7 @@ static nlohmann::json BuildReflectorSnapshot()
 			{ "module", std::string(1, module) },
 			{ "stream_id", stream->GetStreamId() },
 			{ "user", stream->GetUserCallsign().GetCS() },
+			{ "name", CUser::OperatorName(stream->GetUserCallsign()) },
 			{ "callsign", client->GetCallsign().GetCS() },
 			{ "protocol", client->GetProtocolName() },
 			{ "linked_module", std::string(1, client->GetReflectorModule()) } });
@@ -196,6 +201,9 @@ static nlohmann::json BuildReflectorSnapshot()
 	{
 		nlohmann::json entry;
 		entry["callsign"] = user.GetCallsign();
+		const auto name = user.GetName();
+		if (!name.empty())
+			entry["name"] = name;
 		entry["on_module"] = std::string(1, user.GetOnModule());
 		entry["via_peer"] = user.GetViaPeer();
 		entry["via_node"] = user.GetViaNode();

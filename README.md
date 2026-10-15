@@ -886,6 +886,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Extended XML/JSON**: Module mappings (static + dynamic with TTL), reflector metadata, protocol list, per-user protocol info, dynamic TG array
 - **Protocol blocking display**: Active blocks shown as clickable labels in admin panel
 - **WebSocket (4.13.0)**: live events for the dashboard (clients, peers, talking stations, the whole state on connect) on `127.0.0.1:10102`, passed through as `/ws` by nginx; based on the notifier by Jason Kendall (coolacid), with the review fixes (lws calls only in its service thread, connections really closed, no log of every event), see [docs/WEBSOCKET.md](docs/WEBSOCKET.md); `setup.sh` switches it on, the Docker image serves `dashboard-ws` at `/live/`
+- **WebSocket bridges and names (4.14.0)**: `initial_connect` has the bridges of each module (TG mappings, autolinks, connectors to other reflectors), a `module_mappings` event follows their changes, and the station events, last heard and open channels carry the operator's name from the ID database; the XML file takes its bridges from the same code (issue #2)
 
 ### Transcoder (tcd)
 - **In this repository**: tcd moved into `tcd/` with its history; it builds against the urfd sources it shares (`TCPacketDef.h`, `TCSocket.*`) from `../reflector`, so both sides always speak the same protocol

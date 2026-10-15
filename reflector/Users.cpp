@@ -56,6 +56,7 @@ static void DispatchStationEvent(const std::string &eventType, const CUser &hear
 {
 	CNotifierManager::Instance().Dispatch(eventType, [&]() -> nlohmann::json { return {
 		{ "callsign", heard.GetCallsign() },
+		{ "name", heard.GetName() },
 		{ "via_node", heard.GetViaNode() },
 		{ "via_peer", heard.GetViaPeer() },
 		{ "on_module", std::string(1, heard.GetOnModule()) },

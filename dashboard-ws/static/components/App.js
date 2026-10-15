@@ -222,6 +222,7 @@ export default {
     function handleStationStarted(entry) {
       const nextEntry = {
         callsign: entry.callsign,
+        name: entry.name || '',
         on_module: entry.on_module,
         protocol: entry.protocol,
         via_peer: entry.via_peer,
@@ -291,6 +292,12 @@ export default {
           break;
         case 'station_stopped':
           handleStationStopped(payload);
+          break;
+        case 'module_mappings':
+          // the bridges of every module, sent when one changed
+          if (payload.modules) {
+            state.modules = state.modules.map((module) => ({ ...module, mappings: payload.modules[module.name] || [] }));
+          }
           break;
         case 'uptime_update':
           if (typeof payload.uptime_seconds !== 'undefined') state.uptimeSeconds = Number(payload.uptime_seconds);

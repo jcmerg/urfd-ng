@@ -93,7 +93,7 @@ Sent as the first message after a client connects.
 This contains static descriptor data for the reflector and the startup timing metadata:
 
 - `reflector`: callsign, and country, sponsor and dashboard URL when configured
-- `modules`: the configured module list, including description, echo flag, linked node count, on-air user, transcoded flag, and per-module protocol IDs
+- `modules`: the configured module list, including description, echo flag, linked node count, on-air user (`on_air`, with `on_air_name`), transcoded flag, per-module protocol IDs, and `mappings`: the module's bridges, see `module_mappings`
 - `protocols`: the enabled protocol list and their configured ports
 - `server_started`: Unix timestamp when the reflector process started
 - `current_time`: Unix timestamp at the moment the initial packet was built
@@ -112,7 +112,7 @@ This includes the current dynamic state of the reflector:
 - `uptime_seconds`: elapsed time since start
 - `links`: all currently linked clients/modules
 - `last_heard`: recent heard stations
-- `open_channels`: active streams currently transmitting on a module
+- `open_channels`: active streams currently transmitting on a module, with the operator's `name`
 - `peers`: linked peer reflectors with their clients, like `peer_added`
 
 An event that happens while the snapshot is built can arrive after it although the snapshot already has it, e.g. a `client_added` for a client already in `links`. Nothing is lost that way; apply events by key (callsign, protocol, module) so a repeat changes nothing.
@@ -184,13 +184,14 @@ Example payload:
 
 ### `station_started`
 
-Sent when a stream opens on a module: `callsign` is the talking station, `via_node` the client it came through, `on_module` the module.
+Sent when a stream opens on a module: `callsign` is the talking station, `name` the operator's name from the DMR/NXDN ID database (empty when unknown), `via_node` the client it came through, `on_module` the module.
 
 Example payload:
 
 ```json
 {
   "callsign": "N7TAE",
+  "name": "Tom",
   "via_node": "URF123",
   "via_peer": "URF123",
   "on_module": "A",
@@ -203,6 +204,31 @@ Example payload:
 ### `station_stopped`
 
 Sent when that stream closes, with the payload of its `station_started`. There is one stream per module, so at most one station per module is active.
+
+### `module_mappings`
+
+The bridges of every module, sent when one changed: a TG mapping added, removed or its timer refreshed, a connector to another reflector up or down. urfd checks with every write of the XML file, so a change arrives within a few seconds (needs `[Files] XmlPath` or `JsonPath`, as every setup has). The same list is in `initial_connect` as `mappings` of each module.
+
+```json
+{
+  "modules": {
+    "F": [
+      { "protocol": "MMDVMClient", "type": "TG", "id": 26363, "timeslot": 2 },
+      { "protocol": "MMDVMClient", "type": "TG", "id": 2625, "timeslot": 2, "expires": 1730000900 },
+      { "protocol": "SVX", "type": "TG", "id": 26363 },
+      { "protocol": "DCSClient", "type": "Module", "id": "C", "remote_name": "dcs001.xreflector.net:30051", "connected": true }
+    ],
+    "S": []
+  }
+}
+```
+
+- `protocol`: `YSF`, `NXDN`, `P25` (`type` `AutoLink`), `USRP` (`Bridge`), `MMDVM`, `MMDVMClient`, `SvxReflector`, `SVX` (`TG`), `DCSClient`, `DExtraClient`, `DPlusClient` (`Module`), `YSFClient` (`DG-ID`); only enabled protocols
+- `id`: the TG, the reflector ID, the remote module letter or the DG-ID, when there is one
+- `timeslot`: DMR timeslot, for `MMDVM` and `MMDVMClient`
+- `expires`: Unix time a dynamic TG ends unless it is used again; static ones have none
+- `remote_name`: the remote reflector or server, for connectors `host:port`
+- `connected`: for connectors, whether the link is up
 
 ## Ping / pong behavior
 

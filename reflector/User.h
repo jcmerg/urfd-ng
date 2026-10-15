@@ -52,6 +52,7 @@ public:
 	static std::string Locator(double lat, double lon);
 	// the operator's name from the DMR ID database, else the NXDN one, empty if unknown
 	static std::string OperatorName(const CCallsign &my);
+	std::string GetName(void) const { return OperatorName(m_My); }	// from the DMR/NXDN ID database, may be empty
 
 	// operators
 	CUser &operator=(const CUser &) = default;

@@ -44,6 +44,7 @@ public:
 	}
 
 	const std::string &ReflectorName(void) const { return m_ReflectorName; }
+	bool IsRunning(void) const { return m_Running; }
 
 private:
 	CNotifierManager();

@@ -18,6 +18,8 @@
 
 
 #include <string.h>
+#include <algorithm>
+#include <cstdlib>
 #include <ctime>
 
 #include "Global.h"
@@ -581,6 +583,9 @@ void CReflector::MaintenanceThread()
 			}
 		}
 
+		// bridges for the WebSocket clients, when they changed
+		NotifyMappings();
+
 		// json report
 		if (!  jsonpath.empty())
 		{
@@ -722,6 +727,169 @@ void CReflector::JsonReport(nlohmann::json &report)
 
 #define XML_PROTO_ENABLED(key) (!g_Configure.Contains(key) || g_Configure.GetBoolean(key))
 
+// the same bridges, a dynamic TG's expiry moving by a few seconds aside: it is
+// taken anew on every call, while a TG whose timer was refreshed moves by more
+static bool SameMappings(const nlohmann::json &a, const nlohmann::json &b)
+{
+	if (a.size() != b.size())
+		return false;
+	for (auto it = a.begin(); it != a.end(); ++it)
+	{
+		if (!b.contains(it.key()) || it.value().size() != b[it.key()].size())
+			return false;
+		const auto &la = it.value(), &lb = b[it.key()];
+		for (size_t i = 0; i < la.size(); i++)
+		{
+			auto ea = la[i], eb = lb[i];
+			const long long xa = ea.value("expires", 0LL), xb = eb.value("expires", 0LL);
+			ea.erase("expires");
+			eb.erase("expires");
+			if (ea != eb || std::llabs(xa - xb) > 5)
+				return false;
+		}
+	}
+	return true;
+}
+
+// module_mappings to the WebSocket clients when a bridge changed: a TG added,
+// removed or refreshed, a connector up or down
+void CReflector::NotifyMappings(void)
+{
+	auto &notifier = CNotifierManager::Instance();
+	if (!notifier.IsRunning())
+		return;
+	nlohmann::json all = nlohmann::json::object();
+	for (char m : m_Modules)
+		all[std::string(1, m)] = GetModuleMappings(m);
+	if (!m_SentMappings.is_null() && SameMappings(m_SentMappings, all))
+		return;
+	m_SentMappings = all;
+	notifier.Dispatch("module_mappings", [&]() -> nlohmann::json { return { { "modules", all } }; });
+}
+
+// The bridges of one module: autolinks, TG mappings (static and dynamic, with
+// the time a dynamic one expires) and the connectors to other reflectors. For
+// the XML file and the WebSocket; only protocols that are enabled.
+nlohmann::json CReflector::GetModuleMappings(char m)
+{
+	const long long now = std::time(nullptr);
+	nlohmann::json list = nlohmann::json::array();
+	auto add = [&](const char *protocol, const char *type) -> nlohmann::json & {
+		list.push_back({ { "protocol", protocol }, { "type", type } });
+		return list.back();
+	};
+	auto addTG = [&](const char *protocol, const CTGModuleMap::STGInfo &mi, bool timeslot) -> nlohmann::json & {
+		auto &e = add(protocol, "TG");
+		e["id"] = mi.tg;
+		if (timeslot)
+			e["timeslot"] = (int)mi.timeslot;
+		if (!mi.is_static)
+			e["expires"] = now + mi.remainingSeconds;
+		return e;
+	};
+	auto enabled = [](const std::string &key) { return g_Configure.Contains(key) && g_Configure.GetBoolean(key); };
+	auto isModule = [&](const std::string &key) { return g_Configure.Contains(key) && g_Configure.GetString(key)[0] == m; };
+
+	if (XML_PROTO_ENABLED(g_Keys.ysf.enable) && isModule(g_Keys.ysf.autolinkmod))
+	{
+		auto &e = add("YSF", "AutoLink");
+		if (g_Configure.Contains(g_Keys.ysf.ysfreflectordb.id))
+			e["id"] = g_Configure.GetUnsigned(g_Keys.ysf.ysfreflectordb.id);
+		if (g_Configure.Contains(g_Keys.ysf.ysfreflectordb.name))
+			e["remote_name"] = g_Configure.GetString(g_Keys.ysf.ysfreflectordb.name);
+	}
+	if (XML_PROTO_ENABLED(g_Keys.nxdn.enable) && isModule(g_Keys.nxdn.autolinkmod))
+	{
+		auto &e = add("NXDN", "AutoLink");
+		if (g_Configure.Contains(g_Keys.nxdn.reflectorid))
+			e["id"] = g_Configure.GetUnsigned(g_Keys.nxdn.reflectorid);
+	}
+	if (XML_PROTO_ENABLED(g_Keys.p25.enable) && isModule(g_Keys.p25.autolinkmod))
+	{
+		auto &e = add("P25", "AutoLink");
+		if (g_Configure.Contains(g_Keys.p25.reflectorid))
+			e["id"] = g_Configure.GetUnsigned(g_Keys.p25.reflectorid);
+	}
+	if (enabled(g_Keys.usrp.enable) && isModule(g_Keys.usrp.module))
+	{
+		auto &e = add("USRP", "Bridge");
+		if (g_Configure.Contains(g_Keys.usrp.callsign))
+			e["remote_name"] = g_Configure.GetString(g_Keys.usrp.callsign);
+	}
+	if (enabled(g_Keys.mmdvm.enable))
+	{
+		if (auto *proto = m_Protocols.FindByType(EProtocol::dmrmmdvm))
+			for (const auto &mi : static_cast<CDmrmmdvmProtocol *>(proto)->GetTGMap().GetAllMappings())
+				if (mi.module == m)
+					addTG("MMDVM", mi, true);
+	}
+	if (enabled(g_Keys.mmdvmclient.enable))
+	{
+		if (auto *proto = m_Protocols.FindByType(EProtocol::mmdvmclient))
+			for (const auto &mi : static_cast<CMMDVMClientProtocol *>(proto)->GetTGMap().GetAllMappings())
+				if (mi.module == m)
+					addTG("MMDVMClient", mi, true);
+	}
+	if (enabled(g_Keys.svx.enable))
+	{
+		if (auto *proto = m_Protocols.FindByType(EProtocol::svxreflector))
+			for (const auto &mi : static_cast<CSvxReflectorProtocol *>(proto)->GetTGMappings())
+				if (mi.module == m)
+				{
+					auto &e = addTG("SvxReflector", mi, false);
+					if (g_Configure.Contains(g_Keys.svx.host))
+						e["remote_name"] = g_Configure.GetString(g_Keys.svx.host);
+				}
+	}
+	if (enabled(g_Keys.svxs.enable))
+	{
+		if (auto *proto = m_Protocols.FindByType(EProtocol::svx))
+			for (const auto &mi : static_cast<CSvxProtocol *>(proto)->GetTGMappings())
+				if (mi.module == m)
+					addTG("SVX", mi, false);
+	}
+	// connectors to other reflectors: the remote module (or DG-ID) and whether it is up
+	auto addConnector = [&](const char *protocol, const char *type, const std::string &host, uint16_t port, bool connected) -> nlohmann::json & {
+		auto &e = add(protocol, type);
+		e["remote_name"] = host + ":" + std::to_string(port);
+		e["connected"] = connected;
+		return e;
+	};
+	if (enabled(g_Keys.dcsclient.enable))
+	{
+		if (auto *proto = m_Protocols.FindByType(EProtocol::dcsclient))
+			for (const auto &mi : static_cast<CDcsClientProtocol *>(proto)->GetMappings())
+				if (mi.localModule == m)
+					addConnector("DCSClient", "Module", mi.host, mi.port, mi.connected)["id"] = std::string(1, mi.remoteModule);
+	}
+	if (enabled(g_Keys.dextraclient.enable))
+	{
+		if (auto *proto = m_Protocols.FindByType(EProtocol::dextraclient))
+			for (const auto &mi : static_cast<CDExtraClientProtocol *>(proto)->GetMappings())
+				if (mi.localModule == m)
+					addConnector("DExtraClient", "Module", mi.host, mi.port, mi.connected)["id"] = std::string(1, mi.remoteModule);
+	}
+	if (enabled(g_Keys.dplusclient.enable))
+	{
+		if (auto *proto = m_Protocols.FindByType(EProtocol::dplusclient))
+			for (const auto &mi : static_cast<CDPlusClientProtocol *>(proto)->GetMappings())
+				if (mi.localModule == m)
+					addConnector("DPlusClient", "Module", mi.host, mi.port, mi.connected)["id"] = std::string(1, mi.remoteModule);
+	}
+	if (enabled(g_Keys.ysfclient.enable))
+	{
+		if (auto *proto = m_Protocols.FindByType(EProtocol::ysfclient))
+			for (const auto &mi : static_cast<CYsfClientProtocol *>(proto)->GetMappings())
+				if (mi.localModule == m)
+				{
+					auto &e = addConnector("YSFClient", "DG-ID", mi.host, mi.port, mi.connected);
+					if (mi.dgid > 0)
+						e["id"] = (unsigned)mi.dgid;
+				}
+	}
+	return list;
+}
+
 void CReflector::WriteXmlFile(std::ofstream &xmlFile)
 {
 	// write header
@@ -791,213 +959,21 @@ void CReflector::WriteXmlFile(std::ofstream &xmlFile)
 			if (dstid != 0)
 				xmlFile << "\t<NXDNDstId>" << dstid << "</NXDNDstId>" << std::endl;
 		}
-		// per-module protocol mappings (only if protocol is enabled)
-		if (XML_PROTO_ENABLED(g_Keys.ysf.enable)
-			&& g_Configure.Contains(g_Keys.ysf.autolinkmod) && g_Configure.GetString(g_Keys.ysf.autolinkmod)[0] == m)
+		// the bridges of this module, shared with the WebSocket
+		for (const auto &mp : GetModuleMappings(m))
 		{
-			xmlFile << "\t<Mapping><Protocol>YSF</Protocol><Type>AutoLink</Type>";
-			if (g_Configure.Contains(g_Keys.ysf.ysfreflectordb.id))
-				xmlFile << "<ID>" << g_Configure.GetUnsigned(g_Keys.ysf.ysfreflectordb.id) << "</ID>";
-			if (g_Configure.Contains(g_Keys.ysf.ysfreflectordb.name))
-				xmlFile << "<RemoteName>" << CUtils::XmlEscape(g_Configure.GetString(g_Keys.ysf.ysfreflectordb.name)) << "</RemoteName>";
+			xmlFile << "\t<Mapping><Protocol>" << mp["protocol"].get<std::string>() << "</Protocol><Type>" << mp["type"].get<std::string>() << "</Type>";
+			if (mp.contains("id"))
+				xmlFile << "<ID>" << (mp["id"].is_string() ? mp["id"].get<std::string>() : std::to_string(mp["id"].get<unsigned>())) << "</ID>";
+			if (mp.contains("timeslot"))
+				xmlFile << "<Timeslot>TS" << mp["timeslot"].get<int>() << "</Timeslot>";
+			if (mp.contains("remote_name"))
+				xmlFile << "<RemoteName>" << CUtils::XmlEscape(mp["remote_name"].get<std::string>()) << "</RemoteName>";
+			if (mp.contains("expires"))
+				xmlFile << "<Dynamic>true</Dynamic><Remaining>" << std::max<long long>(0, mp["expires"].get<long long>() - (long long)std::time(nullptr)) << "</Remaining>";
+			if (mp.value("connected", false))
+				xmlFile << "<Connected>true</Connected>";
 			xmlFile << "</Mapping>" << std::endl;
-		}
-		if (XML_PROTO_ENABLED(g_Keys.nxdn.enable)
-			&& g_Configure.Contains(g_Keys.nxdn.autolinkmod) && g_Configure.GetString(g_Keys.nxdn.autolinkmod)[0] == m)
-		{
-			xmlFile << "\t<Mapping><Protocol>NXDN</Protocol><Type>AutoLink</Type>";
-			if (g_Configure.Contains(g_Keys.nxdn.reflectorid))
-				xmlFile << "<ID>" << g_Configure.GetUnsigned(g_Keys.nxdn.reflectorid) << "</ID>";
-			xmlFile << "</Mapping>" << std::endl;
-		}
-		if (XML_PROTO_ENABLED(g_Keys.p25.enable)
-			&& g_Configure.Contains(g_Keys.p25.autolinkmod) && g_Configure.GetString(g_Keys.p25.autolinkmod)[0] == m)
-		{
-			xmlFile << "\t<Mapping><Protocol>P25</Protocol><Type>AutoLink</Type>";
-			if (g_Configure.Contains(g_Keys.p25.reflectorid))
-				xmlFile << "<ID>" << g_Configure.GetUnsigned(g_Keys.p25.reflectorid) << "</ID>";
-			xmlFile << "</Mapping>" << std::endl;
-		}
-		if (g_Configure.Contains(g_Keys.usrp.enable) && g_Configure.GetBoolean(g_Keys.usrp.enable)
-			&& g_Configure.Contains(g_Keys.usrp.module) && g_Configure.GetString(g_Keys.usrp.module)[0] == m)
-		{
-			xmlFile << "\t<Mapping><Protocol>USRP</Protocol><Type>Bridge</Type>";
-			if (g_Configure.Contains(g_Keys.usrp.callsign))
-				xmlFile << "<RemoteName>" << CUtils::XmlEscape(g_Configure.GetString(g_Keys.usrp.callsign)) << "</RemoteName>";
-			xmlFile << "</Mapping>" << std::endl;
-		}
-		// MMDVM Server TG mappings for this module (static + dynamic)
-		if (g_Configure.Contains(g_Keys.mmdvm.enable) && g_Configure.GetBoolean(g_Keys.mmdvm.enable))
-		{
-			auto *proto = m_Protocols.FindByType(EProtocol::dmrmmdvm);
-			if (proto)
-			{
-				auto *mmdvm = static_cast<CDmrmmdvmProtocol *>(proto);
-				auto mappings = mmdvm->GetTGMap().GetAllMappings();
-				for (const auto &mi : mappings)
-				{
-					if (mi.module != m) continue;
-					xmlFile << "\t<Mapping><Protocol>MMDVM</Protocol><Type>TG</Type>";
-					xmlFile << "<ID>" << mi.tg << "</ID>";
-					xmlFile << "<Timeslot>TS" << (int)mi.timeslot << "</Timeslot>";
-					if (!mi.is_static)
-					{
-						xmlFile << "<Dynamic>true</Dynamic>";
-						xmlFile << "<Remaining>" << mi.remainingSeconds << "</Remaining>";
-					}
-					xmlFile << "</Mapping>" << std::endl;
-				}
-			}
-		}
-		// MMDVMClient TG mappings for this module (static + dynamic)
-		if (g_Configure.Contains(g_Keys.mmdvmclient.enable) && g_Configure.GetBoolean(g_Keys.mmdvmclient.enable))
-		{
-			auto *proto = m_Protocols.FindByType(EProtocol::mmdvmclient);
-			if (proto)
-			{
-				auto *mmdvm = static_cast<CMMDVMClientProtocol *>(proto);
-				auto mappings = mmdvm->GetTGMap().GetAllMappings();
-				for (const auto &mi : mappings)
-				{
-					if (mi.module != m) continue;
-					xmlFile << "\t<Mapping><Protocol>MMDVMClient</Protocol><Type>TG</Type>";
-					xmlFile << "<ID>" << mi.tg << "</ID>";
-					xmlFile << "<Timeslot>TS" << (int)mi.timeslot << "</Timeslot>";
-					if (!mi.is_static)
-					{
-						xmlFile << "<Dynamic>true</Dynamic>";
-						xmlFile << "<Remaining>" << mi.remainingSeconds << "</Remaining>";
-					}
-					xmlFile << "</Mapping>" << std::endl;
-				}
-			}
-		}
-		// SvxReflector TG mappings for this module (static + dynamic)
-		if (g_Configure.Contains(g_Keys.svx.enable) && g_Configure.GetBoolean(g_Keys.svx.enable))
-		{
-			auto *proto = m_Protocols.FindByType(EProtocol::svxreflector);
-			if (proto)
-			{
-				auto *svx = static_cast<CSvxReflectorProtocol *>(proto);
-				auto mappings = svx->GetTGMappings();
-				for (const auto &mi : mappings)
-				{
-					if (mi.module != m) continue;
-					xmlFile << "\t<Mapping><Protocol>SvxReflector</Protocol><Type>TG</Type>";
-					xmlFile << "<ID>" << mi.tg << "</ID>";
-					if (g_Configure.Contains(g_Keys.svx.host))
-						xmlFile << "<RemoteName>" << CUtils::XmlEscape(g_Configure.GetString(g_Keys.svx.host)) << "</RemoteName>";
-					if (!mi.is_static)
-					{
-						xmlFile << "<Dynamic>true</Dynamic>";
-						xmlFile << "<Remaining>" << mi.remainingSeconds << "</Remaining>";
-					}
-					xmlFile << "</Mapping>" << std::endl;
-				}
-			}
-		}
-		// SVX server TG mappings for this module (static + dynamic)
-		if (g_Configure.Contains(g_Keys.svxs.enable) && g_Configure.GetBoolean(g_Keys.svxs.enable))
-		{
-			auto *proto = m_Protocols.FindByType(EProtocol::svx);
-			if (proto)
-			{
-				auto *svxs = static_cast<CSvxProtocol *>(proto);
-				auto mappings = svxs->GetTGMappings();
-				for (const auto &mi : mappings)
-				{
-					if (mi.module != m) continue;
-					xmlFile << "\t<Mapping><Protocol>SVX</Protocol><Type>TG</Type>";
-					xmlFile << "<ID>" << mi.tg << "</ID>";
-					if (!mi.is_static)
-					{
-						xmlFile << "<Dynamic>true</Dynamic>";
-						xmlFile << "<Remaining>" << mi.remainingSeconds << "</Remaining>";
-					}
-					xmlFile << "</Mapping>" << std::endl;
-				}
-			}
-		}
-		// DCSClient mappings for this module
-		if (g_Configure.Contains(g_Keys.dcsclient.enable) && g_Configure.GetBoolean(g_Keys.dcsclient.enable))
-		{
-			auto *proto = m_Protocols.FindByType(EProtocol::dcsclient);
-			if (proto)
-			{
-				auto *dcs = static_cast<CDcsClientProtocol *>(proto);
-				auto mappings = dcs->GetMappings();
-				for (const auto &mi : mappings)
-				{
-					if (mi.localModule != m) continue;
-					xmlFile << "\t<Mapping><Protocol>DCSClient</Protocol><Type>Module</Type>";
-					xmlFile << "<ID>" << mi.remoteModule << "</ID>";
-					xmlFile << "<RemoteName>" << CUtils::XmlEscape(mi.host) << ":" << mi.port << "</RemoteName>";
-					if (mi.connected)
-						xmlFile << "<Connected>true</Connected>";
-					xmlFile << "</Mapping>" << std::endl;
-				}
-			}
-		}
-		// DExtraClient mappings for this module
-		if (g_Configure.Contains(g_Keys.dextraclient.enable) && g_Configure.GetBoolean(g_Keys.dextraclient.enable))
-		{
-			auto *proto = m_Protocols.FindByType(EProtocol::dextraclient);
-			if (proto)
-			{
-				auto *dextra = static_cast<CDExtraClientProtocol *>(proto);
-				auto mappings = dextra->GetMappings();
-				for (const auto &mi : mappings)
-				{
-					if (mi.localModule != m) continue;
-					xmlFile << "\t<Mapping><Protocol>DExtraClient</Protocol><Type>Module</Type>";
-					xmlFile << "<ID>" << mi.remoteModule << "</ID>";
-					xmlFile << "<RemoteName>" << CUtils::XmlEscape(mi.host) << ":" << mi.port << "</RemoteName>";
-					if (mi.connected)
-						xmlFile << "<Connected>true</Connected>";
-					xmlFile << "</Mapping>" << std::endl;
-				}
-			}
-		}
-		// DPlusClient mappings for this module
-		if (g_Configure.Contains(g_Keys.dplusclient.enable) && g_Configure.GetBoolean(g_Keys.dplusclient.enable))
-		{
-			auto *proto = m_Protocols.FindByType(EProtocol::dplusclient);
-			if (proto)
-			{
-				auto *dplus = static_cast<CDPlusClientProtocol *>(proto);
-				auto mappings = dplus->GetMappings();
-				for (const auto &mi : mappings)
-				{
-					if (mi.localModule != m) continue;
-					xmlFile << "\t<Mapping><Protocol>DPlusClient</Protocol><Type>Module</Type>";
-					xmlFile << "<ID>" << mi.remoteModule << "</ID>";
-					xmlFile << "<RemoteName>" << CUtils::XmlEscape(mi.host) << ":" << mi.port << "</RemoteName>";
-					if (mi.connected)
-						xmlFile << "<Connected>true</Connected>";
-					xmlFile << "</Mapping>" << std::endl;
-				}
-			}
-		}
-		// YSFClient mappings for this module
-		if (g_Configure.Contains(g_Keys.ysfclient.enable) && g_Configure.GetBoolean(g_Keys.ysfclient.enable))
-		{
-			auto *proto = m_Protocols.FindByType(EProtocol::ysfclient);
-			if (proto)
-			{
-				auto *ysf = static_cast<CYsfClientProtocol *>(proto);
-				auto mappings = ysf->GetMappings();
-				for (const auto &mi : mappings)
-				{
-					if (mi.localModule != m) continue;
-					xmlFile << "\t<Mapping><Protocol>YSFClient</Protocol><Type>DG-ID</Type>";
-					if (mi.dgid > 0)
-						xmlFile << "<ID>" << (int)mi.dgid << "</ID>";
-					xmlFile << "<RemoteName>" << CUtils::XmlEscape(mi.host) << ":" << mi.port << "</RemoteName>";
-					if (mi.connected)
-						xmlFile << "<Connected>true</Connected>";
-					xmlFile << "</Mapping>" << std::endl;
-				}
-			}
 		}
 		xmlFile << "</Module>" << std::endl;
 	}

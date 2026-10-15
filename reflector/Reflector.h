@@ -74,6 +74,7 @@ public:
 
 	// get
 	const CCallsign &GetCallsign(void) const        { return m_Callsign; }
+	nlohmann::json GetModuleMappings(char module);	// the bridges of a module, for XML and WebSocket
 	std::time_t GetStartedAt(void) const             { return m_StartedAt; }
 	CUsers  *GetUsers(void)                         { m_Users.Lock(); return &m_Users; }
 	void    ReleaseUsers(void)                      { m_Users.Unlock(); }
@@ -113,6 +114,7 @@ protected:
 	// xml helpers
 	void WriteXmlFile(std::ofstream &);
 	void JsonReport(nlohmann::json &report);
+	void NotifyMappings(void);
 
 	// echo module
 	void EchoThread(void);
@@ -127,6 +129,7 @@ protected:
 	// identity
 	CCallsign   m_Callsign;
 	std::time_t m_StartedAt = 0;
+	nlohmann::json m_SentMappings;	// last module_mappings sent, MaintenanceThread only
 	std::string m_Modules, m_TCmodules;
 	std::string m_ConfigPath;
 
