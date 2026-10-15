@@ -119,6 +119,7 @@ protected:
 		CTimer tcpLastRecvTimer;
 		CTimer tcpHeartbeatTimer;
 		CTimer udpLastRecvTimer;
+		CTimer udpLastSendTimer;  // SvxLink drops the link after 60 s without UDP from us
 
 		// TCP receive buffer (partial frame accumulation)
 		std::vector<uint8_t> tcpRecvBuf;

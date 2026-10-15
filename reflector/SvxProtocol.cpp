@@ -833,6 +833,7 @@ void CSvxProtocol::SendUdpToPeer(SSvxPeer &peer, uint16_t type, const uint8_t *p
 	if (payload && len)
 		buf.Append(payload, (int)len);
 	Send(buf, peer.udpEndpoint);
+	peer.udpLastSendTimer.start();
 }
 
 void CSvxProtocol::OnPeerUdpAudio(uint32_t clientId, const CBuffer &buffer)
@@ -1333,6 +1334,12 @@ void CSvxProtocol::Task(void)
 					TcpSendFrame(peer, hb);
 					peer.tcpHeartbeatTimer.start();
 				}
+
+				// UDP heartbeat send: SvxLink sends none while it talks, so
+				// answering its heartbeats leaves it without UDP from us during a
+				// long transmission, and it disconnects after 60 s
+				if (peer.udpDiscovered && peer.udpLastSendTimer.time() >= SVXS_UDP_KEEPALIVE_PERIOD)
+					SendUdpToPeer(peer, SVX_UDP_MSG_HEARTBEAT);
 
 				// TCP timeout
 				if (peer.tcpLastRecvTimer.time() >= SVXS_TCP_KEEPALIVE_TIMEOUT)
