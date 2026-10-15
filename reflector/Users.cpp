@@ -54,72 +54,31 @@ void CUsers::Hearing(const CCallsign &my, const CCallsign &rpt1, const CCallsign
 
 static void DispatchStationEvent(const std::string &eventType, const CUser &heard)
 {
-	try {
-		CEvent ev;
-		ev.event_type = eventType;
-		ev.timestamp = static_cast<std::int64_t>(std::time(nullptr));
-		ev.reflector_name = g_Configure.GetString(g_Keys.names.callsign);
-		nlohmann::json p;
-		p["callsign"] = heard.GetCallsign();
-		p["via_node"] = heard.GetViaNode();
-		p["via_peer"] = heard.GetViaPeer();
-		p["on_module"] = std::string(1, heard.GetOnModule());
-		p["protocol"] = heard.GetProtocol();
-		p["last_heard_time"] = heard.GetLastHeardTime();
-		p["locator"] = heard.GetLocator();
-		ev.payload = p.dump();
-		CNotifierManager::Instance().Dispatch(ev);
-	} catch (const std::exception &ex) {
-		std::cerr << "Notifier: exception in station event dispatch: " << ex.what() << std::endl;
-	}
+	CNotifierManager::Instance().Dispatch(CEvent(eventType, {
+		{ "callsign", heard.GetCallsign() },
+		{ "via_node", heard.GetViaNode() },
+		{ "via_peer", heard.GetViaPeer() },
+		{ "on_module", std::string(1, heard.GetOnModule()) },
+		{ "protocol", heard.GetProtocol() },
+		{ "last_heard_time", heard.GetLastHeardTime() },
+		{ "locator", heard.GetLocator() } }));
 }
 
-void CUsers::CleanupInactiveStations(void)
-{
-	const auto now = std::time(nullptr);
-	for (auto it = m_ActiveStations.begin(); it != m_ActiveStations.end(); )
-	{
-		if (now - it->second.GetLastHeardTime() > kStationEndTimeoutSec)
-		{
-			DispatchStationEvent("station_stopped", it->second);
-			g_Reflector.StatusChanged();
-			it = m_ActiveStations.erase(it);
-		}
-		else
-		{
-			++it;
-		}
-	}
-}
-
+// one stream per module, so one talking station per module
 void CUsers::StationStarted(const CCallsign &my, const CCallsign &rpt1, const CCallsign &rpt2, const CCallsign &xlx, const std::string &proto)
 {
 	CUser heard(my, rpt1, rpt2, xlx, proto);
-	const std::string key = my.GetBase();
-	const auto activeIt = m_ActiveStations.find(key);
-	if (activeIt == m_ActiveStations.end())
-	{
-		m_ActiveStations.emplace(key, heard);
-		DispatchStationEvent("station_started", heard);
-	}
-	else
-	{
-		activeIt->second = heard;
-	}
-	g_Reflector.StatusChanged();
+	m_ActiveStations[heard.GetOnModule()] = heard;
+	DispatchStationEvent("station_started", heard);
 }
 
-void CUsers::StationStopped(const CCallsign &my, const CCallsign &rpt1, const CCallsign &rpt2, const CCallsign &xlx, const std::string &proto)
+void CUsers::StationStopped(char module)
 {
-	CUser heard(my, rpt1, rpt2, xlx, proto);
-	const std::string key = my.GetBase();
-	const auto activeIt = m_ActiveStations.find(key);
-	if (activeIt != m_ActiveStations.end())
-	{
-		DispatchStationEvent("station_stopped", activeIt->second);
-		m_ActiveStations.erase(activeIt);
-		g_Reflector.StatusChanged();
-	}
+	auto it = m_ActiveStations.find(module);
+	if (it == m_ActiveStations.end())
+		return;
+	DispatchStationEvent("station_stopped", it->second);
+	m_ActiveStations.erase(it);
 }
 
 void CUsers::Hearing(const CCallsign &my, const CCallsign &rpt1, const CCallsign &rpt2, const CCallsign &xlx, const std::string &proto)

@@ -88,7 +88,7 @@
 #define JENABLEDGID              "EnableDGID"
 #define JURL                     "URL"
 #define JUSRP                    "USRP"
-#define JWEBSOCKET               "Websocket"
+#define JWEBSOCKET               "WebSocket"
 #define JWHITELISTPATH           "WhitelistPath"
 #define JXMLPATH                 "XmlPath"
 #define JYSF                     "YSF"
@@ -808,57 +808,26 @@ bool CConfigure::ReadData(const std::string &path)
 					badParam(key);
 				break;
 			case ESection::websocket:
-				if (!data.contains("Websocket") || !data["Websocket"].is_object())
-					data["Websocket"] = nlohmann::json::object();
-				if (!data.contains("websocket") || !data["websocket"].is_object())
-					data["websocket"] = nlohmann::json::object();
-				if (0 == key.compare("Enable"))
-				{
-					const bool enabled = IS_TRUE(value[0]);
-					data["Websocket"]["Enable"] = enabled;
-					data["websocket"]["enable"] = enabled;
-				}
-				else if (0 == key.compare("Port"))
-				{
-					const auto port = std::stoul(value);
-					data["Websocket"]["Port"] = port;
-					data["websocket"]["port"] = port;
-				}
-				else if (0 == key.compare("Bind"))
-				{
-					data["Websocket"]["Bind"] = value;
-					data["websocket"]["bind"] = value;
-				}
+				if (0 == key.compare(JENABLE))
+					data[g_Keys.ws.enable] = IS_TRUE(value[0]);
+				else if (0 == key.compare(JPORT))
+					data[g_Keys.ws.port] = getUnsigned(value, "WebSocket Port", 1024, 65535, 10102);
+				else if (0 == key.compare(JBINDINGADDRESS))
+					data[g_Keys.ws.bindaddress] = value;
 				else if (0 == key.compare("MaxClients"))
-				{
-					const auto max = std::stoi(value);
-					data["Websocket"]["MaxClients"] = max;
-					data["websocket"]["maxclients"] = max;
-				}
-				else if (0 == key.compare("PerClientQueueLen"))
-				{
-					const auto max = std::stoi(value);
-					data["Websocket"]["PerClientQueueLen"] = max;
-					data["websocket"]["perclientqueuelen"] = max;
-				}
-				else if (0 == key.compare("PingIntervalSec"))
-				{
-					const auto valueSec = std::stoi(value);
-					data["Websocket"]["PingIntervalSec"] = valueSec;
-					data["websocket"]["ping_interval"] = valueSec;
-				}
-				else if (0 == key.compare("IdleTimeoutSec"))
-				{
-					const auto valueSec = std::stoi(value);
-					data["Websocket"]["IdleTimeoutSec"] = valueSec;
-					data["websocket"]["idle_timeout"] = valueSec;
-				}
+					data[g_Keys.ws.maxclients] = getUnsigned(value, "WebSocket MaxClients", 1, 1000, 64);
+				else if (0 == key.compare("QueueLength"))
+					data[g_Keys.ws.queuelen] = getUnsigned(value, "WebSocket QueueLength", 16, 10000, 256);
+				else if (0 == key.compare("PingInterval"))
+					data[g_Keys.ws.pinginterval] = getUnsigned(value, "WebSocket PingInterval", 5, 300, 30);
+				else if (0 == key.compare("IdleTimeout"))
+					data[g_Keys.ws.idletimeout] = getUnsigned(value, "WebSocket IdleTimeout", 10, 3600, 90);
 				else
 					badParam(key);
 				break;
 			default:
 				std::cout << "WARNING: parameter '" << line << "' defined before any [section]" << std::endl;
-			}
+		}
 
 	}
 	cfgfile.close();
@@ -1263,6 +1232,16 @@ bool CConfigure::ReadData(const std::string &path)
 			isDefined(ErrorLevel::fatal, "Admin", JPORT, g_Keys.admin.port, rval);
 			isDefined(ErrorLevel::fatal, "Admin", "Password", g_Keys.admin.password, rval);
 		}
+	}
+
+	// WebSocket: optional, every key has a default
+	const std::pair<const std::string &, nlohmann::json> wsDefaults[] = {
+		{ g_Keys.ws.enable, false }, { g_Keys.ws.port, 10102 }, { g_Keys.ws.bindaddress, "127.0.0.1" },
+		{ g_Keys.ws.maxclients, 64 }, { g_Keys.ws.queuelen, 256 }, { g_Keys.ws.pinginterval, 30 }, { g_Keys.ws.idletimeout, 90 } };
+	for (const auto &[key, def] : wsDefaults)
+	{
+		if (!data.contains(key))
+			data[key] = def;
 	}
 
 	// MMDVMClient

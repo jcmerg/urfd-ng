@@ -1,14 +1,42 @@
 # WebSocket notifier protocol
 
-This project exposes a lightweight WebSocket notifier for clients that want near-real-time reflector state without polling a JSON file.
+urfd pushes its state to WebSocket clients, so a dashboard sees links, peers and talking stations as they change instead of reading the XML file every few seconds. Based on the notifier by Jason Kendall (coolacid), PR #1.
+
+## Setup
+
+urfd is built with it by default (`WEBSOCKET = true` in `urfd.mk`, needs `libwebsockets-dev`). It is off until enabled in `urfd.ini`:
+
+```ini
+[WebSocket]
+Enable = true
+Port = 10102
+# BindingAddress = 127.0.0.1   # Default: loopback only
+# MaxClients = 64              # connections at the same time
+# QueueLength = 256            # unsent events per client before it is dropped
+# PingInterval = 30            # seconds of silence before a ping
+# IdleTimeout = 90             # seconds without an answer before hanging up
+```
+
+Changes need a restart. The listener has no password and only sends public data (no IP addresses), but it stays on loopback by default: let the web server pass it through, e.g. nginx:
+
+```nginx
+location /ws {
+    proxy_pass http://127.0.0.1:10102;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 120s;
+}
+```
+
+The browser connects with `new WebSocket("wss://" + location.host + "/ws")`; a subprotocol is optional (`urfd`).
 
 ## Connection lifecycle
 
-- The server opens a libwebsockets context when the notifier backend is enabled.
-- Each client connection is accepted on the configured bind address and port.
 - When a client connects, the server sends an `initial_connect` event first. This contains static reflector metadata and startup timing information so the browser can render the reflector description before the live state arrives.
 - The server then sends a `state_snapshot` event describing the current dynamic reflector state.
-- The connection stays alive with periodic keepalive traffic. If a client is idle too long, the server closes it.
+- After that every change arrives as an event. A client that falls behind by more than `QueueLength` events is disconnected: it reconnects and gets a fresh snapshot instead of a wrong state.
+- The connection stays alive with WebSocket pings, see below.
 
 ## Message format
 
@@ -62,7 +90,7 @@ Sent as the first message after a client connects.
 
 This contains static descriptor data for the reflector and the startup timing metadata:
 
-- `reflector`: configured identity details from the XML output, such as callsign, country, sponsor, and dashboard URL when present
+- `reflector`: callsign, and country, sponsor and dashboard URL when configured
 - `modules`: the configured module list, including description, echo flag, linked node count, on-air user, transcoded flag, and per-module protocol IDs
 - `protocols`: the enabled protocol list and their configured ports
 - `server_started`: Unix timestamp when the reflector process started
@@ -151,7 +179,7 @@ Example payload:
 
 ### `station_started`
 
-Sent when a station begins transmitting or becomes active.
+Sent when a stream opens on a module: `callsign` is the talking station, `via_node` the client it came through, `on_module` the module.
 
 Example payload:
 
@@ -169,36 +197,11 @@ Example payload:
 
 ### `station_stopped`
 
-Sent when a station becomes inactive.
-
-The payload matches the same shape as `station_started`, but describes the active station being cleared.
-
-### `uptime_update`
-
-Sent from the main process at startup and whenever the process emits an uptime event.
-
-Example payload:
-
-```json
-{
-  "server_started": 1730000000,
-  "current_time": 1730000000,
-  "uptime_seconds": 0
-}
-```
+Sent when that stream closes, with the payload of its `station_started`. There is one stream per module, so at most one station per module is active.
 
 ## Ping / pong behavior
 
-The server uses libwebsockets keepalive timers to monitor client responsiveness.
-
-- Each client connection gets a timer configured to the configured ping interval.
-- When the timer expires, the server checks whether the connection has been idle long enough.
-- If the client has been quiet for too long, the server closes the socket as idle.
-- Otherwise, it sends a WebSocket ping frame with payload `urfd`.
-- The peer is expected to respond with a corresponding pong frame.
-- If the ping fails or the client does not respond in a timely way, the server closes the connection.
-
-This is not a user-space application-level ping/pong protocol; it is the standard WebSocket control frame mechanism implemented by libwebsockets.
+libwebsockets pings a client that sent nothing for `PingInterval` seconds and hangs up when no pong came back within `IdleTimeout` seconds. Browsers answer pings on their own; this is the standard WebSocket control frame, not an application message.
 
 ## Notes
 

@@ -51,15 +51,14 @@ public:
 	// operation
 	void   Hearing(const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "");
 	void   Hearing(const CCallsign &, const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "");
+	// WebSocket station_started/station_stopped, from OpenStream and CloseStream
 	void   StationStarted(const CCallsign &, const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "");
-	void   StationStopped(const CCallsign &, const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "");
-	void   CleanupInactiveStations(void);
+	void   StationStopped(char module);
 	void   Location(const CCallsign &, double lat, double lon);
 
 protected:
 	// data
 	std::mutex                       m_Mutex;
 	std::list<CUser>                 m_Users;
-	std::map<std::string, CUser>      m_ActiveStations;
-	static constexpr std::time_t     kStationEndTimeoutSec = 90;
+	std::map<char, CUser>            m_ActiveStations;	// by module
 };

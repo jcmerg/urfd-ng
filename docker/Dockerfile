@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl3t64-gnutls \
     libopendht3t64 \
     libopus0 \
-    libwebsockets19 \
+    libwebsockets19t64 \
     nginx \
     php-fpm \
     supervisor \

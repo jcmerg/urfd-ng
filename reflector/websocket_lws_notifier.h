@@ -1,65 +1,57 @@
 #pragma once
 
-#ifdef USE_LIBWEBSOCKETS
+#ifndef NO_WEBSOCKET
 
 #include <libwebsockets.h>
-#include <chrono>
+#include <atomic>
 #include <deque>
 #include <mutex>
-#include <set>
 #include <string>
 #include <thread>
 #include <unordered_map>
 
+// libwebsockets listener for the dashboard. lws is single threaded: every lws
+// call except lws_cancel_service() happens in the service thread. Publish()
+// only queues the message and wakes that thread, which asks for the writes in
+// LWS_CALLBACK_EVENT_WAIT_CANCELLED.
 class CWebsocketLwsNotifier
 {
 public:
-    CWebsocketLwsNotifier();
-    ~CWebsocketLwsNotifier();
+	CWebsocketLwsNotifier();
+	~CWebsocketLwsNotifier();
 
-    bool Start(const std::string &bindAddr, uint16_t port, int maxClients = 64, int perClientQueue = 32,
-        int pingIntervalSec = 30, int idleTimeoutSec = 90);
-    void Stop();
+	bool Start(const std::string &bindAddr, uint16_t port, int maxClients, int perClientQueue, int pingIntervalSec, int idleTimeoutSec);
+	void Stop(void);
 
-    // Thread-safe publish: enqueue a message to be sent to all connected clients
-    void Publish(const std::string &msg);
+	// any thread
+	void Publish(const std::string &msg);
+
+	static int Callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 
 private:
-    struct PerConn
-    {
-        std::deque<std::string> queue;
-        std::chrono::steady_clock::time_point lastSeen = std::chrono::steady_clock::now();
-        std::chrono::steady_clock::time_point lastPingSent = std::chrono::steady_clock::time_point::min();
-    };
+	struct SConn
+	{
+		std::deque<std::string> queue;
+		bool kill = false;	// queue overflowed, the client is too slow
+	};
 
-    // LWS callbacks
-    public:
-    static int Callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
+	void ServiceLoop(void);
+	int  OnEstablished(struct lws *wsi);
+	void OnClosed(struct lws *wsi);
+	int  OnWritable(struct lws *wsi);
+	void OnCancelled(void);
 
-    private:
+	std::thread m_Thread;
+	std::mutex m_Mutex;
+	std::unordered_map<struct lws *, SConn> m_Clients;
 
-    void ServiceLoop();
-    void OnEstablished(struct lws *wsi);
-    void OnClosed(struct lws *wsi);
-    void OnReceive(struct lws *wsi, void *in, size_t len);
-    void OnWritable(struct lws *wsi);
-    void OnTimer(struct lws *wsi);
-
-    std::thread m_Thread;
-    std::mutex m_Mutex;
-    // per-wsi queue
-    std::unordered_map<struct lws *, PerConn> m_Clients;
-    std::deque<std::string> m_GlobalQueue; // messages waiting to be enqueued to clients
-
-    struct lws_context *m_Ctx;
-    struct lws_protocols m_Protocols[2];
-    bool m_Running;
-    int m_MaxClients;
-    int m_PerClientQueueLen;
-    std::chrono::seconds m_PingInterval;
-    std::chrono::seconds m_IdleTimeout;
-    std::string m_Bind;
-    uint16_t m_Port;
+	struct lws_context *m_Ctx;
+	struct lws_protocols m_Protocols[2];
+	lws_retry_bo_t m_Retry;
+	std::atomic<bool> m_Running;
+	int m_MaxClients;
+	int m_PerClientQueueLen;
+	std::string m_Bind;
 };
 
-#endif // USE_LIBWEBSOCKETS
+#endif

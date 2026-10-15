@@ -426,6 +426,10 @@ $Admin['Port']     = 10101;
 {"cmd": "clear_users", "token": "..."}
 ```
 
+### WebSocket (4.13.0)
+
+Live-Ereignisse für das Dashboard: Clients, Peers und sprechende Stationen, sobald sie sich ändern, und beim Verbinden der komplette Stand, ohne IP-Adressen. Nur lesend und ohne Passwort, daher lauscht es auf Loopback (`127.0.0.1:10102`), und das nginx des Dashboards reicht `/ws` durch. Standardmäßig eingebaut (`WEBSOCKET = true` in `urfd.mk`, braucht `libwebsockets-dev`), aus, bis `[WebSocket] Enable = true` gesetzt ist; Änderungen brauchen einen Neustart. Basiert auf dem Notifier von Jason Kendall (coolacid). Nachrichten und Einrichtung: [docs/WEBSOCKET.md](docs/WEBSOCKET.md) (englisch).
+
 ### Konfiguration per SIGHUP neu laden
 
 Der Reflektor kann seine Konfiguration im laufenden Betrieb neu laden, ohne Verbindungen zu trennen. Dazu `SIGHUP` an den urfd-Prozess schicken.

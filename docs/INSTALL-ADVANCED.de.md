@@ -72,7 +72,7 @@ sudo bash reflector/build.sh            # mit OpenDHT
 sudo bash reflector/build.sh --no-dht   # wo es libopendht-dev nicht gibt
 ```
 
-`build.sh` installiert die Pakete zum Bauen (`build-essential`, `nlohmann-json3-dev`, `libcurl4-gnutls-dev`, `libopus-dev`, `libssl-dev`, `libopendht-dev`), baut als Besitzer des Checkouts und installiert `urfd`, `inicheck` und `dbutil` nach `/usr/local/bin` sowie die systemd-Unit `urfd` mit Echtzeit-Scheduling. Der erste Lauf legt die Vorlagen in `/usr/local/etc/urfd/` ab, mit Pfaden dorthin und `urfd.ini` nur für root lesbar; spätere Läufe behalten die Konfiguration.
+`build.sh` installiert die Pakete zum Bauen (`build-essential`, `nlohmann-json3-dev`, `libcurl4-gnutls-dev`, `libopus-dev`, `libssl-dev`, `libwebsockets-dev`, `libopendht-dev`), baut als Besitzer des Checkouts und installiert `urfd`, `inicheck` und `dbutil` nach `/usr/local/bin` sowie die systemd-Unit `urfd` mit Echtzeit-Scheduling. Der erste Lauf legt die Vorlagen in `/usr/local/etc/urfd/` ab, mit Pfaden dorthin und `urfd.ini` nur für root lesbar; spätere Läufe behalten die Konfiguration.
 
 Die Build-Optionen stehen in `reflector/urfd.mk`, beim ersten Bauen aus [`config/urfd.mk`](../config/urfd.mk) kopiert und danach behalten: `BINDIR`, `debug`, `DHT`.
 

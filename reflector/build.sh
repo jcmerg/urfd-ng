@@ -39,7 +39,7 @@ echo "OpenDHT: $DHT"
 # ---------------------------------------------------------------
 # 1. Dependencies
 # ---------------------------------------------------------------
-PKGS="build-essential git nlohmann-json3-dev libcurl4-gnutls-dev libopus-dev libssl-dev"
+PKGS="build-essential git nlohmann-json3-dev libcurl4-gnutls-dev libopus-dev libssl-dev libwebsockets-dev"
 [ "$DHT" = "true" ] && PKGS="$PKGS libopendht-dev"
 MISSING=""
 for p in $PKGS; do
