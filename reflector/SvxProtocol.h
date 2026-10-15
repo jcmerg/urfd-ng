@@ -108,7 +108,9 @@ protected:
 		uint32_t selectedTG = 0;
 		std::set<uint32_t> monitoredTGs;
 
-		// where its CClient is, ' ' if it has none
+		// its CClient, kept by pointer: one without an IP yet (UDP not seen)
+		// cannot be found again, two unset CIp never compare equal
+		std::shared_ptr<CClient> client;
 		char clientModule = ' ';
 		CIp clientIp;
 

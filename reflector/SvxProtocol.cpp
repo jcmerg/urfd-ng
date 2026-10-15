@@ -672,25 +672,27 @@ void CSvxProtocol::UpdatePeerClient(SSvxPeer &peer, bool remove)
 {
 	char newMod = remove ? ' ' : PeerModule(peer);
 	CIp ip = peer.udpDiscovered ? peer.udpEndpoint : CIp();
-	CCallsign cs;
-	cs.SetCallsign(SvxExtractCallsign(peer.callsign), false);
+	const bool sameIp = (!ip.IsSet() && !peer.clientIp.IsSet()) || (ip.IsSet() && peer.clientIp.IsSet() && ip == peer.clientIp);
 
 	CClients *clients = g_Reflector.GetClients();
-	if (peer.clientModule != ' ' && (peer.clientModule != newMod || peer.clientIp != ip))
+	// a new module or address replaces the client; one the reflector dropped is made anew
+	if (peer.client && (peer.clientModule != newMod || !sameIp || !clients->IsClient(peer.client)))
 	{
-		cs.SetCSModule(peer.clientModule);
-		auto client = clients->FindClient(cs, peer.clientModule, peer.clientIp, EProtocol::svx);
-		if (client)
-			clients->RemoveClient(client);
+		clients->RemoveClient(peer.client);
+		peer.client.reset();
 	}
 	if (newMod != ' ')
 	{
-		cs.SetCSModule(newMod);
-		auto client = clients->FindClient(cs, newMod, ip, EProtocol::svx);
-		if (client)
-			client->Alive();
+		if (peer.client)
+			peer.client->Alive();
 		else
-			clients->AddClient(std::make_shared<CSvxClient>(cs, ip, newMod));
+		{
+			CCallsign cs;
+			cs.SetCallsign(SvxExtractCallsign(peer.callsign), false);
+			cs.SetCSModule(newMod);
+			peer.client = std::make_shared<CSvxClient>(cs, ip, newMod);
+			clients->AddClient(peer.client);
+		}
 	}
 	g_Reflector.ReleaseClients();
 	peer.clientModule = newMod;
