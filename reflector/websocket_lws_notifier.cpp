@@ -154,13 +154,18 @@ static nlohmann::json BuildReflectorSnapshot()
 	auto *clients = g_Reflector.GetClients();
 	for (const auto &client : *clients)
 	{
-		nlohmann::json entry;
-		entry["callsign"] = client->GetCallsign().GetCS();
-		entry["on_module"] = std::string(1, client->GetReflectorModule());
-		entry["protocol"] = client->GetProtocolName();
-		if (client->GetConnectTime() > 0)
-			entry["connect_time"] = client->GetConnectTime();
-		snapshot["links"].push_back(entry);
+		// links: the real nodes only, like the XML file; the pseudo clients of
+		// connectors and the clients of peers still count for open_channels
+		if (client->IsNode() && !client->IsLink())
+		{
+			nlohmann::json entry;
+			entry["callsign"] = client->GetCallsign().GetCS();
+			entry["on_module"] = std::string(1, client->GetReflectorModule());
+			entry["protocol"] = client->GetProtocolName();
+			if (client->GetConnectTime() > 0)
+				entry["connect_time"] = client->GetConnectTime();
+			snapshot["links"].push_back(entry);
+		}
 
 		const char module = client->GetModuleMastered();
 		if (module == ' ')

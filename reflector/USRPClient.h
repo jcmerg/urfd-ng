@@ -37,6 +37,7 @@ public:
 	EProtocol GetProtocol(void) const           { return EProtocol::usrp; }
 	const char *GetProtocolName(void) const     { return "USRP"; }
 	bool IsNode(void) const                     { return true; }
+	bool IsLink(void) const                     { return true; }	// set up from the configuration, linked whether the AllStar node is up or not
 
 	// status
 	bool IsAlive(void) const;

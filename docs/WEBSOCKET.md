@@ -110,7 +110,7 @@ This includes the current dynamic state of the reflector:
 - `server_started`: Unix timestamp when the reflector process started
 - `current_time`: Unix timestamp at the moment the snapshot was built
 - `uptime_seconds`: elapsed time since start
-- `links`: all currently linked clients/modules
+- `links`: the nodes linked to the reflector, like the XML file's linked nodes: not the pseudo clients of the connectors and bridges (MMDVMClient, SvxReflector, DCS/DExtra/DPlus/YSF clients, USRP; those are in the module's `mappings`) and not the clients of interlinked peers (those are in `peers`); `client_added` and `client_removed` cover the same nodes
 - `last_heard`: recent heard stations
 - `open_channels`: active streams currently transmitting on a module, with the operator's `name`
 - `peers`: linked peer reflectors with their clients, like `peer_added`

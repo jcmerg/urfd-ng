@@ -14,6 +14,7 @@ public:
 	EProtocol GetProtocol(void) const           { return EProtocol::svxreflector; }
 	const char *GetProtocolName(void) const     { return "SvxReflector"; }
 	bool IsNode(void) const                     { return true; }
+	bool IsLink(void) const                     { return true; }	// the connector's pseudo client, not a node linked here
 
 	// status
 	bool IsAlive(void) const;
