@@ -27,7 +27,7 @@ MD380_LDLIB =
 MD380_SECT  =
 endif
 
-LDFLAGS = -limbe_vocoder -pthread $(MD380_LDLIB) -latomic
+LDFLAGS = -limbe_vocoder -lspeexdsp -pthread $(MD380_LDLIB) -latomic
 
 # Explicit source list (includes urfd shared files)
 SRCS = Configure.cpp Controller.cpp DV3000.cpp DV3003.cpp DVSIDevice.cpp \

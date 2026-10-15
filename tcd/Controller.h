@@ -31,6 +31,7 @@
 #include "DV3003.h"
 #include "TCSocket.h"
 #include "AGC.h"
+#include "NoiseSuppress.h"
 #include "AmbeGain.h"
 
 class CController
@@ -81,6 +82,7 @@ protected:
 	imbe_vocoder p25vocoder;
 	CAGC m_agcDigital;  // D-Star, DMR/YSF, M17, P25/NXDN
 	CAGC m_agcAnalog;   // SVX and USRP: FM audio, gate above its noise floor
+	CNoiseSuppress m_nsAnalog;  // SVX and USRP: FM noise removed before the AGC
 	CAmbeGain m_ambeGain;  // DmrGainMode = ambe: AGC and gains in the AMBE2+ bitstream
 
 	int32_t calcNumerator(int32_t db) const;

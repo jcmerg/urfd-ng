@@ -63,6 +63,12 @@ if ! dpkg -l libncurses-dev 2>/dev/null | grep -q '^ii'; then
     apt-get update && apt-get install -y libncurses-dev
 fi
 
+# Ensure speexdsp is available (noise suppression for SVX/USRP input)
+if ! dpkg -l libspeexdsp-dev 2>/dev/null | grep -q '^ii'; then
+    echo "Installing libspeexdsp-dev..."
+    apt-get update && apt-get install -y libspeexdsp-dev
+fi
+
 mkdir -p "$BUILDDIR"
 cd "$BUILDDIR"
 

@@ -61,6 +61,7 @@ tcd builds against the urfd sources it shares with the reflector (`TCPacketDef.h
 
 - Linux with systemd: Debian, Ubuntu or Raspberry Pi OS; x86_64, arm64 or armhf
 - DVSI AMBE USB devices (see [Hardware](#hardware)); they use the kernel's `ftdi_sio` driver, no extra driver needed
+- `libspeexdsp-dev` for the noise suppression of analog input; `build.sh` installs it
 - Low latency to the AMBE devices: tcd runs natively, not in Docker. It can run on the reflector's machine or on another one, e.g. a Raspberry Pi next to the radio gear.
 
 ## Hardware
@@ -186,8 +187,11 @@ Gate and gain limit come in two profiles: **AGC digital** for D-Star, DMR/YSF, M
 | `AGCDigitalNoiseGate` / `AGCAnalogNoiseGate` | `-55` / `-40` | `-55` / `-40` | gate threshold in dBFS: the gate closes 60 ms after the level fell below it and fades the gain to the gate floor; within 6 dB above it the gain is not raised. Set it above the noise floor of the sources |
 | `AGCDigitalMaxGainUp` / `AGCAnalogMaxGainUp` | `30` / `12` | `30` / `12` | most amplification in dB |
 | `AGCDigitalGateFloor` / `AGCAnalogGateFloor` | `0` / `-12` | `0` / `-12` | gain while the gate is closed, in dB (0 = unity, at most) |
+| `AGCAnalogNoiseSuppress` | `-15` | `-15` | SVX and USRP only: most attenuation of the noise by the speexdsp preprocessor before the AGC, in dB (-40 to 0, 0 = off) |
 
 **Analog sources (SVX, USRP)** carry FM audio, whose pauses are not silent but the receiver's noise floor, often -45 to -35 dBFS. With the settings for digital sources the gate never closes on it, and the AGC raised the noise between words by up to 30 dB: on a good FM signal (noise at -45 dBFS, speech at -28 dBFS) the speech-to-noise distance fell from 17 to 11 dB. SVX and USRP therefore go through AGC analog with its own gate, gain limit and gate floor; target, attack, release and `AGCMaxGainDown` are shared. With the defaults the distance rises to 25 dB in the same case, and noisier signals are no longer made worse (simulation through `AGC.h`). 20 minutes of FM-Funknetz traffic recorded at an SvxLink node confirm it: on RF the distance fell from 34 to 19 dB with AGC digital and stays at 32 dB with AGC analog, for app and RoIP clients at 36 dB (19.7 before). The gate works on the level after urfd's `RxGain`, so keep that near 0 and let the AGC set the level; a strongly negative `RxGain` puts quiet FM speech below the gate. A squelch tail is louder than any gate: `SQL_TAIL_ELIM` in the SvxLink node's receiver removes it at the source.
+
+**Noise suppression** (`AGCAnalogNoiseSuppress`): the gate only works between words, the FM noise under the speech stays. The vocoders model speech, AMBE above all, and turn that noise into a warbling, robotic sound on DMR. So SVX and USRP input first goes through the speexdsp preprocessor (the noise suppression of many VoIP phones), at urfd's 160 samples / 8 kHz, without added delay. It keeps one noise estimate per module, so the next transmission of the same node starts clean, and follows a different node within a second or two. Its own AGC, VAD and dereverb are off, the level stays the AGC's job. -15 dB is a moderate setting; stronger values remove more noise but can leave "musical" artifacts. Live in the monitor, 0 switches it off.
 
 ### Monitoring and logging
 
@@ -213,7 +217,7 @@ M17/P25 (software vocoder):
   codec --[decode]--> PCM --[AGC]--> PCM --[OutputGain]--> target codec
 
 USRP/SVX (PCM):
-  PCM --[analog AGC]--> PCM --[OutputGain]--> target codec   (RxGain/TxGain per connection in urfd.ini)
+  PCM --[noise suppression]--> PCM --[analog AGC]--> PCM --[OutputGain]--> target codec   (RxGain/TxGain per connection in urfd.ini)
 
 DMR -> DMR/YSF with DmrGainMode = reencode:
   AMBE2+ --[decode]--> PCM --[AGC]--> PCM --[OutputGainDMR]--> [DmrReencodeGain] --> MD380 --> AMBE2+
@@ -305,6 +309,7 @@ journalctl -u tcd -f
 - **AMBE2+ bitstream gain**: `AmbeGainDb` adjusts the b2 parameter in the AMBE2+ frame, with Golay(24,12) FEC recomputed for the A partition and the B partition unscrambled and scrambled again with the new A data (0.2.3; before, the decoder lost the B partition); since 0.2.5 driven by the AGC and computed in the gamma domain, so the gain no longer depends on the level, also with a single device and the MD380
 - **AGC v3**: sliding RMS window, per-speaker tracking, gate with decay, fast release after the gate, asymmetric limits, noise gate, peak limiter that cuts the applied gain at once (0.2.3; before, loud onsets after quiet speech clipped), live changes from the dashboard; thread safe since 0.2.3, as every codec's decode thread uses it. Since 0.2.4 the gate holds 60 ms and fades out instead of switching (word endings are no longer chopped), noise just above it no longer pumps the gain up, and the gain ramps across each frame instead of stepping every 20 ms
 - **AGC digital and AGC analog** (0.3.0): SVX and USRP input have their own gate, gain limit and gain while the gate is closed (`AGCAnalogNoiseGate`, `AGCAnalogMaxGainUp`, `AGCAnalogGateFloor`), so the FM noise between words is lowered instead of raised by up to 30 dB; the other inputs use the same three keys as `AGCDigital…` (0.3.1 renamed `AGCNoiseGate` and `AGCMaxGainUp` to `AGCDigitalNoiseGate` and `AGCDigitalMaxGainUp`, added `AGCDigitalGateFloor`, and `agc-analyze` names the key of the stream's profile); since 0.3.2 the SVX and USRP gains per connection are only in `urfd.ini` (`UsrpGainIn`/`UsrpGainOut` are gone); without the monitor tcd keeps the ini settings (before, it fell back to the built-in defaults after a second)
+- **Noise suppression for analog input** (0.5.0): SVX and USRP go through the speexdsp preprocessor before the AGC analog (`AGCAnalogNoiseSuppress`, default -15 dB, live in the monitor), so the FM noise under the speech no longer turns into robotic AMBE artifacts on DMR; new build dependency `libspeexdsp-dev`
 - **DMR re-encode** (`md380=true`): `DmrGainMode = reencode` with AGC and `DmrReencodeGain` on DMR → DMR/YSF
 - **MD380 stream isolation**: encoder state saved per stream, MD380 calls serialized; since 0.2.7 a new stream starts from the state right after `md380_init()` instead of the previous stream's; since 0.2.9 for every MD380 use, also the primary DMR codec of a single device setup
 - **Mixed mode output gains** (0.2.3): the DV3003's D-Star channel uses `OutputGainDStar`, not `OutputGainDMR`; M17 at 1600 bit/s no longer runs the second half of each packet through the AGC twice; since 0.2.11 a module missing from the module list is not sent to a DMR channel

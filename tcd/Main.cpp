@@ -68,6 +68,7 @@ int main(int argc, char *argv[])
 	g_Stats.config.agc_analog_noisegate.store(g_Conf.GetAGCAnalogNoiseGate());
 	g_Stats.config.agc_analog_maxgain_up.store(g_Conf.GetAGCAnalogMaxGainUp());
 	g_Stats.config.agc_analog_gatefloor.store(g_Conf.GetAGCAnalogGateFloor());
+	g_Stats.config.agc_analog_noisesuppress.store(g_Conf.GetAGCAnalogNoiseSuppress());
 	g_Stats.config.gain_dstar_in.store(g_Conf.GetGain(EGainType::dstarin));
 	g_Stats.config.gain_dstar_out.store(g_Conf.GetGain(EGainType::dstarout));
 	g_Stats.config.gain_dmr_in.store(g_Conf.GetGain(EGainType::dmrin));

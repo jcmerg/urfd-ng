@@ -156,6 +156,7 @@ std::string CMonitorServer::BuildStatsJson()
 	   << ",\"agc_analog_noisegate\":" << g_Stats.config.agc_analog_noisegate.load()
 	   << ",\"agc_analog_maxgain_up\":" << g_Stats.config.agc_analog_maxgain_up.load()
 	   << ",\"agc_analog_gatefloor\":" << g_Stats.config.agc_analog_gatefloor.load()
+	   << ",\"agc_analog_noisesuppress\":" << g_Stats.config.agc_analog_noisesuppress.load()
 	   << ",\"gain_dstar_in\":" << g_Stats.config.gain_dstar_in.load()
 	   << ",\"gain_dstar_out\":" << g_Stats.config.gain_dstar_out.load()
 	   << ",\"gain_dmr_in\":" << g_Stats.config.gain_dmr_in.load()
@@ -276,6 +277,8 @@ void CMonitorServer::HandleRest(struct mg_connection *c, struct mg_http_message 
 			g_Stats.config.agc_analog_maxgain_up.store(analog);
 		if (json_get_float(hm->body.buf, hm->body.len, "analog_gatefloor", analog))
 			g_Stats.config.agc_analog_gatefloor.store(std::min(analog, 0.0f));
+		if (json_get_float(hm->body.buf, hm->body.len, "analog_noisesuppress", analog))
+			g_Stats.config.agc_analog_noisesuppress.store(std::clamp(analog, -40.0f, 0.0f));
 		float dmr_gain_mode;
 		if (json_get_float(hm->body.buf, hm->body.len, "dmr_gain_mode", dmr_gain_mode))
 		{
@@ -474,6 +477,7 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 		{ "AGCAnalogNoiseGate", g_Stats.config.agc_analog_noisegate.load(), false, false },
 		{ "AGCAnalogMaxGainUp", g_Stats.config.agc_analog_maxgain_up.load(), false, false },
 		{ "AGCAnalogGateFloor", g_Stats.config.agc_analog_gatefloor.load(), false, false },
+		{ "AGCAnalogNoiseSuppress", g_Stats.config.agc_analog_noisesuppress.load(), false, false },
 	};
 	{
 		std::string l;

@@ -98,6 +98,7 @@ public:
 		std::atomic<float> agc_analog_noisegate{-40.0f};
 		std::atomic<float> agc_analog_maxgain_up{12.0f};
 		std::atomic<float> agc_analog_gatefloor{-12.0f};
+		std::atomic<float> agc_analog_noisesuppress{-15.0f};
 		std::atomic<int>   gain_dstar_in{0};
 		std::atomic<int>   gain_dstar_out{0};
 		std::atomic<int>   gain_dmr_in{0};

@@ -56,6 +56,7 @@ public:
 	float GetAGCAnalogNoiseGate(void) const  { return agc_analog_noisegate; }
 	float GetAGCAnalogMaxGainUp(void) const  { return agc_analog_maxgain_up; }
 	float GetAGCAnalogGateFloor(void) const  { return agc_analog_gatefloor; }
+	float GetAGCAnalogNoiseSuppress(void) const { return agc_analog_noisesuppress; }
 
 	// Monitor
 	const std::string &GetMonitorBindAddress(void) const { return monitor_bind; }
@@ -88,6 +89,7 @@ private:
 	float agc_analog_noisegate  = -40.0f;  // SVX/USRP: above the FM noise floor of a good signal
 	float agc_analog_maxgain_up = 12.0f;   // SVX/USRP: max amplification (dB)
 	float agc_analog_gatefloor  = -12.0f;  // SVX/USRP: gain with the gate closed (dB)
+	float agc_analog_noisesuppress = -15.0f; // SVX/USRP: speexdsp noise suppression (dB, 0 = off)
 	bool     monitor_enabled    = true;
 	std::string monitor_bind    = "127.0.0.1";   // the monitor has no password
 	uint16_t monitor_http_port  = 8080;

@@ -266,6 +266,7 @@ bool CController::Start()
 	outgain_m17_num = calcNumerator(g_Conf.GetGain(EGainType::outgain_m17));
 	m_agcDigital.Configure(g_Conf.GetAGCEnabled(), g_Conf.GetAGCTarget(), g_Conf.GetAGCAttack(), g_Conf.GetAGCRelease(), g_Conf.GetAGCDigitalMaxGainUp(), g_Conf.GetAGCMaxGainDown(), g_Conf.GetAGCDigitalNoiseGate(), g_Conf.GetAGCDigitalGateFloor());
 	m_agcAnalog.Configure(g_Conf.GetAGCEnabled(), g_Conf.GetAGCTarget(), g_Conf.GetAGCAttack(), g_Conf.GetAGCRelease(), g_Conf.GetAGCAnalogMaxGainUp(), g_Conf.GetAGCMaxGainDown(), g_Conf.GetAGCAnalogNoiseGate(), g_Conf.GetAGCAnalogGateFloor());
+	m_nsAnalog.Configure(g_Conf.GetAGCAnalogNoiseSuppress());
 
 	if (InitVocoders() || tcClient.Open(g_Conf.GetAddress(), g_Conf.GetTCMods(), g_Conf.GetPort()))
 	{
@@ -306,6 +307,7 @@ void CController::ReconfigureAGC()
 		g_Stats.config.agc_analog_noisegate.load(),
 		g_Stats.config.agc_analog_gatefloor.load()
 	);
+	m_nsAnalog.Configure(g_Stats.config.agc_analog_noisesuppress.load());
 	// Also update gain numerators from live config
 	ambe_in_num = calcNumerator(g_Stats.config.gain_dmr_in.load());
 	ambe_out_num = calcNumerator(g_Stats.config.gain_dmr_out.load());
@@ -1168,6 +1170,7 @@ void CController::USRPtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 	{
 		float agc_db; bool agc_gate;
+		m_nsAnalog.Process(tmp, packet->GetModule());
 		m_agcAnalog.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
 		g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 	}
@@ -1248,6 +1251,7 @@ void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
 	g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 	{
 		float agc_db; bool agc_gate;
+		m_nsAnalog.Process(tmp, packet->GetModule());
 		m_agcAnalog.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
 		g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 	}

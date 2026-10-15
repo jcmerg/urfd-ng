@@ -579,11 +579,11 @@ int main(int argc, char *argv[])
 				json_num(cfg_json, "agc_target"), json_num(cfg_json, "agc_attack"),
 				json_num(cfg_json, "agc_release"), json_num(cfg_json, "agc_maxgain_down"));
 			row++;
-			mvprintw(row, 0, "     digital: Gate:%.0f Up:+%.0f Floor:%.0f   analog: Gate:%.0f Up:+%.0f Floor:%.0f",
+			mvprintw(row, 0, "     digital: Gate:%.0f Up:+%.0f Floor:%.0f   analog: Gate:%.0f Up:+%.0f Floor:%.0f NS:%.0f",
 				json_num(cfg_json, "agc_digital_noisegate"), json_num(cfg_json, "agc_digital_maxgain_up"),
 				json_num(cfg_json, "agc_digital_gatefloor"),
 				json_num(cfg_json, "agc_analog_noisegate"), json_num(cfg_json, "agc_analog_maxgain_up"),
-				json_num(cfg_json, "agc_analog_gatefloor"));
+				json_num(cfg_json, "agc_analog_gatefloor"), json_num(cfg_json, "agc_analog_noisesuppress"));
 		}
 		attroff(COLOR_PAIR(5));
 		row++;
