@@ -78,7 +78,7 @@ private:
 	uint16_t port;
 	int dstar_in = 0, dstar_out = 0, dmr_in = 0, dmr_out = 0, dmr_reencode = 0;
 	int outgain_dstar = 0, outgain_dmr = 0, outgain_usrp = 0, outgain_imbe = 0, outgain_m17 = 0;
-	int outgain_dmr_bitstream = 0;
+	int outgain_dmr_bitstream = -6;  // clean at -4 and -6 since 0.7.1, more crackles
 	EDmrGainMode dmr_gain_mode = EDmrGainMode::ambe;
 	int  ambe_gain_db = 0;
 	bool  agc_enabled = false;
