@@ -66,11 +66,11 @@ void CClients::AddClient(std::shared_ptr<CClient> client)
 	}
 	std::cout << std::endl;
 
-	CNotifierManager::Instance().Dispatch(CEvent("client_added", {
+	CNotifierManager::Instance().Dispatch("client_added", [&]() -> nlohmann::json { return {
 		{ "callsign", client->GetCallsign().GetCS() },
 		{ "protocol", client->GetProtocolName() },
 		{ "reflector_module", std::string(1, client->GetReflectorModule()) },
-		{ "connect_time", client->GetConnectTime() } }));
+		{ "connect_time", client->GetConnectTime() } }; });
 }
 
 void CClients::RemoveClient(std::shared_ptr<CClient> client)
@@ -92,11 +92,11 @@ void CClients::RemoveClient(std::shared_ptr<CClient> client)
 					std::cout << " on module " << (*it)->GetReflectorModule();
 				}
 				std::cout << std::endl;
-				CNotifierManager::Instance().Dispatch(CEvent("client_removed", {
+				CNotifierManager::Instance().Dispatch("client_removed", [&]() -> nlohmann::json { return {
 					{ "callsign", (*it)->GetCallsign().GetCS() },
 					{ "protocol", (*it)->GetProtocolName() },
 					{ "reflector_module", std::string(1, (*it)->GetReflectorModule()) },
-					{ "last_heard_time", (*it)->GetLastHeardTime() } }));
+					{ "last_heard_time", (*it)->GetLastHeardTime() } }; });
 				m_Clients.erase(it);
 				break;
 			}

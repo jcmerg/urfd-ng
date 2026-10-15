@@ -164,6 +164,7 @@ export default {
       if (Array.isArray(payload.links)) state.links = payload.links;
       if (Array.isArray(payload.last_heard)) state.lastHeard = payload.last_heard;
       if (Array.isArray(payload.open_channels)) state.openChannels = payload.open_channels;
+      if (Array.isArray(payload.peers)) state.peers = payload.peers;
 
       state.modules = state.modules.map((module) => {
         const active = state.openChannels.find((channel) => channel.module === module.name || channel.linked_module === module.name);
@@ -229,6 +230,8 @@ export default {
         locator: entry.locator || '',
       };
       const index = state.lastHeard.findIndex((item) => item.callsign === entry.callsign && item.on_module === entry.on_module);
+      // urfd learns a locator only from M17 GNSS data: keep a known one
+      if (!nextEntry.locator && index >= 0) nextEntry.locator = state.lastHeard[index].locator || '';
       if (index >= 0) {
         state.lastHeard[index] = { ...state.lastHeard[index], ...nextEntry };
       } else {

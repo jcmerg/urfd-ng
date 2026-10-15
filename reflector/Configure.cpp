@@ -1236,8 +1236,8 @@ bool CConfigure::ReadData(const std::string &path)
 
 	// WebSocket: optional, every key has a default
 	const std::pair<const std::string &, nlohmann::json> wsDefaults[] = {
-		{ g_Keys.ws.enable, false }, { g_Keys.ws.port, 10102 }, { g_Keys.ws.bindaddress, "127.0.0.1" },
-		{ g_Keys.ws.maxclients, 64 }, { g_Keys.ws.queuelen, 256 }, { g_Keys.ws.pinginterval, 30 }, { g_Keys.ws.idletimeout, 90 } };
+		{ g_Keys.ws.enable, false }, { g_Keys.ws.port, 10102u }, { g_Keys.ws.bindaddress, "127.0.0.1" },
+		{ g_Keys.ws.maxclients, 64u }, { g_Keys.ws.queuelen, 256u }, { g_Keys.ws.pinginterval, 30u }, { g_Keys.ws.idletimeout, 90u } };	// unsigned, for GetUnsigned()
 	for (const auto &[key, def] : wsDefaults)
 	{
 		if (!data.contains(key))

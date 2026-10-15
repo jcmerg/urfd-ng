@@ -4,7 +4,7 @@ urfd pushes its state to WebSocket clients, so a dashboard sees links, peers and
 
 ## Setup
 
-urfd is built with it by default (`WEBSOCKET = true` in `urfd.mk`, needs `libwebsockets-dev`). It is off until enabled in `urfd.ini`:
+urfd is always built with it (needs `libwebsockets-dev`). It is off until enabled in `urfd.ini`:
 
 ```ini
 [WebSocket]
@@ -113,6 +113,9 @@ This includes the current dynamic state of the reflector:
 - `links`: all currently linked clients/modules
 - `last_heard`: recent heard stations
 - `open_channels`: active streams currently transmitting on a module
+- `peers`: linked peer reflectors with their clients, like `peer_added`
+
+An event that happens while the snapshot is built can arrive after it although the snapshot already has it, e.g. a `client_added` for a client already in `links`. Nothing is lost that way; apply events by key (callsign, protocol, module) so a repeat changes nothing.
 
 ### `client_added`
 

@@ -32,19 +32,12 @@ else
 CFLAGS = -O2 -W -Werror -std=c++17 -MMD -MD
 endif
 
-LDFLAGS=-pthread -lcurl -lopus -lcrypto
+LDFLAGS=-pthread -lcurl -lopus -lcrypto -lwebsockets
 
 ifeq ($(DHT), true)
 LDFLAGS += -lopendht
 else
 CFLAGS += -DNO_DHT
-endif
-
-# on unless urfd.mk says false, so an older urfd.mk gets it too
-ifeq ($(WEBSOCKET), false)
-CFLAGS += -DNO_WEBSOCKET
-else
-LDFLAGS += -lwebsockets
 endif
 
 SRCS = $(wildcard *.cpp)

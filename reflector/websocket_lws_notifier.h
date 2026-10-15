@@ -1,7 +1,5 @@
 #pragma once
 
-#ifndef NO_WEBSOCKET
-
 #include <libwebsockets.h>
 #include <atomic>
 #include <deque>
@@ -53,5 +51,3 @@ private:
 	int m_PerClientQueueLen;
 	std::string m_Bind;
 };
-
-#endif

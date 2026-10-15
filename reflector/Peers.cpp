@@ -59,16 +59,17 @@ void CPeers::AddPeer(std::shared_ptr<CPeer> peer)
 	m_Peers.push_back(peer);
 	std::cout << "New peer " << peer->GetCallsign() << " at " << peer->GetIp() << " added with protocol " << peer->GetProtocolName()  << std::endl;
 
-	nlohmann::json peerClients = nlohmann::json::array();
-	for (auto cit = peer->cbegin(); cit != peer->cend(); cit++)
-		peerClients.push_back({
-			{ "callsign", (*cit)->GetCallsign().GetCS() },
-			{ "protocol", (*cit)->GetProtocolName() },
-			{ "reflector_module", std::string(1, (*cit)->GetReflectorModule()) } });
-	CNotifierManager::Instance().Dispatch(CEvent("peer_added", {
-		{ "callsign", peer->GetCallsign().GetCS() },
-		{ "protocol", peer->GetProtocolName() },
-		{ "clients", peerClients } }));
+	CNotifierManager::Instance().Dispatch("peer_added", [&]() -> nlohmann::json {
+		nlohmann::json peerClients = nlohmann::json::array();
+		for (auto cit = peer->cbegin(); cit != peer->cend(); cit++)
+			peerClients.push_back({
+				{ "callsign", (*cit)->GetCallsign().GetCS() },
+				{ "protocol", (*cit)->GetProtocolName() },
+				{ "reflector_module", std::string(1, (*cit)->GetReflectorModule()) } });
+		return {
+			{ "callsign", peer->GetCallsign().GetCS() },
+			{ "protocol", peer->GetProtocolName() },
+			{ "clients", peerClients } }; });
 
 	// and append all peer's client to reflector client list
 	// it is double lock safe to lock Clients list after Peers list
@@ -103,9 +104,9 @@ void CPeers::RemovePeer(std::shared_ptr<CPeer> peer)
 			// remove it
 			std::cout << "Peer " << (*pit)->GetCallsign() << " at " << (*pit)->GetIp() << " removed" << std::endl;
 
-			CNotifierManager::Instance().Dispatch(CEvent("peer_removed", {
+			CNotifierManager::Instance().Dispatch("peer_removed", [&]() -> nlohmann::json { return {
 				{ "callsign", (*pit)->GetCallsign().GetCS() },
-				{ "protocol", (*pit)->GetProtocolName() } }));
+				{ "protocol", (*pit)->GetProtocolName() } }; });
 
 			pit = m_Peers.erase(pit);
 		}

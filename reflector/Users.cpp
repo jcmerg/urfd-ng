@@ -54,20 +54,29 @@ void CUsers::Hearing(const CCallsign &my, const CCallsign &rpt1, const CCallsign
 
 static void DispatchStationEvent(const std::string &eventType, const CUser &heard)
 {
-	CNotifierManager::Instance().Dispatch(CEvent(eventType, {
+	CNotifierManager::Instance().Dispatch(eventType, [&]() -> nlohmann::json { return {
 		{ "callsign", heard.GetCallsign() },
 		{ "via_node", heard.GetViaNode() },
 		{ "via_peer", heard.GetViaPeer() },
 		{ "on_module", std::string(1, heard.GetOnModule()) },
 		{ "protocol", heard.GetProtocol() },
 		{ "last_heard_time", heard.GetLastHeardTime() },
-		{ "locator", heard.GetLocator() } }));
+		{ "locator", heard.GetLocator() } }; });
 }
 
 // one stream per module, so one talking station per module
 void CUsers::StationStarted(const CCallsign &my, const CCallsign &rpt1, const CCallsign &rpt2, const CCallsign &xlx, const std::string &proto)
 {
 	CUser heard(my, rpt1, rpt2, xlx, proto);
+	// the locator is known from an earlier transmission (M17 GNSS), if at all
+	for (const auto &user : m_Users)
+	{
+		if (user.GetCallsign() == heard.GetCallsign() && !user.GetLocator().empty())
+		{
+			heard.SetLocation(user);
+			break;
+		}
+	}
 	m_ActiveStations[heard.GetOnModule()] = heard;
 	DispatchStationEvent("station_started", heard);
 }
@@ -126,5 +135,11 @@ void CUsers::Location(const CCallsign &my, double lat, double lon)
 			user.SetLocation(loc, lat, lon);
 			break;
 		}
+	}
+	// and the station talking now, so its station_stopped carries it
+	for ( auto &[module, user] : m_ActiveStations )
+	{
+		if ( user.IsCallsign(my) )
+			user.SetLocation(loc, lat, lon);
 	}
 }

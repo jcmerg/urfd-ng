@@ -4,12 +4,6 @@
 #include "Notifier.h"
 #include "websocket_lws_notifier.h"
 
-CEvent::CEvent(const std::string &type, const nlohmann::json &p)
-	: event_type(type), payload(p)
-{
-	reflector_name = g_Configure.GetString(g_Keys.names.callsign);
-}
-
 nlohmann::json CEvent::ToJson() const
 {
 	nlohmann::json j;
@@ -41,9 +35,8 @@ void CNotifierManager::Start(void)
 		std::cout << "WebSocket: disabled" << std::endl;
 		return;
 	}
-#ifdef NO_WEBSOCKET
-	std::cout << "WebSocket: enabled, but urfd was built without libwebsockets (WEBSOCKET = false in urfd.mk)" << std::endl;
-#else
+	m_ReflectorName = g_Reflector.GetCallsign().GetCS();
+	m_ReflectorName.erase(m_ReflectorName.find_last_not_of(' ') + 1);	// GetCS() pads to 8
 	const std::string bind = g_Configure.Contains(g_Keys.ws.bindaddress) ? g_Configure.GetString(g_Keys.ws.bindaddress) : "127.0.0.1";
 	const auto port = (uint16_t)g_Configure.GetUnsigned(g_Keys.ws.port);
 	m_Ws = std::make_unique<CWebsocketLwsNotifier>();
@@ -61,25 +54,19 @@ void CNotifierManager::Start(void)
 		std::cerr << "WebSocket: failed to listen on " << bind << ":" << port << std::endl;
 		m_Ws.reset();
 	}
-#endif
 }
 
 void CNotifierManager::Stop(void)
 {
 	m_Running = false;
-#ifndef NO_WEBSOCKET
-	// the object stays until exit: a Dispatch() that passed the check above
+	// the object stays until exit: a Dispatch() that already saw m_Running
 	// still finds it, and Publish() on a stopped listener does nothing
 	if (m_Ws)
 		m_Ws->Stop();
-#endif
 }
 
-void CNotifierManager::Dispatch(const CEvent &ev)
+void CNotifierManager::Send(const CEvent &ev)
 {
-	if (!m_Running)
-		return;
-#ifndef NO_WEBSOCKET
 	try
 	{
 		// callsigns come from the air: replace invalid UTF-8 instead of throwing
@@ -89,5 +76,4 @@ void CNotifierManager::Dispatch(const CEvent &ev)
 	{
 		std::cerr << "WebSocket: cannot send " << ev.event_type << ": " << ex.what() << std::endl;
 	}
-#endif
 }

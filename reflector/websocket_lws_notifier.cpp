@@ -1,5 +1,3 @@
-#ifndef NO_WEBSOCKET
-
 #include <algorithm>
 #include <cstring>
 #include <ctime>
@@ -35,6 +33,21 @@ static nlohmann::json BuildInitialConnectPayload()
 	if (g_Configure.Contains(g_Keys.names.url))
 		payload["reflector"]["dashboard_url"] = g_Configure.GetString(g_Keys.names.url);
 
+	// the nodes per module in one pass under the clients lock
+	int nodeCount[26] = {};
+	auto *clients = g_Reflector.GetClients();
+	for (auto cit = clients->cbegin(); cit != clients->cend(); ++cit)
+	{
+		if (!(*cit)->IsNode() || (*cit)->IsLink())
+			continue;
+		for (char m = 'A'; m <= 'Z'; m++)
+		{
+			if ((*cit)->IsLinkedTo(m))
+				nodeCount[m - 'A']++;
+		}
+	}
+	g_Reflector.ReleaseClients();
+
 	payload["modules"] = nlohmann::json::array();
 	auto modules = g_Configure.GetString(g_Keys.modules.modules);
 	for (char module : modules)
@@ -50,15 +63,7 @@ static nlohmann::json BuildInitialConnectPayload()
 
 		moduleEntry["echo"] = g_Configure.Contains(g_Keys.echo.module) && g_Configure.GetString(g_Keys.echo.module)[0] == module;
 
-		int nodeCount = 0;
-		auto *modClients = g_Reflector.GetClients();
-		for (auto cit = modClients->cbegin(); cit != modClients->cend(); ++cit)
-		{
-			if ((*cit)->IsNode() && !(*cit)->IsLink() && (*cit)->IsLinkedTo(module))
-				++nodeCount;
-		}
-		g_Reflector.ReleaseClients();
-		moduleEntry["linked_nodes"] = nodeCount;
+		moduleEntry["linked_nodes"] = nodeCount[module - 'A'];
 
 		auto stream = g_Reflector.GetStream(module);
 		if (stream && stream->IsOpen())
@@ -138,63 +143,69 @@ static nlohmann::json BuildReflectorSnapshot()
 	snapshot["links"] = nlohmann::json::array();
 	snapshot["last_heard"] = nlohmann::json::array();
 	snapshot["open_channels"] = nlohmann::json::array();
+	snapshot["peers"] = nlohmann::json::array();
 
+	// the open channels from the clients that master a stream: the stream's
+	// owner pointer is reset outside any lock when it closes
 	auto *clients = g_Reflector.GetClients();
-	if (clients)
+	for (const auto &client : *clients)
 	{
-		for (const auto &client : *clients)
-		{
-			nlohmann::json entry;
-			entry["callsign"] = client->GetCallsign().GetCS();
-			entry["on_module"] = std::string(1, client->GetReflectorModule());
-			entry["protocol"] = client->GetProtocolName();
-			if (client->GetConnectTime() > 0)
-				entry["connect_time"] = client->GetConnectTime();
-			snapshot["links"].push_back(entry);
-		}
-		g_Reflector.ReleaseClients();
-	}
+		nlohmann::json entry;
+		entry["callsign"] = client->GetCallsign().GetCS();
+		entry["on_module"] = std::string(1, client->GetReflectorModule());
+		entry["protocol"] = client->GetProtocolName();
+		if (client->GetConnectTime() > 0)
+			entry["connect_time"] = client->GetConnectTime();
+		snapshot["links"].push_back(entry);
 
-	auto *users = g_Reflector.GetUsers();
-	if (users)
-	{
-		for (const auto &user : *users)
-		{
-			nlohmann::json entry;
-			entry["callsign"] = user.GetCallsign();
-			entry["on_module"] = std::string(1, user.GetOnModule());
-			entry["via_peer"] = user.GetViaPeer();
-			entry["via_node"] = user.GetViaNode();
-			entry["protocol"] = user.GetProtocol();
-			entry["last_heard_time"] = user.GetLastHeardTime();
-			if (!user.GetLocator().empty())
-				entry["locator"] = user.GetLocator();
-			snapshot["last_heard"].push_back(entry);
-		}
-		g_Reflector.ReleaseUsers();
-	}
-
-	const std::string modules = g_Reflector.GetModules();
-	for (char module : modules)
-	{
+		const char module = client->GetModuleMastered();
+		if (module == ' ')
+			continue;
 		auto stream = g_Reflector.GetStream(module);
 		if (!stream || !stream->IsOpen())
 			continue;
-
-		nlohmann::json entry;
-		entry["module"] = std::string(1, module);
-		entry["stream_id"] = stream->GetStreamId();
-		entry["user"] = stream->GetUserCallsign().GetCS();
-
-		auto owner = stream->GetOwnerClient();
-		if (owner)
-		{
-			entry["callsign"] = owner->GetCallsign().GetCS();
-			entry["protocol"] = owner->GetProtocolName();
-			entry["linked_module"] = std::string(1, owner->GetReflectorModule());
-		}
-		snapshot["open_channels"].push_back(entry);
+		snapshot["open_channels"].push_back({
+			{ "module", std::string(1, module) },
+			{ "stream_id", stream->GetStreamId() },
+			{ "user", stream->GetUserCallsign().GetCS() },
+			{ "callsign", client->GetCallsign().GetCS() },
+			{ "protocol", client->GetProtocolName() },
+			{ "linked_module", std::string(1, client->GetReflectorModule()) } });
 	}
+	g_Reflector.ReleaseClients();
+
+	auto *peers = g_Reflector.GetPeers();
+	for (auto pit = peers->cbegin(); pit != peers->cend(); ++pit)
+	{
+		nlohmann::json peerClients = nlohmann::json::array();
+		for (auto cit = (*pit)->cbegin(); cit != (*pit)->cend(); ++cit)
+			peerClients.push_back({
+				{ "callsign", (*cit)->GetCallsign().GetCS() },
+				{ "protocol", (*cit)->GetProtocolName() },
+				{ "reflector_module", std::string(1, (*cit)->GetReflectorModule()) } });
+		snapshot["peers"].push_back({
+			{ "callsign", (*pit)->GetCallsign().GetCS() },
+			{ "protocol", (*pit)->GetProtocolName() },
+			{ "connect_time", (*pit)->GetConnectTime() },
+			{ "clients", peerClients } });
+	}
+	g_Reflector.ReleasePeers();
+
+	auto *users = g_Reflector.GetUsers();
+	for (const auto &user : *users)
+	{
+		nlohmann::json entry;
+		entry["callsign"] = user.GetCallsign();
+		entry["on_module"] = std::string(1, user.GetOnModule());
+		entry["via_peer"] = user.GetViaPeer();
+		entry["via_node"] = user.GetViaNode();
+		entry["protocol"] = user.GetProtocol();
+		entry["last_heard_time"] = user.GetLastHeardTime();
+		if (!user.GetLocator().empty())
+			entry["locator"] = user.GetLocator();
+		snapshot["last_heard"].push_back(entry);
+	}
+	g_Reflector.ReleaseUsers();
 
 	return snapshot;
 }
@@ -258,8 +269,14 @@ bool CWebsocketLwsNotifier::Start(const std::string &bindAddr, uint16_t port, in
 
 void CWebsocketLwsNotifier::Stop(void)
 {
-	if (!m_Running.exchange(false))
-		return;
+	{
+		// under the lock: a Publish() that saw m_Running has called
+		// lws_cancel_service() before the context goes away
+		std::lock_guard<std::mutex> lk(m_Mutex);
+		if (!m_Running)
+			return;
+		m_Running = false;
+	}
 	lws_cancel_service(m_Ctx);
 	if (m_Thread.joinable())
 		m_Thread.join();
@@ -278,26 +295,25 @@ void CWebsocketLwsNotifier::ServiceLoop(void)
 
 void CWebsocketLwsNotifier::Publish(const std::string &msg)
 {
+	std::lock_guard<std::mutex> lk(m_Mutex);
+	if (!m_Running || m_Clients.empty())
+		return;
+	for (auto &[wsi, conn] : m_Clients)
 	{
-		std::lock_guard<std::mutex> lk(m_Mutex);
-		if (!m_Running || m_Clients.empty())
-			return;
-		for (auto &[wsi, conn] : m_Clients)
+		if (conn.kill)
+			continue;
+		if ((int)conn.queue.size() >= m_PerClientQueueLen)
 		{
-			if (conn.kill)
-				continue;
-			if ((int)conn.queue.size() >= m_PerClientQueueLen)
-			{
-				// a client that missed events would show a wrong state: drop it,
-				// it reconnects and gets a fresh snapshot
-				conn.kill = true;
-				conn.queue.clear();
-				continue;
-			}
-			conn.queue.push_back(msg);
+			// a client that missed events would show a wrong state: drop it,
+			// it reconnects and gets a fresh snapshot
+			conn.kill = true;
+			conn.queue.clear();
+			continue;
 		}
+		conn.queue.push_back(msg);
 	}
-	// the only lws call allowed from another thread
+	// the only lws call allowed from another thread; under m_Mutex, so Stop()
+	// cannot destroy the context in between
 	lws_cancel_service(m_Ctx);
 }
 
@@ -346,8 +362,8 @@ int CWebsocketLwsNotifier::OnEstablished(struct lws *wsi)
 	try
 	{
 		const auto dump = [](const CEvent &ev) { return ev.ToJson().dump(-1, ' ', false, nlohmann::json::error_handler_t::replace); };
-		first = dump(CEvent("initial_connect", BuildInitialConnectPayload()));
-		snapshot = dump(CEvent("state_snapshot", BuildReflectorSnapshot()));
+		first = dump(CEvent("initial_connect", BuildInitialConnectPayload(), CNotifierManager::Instance().ReflectorName()));
+		snapshot = dump(CEvent("state_snapshot", BuildReflectorSnapshot(), CNotifierManager::Instance().ReflectorName()));
 	}
 	catch (const std::exception &ex)
 	{
@@ -412,5 +428,3 @@ void CWebsocketLwsNotifier::OnCancelled(void)
 			lws_callback_on_writable(wsi);
 	}
 }
-
-#endif

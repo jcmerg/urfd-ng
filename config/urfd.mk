@@ -10,6 +10,3 @@ debug = false
 
 # Enable OpenDHT support for peer discovery without IP addresses
 DHT = true
-
-# WebSocket for the live dashboard, [WebSocket] in urfd.ini (needs libwebsockets-dev)
-WEBSOCKET = true

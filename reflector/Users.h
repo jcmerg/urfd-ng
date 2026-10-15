@@ -40,7 +40,7 @@ public:
 	// management
 	int    GetSize(void) const          { return (int)m_Users.size(); }
 	void   AddUser(const CUser &);
-	void   Clear(void)                  { m_Users.clear(); m_ActiveStations.clear(); }
+	void   Clear(void)                  { m_Users.clear(); }	// the active stations end with their streams
 
 	// pass-through
 	std::list<CUser>::iterator begin()              { return m_Users.begin(); }

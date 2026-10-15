@@ -75,6 +75,7 @@ public:
 	virtual bool IsAMaster(void) const                  { return (m_ModuleMastered != ' '); }
 	virtual void SetMasterOfModule(char c)              { m_ModuleMastered = c; }
 	virtual void NotAMaster(void)                       { m_ModuleMastered = ' '; }
+	char GetModuleMastered(void) const                  { return m_ModuleMastered; }
 	virtual void Heard(void)                            { m_LastHeardTime = std::time(nullptr); }
 
 	// reporting

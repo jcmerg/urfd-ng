@@ -428,7 +428,7 @@ $Admin['Port']     = 10101;
 
 ### WebSocket (4.13.0)
 
-Live events for the dashboard: clients, peers and talking stations as they change, and the whole state when a client connects, without IP addresses. Read only and without a password, so it listens on loopback (`127.0.0.1:10102`) and the dashboard's nginx passes `/ws` through. Built in by default (`WEBSOCKET = true` in `urfd.mk`, needs `libwebsockets-dev`), off until `[WebSocket] Enable = true`; changes need a restart. Based on the notifier by Jason Kendall (coolacid). Messages and setup: [docs/WEBSOCKET.md](docs/WEBSOCKET.md).
+Live events for the dashboard: clients, peers and talking stations as they change, and the whole state when a client connects, without IP addresses. Read only and without a password, so it listens on loopback (`127.0.0.1:10102`) and the dashboard's nginx passes `/ws` through. Always built in (needs `libwebsockets-dev`), off until `[WebSocket] Enable = true`; changes need a restart. Based on the notifier by Jason Kendall (coolacid). Messages and setup: [docs/WEBSOCKET.md](docs/WEBSOCKET.md).
 
 ### SIGHUP Configuration Reload
 
