@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="URFD live reflector dashboard" />
+    <title>URFD Live Dashboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      window.__URFD_DASHBOARD_CONFIG__ = window.__URFD_DASHBOARD_CONFIG__ || { __configLoaded: false };
+    </script>
+    <script src="./config.js" onerror="window.__URFD_DASHBOARD_CONFIG__ = { __configLoaded: false }; console.info('No dashboard config.js present; using default dev settings.');"></script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
