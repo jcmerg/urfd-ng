@@ -273,8 +273,8 @@ bool CController::Start()
 		keep_running = false;
 		return true;
 	}
-	if (dstar_device) dstar_device->SetOutputGains(outgain_dstar_num, outgain_dmr_num);
-	if (dmrsf_device) dmrsf_device->SetOutputGains(outgain_dstar_num, outgain_dmr_num);
+	if (dstar_device) dstar_device->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
+	if (dmrsf_device) dmrsf_device->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
 
 	reflectorFuture = std::async(std::launch::async, &CController::ReadReflectorThread, this);
 	c2Future        = std::async(std::launch::async, &CController::ProcessC2Thread,     this);
@@ -317,8 +317,8 @@ void CController::ReconfigureAGC()
 	outgain_usrp_num = calcNumerator(g_Stats.config.outgain_usrp.load());
 	outgain_imbe_num = calcNumerator(g_Stats.config.outgain_imbe.load());
 	outgain_m17_num = calcNumerator(g_Stats.config.outgain_m17.load());
-	if (dstar_device) dstar_device->SetOutputGains(outgain_dstar_num, outgain_dmr_num);
-	if (dmrsf_device) dmrsf_device->SetOutputGains(outgain_dstar_num, outgain_dmr_num);
+	if (dstar_device) dstar_device->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
+	if (dmrsf_device) dmrsf_device->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
 }
 
 void CController::Stop()
@@ -885,11 +885,12 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 		uint8_t ambe2[9];
 		int16_t dmr_buf[160];
 		memcpy(dmr_buf, packet->GetAudioSamples(), sizeof(dmr_buf));
-		ApplyGain(dmr_buf, 160, outgain_dmr_num);
+		ApplyGain(dmr_buf, 160, PcmDmrGainNum());
 		std::lock_guard<std::mutex> lock(md380_mux);
 		Md380SelectStream(packet->GetStreamId());
 		md380_encode_fec(ambe2, dmr_buf);
 		Md380Stat(packet->GetModule(), g_Stats.md380.encodes);
+		BitstreamDmrGain(ambe2, packet->GetStreamId());
 		packet->SetDMRData(ambe2);
 #endif
 	}
@@ -946,7 +947,7 @@ void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 	uint8_t ambe2[9];
 	int16_t gained[160];
 	memcpy(gained, packet->GetAudioSamples(), sizeof(gained));
-	ApplyGain(gained, 160, outgain_dmr_num);
+	ApplyGain(gained, 160, PcmDmrGainNum());
 
 	{
 		std::lock_guard<std::mutex> lock(md380_mux);
@@ -962,6 +963,7 @@ void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 			md380_encode_fec(ambe2, gained);
 		Md380Stat(packet->GetModule(), g_Stats.md380.encodes);
 	}
+	BitstreamDmrGain(ambe2, packet->GetStreamId());
 	packet->SetDMRData(ambe2);
 
 	// we might be all done...
@@ -1446,10 +1448,35 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 	}
 	else
 	{
+		// the DVSI encoded audio of another codec: OutputGainDMR in the bitstream
+		if (g_Stats.config.outgain_dmr_bitstream.load(std::memory_order_relaxed))
+		{
+			uint8_t dmr_data[9];
+			memcpy(dmr_data, packet->GetDMRData(), 9);
+			BitstreamDmrGain(dmr_data, packet->GetStreamId());
+			packet->SetDMRData(dmr_data);
+		}
 		send_mux.lock();
 		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
 		send_mux.unlock();
 	}
+}
+
+// OutputGainDMR for audio that is encoded to DMR (not DMR -> DMR, which has
+// its own path): as a PCM gain before the encoder, or with
+// OutputGainDMRBitstream through b2 after it, so the encoder gets full level
+int32_t CController::PcmDmrGainNum(void) const
+{
+	return g_Stats.config.outgain_dmr_bitstream.load(std::memory_order_relaxed) ? 256 : outgain_dmr_num;
+}
+
+void CController::BitstreamDmrGain(uint8_t *ambe2, uint16_t streamId)
+{
+	if (!g_Stats.config.outgain_dmr_bitstream.load(std::memory_order_relaxed))
+		return;
+	const int db = g_Stats.config.outgain_dmr.load(std::memory_order_relaxed);
+	if (db != 0)
+		m_ambeGain.Process(ambe2, streamId, (float)db);
 }
 
 void CController::Dump(const std::shared_ptr<CTranscoderPacket> p, const std::string &title) const

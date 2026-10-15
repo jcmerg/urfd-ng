@@ -76,6 +76,7 @@ int main(int argc, char *argv[])
 	g_Stats.config.gain_dmr_reencode.store(g_Conf.GetGain(EGainType::dmrreencode));
 	g_Stats.config.outgain_dstar.store(g_Conf.GetGain(EGainType::outgain_dstar));
 	g_Stats.config.outgain_dmr.store(g_Conf.GetGain(EGainType::outgain_dmr));
+	g_Stats.config.outgain_dmr_bitstream.store(g_Conf.GetOutputGainDMRBitstream());
 	g_Stats.config.outgain_usrp.store(g_Conf.GetGain(EGainType::outgain_usrp));
 	g_Stats.config.outgain_imbe.store(g_Conf.GetGain(EGainType::outgain_imbe));
 	g_Stats.config.outgain_m17.store(g_Conf.GetGain(EGainType::outgain_m17));

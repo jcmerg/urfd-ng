@@ -164,6 +164,7 @@ std::string CMonitorServer::BuildStatsJson()
 	   << ",\"gain_dmr_reencode\":" << g_Stats.config.gain_dmr_reencode.load()
 	   << ",\"outgain_dstar\":" << g_Stats.config.outgain_dstar.load()
 	   << ",\"outgain_dmr\":" << g_Stats.config.outgain_dmr.load()
+	   << ",\"outgain_dmr_bitstream\":" << (g_Stats.config.outgain_dmr_bitstream.load() ? "true" : "false")
 	   << ",\"outgain_usrp\":" << g_Stats.config.outgain_usrp.load()
 	   << ",\"outgain_imbe\":" << g_Stats.config.outgain_imbe.load()
 	   << ",\"outgain_m17\":" << g_Stats.config.outgain_m17.load()
@@ -254,6 +255,9 @@ void CMonitorServer::HandleRest(struct mg_connection *c, struct mg_http_message 
 		float target, attack, release;
 		if (json_get_bool(hm->body.buf, hm->body.len, "enabled", enabled))
 			g_Stats.config.agc_enabled.store(enabled);
+		bool bitstream;
+		if (json_get_bool(hm->body.buf, hm->body.len, "outgain_dmr_bitstream", bitstream))
+			g_Stats.config.outgain_dmr_bitstream.store(bitstream);
 		if (json_get_float(hm->body.buf, hm->body.len, "target", target))
 			g_Stats.config.agc_target.store(target);
 		if (json_get_float(hm->body.buf, hm->body.len, "attack", attack))
@@ -470,6 +474,7 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 	// keys of AGC digital and AGC analog: replaced where they stand, else written
 	// after AGCMaxGainDown (or at the end), so an ini without them gets them
 	struct SKey { const char *key; float value; bool present; bool written; };
+	bool bitstreamPresent = false;
 	std::vector<SKey> profile = {
 		{ "AGCDigitalNoiseGate", g_Stats.config.agc_digital_noisegate.load(), false, false },
 		{ "AGCDigitalMaxGainUp", g_Stats.config.agc_digital_maxgain_up.load(), false, false },
@@ -488,6 +493,7 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 			while (!k.empty() && k.back() == ' ') k.pop_back();
 			for (auto &a : profile)
 				if (k == a.key) a.present = true;
+			if (k == "OutputGainDMRBitstream") bitstreamPresent = true;
 		}
 		in.clear();
 		in.seekg(0);
@@ -515,7 +521,14 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 				if (key == "DmrGainOut")        { out << key << " = " << g_Stats.config.gain_dmr_out.load() << "\n"; continue; }
 				if (key == "DmrReencodeGain")   { out << key << " = " << g_Stats.config.gain_dmr_reencode.load() << "\n"; continue; }
 				if (key == "OutputGainDStar")   { out << key << " = " << g_Stats.config.outgain_dstar.load() << "\n"; continue; }
-				if (key == "OutputGainDMR")    { out << key << " = " << g_Stats.config.outgain_dmr.load() << "\n"; continue; }
+				if (key == "OutputGainDMR")
+				{
+					out << key << " = " << g_Stats.config.outgain_dmr.load() << "\n";
+					if (!bitstreamPresent)
+						out << "OutputGainDMRBitstream = " << (g_Stats.config.outgain_dmr_bitstream.load() ? "true" : "false") << "\n";
+					continue;
+				}
+				if (key == "OutputGainDMRBitstream") { out << key << " = " << (g_Stats.config.outgain_dmr_bitstream.load() ? "true" : "false") << "\n"; continue; }
 				if (key == "OutputGainUSRP")   { out << key << " = " << g_Stats.config.outgain_usrp.load() << "\n"; continue; }
 				if (key == "OutputGainIMBE")   { out << key << " = " << g_Stats.config.outgain_imbe.load() << "\n"; continue; }
 				if (key == "OutputGainM17")    { out << key << " = " << g_Stats.config.outgain_m17.load() << "\n"; continue; }

@@ -64,6 +64,8 @@ public:
 	uint16_t GetMonitorStatsPort(void) const { return monitor_stats_port; }
 	bool     GetMonitorEnabled(void) const   { return monitor_enabled; }
 	const std::string &GetIniPath(void) const { return ini_path; }
+	// OutputGainDMR for non-DMR sources: encode at full level, then b2 in the AMBE2+ frame
+	bool GetOutputGainDMRBitstream(void) const { return outgain_dmr_bitstream; }
 
 	// Stats logging
 	bool               GetStatsLogEnabled(void) const { return statslog_enabled; }
@@ -76,6 +78,7 @@ private:
 	uint16_t port;
 	int dstar_in = 0, dstar_out = 0, dmr_in = 0, dmr_out = 0, dmr_reencode = 0;
 	int outgain_dstar = 0, outgain_dmr = 0, outgain_usrp = 0, outgain_imbe = 0, outgain_m17 = 0;
+	bool outgain_dmr_bitstream = false;
 	EDmrGainMode dmr_gain_mode = EDmrGainMode::ambe;
 	int  ambe_gain_db = 0;
 	bool  agc_enabled = false;

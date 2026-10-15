@@ -32,6 +32,7 @@
 #define DMRREENCODE    "DmrReencodeGain"
 #define OUTGAIN_DSTAR  "OutputGainDStar"
 #define OUTGAIN_DMR    "OutputGainDMR"
+#define OUTGAIN_DMRBS  "OutputGainDMRBitstream"
 #define OUTGAIN_USRP   "OutputGainUSRP"
 #define OUTGAIN_IMBE   "OutputGainIMBE"
 #define OUTGAIN_M17    "OutputGainM17"
@@ -160,6 +161,8 @@ bool CConfigure::ReadData(const std::string &path)
 			outgain_dmr = getSigned(key, value);
 			if (outgain_dmr > 0) std::cerr << "Warning: " << OUTGAIN_DMR << " > 0 is unusual (amplifies all DMR/YSF output)" << std::endl;
 		}
+		else if (0 == key.compare(OUTGAIN_DMRBS))
+			outgain_dmr_bitstream = IS_TRUE(value[0]);
 		else if (0 == key.compare(OUTGAIN_USRP))
 			outgain_usrp = getSigned(key, value);
 		else if (0 == key.compare(OUTGAIN_IMBE))
@@ -263,7 +266,7 @@ bool CConfigure::ReadData(const std::string &path)
 	if (dmr_reencode != 0)
 		std::cout << DMRREENCODE << " = " << dmr_reencode << std::endl;
 	if (outgain_dstar != 0) std::cout << OUTGAIN_DSTAR << " = " << outgain_dstar << std::endl;
-	if (outgain_dmr != 0)   std::cout << OUTGAIN_DMR << " = " << outgain_dmr << std::endl;
+	if (outgain_dmr != 0)   std::cout << OUTGAIN_DMR << " = " << outgain_dmr << (outgain_dmr_bitstream ? " (non-DMR sources: through b2 after the encoder)" : "") << std::endl;
 	if (outgain_usrp != 0)  std::cout << OUTGAIN_USRP << " = " << outgain_usrp << std::endl;
 	if (outgain_imbe != 0)  std::cout << OUTGAIN_IMBE << " = " << outgain_imbe << std::endl;
 	if (outgain_m17 != 0)   std::cout << OUTGAIN_M17 << " = " << outgain_m17 << std::endl;

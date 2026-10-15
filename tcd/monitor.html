@@ -233,6 +233,7 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
           <div class="row"><label for="og_dstar">D-Star</label><input type="range" min="-24" max="10" id="og_dstar"><output id="v_og_dstar" for="og_dstar">0</output></div>
           <div class="row"><label for="og_m17">M17</label><input type="range" min="-24" max="10" id="og_m17"><output id="v_og_m17" for="og_m17">0</output></div>
           <div class="row"><label for="og_dmr">DMR and YSF</label><input type="range" min="-24" max="10" id="og_dmr"><output id="v_og_dmr" for="og_dmr">0</output></div>
+          <div class="row"><label for="og_dmr_bs">DMR level in the bitstream (b2), other codecs</label><input type="checkbox" id="og_dmr_bs"></div>
           <div class="row"><label for="og_imbe">P25 and NXDN</label><input type="range" min="-24" max="10" id="og_imbe"><output id="v_og_imbe" for="og_imbe">0</output></div>
           <div class="row"><label for="og_usrp">USRP and SVX</label><input type="range" min="-24" max="10" id="og_usrp"><output id="v_og_usrp" for="og_usrp">0</output></div>
         </div>
@@ -457,6 +458,7 @@ function loadConfig(cfg) {
   $('dmr_gain_mode').value = ['off', 'ambe', 'reencode'][cfg.dmr_gain_mode] || 'off';
   setVal('ambe_gain_db', 'v_ambe_gain_db', cfg.ambe_gain_db);
   $('agc_en').checked = cfg.agc_enabled;
+  $('og_dmr_bs').checked = !!cfg.outgain_dmr_bitstream;
   agcKeys.forEach(function (k) { setVal(k, 'v_' + k, cfg[k]); });
 }
 function post(path, body) { return fetch(path, { method: 'POST', body: JSON.stringify(body) }); }
@@ -478,6 +480,7 @@ agcKeys.forEach(function (k) {
   });
 });
 $('agc_en').addEventListener('change', function (e) { post('/api/agc', { enabled: e.target.checked }); });
+$('og_dmr_bs').addEventListener('change', function (e) { post('/api/agc', { outgain_dmr_bitstream: e.target.checked }); });
 $('dmr_gain_mode').addEventListener('change', function (e) {
   post('/api/agc', { dmr_gain_mode: { off: 0, ambe: 1, reencode: 2 }[e.target.value] || 0 });
   updateDmrGainMode();

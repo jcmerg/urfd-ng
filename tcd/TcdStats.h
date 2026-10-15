@@ -106,6 +106,7 @@ public:
 		std::atomic<int>   gain_dmr_reencode{0};
 		std::atomic<int>   outgain_dstar{0};
 		std::atomic<int>   outgain_dmr{0};
+		std::atomic<bool>  outgain_dmr_bitstream{false};
 		std::atomic<int>   outgain_usrp{0};
 		std::atomic<int>   outgain_imbe{0};
 		std::atomic<int>   outgain_m17{0};
