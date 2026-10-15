@@ -294,6 +294,7 @@ var $ = function (id) { return document.getElementById(id); };
 function esc(v) { return String(v).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 function db(v) { return v > -99 ? v.toFixed(1) : '-∞'; }
 function signed(v) { return (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1); }
+function ago(s) { return s < 120 ? Math.round(s) + ' s ago' : s < 7200 ? Math.round(s / 60) + ' min ago' : Math.round(s / 3600) + ' h ago'; }
 
 // theme: system, light, dark
 var modes = ['system', 'light', 'dark'], mode = 'system';
@@ -392,7 +393,7 @@ function render() {
       p.to.textContent = 'to ' + targets(m.codec_in).join(', ');
     } else {
       p.ann.hidden = true;
-      p.state.textContent = m.codec_in === 'none' ? 'No stream since tcd started' : 'Last stream ' + m.codec_in + ', ' + Math.round(m.idle) + ' s ago';
+      p.state.textContent = m.last_codec === 'none' ? 'No stream since tcd started' : 'Last stream ' + m.last_codec + ', ' + ago(m.idle);
       p.codec.textContent = 'Idle';
       p.to.textContent = 'Waiting for a stream';
     }

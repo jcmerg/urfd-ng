@@ -328,6 +328,7 @@ journalctl -u tcd -f
 ### Überwachung und Konfiguration
 - **Web-Dashboard**: eingebauter HTTP/WebSocket-Server, seit 0.4.0 im Stil des urfd-Dashboards, mit Signalweg, LCD-Pegelanzeigen, Verstärkungs- und AGC-Reglern, Geräte- und MD380-Status, Speichern in die INI
 - **tcdmon**: Monitor im Terminal
+- **Letzter Stream im Monitor** (0.7.3): ein freies Modul zeigt Codec und Alter seines letzten Streams (Sekunden, dann Minuten und Stunden), statt 2 s nach jedem Stream wieder auf "No stream since tcd started" zu fallen; das Stats-JSON liefert ihn als `last_codec`
 - **Statistik-CSV** mit automatischem Aufräumen und dem Werkzeug `agc-analyze`; seit 0.2.9 meldet es Flackern des Gates als Öffnungen unter 100 ms (Rauschen über der Schwelle, das Noise-Gate des Profils anheben), da das Gate seit 0.2.4 vor dem Schließen nachhält
 - **Umbenannte Schlüssel**: `DmrGainIn/Out` (war `DmrYsfGainIn/Out`), `UsrpGainIn/Out` (war `UsrpRxGain/TxGain`, seit 0.3.2 entfallen), Verstärkungen erweitert auf ±40 dB
 

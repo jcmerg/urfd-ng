@@ -30,6 +30,7 @@ struct ModuleStats
 	// Stream info
 	std::atomic<uint16_t> stream_id{0};
 	std::atomic<uint8_t>  codec_in{0};        // ECodecType cast
+	std::atomic<uint8_t>  last_codec{0};      // codec_in of the last stream, kept while idle
 
 	// Packet counters
 	std::atomic<uint32_t> packets_in{0};      // from reflector
@@ -182,6 +183,7 @@ public:
 		modules[idx].packets_in.fetch_add(1, std::memory_order_relaxed);
 		modules[idx].stream_id.store(sid, std::memory_order_relaxed);
 		modules[idx].codec_in.store((uint8_t)codec, std::memory_order_relaxed);
+		modules[idx].last_codec.store((uint8_t)codec, std::memory_order_relaxed);
 		modules[idx].last_activity.store(0.0f, std::memory_order_relaxed);
 	}
 

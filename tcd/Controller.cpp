@@ -624,7 +624,7 @@ void CController::ReadReflectorThread()
 				if (idx < 0 || idx >= CTcdStats::MAX_MODULES) continue;
 				auto &ms = g_Stats.modules[idx];
 				float idle = ms.last_activity.load(std::memory_order_relaxed);
-				if (idle < 100.0f)  // don't overflow
+				if (idle < 1.0e6f)  // whole seconds stay exact in a float far beyond this
 					ms.last_activity.store(idle + 1.0f, std::memory_order_relaxed);
 				// Reset display after 2s of no packets
 				if (idle >= 2.0f && ms.codec_in.load(std::memory_order_relaxed) != 0)

@@ -328,6 +328,7 @@ journalctl -u tcd -f
 ### Monitoring and configuration
 - **Web dashboard**: embedded HTTP/WebSocket server, in the urfd dashboard's look since 0.4.0, with signal flow, LCD level meters, gain and AGC controls, device and MD380 status, save to INI
 - **tcdmon**: terminal monitor
+- **Last stream in the monitor** (0.7.3): an idle module shows the codec and age of its last stream (seconds, then minutes and hours) instead of falling back to "No stream since tcd started" 2 s after each stream; the stats JSON carries it as `last_codec`
 - **Stats CSV** with automatic cleanup and the `agc-analyze` tool; since 0.2.9 it reports gate flicker as openings under 100 ms (noise crossing the threshold, raise the profile's noise gate), as the gate holds before it closes since 0.2.4
 - **Renamed keys**: `DmrGainIn/Out` (was `DmrYsfGainIn/Out`), `UsrpGainIn/Out` (was `UsrpRxGain/TxGain`, gone since 0.3.2), gains extended to ±40 dB
 

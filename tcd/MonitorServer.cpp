@@ -97,6 +97,7 @@ std::string CMonitorServer::BuildStatsJson()
 
 		js << "\"" << mod << "\":{"
 		   << "\"codec_in\":\"" << codec_name(m.codec_in.load(std::memory_order_relaxed)) << "\""
+		   << ",\"last_codec\":\"" << codec_name(m.last_codec.load(std::memory_order_relaxed)) << "\""
 		   << ",\"stream_id\":" << m.stream_id.load(std::memory_order_relaxed)
 		   << ",\"rms_in\":" << m.rms_in.load(std::memory_order_relaxed)
 		   << ",\"peak_in\":" << m.peak_in.load(std::memory_order_relaxed)
