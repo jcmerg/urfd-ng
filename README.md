@@ -157,7 +157,20 @@ Port = 5300                         # TCP and UDP port (same)
 
 **TG mapping**: Modules must be transcoded. Multiple TGs per module supported. Dynamic TGs can be added via the Admin interface with configurable TTL.
 
-**TG selection, like SvxReflector**: A node has one selected TG, `MsgSelectTG` replaces it; `MsgTgMonitor` sets the TGs whose talker start/stop it gets. A TG has one talker at a time. The other nodes on the TG get the talker's OPUS packets as they came (no transcoding), also on TGs that aren't mapped to a module; mapped TGs also go to and come from their urfd module. Nodes must speak protocol 2.0: current SvxLink versions use protocol 3 (TLS with certificates), which urfd does not support; they are asked to downgrade and log that they can't.
+**TG selection, like SvxReflector**: A node has one selected TG, `MsgSelectTG` replaces it; `MsgTgMonitor` sets the TGs whose talker start/stop it gets. A TG has one talker at a time. The other nodes on the TG get the talker's OPUS packets as they came (no transcoding), also on TGs that aren't mapped to a module; mapped TGs also go to and come from their urfd module. Nodes must speak protocol 2.0. SvxLink with an `AUTH_KEY` does, also current versions (tested with SvxLink 1.9.99.36 / 25.05, 2026-10-15); a node set up for certificates only uses protocol 3 (TLS), which urfd does not support: it is asked to downgrade and logs that it can't.
+
+**Setting up a SvxLink node**, in `[ReflectorLogic]` (example for TG26363 on a urfd module):
+```ini
+HOSTS = urf.example.org:5300    # instead of DNS_DOMAIN
+CALLSIGN = N0CALL-HS            # the user in [SVXServer]
+AUTH_KEY = changeme             # its password
+DEFAULT_TG = 26363              # selected on local traffic
+MONITOR_TGS = 26363             # heard while idle, and the module urfd links the node on
+```
+- With `DEFAULT_TG` set, SvxLink mutes the first transmission after it fell back to TG 0 (`TG_SELECT_TIMEOUT`, 30 s by default): `MUTE_FIRST_TX_LOC` is on by default and keeps that transmission (no audio is sent at all) to suppress test keyups and DTMF commands. The second transmission goes through; `MUTE_FIRST_TX_LOC = 0` sends the first one too.
+- Level: the node's receiver must not clip. A SHARI node (CM108) with `Mic Capture Volume` 23 of 35 clipped every transmission (speech at -6 dBFS, peaks at full scale), which sounds harsh after the AMBE encoder; at 15 the speech came at -16 dBFS without clipping (`amixer -c Device cset numid=8 15`, then `alsactl store`). Keep `RxGain` in urfd.ini at 0 and let tcd's AGC analog set the level.
+- The FM noise under the speech turns robotic after the AMBE encoder on DMR; tcd since 0.5.0 removes most of it before encoding (`AGCAnalogNoiseSuppress`, see [tcd/README.md](tcd/README.md#agc)).
+- The node shows in the links on the module of its selected TG, or while it has none (TG 0) on the one of its first mapped monitored TG, with the address urfd sees: a node in the reflector's own LAN shows its internal IP.
 
 **Admin commands**:
 ```json

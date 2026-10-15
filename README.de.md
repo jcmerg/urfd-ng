@@ -157,7 +157,20 @@ Port = 5300                         # TCP and UDP port (same)
 
 **TG-Zuordnung**: Die Module müssen transcodiert sein. Mehrere TGs pro Modul sind möglich. Dynamische TGs lassen sich über die Admin-Oberfläche mit einstellbarer Laufzeit (TTL) hinzufügen.
 
-**TG-Auswahl wie beim SvxReflector**: Ein Knoten hat genau eine ausgewählte TG, `MsgSelectTG` ersetzt sie; `MsgTgMonitor` legt fest, von welchen TGs er Sprecherbeginn und -ende bekommt. Eine TG hat jeweils einen Sprecher. Die anderen Knoten auf der TG bekommen dessen OPUS-Pakete unverändert (ohne Transcoding), auch auf TGs ohne Modul; zugeordnete TGs gehen außerdem zu ihrem urfd-Modul und kommen von dort. Die Knoten müssen Protokoll 2.0 sprechen: Aktuelle SvxLink-Versionen nutzen Protokoll 3 (TLS mit Zertifikaten), das urfd nicht unterstützt; sie werden um einen Downgrade gebeten und loggen, dass sie das nicht können.
+**TG-Auswahl wie beim SvxReflector**: Ein Knoten hat genau eine ausgewählte TG, `MsgSelectTG` ersetzt sie; `MsgTgMonitor` legt fest, von welchen TGs er Sprecherbeginn und -ende bekommt. Eine TG hat jeweils einen Sprecher. Die anderen Knoten auf der TG bekommen dessen OPUS-Pakete unverändert (ohne Transcoding), auch auf TGs ohne Modul; zugeordnete TGs gehen außerdem zu ihrem urfd-Modul und kommen von dort. Die Knoten müssen Protokoll 2.0 sprechen. SvxLink mit `AUTH_KEY` tut das, auch aktuelle Versionen (getestet mit SvxLink 1.9.99.36 / 25.05, 15.10.2026); ein Knoten, der nur für Zertifikate eingerichtet ist, nutzt Protokoll 3 (TLS), das urfd nicht unterstützt: Er wird um einen Downgrade gebeten und loggt, dass er das nicht kann.
+
+**SvxLink-Knoten einrichten**, in `[ReflectorLogic]` (Beispiel für TG26363 auf einem urfd-Modul):
+```ini
+HOSTS = urf.example.org:5300    # statt DNS_DOMAIN
+CALLSIGN = N0CALL-HS            # der Nutzer in [SVXServer]
+AUTH_KEY = changeme             # sein Passwort
+DEFAULT_TG = 26363              # wird bei lokalem Verkehr gewählt
+MONITOR_TGS = 26363             # im Leerlauf gehört, und das Modul, auf dem urfd den Knoten verlinkt
+```
+- Mit gesetzter `DEFAULT_TG` schaltet SvxLink die erste Aussendung stumm, nachdem es auf TG 0 zurückgefallen ist (`TG_SELECT_TIMEOUT`, standardmäßig 30 s): `MUTE_FIRST_TX_LOC` ist standardmäßig an und behält diese Aussendung zurück (es wird gar kein Audio gesendet), um Testdurchgänge und DTMF-Befehle vom Netz fernzuhalten. Die zweite Aussendung geht durch; `MUTE_FIRST_TX_LOC = 0` sendet auch die erste.
+- Pegel: Der Empfänger des Knotens darf nicht übersteuern. Ein SHARI-Knoten (CM108) mit `Mic Capture Volume` 23 von 35 übersteuerte jede Aussendung (Sprache bei -6 dBFS, Spitzen bei Vollaussteuerung), das klingt nach dem AMBE-Encoder kratzig; mit 15 kam die Sprache mit -16 dBFS ohne Übersteuerung (`amixer -c Device cset numid=8 15`, danach `alsactl store`). `RxGain` in der urfd.ini bei 0 lassen und den Pegel der AGC analog im tcd überlassen.
+- Das FM-Rauschen unter der Sprache klingt nach dem AMBE-Encoder auf DMR roboterhaft; tcd entfernt seit 0.5.0 den größten Teil davon vor dem Kodieren (`AGCAnalogNoiseSuppress`, siehe [tcd/README.de.md](tcd/README.de.md#agc)).
+- Der Knoten erscheint in den Links auf dem Modul seiner gewählten TG, oder ohne gewählte TG (TG 0) auf dem seiner ersten beobachteten TG mit Modul, mit der Adresse, die urfd sieht: Ein Knoten im eigenen LAN des Reflektors zeigt seine interne IP.
 
 **Admin-Befehle**:
 ```json
