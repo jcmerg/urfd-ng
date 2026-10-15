@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert. Ursprünglich für den Reflektor URF363 entwickelt.
 
-**urfd 4.12.5-dht** | tcd 0.7.1 | Dashboard v2.12.1
+**urfd 4.12.5-dht** | tcd 0.7.1 | Dashboard v2.12.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -573,7 +573,7 @@ Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Das
 
 Der JSON-Report enthält außerdem ein Array `DynamicTGs` mit Protokoll, TG, Modul und Restlaufzeit aller aktiven dynamischen Zuordnungen.
 
-### Dashboard v2.12.1
+### Dashboard v2.12.2
 In v2.9.0 neu gestaltet als Frontplatte eines Funkgeräts: Ein bernsteinfarbenes LCD zeigt, wer gerade sendet, die Module sind ein Tastenfeld, der Rest sind schlichte Tabellen. Davor: dunkles Design (v2.6.0), robust gegen Ausfälle des Verzeichnisses (v2.6.1), M17-Positionen in der Last-Heard-Liste (v2.7.0), Eintrag ins Verzeichnis an den Reflektor abgegeben (v2.8.0), Sicherheitskorrekturen (v2.8.1, v2.8.2), Korrekturen an Statusdatei und Admin-Socket (v2.8.3). Seit v2.10.0 steht der Vorname neben dem Rufzeichen, aus den ID-Datenbanken, die urfd lädt (ab urfd 4.12.0).
 
 **Seiten:**
@@ -837,6 +837,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v2.12.2**: Das Rufzeichen in den Links führt wie in der Last-Heard-Liste zu QRZ, nicht zu aprs.fi
 - **Dashboard v2.12.1**: Die Tabelle der SVX-Nodes zeigt neben der gewählten TG die beobachteten TGs und seit wann der Node verbunden ist
 - **Dashboard v2.12.0**: "also on" nennt höchstens drei Module und zählt den Rest (alle im Tooltip); mehr als 8 Module bekommen ein kompaktes Tastenfeld mit 7 Spalten, der Modulname steht im Tooltip
 - **Dashboard v2.11.0**: Das LCD folgt der gewählten Modultaste (wer dort sendet oder zuletzt gehört wurde); ohne Auswahl zeigt es die zuletzt begonnene Aussendung, und "also on S" nennt die weiteren Module auf Sendung, im LCD und in der Sendezeile
