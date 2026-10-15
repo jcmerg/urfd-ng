@@ -670,9 +670,11 @@ char CSvxProtocol::PeerModule(const SSvxPeer &peer) const
 // Called without m_TGMutex held (the client list is locked here)
 void CSvxProtocol::UpdatePeerClient(SSvxPeer &peer, bool remove)
 {
-	char newMod = remove ? ' ' : PeerModule(peer);
-	CIp ip = peer.udpDiscovered ? peer.udpEndpoint : CIp();
-	const bool sameIp = (!ip.IsSet() && !peer.clientIp.IsSet()) || (ip.IsSet() && peer.clientIp.IsSet() && ip == peer.clientIp);
+	// a CClient only once the UDP address is known: before that the node gets
+	// no audio, and an unset CIp neither prints (GetAddress warns) nor compares
+	char newMod = (remove || !peer.udpDiscovered) ? ' ' : PeerModule(peer);
+	const CIp &ip = peer.udpEndpoint;
+	const bool sameIp = (ip == peer.clientIp);	// not IsSet(): an address from recvfrom() never sets it
 
 	CClients *clients = g_Reflector.GetClients();
 	// a new module or address replaces the client; one the reflector dropped is made anew
@@ -780,7 +782,7 @@ void CSvxProtocol::OnUdpPacket(const CBuffer &buffer, const CIp &ip)
 	// UDP endpoint discovery
 	if (!peer.udpDiscovered)
 	{
-		// the CClient moves from the address-less entry to the real one
+		// now the node gets its CClient
 		peer.udpEndpoint = ip;
 		peer.udpDiscovered = true;
 		UpdatePeerClient(peer);
