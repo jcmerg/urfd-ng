@@ -88,8 +88,8 @@ private:
 	float agc_digital_gatefloor  = 0.0f;    // gain with the gate closed (dB)
 	float agc_analog_noisegate  = -40.0f;  // SVX/USRP: above the FM noise floor of a good signal
 	float agc_analog_maxgain_up = 12.0f;   // SVX/USRP: max amplification (dB)
-	float agc_analog_gatefloor  = -12.0f;  // SVX/USRP: gain with the gate closed (dB)
-	float agc_analog_noisesuppress = -15.0f; // SVX/USRP: speexdsp noise suppression (dB, 0 = off)
+	float agc_analog_gatefloor  = 0.0f;    // SVX/USRP: gain with the gate closed (dB), the noise suppression lowers the pauses
+	float agc_analog_noisesuppress = -10.0f; // SVX/USRP: speexdsp noise suppression (dB, 0 = off)
 	bool     monitor_enabled    = true;
 	std::string monitor_bind    = "127.0.0.1";   // the monitor has no password
 	uint16_t monitor_http_port  = 8080;
