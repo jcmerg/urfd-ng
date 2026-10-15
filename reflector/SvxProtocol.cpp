@@ -381,9 +381,7 @@ void CSvxProtocol::DisconnectPeer(uint32_t clientId)
 		TcpBroadcast(msg, clientId);
 
 		// drop its CClient entry
-		uint32_t oldTG = peer.selectedTG;
-		peer.selectedTG = 0;
-		UpdatePeerClient(peer, oldTG);
+		UpdatePeerClient(peer, true);
 	}
 
 	// Cleanup TCP
@@ -651,34 +649,52 @@ void CSvxProtocol::OnPeerNodeInfo(uint32_t clientId, const std::vector<uint8_t> 
 	}
 }
 
-// keeps the CClient of a peer on the module of its selected TG; called without
-// m_TGMutex held (the client list is locked first)
-void CSvxProtocol::UpdatePeerClient(SSvxPeer &peer, uint32_t oldTG)
+// the module a node is linked on: the one of its selected TG, or while it
+// has none selected (SvxLink idles on TG 0) the one of the first monitored
+// TG that is mapped, where it hears the traffic; ' ' if none
+char CSvxProtocol::PeerModule(const SSvxPeer &peer) const
 {
-	char oldMod = oldTG ? TGToModule(oldTG) : ' ';
-	char newMod = peer.selectedTG ? TGToModule(peer.selectedTG) : ' ';
-	if (oldMod == newMod)
-		return;
+	if (peer.selectedTG)
+		return TGToModule(peer.selectedTG);
+	for (uint32_t tg : peer.monitoredTGs)
+	{
+		char mod = TGToModule(tg);
+		if (mod != ' ')
+			return mod;
+	}
+	return ' ';
+}
 
+// keeps the CClient of a peer on PeerModule() and its current address, adds
+// it again if it went missing (dropped with an expired TG); remove drops it.
+// Called without m_TGMutex held (the client list is locked here)
+void CSvxProtocol::UpdatePeerClient(SSvxPeer &peer, bool remove)
+{
+	char newMod = remove ? ' ' : PeerModule(peer);
 	CIp ip = peer.udpDiscovered ? peer.udpEndpoint : CIp();
 	CCallsign cs;
 	cs.SetCallsign(SvxExtractCallsign(peer.callsign), false);
 
 	CClients *clients = g_Reflector.GetClients();
-	if (oldMod != ' ')
+	if (peer.clientModule != ' ' && (peer.clientModule != newMod || peer.clientIp != ip))
 	{
-		cs.SetCSModule(oldMod);
-		auto client = clients->FindClient(cs, oldMod, ip, EProtocol::svx);
+		cs.SetCSModule(peer.clientModule);
+		auto client = clients->FindClient(cs, peer.clientModule, peer.clientIp, EProtocol::svx);
 		if (client)
 			clients->RemoveClient(client);
 	}
 	if (newMod != ' ')
 	{
 		cs.SetCSModule(newMod);
-		if (!clients->FindClient(cs, newMod, ip, EProtocol::svx))
+		auto client = clients->FindClient(cs, newMod, ip, EProtocol::svx);
+		if (client)
+			client->Alive();
+		else
 			clients->AddClient(std::make_shared<CSvxClient>(cs, ip, newMod));
 	}
 	g_Reflector.ReleaseClients();
+	peer.clientModule = newMod;
+	peer.clientIp = ip;
 }
 
 void CSvxProtocol::OnPeerSelectTG(uint32_t clientId, const std::vector<uint8_t> &payload)
@@ -696,9 +712,8 @@ void CSvxProtocol::OnPeerSelectTG(uint32_t clientId, const std::vector<uint8_t> 
 
 	// like SvxReflector: talking on the old TG ends there, one TG is selected at a time
 	ClosePeerInStream(clientId);
-	uint32_t oldTG = peer.selectedTG;
 	peer.selectedTG = tg;
-	UpdatePeerClient(peer, oldTG);
+	UpdatePeerClient(peer);
 
 	if (tg == 0)
 		std::cout << "SVXServer: " << peer.callsign << " selected no TG" << std::endl;
@@ -727,6 +742,7 @@ void CSvxProtocol::OnPeerTgMonitor(uint32_t clientId, const std::vector<uint8_t>
 	for (uint16_t i = 0; i < count; i++)
 		peer.monitoredTGs.insert(SvxUnpack32(payload, pos));
 	std::cout << "SVXServer: " << peer.callsign << " monitors " << count << " TG(s)" << std::endl;
+	UpdatePeerClient(peer);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -763,13 +779,9 @@ void CSvxProtocol::OnUdpPacket(const CBuffer &buffer, const CIp &ip)
 	if (!peer.udpDiscovered)
 	{
 		// the CClient moves from the address-less entry to the real one
-		uint32_t tg = peer.selectedTG;
-		peer.selectedTG = 0;
-		UpdatePeerClient(peer, tg);
 		peer.udpEndpoint = ip;
 		peer.udpDiscovered = true;
-		peer.selectedTG = tg;
-		UpdatePeerClient(peer, 0);
+		UpdatePeerClient(peer);
 		std::cout << "SVXServer: discovered UDP endpoint for " << peer.callsign << std::endl;
 	}
 
@@ -1383,30 +1395,13 @@ void CSvxProtocol::Task(void)
 		m_SnapshotTimer.start();
 	}
 
-	// 9. the CClients of connected nodes stay alive
+	// 9. the CClients of connected nodes stay alive, on the module they
+	// belong to after TG map changes
 	if (m_AliveTimer.time() >= 5)
 	{
-		std::vector<std::pair<CCallsign, CIp>> alive;
 		for (auto &[id, peer] : m_Peers)
-		{
-			if (peer.authState != SSvxPeer::EAuthState::connected || peer.selectedTG == 0)
-				continue;
-			char mod = TGToModule(peer.selectedTG);
-			if (mod == ' ')
-				continue;
-			CCallsign cs;
-			cs.SetCallsign(SvxExtractCallsign(peer.callsign), false);
-			cs.SetCSModule(mod);
-			alive.emplace_back(cs, peer.udpDiscovered ? peer.udpEndpoint : CIp());
-		}
-		CClients *clients = g_Reflector.GetClients();
-		for (auto &[cs, ip] : alive)
-		{
-			auto client = clients->FindClient(cs, cs.GetCSModule(), ip, EProtocol::svx);
-			if (client)
-				client->Alive();
-		}
-		g_Reflector.ReleaseClients();
+			if (peer.authState == SSvxPeer::EAuthState::connected)
+				UpdatePeerClient(peer);
 		m_AliveTimer.start();
 	}
 

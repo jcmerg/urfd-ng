@@ -108,6 +108,10 @@ protected:
 		uint32_t selectedTG = 0;
 		std::set<uint32_t> monitoredTGs;
 
+		// where its CClient is, ' ' if it has none
+		char clientModule = ' ';
+		CIp clientIp;
+
 		// OPUS decoder with sequence tracking (stateful, per peer)
 		std::unique_ptr<CSvxOpusRx> rx;
 
@@ -164,7 +168,8 @@ protected:
 	void BuildUdpHeader(CBuffer &buf, uint16_t type, uint16_t clientId, uint16_t &seq);
 
 	// CClient entry of a peer for the module of its selected TG
-	void UpdatePeerClient(SSvxPeer &peer, uint32_t oldTG);
+	char PeerModule(const SSvxPeer &peer) const;
+	void UpdatePeerClient(SSvxPeer &peer, bool remove = false);
 
 	// stream helpers
 	void OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &, const CIp &);
