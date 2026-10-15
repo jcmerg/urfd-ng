@@ -426,9 +426,9 @@ $Admin['Port']     = 10101;
 {"cmd": "clear_users", "token": "..."}
 ```
 
-### WebSocket (4.13.0)
+### WebSocket (4.13.0, bridges and names 4.14.0)
 
-Live events for the dashboard: clients, peers and talking stations as they change, and the whole state when a client connects, without IP addresses. Read only and without a password, so it listens on loopback (`127.0.0.1:10102`) and the dashboard's nginx passes `/ws` through. Always built in (needs `libwebsockets-dev`), off until `[WebSocket] Enable = true`, which `setup.sh` sets on install and on `setup.sh update`; changes need a restart. The Docker image serves the live dashboard by Jason Kendall (coolacid) at `/live/`, next to this dashboard. Based on the notifier by Jason Kendall (coolacid). Messages and setup: [docs/WEBSOCKET.md](docs/WEBSOCKET.md).
+Live events for the dashboard: clients, peers and talking stations (with the operator's name from the ID database) as they change, the bridges of each module (TG mappings, autolinks, connectors to other reflectors) and their changes, and the whole state when a client connects, without IP addresses. Read only and without a password, so it listens on loopback (`127.0.0.1:10102`) and the dashboard's nginx passes `/ws` through. Always built in (needs `libwebsockets-dev`), off until `[WebSocket] Enable = true`, which `setup.sh` sets on install and on `setup.sh update`; changes need a restart. Based on the notifier by Jason Kendall (coolacid), whose live dashboard the Docker image serves at `/live/`, next to this dashboard. Messages and setup: [docs/WEBSOCKET.md](docs/WEBSOCKET.md).
 
 ### SIGHUP Configuration Reload
 

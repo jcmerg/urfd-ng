@@ -426,9 +426,9 @@ $Admin['Port']     = 10101;
 {"cmd": "clear_users", "token": "..."}
 ```
 
-### WebSocket (4.13.0)
+### WebSocket (4.13.0, Bridges und Namen 4.14.0)
 
-Live-Ereignisse für das Dashboard: Clients, Peers und sprechende Stationen, sobald sie sich ändern, und beim Verbinden der komplette Stand, ohne IP-Adressen. Nur lesend und ohne Passwort, daher lauscht es auf Loopback (`127.0.0.1:10102`), und das nginx des Dashboards reicht `/ws` durch. Immer eingebaut (braucht `libwebsockets-dev`), aus, bis `[WebSocket] Enable = true` gesetzt ist, was `setup.sh` bei der Installation und bei `setup.sh update` tut; Änderungen brauchen einen Neustart. Das Docker-Image liefert das Live-Dashboard von Jason Kendall (coolacid) unter `/live/` aus, neben diesem Dashboard. Basiert auf dem Notifier von Jason Kendall (coolacid). Nachrichten und Einrichtung: [docs/WEBSOCKET.md](docs/WEBSOCKET.md) (englisch).
+Live-Ereignisse für das Dashboard: Clients, Peers und sprechende Stationen (mit dem Namen des Funkers aus der ID-Datenbank), sobald sie sich ändern, die Bridges jedes Moduls (TG-Mappings, Autolinks, Connectoren zu anderen Reflektoren) und ihre Änderungen, und beim Verbinden der komplette Stand, ohne IP-Adressen. Nur lesend und ohne Passwort, daher lauscht es auf Loopback (`127.0.0.1:10102`), und das nginx des Dashboards reicht `/ws` durch. Immer eingebaut (braucht `libwebsockets-dev`), aus, bis `[WebSocket] Enable = true` gesetzt ist, was `setup.sh` bei der Installation und bei `setup.sh update` tut; Änderungen brauchen einen Neustart. Basiert auf dem Notifier von Jason Kendall (coolacid), dessen Live-Dashboard das Docker-Image unter `/live/` ausliefert, neben diesem Dashboard. Nachrichten und Einrichtung: [docs/WEBSOCKET.md](docs/WEBSOCKET.md) (englisch).
 
 ### Konfiguration per SIGHUP neu laden
 
