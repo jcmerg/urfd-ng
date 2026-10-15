@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both. Originally developed for the URF363 reflector.
 
-**urfd 4.12.2-dht** | tcd 0.4.0 | Dashboard v2.12.0
+**urfd 4.12.3-dht** | tcd 0.4.0 | Dashboard v2.12.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -570,7 +570,7 @@ Module names are configured once in `urfd.ini` and automatically available in th
 
 The JSON report also includes a `DynamicTGs` array with protocol, TG, module, and remaining seconds for all active dynamic mappings.
 
-### Dashboard v2.12.0
+### Dashboard v2.12.1
 Redesigned in v2.9.0 as the front panel of a radio: an amber LCD shows who is on the air, the modules are a keypad, the rest are plain tables. Before that: dark mode (v2.6.0), hardened against directory outages (v2.6.1), M17 positions in the last-heard list (v2.7.0), directory registration moved to the reflector (v2.8.0), security fixes (v2.8.1, v2.8.2), status file and admin socket fixes (v2.8.3). Since v2.10.0 the operator's first name stands next to the callsign, from the ID databases urfd loads (urfd 4.12.0 and later).
 
 **Pages:**
@@ -846,9 +846,11 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.6.0**: Dark mode redesign, admin panel, module overview with TG mappings and NXDN RAN, protocol-specific columns hidden when disabled, protocol list, QuadNet Live proxy, reflector list with search/pagination
 - **Dashboard v2.6.1**: Survives an outage of the XLX directory. Explicit timeouts on every outbound request, CallingHome failures logged instead of aborting the page render, reflector and peer lists served from an on-disk cache, admin API no longer serialized behind the PHP session lock
 - **Dashboard v2.7.0**: Locator column for stations that send an M17 GNSS position, also in `/json/stations`
+- **Dashboard v2.12.1**: The SVX nodes table shows the monitored TGs next to the selected one and when the node connected
 - **Dashboard v2.12.0**: "also on" names three modules at most and counts the rest (all of them in the tooltip); more than 8 modules get a compact keypad of 7 columns with the module name in the tooltip
 - **Dashboard v2.11.0**: The LCD follows the selected module key (who transmits there, or who was heard there last); without a selection it shows the transmission that started last, and "also on S" names the other modules on the air, in the LCD and the on-air line
 - **Dashboard v2.10.0**: Operator's first name next to the callsign in the LCD, the last-heard list, the on-air line and `/json/stations`; a speaker change shows within about two seconds (a small probe, `api/onair.php`, is polled every 1.5 s and triggers the reload); a smaller LCD; the theme switch keeps the top bar on one line
+- **SVXServer node list (4.12.3)**: the node info is read with the keys SvxLink really sends (`sw` + `swVer`, `nodeLocation`/`Location`, `Locator`, the `qth` sites of `node_info.json`), so the software and location are no longer empty; `svxs_peer_list` also returns `monitored_tgs` and `connected_since`
 - **Module node count without links (4.12.2)**: `<LinkedNodes>` counts only the nodes the status file lists; a link the reflector keeps to another server (MMDVMClient, DCS, DExtra, DPlus or YSF client, DCS peer) no longer adds one to each module it is mapped to
 - **Clean transcoder shutdown (4.12.1)**: stopping urfd no longer floods the log with `POLLNVAL received on module`; a socket that turns invalid is dropped, the socket list is no longer emptied under the running codec threads, and an error or hangup without data is no longer handed on as a packet
 - **Operator names in the status file (4.12.0)**: `<Name>` per station from the DMR ID database (NXDN as fallback), looked up on a copy of the list so a database reload never holds up the last-heard lock; the status file is written right after a stream opens or closes or a station is heard, not only every 10 s

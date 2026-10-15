@@ -32,7 +32,7 @@ SJsonKeys    g_Keys;
 CReflector   g_Reflector;
 CGateKeeper  g_GateKeeper;
 CConfigure   g_Configure;
-CVersion     g_Version(4,12,2); // The major byte should only change if the interlink packet changes! [URF] InterlinkVersion = 3 still announces 3
+CVersion     g_Version(4,12,3); // The major byte should only change if the interlink packet changes! [URF] InterlinkVersion = 3 still announces 3
 CLookupDmr   g_LDid;
 CLookupNxdn  g_LNid;
 CLookupYsf   g_LYtr;

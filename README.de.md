@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert. Ursprünglich für den Reflektor URF363 entwickelt.
 
-**urfd 4.12.2-dht** | tcd 0.4.0 | Dashboard v2.12.0
+**urfd 4.12.3-dht** | tcd 0.4.0 | Dashboard v2.12.1
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -560,7 +560,7 @@ Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Das
 
 Der JSON-Report enthält außerdem ein Array `DynamicTGs` mit Protokoll, TG, Modul und Restlaufzeit aller aktiven dynamischen Zuordnungen.
 
-### Dashboard v2.12.0
+### Dashboard v2.12.1
 In v2.9.0 neu gestaltet als Frontplatte eines Funkgeräts: Ein bernsteinfarbenes LCD zeigt, wer gerade sendet, die Module sind ein Tastenfeld, der Rest sind schlichte Tabellen. Davor: dunkles Design (v2.6.0), robust gegen Ausfälle des Verzeichnisses (v2.6.1), M17-Positionen in der Last-Heard-Liste (v2.7.0), Eintrag ins Verzeichnis an den Reflektor abgegeben (v2.8.0), Sicherheitskorrekturen (v2.8.1, v2.8.2), Korrekturen an Statusdatei und Admin-Socket (v2.8.3). Seit v2.10.0 steht der Vorname neben dem Rufzeichen, aus den ID-Datenbanken, die urfd lädt (ab urfd 4.12.0).
 
 **Seiten:**
@@ -824,9 +824,11 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v2.12.1**: Die Tabelle der SVX-Nodes zeigt neben der gewählten TG die beobachteten TGs und seit wann der Node verbunden ist
 - **Dashboard v2.12.0**: "also on" nennt höchstens drei Module und zählt den Rest (alle im Tooltip); mehr als 8 Module bekommen ein kompaktes Tastenfeld mit 7 Spalten, der Modulname steht im Tooltip
 - **Dashboard v2.11.0**: Das LCD folgt der gewählten Modultaste (wer dort sendet oder zuletzt gehört wurde); ohne Auswahl zeigt es die zuletzt begonnene Aussendung, und "also on S" nennt die weiteren Module auf Sendung, im LCD und in der Sendezeile
 - **Dashboard v2.10.0**: Vorname neben dem Rufzeichen im LCD, in der Last-Heard-Liste, in der Sendezeile und in `/json/stations`; ein Sprecherwechsel erscheint nach etwa zwei Sekunden (eine kleine Abfrage, `api/onair.php`, läuft alle 1,5 s und stößt das Neuladen an); ein kleineres LCD; der Theme-Umschalter hält die Kopfleiste in einer Zeile
+- **SVXServer-Nodeliste (4.12.3)**: Die Node-Info wird mit den Keys gelesen, die SvxLink wirklich schickt (`sw` + `swVer`, `nodeLocation`/`Location`, `Locator`, die `qth`-Standorte aus `node_info.json`), Software und Standort sind also nicht mehr leer; `svxs_peer_list` liefert zusätzlich `monitored_tgs` und `connected_since`
 - **Knotenzahl je Modul ohne Links (4.12.2)**: `<LinkedNodes>` zählt nur noch die Nodes, die auch im Status-File stehen; ein Link des Reflectors zu einem anderen Server (MMDVMClient, DCS-, DExtra-, DPlus- oder YSF-Client, DCS-Peer) zählt nicht mehr auf jedem Modul mit, auf das er gemappt ist
 - **Sauberes Beenden der Transcoder-Verbindung (4.12.1)**: Beim Stoppen von urfd füllt sich das Log nicht mehr mit `POLLNVAL received on module`; ein ungültig gewordener Socket wird verworfen, die Socket-Liste wird den laufenden Codec-Threads nicht mehr unter den Füßen geleert, und ein Fehler oder Verbindungsabbruch ohne Daten wird nicht mehr als Paket weitergereicht
 - **Namen in der Statusdatei (4.12.0)**: `<Name>` pro Station aus der DMR-ID-Datenbank (NXDN als Rückfall), nachgeschlagen auf einer Kopie der Liste, damit ein Neuladen der Datenbank nie die Last-Heard-Sperre aufhält; die Statusdatei wird gleich nach dem Öffnen oder Schließen eines Streams oder dem Hören einer Station geschrieben, nicht nur alle 10 s
