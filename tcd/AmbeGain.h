@@ -25,6 +25,7 @@
 
 #include <cstdint>
 #include <cmath>
+#include <algorithm>
 #include <mutex>
 #include <chrono>
 #include <unordered_map>
@@ -108,8 +109,13 @@ static inline bool AmbeIsVoiceOrSilence(int b0)
 class CAmbeGain
 {
 public:
-	// change the decoded level of this frame by gainDb
-	void Process(uint8_t *ambe, uint16_t streamId, float gainDb)
+	// change the decoded level of this frame by gainDb. maxStepDb > 0 limits how
+	// far the applied gain may move from one frame to the next: at the bottom of
+	// the table the b2 steps are 6-8 dB, and making up the rounding error in the
+	// next frame lets the gain alternate between two of them, a 25-50 Hz level
+	// modulation that sounds like crackling on quiet passages. Limited, the gain
+	// follows within a few frames on speech and no longer jumps on quiet frames
+	void Process(uint8_t *ambe, uint16_t streamId, float gainDb, float maxStepDb = 0.0f)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		const auto now = std::chrono::steady_clock::now();
@@ -128,7 +134,13 @@ public:
 
 		// the decoder's gamma for the original frame, and what we want it to be
 		st.gammaOrig = AMBE_DG[f.b2] + 0.5f * st.gammaOrig;
-		const float want = st.gammaOrig + gainDb / 6.0206f;
+		float offset = gainDb / 6.0206f;
+		if (maxStepDb > 0.0f)
+		{
+			const float step = maxStepDb / 6.0206f;
+			offset = std::clamp(offset, st.offset - step, st.offset + step);
+		}
+		const float want = st.gammaOrig + offset;
 
 		// the b2 whose gamma comes closest, given the modified stream's history
 		const float base = 0.5f * st.gammaMod;
@@ -144,6 +156,7 @@ public:
 			}
 		}
 		st.gammaMod = AMBE_DG[best] + base;
+		st.offset = st.gammaMod - st.gammaOrig;
 
 		if (best != f.b2)
 			AmbeWriteB2(ambe, f, best);
@@ -154,6 +167,7 @@ private:
 	{
 		float gammaOrig = 0.0f;
 		float gammaMod = 0.0f;
+		float offset = 0.0f;   // gammaMod - gammaOrig of the last frame
 		std::chrono::steady_clock::time_point lastUsed{};
 	};
 

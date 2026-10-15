@@ -1485,7 +1485,7 @@ void CController::BitstreamDmrGain(uint8_t *ambe2, uint16_t streamId)
 {
 	const int bs = BitstreamDmrDb();
 	if (bs != 0)
-		m_ambeGain.Process(ambe2, streamId, (float)bs);
+		m_ambeGain.Process(ambe2, streamId, (float)bs, 1.2f);  // at most 1.2 dB per frame: no crackling on quiet frames
 }
 
 void CController::Dump(const std::shared_ptr<CTranscoderPacket> p, const std::string &title) const
