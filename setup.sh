@@ -340,6 +340,9 @@ write_urfd_config() {
         set_ini "$ini" Admin Password "$ADMIN_PASSWORD"
     fi
 
+    # live events for the dashboard at /live/ (loopback, nginx passes /ws)
+    set_ini "$ini" WebSocket Enable true
+
     # paths inside the container
     local c=/usr/local/etc/urfd
     set_ini "$ini" "DMR ID DB" Mode both
@@ -472,6 +475,7 @@ summary() {
 
  Reflector $CALLSIGN
    Dashboard:      $DASHURL
+   Live dashboard: ${DASHURL%/}/live/   (a TLS proxy in front must pass /ws as WebSocket)
    Configuration:  $CFG_DIR/urfd.ini   (more protocols, BrandMeister, interlinks)
    After changes:  docker restart urfd
    Logs:           docker logs -f urfd
@@ -540,6 +544,18 @@ PY
     [ -n "$url" ] && set_ini "$ini" Names DashboardUrl "$url"
 }
 
+# Since urfd 4.13 the image serves the live dashboard at /live/, which reads
+# urfd's WebSocket. Switch it on once for an urfd.ini from before; an existing
+# [WebSocket] section is the operator's choice and stays.
+migrate_websocket() {
+    local ini="$CFG_DIR/urfd.ini"
+    [ -f "$ini" ] || return 0
+    grep -q '^\[WebSocket\]' "$ini" && return 0
+    info "Enabling the WebSocket for the live dashboard ([WebSocket] in urfd.ini)"
+    set_ini "$ini" WebSocket Enable true
+    set_ini "$ini" WebSocket Port 10102
+}
+
 update() {
     local have_urfd=false have_tcd=false
     [ -f "$CFG_DIR/urfd.ini" ] && have_urfd=true
@@ -562,6 +578,7 @@ update() {
     if [ "$have_urfd" = true ]; then
         install_docker
         migrate_callinghome
+        migrate_websocket
         secure_files
         build_urfd
         # the dashboard version shown in the top bar lives in the kept config

@@ -88,7 +88,7 @@ Leite diese Ports in deinem Router auf den Rechner weiter, oder gib sie in der F
 
 ### 4. Ausprobieren
 
-1. Öffne das Dashboard im Browser.
+1. Öffne das Dashboard im Browser. Das Live-Dashboard liegt unter `/live/` auf derselben Adresse, z.B. `http://urf123.example.com:8363/live/`; steht das Dashboard hinter einem eigenen TLS-Proxy, muss der `/ws` als WebSocket weiterreichen (`Upgrade`-Header, siehe [docs/WEBSOCKET.md](WEBSOCKET.md#setup)).
 2. Verbinde einen Hotspot oder ein Funkgerät mit deinem Reflektor und einem Modul, z.B. `URF123 Z` für das Echo-Modul.
 3. Sag etwas und lass los: Nach 3 Sekunden hörst du dich selbst.
 4. Teste ein transcodiertes Modul über Betriebsarten hinweg, z.B. D-Star und DMR auf Modul `A`.

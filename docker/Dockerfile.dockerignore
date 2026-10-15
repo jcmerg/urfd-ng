@@ -1,4 +1,4 @@
-# Only reflector/, config/urfd.mk and dashboard/ go into the image
+# Only reflector/, config/urfd.mk, dashboard/ and dashboard-ws/ go into the image
 .git
 .claude
 tcd

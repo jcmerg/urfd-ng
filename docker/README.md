@@ -51,7 +51,7 @@ defines no `unix_http_server` socket. Restart with `docker restart urfd`.
 | `Dockerfile.dockerignore` | Keeps `.git`, `tcd/` and build output out of the build context |
 | `build.sh` | Build + restart helper |
 | `supervisord.conf` | Process manager (urfd, nginx, php-fpm) |
-| `nginx-dashboard.conf` | Dashboard web server config |
+| `nginx-dashboard.conf` | Dashboard web server config: the PHP dashboard at `/`, the live dashboard (`dashboard-ws`) at `/live/`, urfd's WebSocket at `/ws` |
 
 ## Synology NAS
 

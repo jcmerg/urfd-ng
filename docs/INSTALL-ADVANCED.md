@@ -101,6 +101,7 @@ The dashboard reads the reflector's status file (`[Files] XmlPath`, default `/va
 ```bash
 sudo apt install nginx php-fpm
 sudo cp -r ~/urfd/dashboard /var/www/urfd-dashboard
+sudo cp -r ~/urfd/dashboard-ws/static /var/www/urfd-dashboard-ws   # the live dashboard at /live/
 sudo mkdir -p /var/lib/xlxd-ch
 sudo chown -R www-data:www-data /var/www/urfd-dashboard /var/lib/xlxd-ch
 
@@ -112,7 +113,7 @@ sudo ln -s /etc/nginx/sites-available/urfd-dashboard.conf /etc/nginx/sites-enabl
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-The dashboard is then on port 8363; change `listen` in the configuration for another port, or put it behind your existing web server. The Docker image also raises `pm.max_children` and lowers `default_socket_timeout` in PHP, see [docker/README.md](../docker/README.md#php-tuning); worth doing on a busy reflector. Settings are in `/var/www/urfd-dashboard/pgs/config.inc.php`; keep a copy of it for updates.
+The dashboard is then on port 8363; change `listen` in the configuration for another port, or put it behind your existing web server. The Docker image also raises `pm.max_children` and lowers `default_socket_timeout` in PHP, see [docker/README.md](../docker/README.md#php-tuning); worth doing on a busy reflector. Settings are in `/var/www/urfd-dashboard/pgs/config.inc.php`; keep a copy of it for updates. The live dashboard at `/live/` needs `[WebSocket] Enable = true` in `urfd.ini`; the configuration passes `/ws` to it, see [WEBSOCKET.md](WEBSOCKET.md).
 
 **Admin page**: `$Admin['Enable'] = true` in the dashboard and `[Admin] Enable = true` in `urfd.ini` (restart urfd). Log in with the `[Admin] Password` from `urfd.ini`; the dashboard keeps no copy of it. The page is behind the π symbol in the footer.
 

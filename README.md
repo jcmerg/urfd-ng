@@ -428,7 +428,7 @@ $Admin['Port']     = 10101;
 
 ### WebSocket (4.13.0)
 
-Live events for the dashboard: clients, peers and talking stations as they change, and the whole state when a client connects, without IP addresses. Read only and without a password, so it listens on loopback (`127.0.0.1:10102`) and the dashboard's nginx passes `/ws` through. Always built in (needs `libwebsockets-dev`), off until `[WebSocket] Enable = true`; changes need a restart. Based on the notifier by Jason Kendall (coolacid). Messages and setup: [docs/WEBSOCKET.md](docs/WEBSOCKET.md).
+Live events for the dashboard: clients, peers and talking stations as they change, and the whole state when a client connects, without IP addresses. Read only and without a password, so it listens on loopback (`127.0.0.1:10102`) and the dashboard's nginx passes `/ws` through. Always built in (needs `libwebsockets-dev`), off until `[WebSocket] Enable = true`, which `setup.sh` sets on install and on `setup.sh update`; changes need a restart. The Docker image serves the live dashboard by Jason Kendall (coolacid) at `/live/`, next to this dashboard. Based on the notifier by Jason Kendall (coolacid). Messages and setup: [docs/WEBSOCKET.md](docs/WEBSOCKET.md).
 
 ### SIGHUP Configuration Reload
 
@@ -729,7 +729,7 @@ With the [md380_vocoder](https://github.com/jcmerg/md380_vocoder) library, the t
 
 The urfd container runs two services via supervisord:
 - **urfd** - The reflector daemon
-- **nginx + php-fpm** - Dashboard on port 8363
+- **nginx + php-fpm** - Dashboard on port 8363, the live dashboard at `/live/` and urfd's WebSocket at `/ws`
 
 ### Configuration files
 
@@ -885,7 +885,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.8.0**: No CallingHome any more, the reflector registers itself; the reflector list reads `$Directory` (falling back to old `$CallingHome` settings); `/json/metadata` takes the dashboard URL from the reflector's XML
 - **Extended XML/JSON**: Module mappings (static + dynamic with TTL), reflector metadata, protocol list, per-user protocol info, dynamic TG array
 - **Protocol blocking display**: Active blocks shown as clickable labels in admin panel
-- **WebSocket (4.13.0)**: live events for the dashboard (clients, peers, talking stations, the whole state on connect) on `127.0.0.1:10102`, passed through as `/ws` by nginx; based on the notifier by Jason Kendall (coolacid), with the review fixes (lws calls only in its service thread, connections really closed, no log of every event), see [docs/WEBSOCKET.md](docs/WEBSOCKET.md)
+- **WebSocket (4.13.0)**: live events for the dashboard (clients, peers, talking stations, the whole state on connect) on `127.0.0.1:10102`, passed through as `/ws` by nginx; based on the notifier by Jason Kendall (coolacid), with the review fixes (lws calls only in its service thread, connections really closed, no log of every event), see [docs/WEBSOCKET.md](docs/WEBSOCKET.md); `setup.sh` switches it on, the Docker image serves `dashboard-ws` at `/live/`
 
 ### Transcoder (tcd)
 - **In this repository**: tcd moved into `tcd/` with its history; it builds against the urfd sources it shares (`TCPacketDef.h`, `TCSocket.*`) from `../reflector`, so both sides always speak the same protocol

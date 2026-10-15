@@ -428,7 +428,7 @@ $Admin['Port']     = 10101;
 
 ### WebSocket (4.13.0)
 
-Live-Ereignisse für das Dashboard: Clients, Peers und sprechende Stationen, sobald sie sich ändern, und beim Verbinden der komplette Stand, ohne IP-Adressen. Nur lesend und ohne Passwort, daher lauscht es auf Loopback (`127.0.0.1:10102`), und das nginx des Dashboards reicht `/ws` durch. Immer eingebaut (braucht `libwebsockets-dev`), aus, bis `[WebSocket] Enable = true` gesetzt ist; Änderungen brauchen einen Neustart. Basiert auf dem Notifier von Jason Kendall (coolacid). Nachrichten und Einrichtung: [docs/WEBSOCKET.md](docs/WEBSOCKET.md) (englisch).
+Live-Ereignisse für das Dashboard: Clients, Peers und sprechende Stationen, sobald sie sich ändern, und beim Verbinden der komplette Stand, ohne IP-Adressen. Nur lesend und ohne Passwort, daher lauscht es auf Loopback (`127.0.0.1:10102`), und das nginx des Dashboards reicht `/ws` durch. Immer eingebaut (braucht `libwebsockets-dev`), aus, bis `[WebSocket] Enable = true` gesetzt ist, was `setup.sh` bei der Installation und bei `setup.sh update` tut; Änderungen brauchen einen Neustart. Das Docker-Image liefert das Live-Dashboard von Jason Kendall (coolacid) unter `/live/` aus, neben diesem Dashboard. Basiert auf dem Notifier von Jason Kendall (coolacid). Nachrichten und Einrichtung: [docs/WEBSOCKET.md](docs/WEBSOCKET.md) (englisch).
 
 ### Konfiguration per SIGHUP neu laden
 
@@ -707,7 +707,7 @@ Mit der Bibliothek [md380_vocoder](https://github.com/jcmerg/md380_vocoder) brau
 
 Im urfd-Container laufen zwei Dienste unter supervisord:
 - **urfd**: der Reflektor
-- **nginx + php-fpm**: Dashboard auf Port 8363
+- **nginx + php-fpm**: Dashboard auf Port 8363, das Live-Dashboard unter `/live/` und der WebSocket von urfd unter `/ws`
 
 ### Konfigurationsdateien
 
@@ -863,7 +863,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.8.0**: Kein CallingHome mehr, der Reflektor trägt sich selbst ein; die Reflektorliste liest `$Directory` (mit Rückfall auf alte `$CallingHome`-Einstellungen); `/json/metadata` nimmt die Dashboard-URL aus dem XML des Reflektors
 - **Erweitertes XML/JSON**: Modul-Zuordnungen (statisch und dynamisch mit Laufzeit), Reflektor-Angaben, Protokollliste, Protokoll pro Nutzer, Array der dynamischen TGs
 - **Anzeige der Protokoll-Sperren**: Aktive Sperren als anklickbare Markierungen im Admin-Panel
-- **WebSocket (4.13.0)**: Live-Ereignisse für das Dashboard (Clients, Peers, sprechende Stationen, beim Verbinden der komplette Stand) auf `127.0.0.1:10102`, von nginx als `/ws` durchgereicht; basiert auf dem Notifier von Jason Kendall (coolacid), mit den Fixes aus dem Review (lws-Aufrufe nur in seinem Service-Thread, Verbindungen werden wirklich geschlossen, kein Log jedes Ereignisses), siehe [docs/WEBSOCKET.md](docs/WEBSOCKET.md)
+- **WebSocket (4.13.0)**: Live-Ereignisse für das Dashboard (Clients, Peers, sprechende Stationen, beim Verbinden der komplette Stand) auf `127.0.0.1:10102`, von nginx als `/ws` durchgereicht; basiert auf dem Notifier von Jason Kendall (coolacid), mit den Fixes aus dem Review (lws-Aufrufe nur in seinem Service-Thread, Verbindungen werden wirklich geschlossen, kein Log jedes Ereignisses), siehe [docs/WEBSOCKET.md](docs/WEBSOCKET.md); `setup.sh` schaltet ihn ein, das Docker-Image liefert `dashboard-ws` unter `/live/` aus
 
 ### Transcoder (tcd)
 - **In diesem Repository**: tcd liegt mit seiner Historie in `tcd/`; es baut gegen die gemeinsamen urfd-Quellen (`TCPacketDef.h`, `TCSocket.*`) aus `../reflector`, beide Seiten sprechen also immer dasselbe Protokoll
