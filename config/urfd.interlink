@@ -1,0 +1,40 @@
+##############################################################################
+#  URFD interlink file
+#
+#  One line per entry. Each entry specifies a remote reflector to peer with.
+#  DNS hostnames and IP addresses are both supported.
+#  Remote reflector must also list this reflector in its interlink file.
+#  Only listed reflectors may peer: with no entries, no reflector can.
+#
+#  Format: <Callsign> <Address> <Modules> [Port] [Protocol]
+#
+#  URF Peering (port 10017):
+#    URF270 urf270.example.com EF
+#    URF290 ABC                       # DHT only (no address needed)
+#
+#  XLX Peering (port 10002, requires [XLXPeer] Enable = true):
+#    XLX269 xlx269.example.com A
+#
+#  DCS Peering (two modes, optional protocol field — DCS entries only):
+#    DCS002 dcs002.xreflector.net S             # native DCS (port 30051)
+#    DCS002 dcs002.xreflector.net S 31000       # native DCS on custom port
+#    DCS002 dcs002.xreflector.net S XLX         # XLX protocol (port 10002)
+#    DCS002 dcs002.xreflector.net S 10002 XLX   # XLX on explicit port
+#
+#    Default for DCS entries is native DCS protocol on port 30051.
+#    Add "XLX" to use XLX peering instead (requires [XLXPeer] Enable = true).
+#    The protocol field is only supported for DCS entries.
+#
+#  M17 Peering with mrefd reflectors (port 17000, requires [M17] Callsign):
+#    M17-QQQ m17-qqq.example.com AB             # mrefd >= 1.0
+#    M17-QQQ m17-qqq.example.com AB 17001       # on a custom port
+#    M17-QQQL m17-qqq.example.com AB            # legacy mrefd < 1.0 (trailing L)
+#    M17-QQQ AB                                 # address from the Ham-DHT
+#
+#    Without an address the mrefd's DHT document gives address, port and
+#    legacy state, and the [M17] Callsign of this reflector is published
+#    there for the mrefd in turn. The modules must be the same on both sides,
+#    and the mrefd must list this reflector's [M17] Callsign with the same
+#    modules in its mrefd.interlink.
+#
+#############################################################################

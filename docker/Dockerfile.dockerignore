@@ -1,0 +1,12 @@
+# Only reflector/, config/urfd.mk, dashboard/ and dashboard-ws/ go into the image
+.git
+.claude
+tcd
+docs
+docker
+**/*.o
+**/*.d
+reflector/urfd
+reflector/inicheck
+reflector/dbutil
+reflector/urfd.mk

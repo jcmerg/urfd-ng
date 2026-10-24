@@ -1,0 +1,13 @@
+##############################################################################
+#  URFD Blacklist
+#
+#  One callsign per line. Blacklisted callsigns are denied access.
+#  Supports wildcard (*) as the last character.
+#  An empty file means nobody is blocked.
+#
+#  Examples:
+#    *       deny access to everybody (not recommended)
+#    LX*     deny all callsigns starting with LX
+#    LX3JL   deny LX3JL exactly
+#
+##############################################################################

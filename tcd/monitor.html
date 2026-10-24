@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TCD Monitor</title>
+<script>try { var t = localStorage.getItem('tcd-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
+<style>
+/*
+ * tcd monitor, in the look of the URF dashboard: a radio front panel.
+ * Each module is an amber LCD with its level meters; red means trouble, nothing else.
+ * embed_html.sh puts the Saira font in at build time.
+ */
+@font-face {
+  font-family: "Saira";
+  font-style: normal;
+  font-weight: 300 800;
+  font-stretch: 50% 125%;
+  font-display: swap;
+  src: url(data:font/woff2;base64,/*SAIRA_WOFF2*/) format("woff2");
+}
+:root {
+  --panel: #D5D9DA;
+  --panel-raised: #E4E7E7;
+  --panel-sunk: #C7CCCD;
+  --ink: #1D2427;
+  --graphite: #4F575B;
+  --rule: #B1B8BA;
+  --lcd: #E3A23F;
+  --lcd-ink: #2A1905;
+  --lcd-dim: #7A4E12;
+  --lcd-seg: #2a19052e;
+  --bezel: #2B3236;
+  --tx: #C8352B;
+  --ok: #2F7A45;
+  --warn: #9A6200;
+  --font: "Saira", "Bahnschrift", "DIN Alternate", "Arial Narrow", system-ui, sans-serif;
+  --fs-xs: 0.8125rem;
+  --fs-s: 0.9375rem;
+  --fs-m: 1.0625rem;
+  --fs-l: 1.375rem;
+  --fs-xl: 1.75rem;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --panel: #252B2E; --panel-raised: #2F363A; --panel-sunk: #1C2124;
+    --ink: #E2E5E3; --graphite: #A2AAAD; --rule: #3C454A;
+    --bezel: #121618; --tx: #E5493E; --ok: #6DBA82; --warn: #E0A84A;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --panel: #252B2E; --panel-raised: #2F363A; --panel-sunk: #1C2124;
+  --ink: #E2E5E3; --graphite: #A2AAAD; --rule: #3C454A;
+  --bezel: #121618; --tx: #E5493E; --ok: #6DBA82; --warn: #E0A84A;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--panel); color: var(--ink); font-family: var(--font); font-size: var(--fs-m);
+       line-height: 1.45; font-variant-numeric: tabular-nums; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.muted { color: var(--graphite); }
+.wrap { max-width: 76rem; margin: 0 auto; padding-inline: 16px; }
+h1, h2, h3 { font-weight: 650; font-stretch: 82%; margin: 0; line-height: 1.2; }
+h1 { font-size: var(--fs-l); font-stretch: 75%; font-weight: 700; }
+h2 { font-size: var(--fs-l); }
+h3 { font-size: var(--fs-m); }
+
+/* top bar */
+.bar { border-bottom: 1px solid var(--rule); background: var(--panel-raised); }
+.bar .wrap { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem 1.5rem; padding-block: 0.75rem; }
+.bar .sub { font-size: var(--fs-xs); color: var(--graphite); }
+.bar .ver { font-size: var(--fs-xs); color: var(--graphite); }
+.bar .right { margin-left: auto; display: flex; align-items: center; gap: 1rem; font-size: var(--fs-xs); color: var(--graphite); }
+.link-state::before { content: ""; display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 50%; margin-right: 0.4rem;
+                      background: var(--graphite); vertical-align: 0.05em; }
+.link-state.ok::before { background: var(--ok); }
+.link-state.bad { color: var(--tx); font-weight: 600; }
+.link-state.bad::before { background: var(--tx); }
+.theme-btn { font: inherit; font-size: var(--fs-xs); color: var(--graphite); background: none; border: 1px solid var(--rule);
+             border-radius: 3px; padding: 0.2rem 0.55rem; cursor: pointer; min-width: 4.6rem; }
+.theme-btn:hover { color: var(--ink); border-color: var(--graphite); }
+
+main .wrap { padding-block: 1.5rem 3rem; display: grid; gap: 2.25rem; }
+section > header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0.5rem 1rem;
+                   margin-bottom: 0.75rem; }
+.hint { font-size: var(--fs-xs); color: var(--graphite); margin: 0; }
+
+/* module LCDs */
+.mods { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); gap: 1.25rem; }
+.mod { display: grid; grid-template-rows: 1fr auto; gap: 0.5rem; min-width: 0; }
+.bezel { background: var(--bezel); border-radius: 12px; padding: 8px; display: grid; }
+.lcd { border-radius: 5px; background: var(--lcd); color: var(--lcd-ink); box-shadow: inset 0 3px 0 #00000024;
+       padding: 0.7rem 1rem 0.8rem; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+       grid-template-areas: "top ch" "codec ch" "meters meters"; gap: 0.2rem 1rem; }
+.lcd-top { grid-area: top; display: flex; align-items: center; gap: 0.55rem; font-size: var(--fs-s); font-weight: 600; min-height: 1.5rem; }
+.ann { background: var(--lcd-ink); color: var(--lcd); font-weight: 750; font-size: var(--fs-xs); line-height: 1; padding: 0.22rem 0.4rem 0.18rem; border-radius: 2px; }
+.ann.gate { background: transparent; color: var(--lcd-ink); box-shadow: inset 0 0 0 1.5px var(--lcd-ink); }
+.lcd-codec { grid-area: codec; margin: 0; font-size: clamp(2.2rem, 6vw, 3.25rem); font-weight: 650; font-stretch: 60%; line-height: 0.95; overflow-wrap: anywhere; }
+.lcd-codec small { display: block; min-height: 1.3em; font-size: var(--fs-xs); font-weight: 500; font-stretch: 90%; line-height: 1.3; margin-top: 0.3rem; color: var(--lcd-dim); }
+.lcd-ch { grid-area: ch; align-self: stretch; display: grid; align-content: center; justify-items: center;
+          border-left: 2px solid #2a190533; padding-left: 1rem; }
+.lcd-ch span { font-size: var(--fs-xs); color: var(--lcd-dim); }
+.lcd-ch b { font-size: clamp(2.8rem, 7vw, 4rem); font-weight: 700; font-stretch: 62%; line-height: 0.85; }
+.lcd.idle .lcd-codec, .lcd.idle .lcd-ch b { color: var(--lcd-dim); }
+
+/* bar graph meters, drawn the way an LCD draws them: segments that are dark or not */
+.meters { grid-area: meters; display: grid; gap: 0.35rem; margin-top: 0.6rem; }
+.meter { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr) 4.2rem; align-items: center; gap: 0.6rem; font-size: var(--fs-xs); }
+.meter > span:first-child { color: var(--lcd-dim); font-weight: 600; }
+.meter .val { text-align: right; font-weight: 650; font-size: var(--fs-s); font-stretch: 80%; }
+.track { position: relative; height: 0.85rem;
+         background: repeating-linear-gradient(90deg, var(--lcd-seg) 0 5px, transparent 5px 7px); }
+.fill { position: absolute; inset: 0 auto 0 0; width: 0;
+        background: repeating-linear-gradient(90deg, var(--lcd-ink) 0 5px, transparent 5px 7px); }
+.peak { position: absolute; top: -2px; bottom: -2px; width: 3px; background: var(--lcd-ink); left: 0; }
+.target { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 1.5px dashed var(--lcd-ink); opacity: 0.7; }
+.scale { position: relative; height: 0.9rem; margin: 0 4.8rem 0 4rem; font-size: 0.6875rem; color: var(--lcd-dim); }
+.scale span { position: absolute; transform: translateX(-50%); }
+.lcd.idle .fill, .lcd.idle .peak { visibility: hidden; }
+
+.flow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.45rem; font-size: var(--fs-xs); color: var(--graphite); padding-inline: 0.25rem; }
+.flow b { color: var(--ink); font-weight: 600; }
+.flow .arr { color: var(--rule); }
+.flow .pkts { margin-left: auto; }
+
+/* tables */
+.cols { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 2rem; align-items: start; }
+.cols > * { min-width: 0; }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: var(--fs-s); }
+th { text-align: left; font-weight: 500; font-size: var(--fs-xs); color: var(--graphite); padding: 0 0.7rem 0.4rem; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+td { padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--rule); vertical-align: baseline; }
+.r { text-align: right; white-space: nowrap; }
+td b { font-weight: 650; font-stretch: 85%; }
+.mod-tag { display: inline-block; min-width: 1.5rem; text-align: center; font-weight: 700; font-stretch: 75%;
+           background: var(--lcd); color: var(--lcd-ink); border-radius: 2px; padding: 0 0.3rem; margin-right: 0.2rem; }
+.state-ok { color: var(--ok); font-weight: 600; }
+.state-use { color: var(--ink); font-weight: 600; }
+.state-bad { color: var(--tx); font-weight: 600; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1.5rem; margin: 0; font-size: var(--fs-s); }
+.kv dt { color: var(--graphite); }
+.kv dd { margin: 0; }
+.empty { color: var(--graphite); padding-block: 1.25rem; text-align: center; }
+
+/* settings */
+.settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.75rem 3rem; }
+@media (max-width: 760px) { .settings { grid-template-columns: minmax(0, 1fr); } }
+.group { display: grid; gap: 0.15rem; align-content: start; }
+.group h3 { margin-bottom: 0.35rem; }
+.group p { margin: 0 0 0.4rem; font-size: var(--fs-xs); color: var(--graphite); }
+.row { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr) 3.6rem; align-items: center; gap: 0.75rem;
+       font-size: var(--fs-s); min-height: 2rem; }
+.row label { color: var(--graphite); }
+.row output { text-align: right; font-weight: 600; }
+.row input[type=range] { width: 100%; accent-color: var(--ink); }
+.row select { font: inherit; font-size: var(--fs-s); color: var(--ink); background: var(--panel-raised); border: 1px solid var(--rule);
+              border-radius: 3px; padding: 0.2rem 0.4rem; grid-column: 2 / 4; }
+.row input[type=checkbox] { accent-color: var(--ink); width: 1.05rem; height: 1.05rem; justify-self: start; }
+.save { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--rule); }
+.btn { font: inherit; font-size: var(--fs-s); font-weight: 600; color: var(--panel); background: var(--ink); border: 1px solid var(--ink);
+       border-bottom-width: 2px; border-radius: 3px; padding: 0.35rem 0.9rem; cursor: pointer; }
+.btn:active { transform: translateY(1px); }
+.save-state { font-size: var(--fs-s); }
+
+footer { border-top: 1px solid var(--rule); }
+footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphite); }
+
+@media (max-width: 860px) {
+  .cols { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  .bar .ver { display: none; }
+  .row { grid-template-columns: minmax(0, 1fr) 3.4rem; }
+  .row label { grid-column: 1 / -1; }
+  .row select { grid-column: 1 / -1; }
+  .meter { grid-template-columns: 2.8rem minmax(0, 1fr) 3.6rem; }
+  .scale { margin: 0 4.2rem 0 3.4rem; }
+  .opt { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn:active { transform: none; }
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="wrap">
+    <h1>TCD</h1>
+    <span class="sub">Transcoder monitor</span>
+    <div class="right">
+      <span class="ver" id="ver"></span>
+      <span class="link-state" id="conn">Connecting</span>
+      <button class="theme-btn" id="theme-btn" type="button" aria-label="Theme: system" title="Theme: system. Click to switch">System</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <section aria-labelledby="h-mods">
+      <header>
+        <h2 id="h-mods">Modules</h2>
+        <p class="hint">Levels in dBFS before and after the AGC; the dashed line is the AGC target</p>
+      </header>
+      <div class="mods" id="modules"><p class="empty">Waiting for the first report from tcd</p></div>
+    </section>
+
+    <div class="cols">
+      <section aria-labelledby="h-dev">
+        <header><h2 id="h-dev">Vocoders</h2></header>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Device</th><th>Type</th><th>State</th><th>Channels</th><th class="r opt">Queue</th><th class="r">Errors</th></tr></thead>
+            <tbody id="devices"><tr><td colspan="6" class="empty">No report yet</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+      <section aria-labelledby="h-ref">
+        <header><h2 id="h-ref">Reflector</h2></header>
+        <dl class="kv" id="reflector"><dt>Link</dt><dd class="muted">No report yet</dd></dl>
+      </section>
+    </div>
+
+    <section aria-labelledby="h-set">
+      <header>
+        <h2 id="h-set">Settings</h2>
+        <p class="hint">Changes apply at once; save them to keep them after a restart</p>
+      </header>
+      <div class="settings">
+        <div class="group">
+          <h3>Output gain</h3>
+          <p>After the AGC, per target, in dB</p>
+          <div class="row"><label for="og_dstar">D-Star</label><input type="range" min="-24" max="10" id="og_dstar"><output id="v_og_dstar" for="og_dstar">0</output></div>
+          <div class="row"><label for="og_m17">M17</label><input type="range" min="-24" max="10" id="og_m17"><output id="v_og_m17" for="og_m17">0</output></div>
+          <div class="row"><label for="og_dmr">DMR and YSF</label><input type="range" min="-24" max="10" id="og_dmr"><output id="v_og_dmr" for="og_dmr">0</output></div>
+          <div class="row"><label for="og_dmr_bs">Of it in the bitstream (b2), other codecs</label><input type="range" min="-24" max="0" id="og_dmr_bs"><output id="v_og_dmr_bs" for="og_dmr_bs">-6</output></div>
+          <div class="row"><label for="og_imbe">P25 and NXDN</label><input type="range" min="-24" max="10" id="og_imbe"><output id="v_og_imbe" for="og_imbe">0</output></div>
+          <div class="row"><label for="og_usrp">USRP and SVX</label><input type="range" min="-24" max="10" id="og_usrp"><output id="v_og_usrp" for="og_usrp">0</output></div>
+        </div>
+        <div class="group">
+          <h3>DVSI hardware gain</h3>
+          <p>In the AMBE chips, in dB</p>
+          <div class="row"><label for="g_dstar_in">D-Star in</label><input type="range" min="-24" max="24" id="g_dstar_in"><output id="v_dstar_in" for="g_dstar_in">0</output></div>
+          <div class="row"><label for="g_dstar_out">D-Star out</label><input type="range" min="-24" max="24" id="g_dstar_out"><output id="v_dstar_out" for="g_dstar_out">0</output></div>
+          <div class="row"><label for="g_dmr_in">DMR in</label><input type="range" min="-24" max="24" id="g_dmr_in"><output id="v_dmr_in" for="g_dmr_in">0</output></div>
+          <div class="row"><label for="g_dmr_out">DMR out</label><input type="range" min="-24" max="24" id="g_dmr_out"><output id="v_dmr_out" for="g_dmr_out">0</output></div>
+          <h3 style="margin-top:0.9rem">DMR to DMR and YSF</h3>
+          <div class="row"><label for="dmr_gain_mode">Level</label><select id="dmr_gain_mode">
+            <option value="off">Pass through unchanged</option>
+            <option value="ambe">AGC in the bitstream (b2)</option>
+            <option value="reencode">AGC and re-encode (MD380)</option>
+          </select></div>
+          <div class="row" id="dmr_gain_ambe" hidden><label for="ambe_gain_db">Offset</label><input type="range" min="-30" max="10" id="ambe_gain_db"><output id="v_ambe_gain_db" for="ambe_gain_db">0</output></div>
+          <div class="row" id="dmr_gain_reencode" hidden><label for="g_dmr_reencode">Offset</label><input type="range" min="-24" max="24" id="g_dmr_reencode"><output id="v_dmr_reencode" for="g_dmr_reencode">0</output></div>
+        </div>
+        <div class="group">
+          <h3>AGC</h3>
+          <div class="row"><label for="agc_en">On</label><input type="checkbox" id="agc_en"></div>
+          <div class="row"><label for="agc_target">Target in dBFS</label><input type="range" min="-40" max="0" id="agc_target"><output id="v_agc_target" for="agc_target">-16</output></div>
+          <div class="row"><label for="agc_attack">Attack in ms</label><input type="range" min="5" max="200" id="agc_attack"><output id="v_agc_attack" for="agc_attack">50</output></div>
+          <div class="row"><label for="agc_release">Release in ms</label><input type="range" min="50" max="2000" id="agc_release"><output id="v_agc_release" for="agc_release">500</output></div>
+          <div class="row"><label for="agc_maxgain_down">Max cut in dB</label><input type="range" min="1" max="40" id="agc_maxgain_down"><output id="v_agc_maxgain_down" for="agc_maxgain_down">24</output></div>
+        </div>
+        <div class="group">
+          <h3>AGC for digital sources</h3>
+          <p>D-Star, DMR and YSF, M17, P25 and NXDN</p>
+          <div class="row"><label for="agc_digital_noisegate">Noise gate in dBFS</label><input type="range" min="-70" max="-20" id="agc_digital_noisegate"><output id="v_agc_digital_noisegate" for="agc_digital_noisegate">-55</output></div>
+          <div class="row"><label for="agc_digital_maxgain_up">Max boost in dB</label><input type="range" min="0" max="40" id="agc_digital_maxgain_up"><output id="v_agc_digital_maxgain_up" for="agc_digital_maxgain_up">30</output></div>
+          <div class="row"><label for="agc_digital_gatefloor">Gate floor in dB</label><input type="range" min="-40" max="0" id="agc_digital_gatefloor"><output id="v_agc_digital_gatefloor" for="agc_digital_gatefloor">0</output></div>
+          <h3 style="margin-top:0.9rem">AGC for analog sources</h3>
+          <p>SvxLink and USRP</p>
+          <div class="row"><label for="agc_analog_noisegate">Noise gate in dBFS</label><input type="range" min="-70" max="-20" id="agc_analog_noisegate"><output id="v_agc_analog_noisegate" for="agc_analog_noisegate">-40</output></div>
+          <div class="row"><label for="agc_analog_maxgain_up">Max boost in dB</label><input type="range" min="0" max="40" id="agc_analog_maxgain_up"><output id="v_agc_analog_maxgain_up" for="agc_analog_maxgain_up">12</output></div>
+          <div class="row"><label for="agc_analog_gatefloor">Gate floor in dB</label><input type="range" min="-40" max="0" id="agc_analog_gatefloor"><output id="v_agc_analog_gatefloor" for="agc_analog_gatefloor">0</output></div>
+          <div class="row"><label for="agc_analog_noisesuppress">Noise suppression in dB (0 = off)</label><input type="range" min="-40" max="0" id="agc_analog_noisesuppress"><output id="v_agc_analog_noisesuppress" for="agc_analog_noisesuppress">-10</output></div>
+        </div>
+      </div>
+      <div class="save">
+        <button class="btn" id="btn_save" type="button">Save to tcd.ini</button>
+        <span class="save-state" id="save_status" role="status"></span>
+      </div>
+    </section>
+  </div>
+</main>
+<footer><div class="wrap">tcd, the hybrid transcoder of urfd-ng</div></footer>
+
+<script>
+var ws, data = null, configLoaded = false, cards = {};
+var $ = function (id) { return document.getElementById(id); };
+
+function esc(v) { return String(v).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function db(v) { return v > -99 ? v.toFixed(1) : '-∞'; }
+function signed(v) { return (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1); }
+function ago(s) { return s < 120 ? Math.round(s) + ' s ago' : s < 7200 ? Math.round(s / 60) + ' min ago' : Math.round(s / 3600) + ' h ago'; }
+
+// theme: system, light, dark
+var modes = ['system', 'light', 'dark'], mode = 'system';
+try { mode = localStorage.getItem('tcd-theme') || 'system'; } catch (e) {}
+function applyTheme() {
+  if (mode === 'system') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', mode);
+  var b = $('theme-btn');
+  b.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+  b.setAttribute('aria-label', 'Theme: ' + mode);
+  b.title = 'Theme: ' + mode + '. Click to switch';
+}
+$('theme-btn').addEventListener('click', function () {
+  mode = modes[(modes.indexOf(mode) + 1) % modes.length];
+  try { localStorage.setItem('tcd-theme', mode); } catch (e) {}
+  applyTheme();
+});
+applyTheme();
+
+function connect() {
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws.onopen = function () { $('conn').className = 'link-state ok'; $('conn').textContent = 'Live'; };
+  ws.onclose = function () { $('conn').className = 'link-state bad'; $('conn').textContent = 'No connection to tcd, retrying'; setTimeout(connect, 2000); };
+  ws.onerror = function () { ws.close(); };
+  ws.onmessage = function (e) {
+    data = JSON.parse(e.data);
+    if (data.version) $('ver').textContent = 'tcd ' + data.version;
+    if (!configLoaded) {
+      loadConfig(data.config);
+      if (!(data.md380 && data.md380.available)) {
+        var o = document.querySelector('#dmr_gain_mode option[value="reencode"]'); if (o) o.remove();
+      }
+      updateDmrGainMode();
+      configLoaded = true;
+    }
+    render();
+  };
+}
+
+// -60 dBFS is the left end of a meter, 0 dBFS the right end
+function pos(v) { return Math.max(0, Math.min(100, (v + 60) / 60 * 100)); }
+
+// what a module turns its input into
+function targets(codec) {
+  var c = codec.toLowerCase(), out = [];
+  if (c.indexOf('star') < 0) out.push('D-Star');
+  if (c.indexOf('dmr') < 0) out.push('DMR/YSF');
+  if (c.indexOf('codec2') < 0) out.push('M17');
+  if (c.indexOf('p25') < 0) out.push('P25/NXDN');
+  if (c !== 'usrp') out.push('USRP');
+  if (c !== 'svx') out.push('SVX');
+  return out;
+}
+
+function makeCard(mod) {
+  var el = document.createElement('article');
+  el.className = 'mod';
+  el.setAttribute('aria-label', 'Module ' + mod);
+  el.innerHTML =
+    '<div class="bezel"><div class="lcd idle">' +
+      '<div class="lcd-top"><span class="ann" data-k="ann"></span><span data-k="state"></span></div>' +
+      '<p class="lcd-codec"><span data-k="codec"></span><small data-k="to"></small></p>' +
+      '<div class="lcd-ch"><span>Module</span><b>' + esc(mod) + '</b></div>' +
+      '<div class="meters">' +
+        '<div class="meter"><span>Before</span><div class="track"><i class="fill" data-k="fin"></i><i class="peak" data-k="pin"></i></div><span class="val" data-k="vin"></span></div>' +
+        '<div class="meter"><span>After</span><div class="track"><i class="fill" data-k="fout"></i><i class="peak" data-k="pout"></i><i class="target" data-k="tgt"></i></div><span class="val" data-k="vout"></span></div>' +
+        '<div class="scale" aria-hidden="true"><span style="left:0%">−60</span><span style="left:33.3%">−40</span><span style="left:66.7%">−20</span><span style="left:83.3%">−10</span><span style="left:100%">0</span></div>' +
+      '</div>' +
+    '</div></div>' +
+    '<div class="flow" data-k="flow"></div>';
+  var parts = {};
+  el.querySelectorAll('[data-k]').forEach(function (n) { parts[n.dataset.k] = n; });
+  parts.lcd = el.querySelector('.lcd');
+  return { el: el, p: parts };
+}
+
+function render() {
+  if (!data) return;
+  var cfg = data.config, mods = Object.keys(data.modules).sort();
+  var box = $('modules');
+  if (mods.join() !== Object.keys(cards).sort().join()) {
+    box.innerHTML = ''; cards = {};
+    mods.forEach(function (m) { cards[m] = makeCard(m); box.appendChild(cards[m].el); });
+    if (!mods.length) box.innerHTML = '<p class="empty">tcd reports no transcoded modules. Check TranscodedModules in urfd.ini.</p>';
+  }
+  mods.forEach(function (mod) {
+    var m = data.modules[mod], p = cards[mod].p;
+    var active = m.codec_in !== 'none' && m.idle < 2;
+    p.lcd.classList.toggle('idle', !active);
+    if (active) {
+      p.ann.hidden = false;
+      p.ann.textContent = (cfg.agc_enabled && m.agc_gate) ? 'GATE' : 'IN';
+      p.ann.className = 'ann' + ((cfg.agc_enabled && m.agc_gate) ? ' gate' : '');
+      p.state.textContent = cfg.agc_enabled ? (m.agc_gate ? 'Noise gate closed' : 'AGC ' + signed(m.agc_gain) + ' dB') : 'AGC off';
+      p.codec.textContent = m.codec_in;
+      p.to.textContent = 'to ' + targets(m.codec_in).join(', ');
+    } else {
+      p.ann.hidden = true;
+      p.state.textContent = m.last_codec === 'none' ? 'No stream since tcd started' : 'Last stream ' + m.last_codec + ', ' + ago(m.idle);
+      p.codec.textContent = 'Idle';
+      p.to.textContent = 'Waiting for a stream';
+    }
+    p.fin.style.width = pos(m.rms_in) + '%';
+    p.pin.style.left = 'calc(' + pos(m.peak_in) + '% - 1.5px)';
+    p.vin.textContent = db(m.rms_in);
+    p.fout.style.width = pos(m.rms_out) + '%';
+    p.pout.style.left = 'calc(' + pos(m.peak_out) + '% - 1.5px)';
+    p.vout.textContent = db(m.rms_out);
+    p.tgt.hidden = !cfg.agc_enabled;
+    p.tgt.style.left = pos(cfg.agc_target) + '%';
+
+    // the signal path as text: source, input gain, AGC, packets
+    var cl = m.codec_in.toLowerCase(), gainIn = 0;
+    if (cl.indexOf('star') >= 0) gainIn = cfg.gain_dstar_in;
+    else if (cl.indexOf('dmr') >= 0) gainIn = cfg.gain_dmr_in;
+    var flow = active
+      ? '<b>' + esc(m.codec_in) + '</b>' + (gainIn ? '<span class="arr">→</span>DVSI ' + (gainIn > 0 ? '+' : '') + gainIn + ' dB' : '') +
+        '<span class="arr">→</span>PCM ' + db(m.rms_in) +
+        '<span class="arr">→</span>' + (cfg.agc_enabled ? (m.agc_gate ? 'gate' : 'AGC ' + signed(m.agc_gain) + ' dB') : 'no AGC') +
+        '<span class="arr">→</span>PCM ' + db(m.rms_out)
+      : '<span>No signal path while idle</span>';
+    p.flow.innerHTML = flow + '<span class="pkts">' + m.pkts_in + ' in, ' + m.pkts_out + ' out</span>';
+  });
+
+  // vocoders: DVSI devices and the MD380 software vocoder
+  var rows = '';
+  data.devices.forEach(function (d) {
+    var used = d.channels ? d.channels.filter(function (c) { return c.module; }).map(function (c) { return c.module; }) : [];
+    var total = d.type === 'DV3003' ? 3 : 1;
+    var state = !d.online ? '<span class="state-bad">offline</span>' : used.length ? '<span class="state-use">in use</span>' : '<span class="state-ok">ready</span>';
+    rows += '<tr><td><b>' + esc(d.serial) + '</b></td><td>' + esc(d.type) + (d.role ? ' <span class="muted">' + esc(d.role) + '</span>' : '') + '</td>' +
+      '<td>' + state + '</td><td>' + used.map(function (u) { return '<span class="mod-tag">' + esc(u) + '</span>'; }).join('') +
+      '<span class="muted">' + used.length + ' of ' + total + '</span></td>' +
+      '<td class="r opt">' + d.buf_depth + '</td><td class="r">' + (d.errors > 0 ? '<span class="state-bad">' + d.errors + '</span>' : '0') + '</td></tr>';
+  });
+  if (data.md380 && data.md380.available) {
+    var x = data.md380, act = x.active_module && x.active_module.length > 0;
+    rows += '<tr><td><b>MD380</b></td><td>Software <span class="muted">dmr</span></td>' +
+      '<td>' + (act ? '<span class="state-use">in use</span>' : '<span class="state-ok">ready</span>') + '</td>' +
+      '<td>' + (act ? '<span class="mod-tag">' + esc(x.active_module) + '</span>' : '') + '<span class="muted">re-encode ' + (x.reencode_active ? 'on' : 'off') + ', ' + x.cached_streams + ' cached</span></td>' +
+      '<td class="r opt">' + x.encodes + ' / ' + x.decodes + '</td><td class="r">' + x.reencodes + ' re</td></tr>';
+  }
+  $('devices').innerHTML = rows || '<tr><td colspan="6" class="empty">No vocoder found. Check the DeviceSerial lines in tcd.ini.</td></tr>';
+
+  var r = data.reflector;
+  $('reflector').innerHTML =
+    '<dt>Link</dt><dd>' + (r.connected ? '<span class="state-ok">connected</span>' : '<span class="state-bad">not connected, tcd retries on its own</span>') + '</dd>' +
+    '<dt>Packets in</dt><dd>' + r.pkts_rx + '</dd><dt>Packets out</dt><dd>' + r.pkts_tx + '</dd>';
+}
+
+// settings
+var gainKeys = ['dstar_in', 'dstar_out', 'dmr_in', 'dmr_out', 'dmr_reencode'];
+var outgainKeys = ['outgain_dstar', 'outgain_m17', 'outgain_dmr', 'outgain_imbe', 'outgain_usrp'];
+var agcKeys = ['agc_target', 'agc_attack', 'agc_release', 'agc_maxgain_down',
+  'agc_digital_noisegate', 'agc_digital_maxgain_up', 'agc_digital_gatefloor',
+  'agc_analog_noisegate', 'agc_analog_maxgain_up', 'agc_analog_gatefloor', 'agc_analog_noisesuppress'];
+
+function setVal(inputId, outId, v) {
+  if (v === undefined) return;
+  var el = $(inputId); if (!el) return;
+  el.value = v; $(outId).textContent = v;
+}
+function loadConfig(cfg) {
+  gainKeys.forEach(function (k) { setVal('g_' + k, 'v_' + k, cfg['gain_' + k]); });
+  outgainKeys.forEach(function (k) { var s = k.replace('outgain_', ''); setVal('og_' + s, 'v_og_' + s, cfg[k]); });
+  $('dmr_gain_mode').value = ['off', 'ambe', 'reencode'][cfg.dmr_gain_mode] || 'off';
+  setVal('ambe_gain_db', 'v_ambe_gain_db', cfg.ambe_gain_db);
+  $('agc_en').checked = cfg.agc_enabled;
+  setVal('og_dmr_bs', 'v_og_dmr_bs', cfg.outgain_dmr_bitstream);
+  agcKeys.forEach(function (k) { setVal(k, 'v_' + k, cfg[k]); });
+}
+function post(path, body) { return fetch(path, { method: 'POST', body: JSON.stringify(body) }); }
+
+gainKeys.forEach(function (k) {
+  var el = $('g_' + k); if (!el) return;
+  el.addEventListener('input', function () { $('v_' + k).textContent = el.value; post('/api/gain', { type: k, db: parseInt(el.value, 10) }); });
+});
+outgainKeys.forEach(function (k) {
+  var s = k.replace('outgain_', ''), el = $('og_' + s); if (!el) return;
+  el.addEventListener('input', function () { $('v_og_' + s).textContent = el.value; post('/api/gain', { type: k, db: parseInt(el.value, 10) }); });
+});
+agcKeys.forEach(function (k) {
+  var el = $(k); if (!el) return;
+  el.addEventListener('input', function () {
+    $('v_' + k).textContent = el.value;
+    var body = {}; body[k.replace('agc_', '')] = parseFloat(el.value);
+    post('/api/agc', body);
+  });
+});
+$('agc_en').addEventListener('change', function (e) { post('/api/agc', { enabled: e.target.checked }); });
+$('og_dmr_bs').addEventListener('input', function (e) { $('v_og_dmr_bs').textContent = e.target.value; post('/api/agc', { outgain_dmr_bitstream: parseInt(e.target.value, 10) }); });
+$('dmr_gain_mode').addEventListener('change', function (e) {
+  post('/api/agc', { dmr_gain_mode: { off: 0, ambe: 1, reencode: 2 }[e.target.value] || 0 });
+  updateDmrGainMode();
+});
+$('ambe_gain_db').addEventListener('input', function (e) {
+  $('v_ambe_gain_db').textContent = e.target.value;
+  post('/api/agc', { ambe_gain_db: parseInt(e.target.value, 10) });
+});
+function updateDmrGainMode() {
+  var m = $('dmr_gain_mode').value;
+  $('dmr_gain_ambe').hidden = m !== 'ambe';
+  $('dmr_gain_reencode').hidden = m !== 'reencode';
+}
+
+var saveTimer = null;
+$('btn_save').addEventListener('click', function () {
+  var s = $('save_status');
+  s.className = 'save-state muted'; s.textContent = 'Saving';
+  clearTimeout(saveTimer);
+  fetch('/api/save', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (j) {
+    if (j.status === 'ok') { s.className = 'save-state state-ok'; s.textContent = 'Saved to tcd.ini'; }
+    else { s.className = 'save-state state-bad'; s.textContent = 'Not saved: ' + (j.message || 'tcd gave no reason'); }
+  }).catch(function () {
+    s.className = 'save-state state-bad'; s.textContent = 'Not saved: no answer from tcd';
+  }).then(function () { saveTimer = setTimeout(function () { s.textContent = ''; }, 5000); });
+});
+
+connect();
+</script>
+</body>
+</html>
