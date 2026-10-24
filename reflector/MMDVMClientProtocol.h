@@ -66,7 +66,7 @@ public:
 	// a call from another MMDVMClient connection: never from this one or one in
 	// the same network, else only if neither blocks the other by name
 	bool IsSourceClientBlocked(const CClient &client) const override;
-	bool BlocksInstance(unsigned instance) const { return m_BlockedInstances.count(instance) > 0; }
+	unsigned GetMmdvmConnection(void) const override { return m_Instance; }
 
 	// initialization
 	bool Initialize(const char *type, const EProtocol ptype, const uint16_t port, const bool has_ipv4, const bool has_ipv6);
@@ -141,7 +141,6 @@ private:
 	const SJsonKeys::MMDVMCLIENT m_Keys;
 	const std::string m_Name;
 	std::string     m_Network;
-	std::set<unsigned> m_BlockedInstances;	// other connections in BlockProtocols
 	std::string     m_TCModules;		// [Transcoder] Modules, if tcd runs
 
 	// the client of each module, ours alone: another connection may use the

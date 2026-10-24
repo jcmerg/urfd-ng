@@ -13,12 +13,9 @@
 inline const std::map<std::string, EProtocol> &ProtocolNames(void)
 {
 	static const std::map<std::string, EProtocol> names = {
-		// every MMDVMClient connection; an MMDVMClient's own BlockProtocols takes these
-		// names for that one connection (see MmdvmClientConfig.h)
-		{"MMDVMClient", EProtocol::mmdvmclient}, {"MMDVMClient2", EProtocol::mmdvmclient}, {"MMDVMClient3", EProtocol::mmdvmclient},
-		{"MMDVMClient4", EProtocol::mmdvmclient}, {"MMDVMClient5", EProtocol::mmdvmclient}, {"MMDVMClient6", EProtocol::mmdvmclient},
-		{"MMDVMClient7", EProtocol::mmdvmclient}, {"MMDVMClient8", EProtocol::mmdvmclient}, {"MMDVMClient9", EProtocol::mmdvmclient},
-		{"SvxReflector", EProtocol::svxreflector},
+		// every MMDVMClient connection; "MMDVMClient1" ... "MMDVMClient9" name one of
+		// them (MmdvmClientConnection in MmdvmClientConfig.h)
+		{"MMDVMClient", EProtocol::mmdvmclient}, {"SvxReflector", EProtocol::svxreflector},
 		{"SVX", EProtocol::svx}, {"SVXServer", EProtocol::svx}, {"HyTalk", EProtocol::hytalk},
 		{"DCSClient", EProtocol::dcsclient}, {"DExtraClient", EProtocol::dextraclient},
 		{"DPlusClient", EProtocol::dplusclient}, {"YSFClient", EProtocol::ysfclient},

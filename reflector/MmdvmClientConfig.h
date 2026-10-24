@@ -43,6 +43,16 @@ inline unsigned MmdvmClientInstance(const std::string &name)
 	return 0;
 }
 
+// 1 to MMDVMCLI_MAX_INSTANCES for "MMDVMClient1" ... "MMDVMClient9", the name of one
+// connection in BlockProtocols and the admin block commands, else 0; there plain
+// "MMDVMClient" means every connection
+inline unsigned MmdvmClientConnection(const std::string &name)
+{
+	if (name.size() == 12 && name.compare(0, 11, "MMDVMClient") == 0 && name[11] >= '1' && name[11] <= '0' + MMDVMCLI_MAX_INSTANCES)
+		return unsigned(name[11] - '0');
+	return 0;
+}
+
 inline SJsonKeys::MMDVMCLIENT MmdvmClientKeys(unsigned n)
 {
 	const std::string p = MmdvmClientPrefix(n);
@@ -51,20 +61,19 @@ inline SJsonKeys::MMDVMCLIENT MmdvmClientKeys(unsigned n)
 		p + "Software", p + "Firmware", p + "FallbackDmrId", p + "BlockProtocols", p + "BmApiKey", p + "Network" };
 }
 
-// the network a connection belongs to: its Network key, else the master's
-// domain, so 2622.master.brandmeister.network and 2621.master.brandmeister.network
-// are both "brandmeister.network"; an IP address is a network of its own
+// the network a connection belongs to: its Network key, else "brandmeister.network"
+// for every BrandMeister master (2622.master.brandmeister.network, ...), else the
+// master's host name or address itself. Two masters of another network, or a
+// BrandMeister master given by its IP address, need the Network key: a shared
+// domain alone (*.ddns.net) does not make a network.
 inline std::string MmdvmClientNetwork(const std::string &configured, const std::string &address)
 {
 	auto lower = [](std::string s) { for (auto &c : s) c = char(std::tolower((unsigned char)c)); return s; };
 	if (!configured.empty())
 		return lower(configured);
 	const std::string a = lower(address);
-	if (a.find_first_not_of("0123456789.") == std::string::npos || a.find(':') != std::string::npos)
-		return a;
-	const auto last = a.rfind('.');
-	if (last == std::string::npos || last == 0)
-		return a;
-	const auto prev = a.rfind('.', last - 1);
-	return (prev == std::string::npos) ? a : a.substr(prev + 1);
+	static const std::string bm = "brandmeister.network";
+	if (a == bm || (a.size() > bm.size() && a.compare(a.size() - bm.size() - 1, bm.size() + 1, "." + bm) == 0))
+		return bm;
+	return a;
 }

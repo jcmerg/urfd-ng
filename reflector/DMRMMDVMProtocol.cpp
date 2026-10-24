@@ -24,7 +24,6 @@
 #include <sstream>
 
 #include "Global.h"
-#include "ProtocolNames.h"
 #include "DMRMMDVMClient.h"
 #include "DMRMMDVMProtocol.h"
 #include "BPTC19696.h"
@@ -115,27 +114,7 @@ bool CDmrmmdvmProtocol::Initialize(const char *type, const EProtocol ptype, cons
 	}
 
 	// BlockProtocols: urfd.ini had the key, but nothing read it before 4.20.0
-	if (g_Configure.Contains("mmdvmBlockProtocols"))
-	{
-		const auto &protoMap = ProtocolNames();
-		std::istringstream ss(g_Configure.GetString("mmdvmBlockProtocols"));
-		std::string token;
-		while (std::getline(ss, token, ','))
-		{
-			token.erase(0, token.find_first_not_of(" \t"));
-			token.erase(token.find_last_not_of(" \t") + 1);
-			if (token.empty())
-				continue;
-			auto it = protoMap.find(token);
-			if (it != protoMap.end())
-			{
-				m_BlockedSources.insert(it->second);
-				std::cout << "MMDVM: blocking protocol " << token << std::endl;
-			}
-			else
-				std::cerr << "MMDVM: unknown protocol in BlockProtocols: " << token << std::endl;
-		}
-	}
+	ParseBlockProtocols("mmdvmBlockProtocols", "MMDVM");
 	SaveBlockDefaults();
 
 	// load TG mappings

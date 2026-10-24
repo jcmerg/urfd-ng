@@ -544,14 +544,18 @@ void CReflector::RouterThread(const char ThisModule)
 				}
 				continue;
 			}
+			// the other way round: the source blocks the destination, by type or,
+			// for one MMDVMClient connection, by its name
 			bool reverseBlocked = false;
+			const unsigned dstConn = (*it)->GetMmdvmConnection();
+			auto blocksDst = [&](const CProtocol *p) { return p->IsSourceBlocked(dstProto) || (dstConn && p->IsMmdvmConnectionBlocked(dstConn)); };
 			if (srcInstance)
-				reverseBlocked = srcInstance->IsSourceBlocked(dstProto);	// only the instance the call came from
+				reverseBlocked = blocksDst(srcInstance);	// only the instance the call came from
 			else
 			{
 				for (auto sit=m_Protocols.begin(); sit!=m_Protocols.end(); sit++)
 				{
-					if ((*sit)->GetProtocolType() == srcProto && (*sit)->IsSourceBlocked(dstProto))
+					if ((*sit)->GetProtocolType() == srcProto && blocksDst((*sit).get()))
 					{ reverseBlocked = true; break; }
 				}
 			}

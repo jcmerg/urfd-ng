@@ -8,7 +8,6 @@
 #include <sstream>
 
 #include "Global.h"
-#include "ProtocolNames.h"
 #include "YSFClientPeer.h"
 #include "YSFClientProtocol.h"
 
@@ -30,25 +29,7 @@ bool CYsfClientProtocol::Initialize(const char *type, const EProtocol ptype, con
 	m_szCallsign[::strlen(m_szCallsign)] = ' ';
 
 	// Parse BlockProtocols
-	if (g_Configure.Contains(g_Keys.ysfclient.blockprotocols))
-	{
-		const auto &protoMap = ProtocolNames();
-		std::istringstream ss(g_Configure.GetString(g_Keys.ysfclient.blockprotocols));
-		std::string token;
-		while (std::getline(ss, token, ','))
-		{
-			token.erase(0, token.find_first_not_of(" \t"));
-			token.erase(token.find_last_not_of(" \t") + 1);
-			auto it = protoMap.find(token);
-			if (it != protoMap.end())
-			{
-				m_BlockedSources.insert(it->second);
-				std::cout << "YSFClient: blocking protocol " << token << std::endl;
-			}
-			else if (!token.empty())
-				std::cerr << "YSFClient: unknown protocol in BlockProtocols: " << token << std::endl;
-		}
-	}
+	ParseBlockProtocols(g_Keys.ysfclient.blockprotocols, "YSFClient");
 
 	// Block self-routing
 	m_BlockedSources.insert(EProtocol::ysfclient);

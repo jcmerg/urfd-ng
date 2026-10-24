@@ -10,7 +10,6 @@
 #include <set>
 
 #include "Global.h"
-#include "ProtocolNames.h"
 #include "MMDVMClientPeer.h"
 #include "MMDVMClientProtocol.h"
 #include "BPTC19696.h"
@@ -52,35 +51,7 @@ bool CMMDVMClientProtocol::Initialize(const char *type, const EProtocol ptype, c
 	m_Network = MmdvmClientNetwork(g_Configure.Contains(m_Keys.network) ? g_Configure.GetString(m_Keys.network) : "", m_MasterAddress);
 
 	// Parse BlockProtocols (comma-separated, e.g. "SvxReflector,YSF")
-	if (g_Configure.Contains(m_Keys.blockprotocols))
-	{
-		const auto &protoMap = ProtocolNames();
-		std::istringstream ss(g_Configure.GetString(m_Keys.blockprotocols));
-		std::string token;
-		while (std::getline(ss, token, ','))
-		{
-			token.erase(0, token.find_first_not_of(" \t"));
-			token.erase(token.find_last_not_of(" \t") + 1);
-			// another connection by its name: only that one, not all MMDVMClients
-			if (const unsigned other = MmdvmClientInstance(token))
-			{
-				if (other != m_Instance)
-				{
-					m_BlockedInstances.insert(other);
-					std::cout << m_Name << ": blocking " << token << std::endl;
-				}
-				continue;
-			}
-			auto it = protoMap.find(token);
-			if (it != protoMap.end())
-			{
-				m_BlockedSources.insert(it->second);
-				std::cout << m_Name << ": blocking protocol " << token << std::endl;
-			}
-			else if (!token.empty())
-				std::cerr << m_Name << ": unknown protocol in BlockProtocols: " << token << std::endl;
-		}
-	}
+	ParseBlockProtocols(m_Keys.blockprotocols, m_Name);
 
 	// Calls from MMDVMClient connections are judged by IsSourceClientBlocked:
 	// never our own back to the master (that confuses BrandMeister and blocks
@@ -141,7 +112,8 @@ bool CMMDVMClientProtocol::IsSourceClientBlocked(const CClient &client) const
 		return true;	// our own call back to the master
 	if (src->GetNetwork() == m_Network)
 		return true;	// the network has it already
-	return BlocksInstance(src->GetInstance()) || src->BlocksInstance(m_Instance);
+	// either connection names the other in its BlockProtocols or by an admin block
+	return IsMmdvmConnectionBlocked(src->GetInstance()) || src->IsMmdvmConnectionBlocked(m_Instance);
 }
 
 // look the master up again, keeping the last address if that fails
@@ -157,7 +129,16 @@ void CMMDVMClientProtocol::ResolveMaster(void)
 	CIp old(m_MasterIp);
 	old.SetPort(m_MasterPort);
 	if (!m_MasterIp.AddressIsZero() && (old != ip))
+	{
 		std::cout << m_Name << ": master " << m_MasterAddress << " is now at " << ip << std::endl;
+		// our module clients carry the old address: the next call makes new ones
+		CClients *clients = g_Reflector.GetClients();
+		for (auto &mc : m_ModuleClients)
+			if (mc.second && clients->IsClient(mc.second))
+				clients->RemoveClient(mc.second);
+		g_Reflector.ReleaseClients();
+		m_ModuleClients.clear();
+	}
 	m_MasterIp = ip;
 }
 
@@ -445,27 +426,30 @@ void CMMDVMClientProtocol::SendConfig(void)
 	// section leaves out from [MMDVMClient]: BrandMeister closed one that sent
 	// the bare defaults right after its config.
 	const auto first = MmdvmClientKeys(1);
-	auto key = [&](const std::string &own, const std::string &fallback) -> const std::string & {
-		return (g_Configure.Contains(own) || m_Instance == 1) ? own : fallback;
+	// the key that has the value: this section's, else [MMDVMClient]'s; nullptr for neither
+	auto pick = [&](const std::string &own, const std::string &fallback) -> const std::string * {
+		if (g_Configure.Contains(own))
+			return &own;
+		return (m_Instance > 1 && g_Configure.Contains(fallback)) ? &fallback : nullptr;
 	};
 	double lat = 0.0, lon = 0.0;
 	unsigned rxfreq = 439000000, txfreq = 439000000;
 	std::string location, description, url;
 
-	if (g_Configure.Contains(key(m_Keys.latitude, first.latitude)))
-		lat = std::stod(g_Configure.GetString(key(m_Keys.latitude, first.latitude)));
-	if (g_Configure.Contains(key(m_Keys.longitude, first.longitude)))
-		lon = std::stod(g_Configure.GetString(key(m_Keys.longitude, first.longitude)));
-	if (g_Configure.Contains(key(m_Keys.rxfreq, first.rxfreq)))
-		rxfreq = g_Configure.GetUnsigned(key(m_Keys.rxfreq, first.rxfreq));
-	if (g_Configure.Contains(key(m_Keys.txfreq, first.txfreq)))
-		txfreq = g_Configure.GetUnsigned(key(m_Keys.txfreq, first.txfreq));
-	if (g_Configure.Contains(key(m_Keys.location, first.location)))
-		location = g_Configure.GetString(key(m_Keys.location, first.location));
-	if (g_Configure.Contains(key(m_Keys.description, first.description)))
-		description = g_Configure.GetString(key(m_Keys.description, first.description));
-	if (g_Configure.Contains(key(m_Keys.url, first.url)))
-		url = g_Configure.GetString(key(m_Keys.url, first.url));
+	if (const auto *k = pick(m_Keys.latitude, first.latitude))
+		lat = std::stod(g_Configure.GetString(*k));
+	if (const auto *k = pick(m_Keys.longitude, first.longitude))
+		lon = std::stod(g_Configure.GetString(*k));
+	if (const auto *k = pick(m_Keys.rxfreq, first.rxfreq))
+		rxfreq = g_Configure.GetUnsigned(*k);
+	if (const auto *k = pick(m_Keys.txfreq, first.txfreq))
+		txfreq = g_Configure.GetUnsigned(*k);
+	if (const auto *k = pick(m_Keys.location, first.location))
+		location = g_Configure.GetString(*k);
+	if (const auto *k = pick(m_Keys.description, first.description))
+		description = g_Configure.GetString(*k);
+	if (const auto *k = pick(m_Keys.url, first.url))
+		url = g_Configure.GetString(*k);
 
 	char config[400];
 	::memset(config, 0, sizeof(config));

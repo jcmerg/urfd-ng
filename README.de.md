@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert. Ursprünglich für den Reflektor URF363 entwickelt.
 
-**urfd 4.21.1-dht** | tcd 0.9.0 | Dashboard v2.13.0
+**urfd 4.21.2-dht** | tcd 0.9.0 | Dashboard v2.13.0
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -115,13 +115,14 @@ MasterPort = 62031
 DmrId = 123456702                   # eine zweite Hotspot-ID
 Password = changeme
 Callsign = N0CALL
-# Network = brandmeister.network    # Standard: die Domain des Masters
+# Network = brandmeister.network    # Standard: brandmeister.network bei BM-Mastern, sonst der Host
 TG262 = D,TS2                       # Deutschland auf Modul D
 TG91 = W,TS1                        # Weltweit auf Modul W
 ```
 
-- **Netz.** Eine Verbindung gehört zum Netz aus ihrem Schlüssel `Network`, sonst zur Domain des Masters: `2622.master.brandmeister.network` und `2621.master.brandmeister.network` sind beide `brandmeister.network`, eine IP-Adresse ist ein eigenes Netz.
-- **Brücken.** Ein Ruf geht nie an die Verbindung zurück, von der er kam, und nie an eine andere Verbindung im selben Netz (das Netz hat ihn schon). Zwischen verschiedenen Netzen wird ein Modul, das beide gemappt haben, gebrückt; `BlockProtocols = MMDVMClient3` (der Sektionsname der anderen Verbindung) schaltet das für dieses Paar ab. In den `BlockProtocols` anderer Protokolle sperrt ein Name wie `MMDVMClient2` alle MMDVMClient-Verbindungen.
+- **Netz.** Eine Verbindung gehört zum Netz aus ihrem Schlüssel `Network`. Ohne ihn ist jeder BrandMeister-Master (`*.brandmeister.network`) `brandmeister.network`, jeder andere Master ein eigenes Netz (sein Hostname oder seine Adresse). `Network` braucht es für zwei Master eines anderen Netzes oder für einen BrandMeister-Master, der per IP-Adresse eingetragen ist.
+- **Brücken.** Ein Ruf geht nie an die Verbindung zurück, von der er kam, und nie an eine andere Verbindung im selben Netz (das Netz hat ihn schon). Zwischen verschiedenen Netzen wird ein Modul, das beide gemappt haben, gebrückt; `BlockProtocols = MMDVMClient3` schaltet das für dieses Paar ab.
+- **Namen.** In allen `BlockProtocols` und bei den Admin-Befehlen `block`/`unblock` heißt `MMDVMClient` alle Verbindungen, `MMDVMClient1` bis `MMDVMClient9` eine davon (`MMDVMClient1` ist `[MMDVMClient]`). Bei mehreren Verbindungen listet der Admin-Status sie unter diesen Namen.
 - **Prüfungen.** `inicheck` lehnt eine TG oder Hotspot-ID ab, die zwei Verbindungen desselben Netzes nutzen; die Admin-Seite lehnt so eine dynamische TG ab.
 - **Module ohne Transcoding.** Eine MMDVMClient-TG darf auf einem Modul liegen, das tcd nicht transkodiert. Von dort gehen nur AMBE+2-Aussendungen (DMR, YSF, NXDN, HyTalk) an den Master, erkannt am ersten Frame; D-Star, M17, SVX und die übrigen bleiben lokal, im Netz kämen sie als Stille an.
 - **Admin.** `tg_add`, `tg_remove`, `reconnect` und `kerchunk` nehmen `"client": 2` (oder das Protokoll `mmdvmclient2`); ohne das ist `[MMDVMClient]` gemeint, bei einer TG die Verbindung, die sie hat, und bei `reconnect` alle. `tg_list` und `status` listen jede Verbindung mit ihrem Netz. Das Dashboard (v2.13.0) bietet beim Hinzufügen einer TG jede Verbindung an und hat für jede einen Reconnect-Button.
@@ -146,7 +147,7 @@ Password = changeme                 # Authentication password
 # TG26363 = S
 ```
 
-**BlockProtocols**: Unterstützt bei MMDVMClient, SvxReflector, SVXServer, HyTalk, DCSClient, DExtraClient, DPlusClient und YSFClient. Audio aus den aufgeführten Quell-Protokollen wird nicht über diese Anbindung weitergeleitet. Jedes Client-Protokoll verhindert außerdem immer, dass Audio zu ihm selbst zurückläuft (DCSClient schickt z.B. nie Audio, das von DCSClient kam, wieder hinaus). Verfügbare Protokollnamen (seit 4.20.0 eine Tabelle für alle): `MMDVM`, `MMDVMClient`, `SvxReflector`, `SVX` oder `SVXServer`, `HyTalk`, `DExtra`, `DExtraClient`, `DPlus`, `DPlusClient`, `DCS`, `DCSClient`, `DMRPlus`, `YSF`, `YSFClient`, `M17`, `NXDN`, `P25`, `USRP`, `URF`, `XLXPeer`, `G3`. Durch Komma getrennt.
+**BlockProtocols**: Unterstützt bei MMDVMClient, SvxReflector, SVXServer, HyTalk, DCSClient, DExtraClient, DPlusClient und YSFClient. Audio aus den aufgeführten Quell-Protokollen wird nicht über diese Anbindung weitergeleitet. Jedes Client-Protokoll verhindert außerdem immer, dass Audio zu ihm selbst zurückläuft (DCSClient schickt z.B. nie Audio, das von DCSClient kam, wieder hinaus). Verfügbare Protokollnamen (seit 4.20.0 eine Tabelle für alle): `MMDVM`, `MMDVMClient` (alle Verbindungen) oder `MMDVMClient1` bis `MMDVMClient9` (eine), `SvxReflector`, `SVX` oder `SVXServer`, `HyTalk`, `DExtra`, `DExtraClient`, `DPlus`, `DPlusClient`, `DCS`, `DCSClient`, `DMRPlus`, `YSF`, `YSFClient`, `M17`, `NXDN`, `P25`, `USRP`, `URF`, `XLXPeer`, `G3`. Durch Komma getrennt.
 
 **Eine TG zur Zeit**: Ein Knoten am SvxReflector hat genau eine ausgewählte TG; er bekommt nur deren Audio, und sein Audio geht dorthin. urfd wählt die erste feste TG (die niedrigste Nummer, die Heimat-TG) und überwacht alle zugeordneten TGs (`MsgTgMonitor`, wie `MONITOR_TGS` bei SvxLink). Ein Sprecher auf einer überwachten TG wählt diese TG, wenn urfd seit 3 s keinen Verkehr hatte; Audio eines urfd-Moduls, dessen TG nicht gewählt ist, wählt sie, außer auf der gewählten spricht gerade jemand, dann geht der Durchgang dieses Moduls nicht hinaus. Nach 30 s ohne Verkehr kehrt urfd zur Heimat-TG zurück. Mit nur einer zugeordneten TG ändert sich nichts.
 
