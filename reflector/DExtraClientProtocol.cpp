@@ -7,7 +7,6 @@
 #include <sstream>
 
 #include "Global.h"
-#include "ProtocolNames.h"
 #include "DExtraClientPeer.h"
 #include "DExtraClientProtocol.h"
 
@@ -22,25 +21,7 @@ bool CDExtraClientProtocol::Initialize(const char *type, const EProtocol ptype, 
 		m_ClientCallsign = m_ReflectorCallsign;
 
 	// Parse BlockProtocols
-	if (g_Configure.Contains(g_Keys.dextraclient.blockprotocols))
-	{
-		const auto &protoMap = ProtocolNames();
-		std::istringstream ss(g_Configure.GetString(g_Keys.dextraclient.blockprotocols));
-		std::string token;
-		while (std::getline(ss, token, ','))
-		{
-			token.erase(0, token.find_first_not_of(" \t"));
-			token.erase(token.find_last_not_of(" \t") + 1);
-			auto it = protoMap.find(token);
-			if (it != protoMap.end())
-			{
-				m_BlockedSources.insert(it->second);
-				std::cout << "DExtraClient: blocking protocol " << token << std::endl;
-			}
-			else if (!token.empty())
-				std::cerr << "DExtraClient: unknown protocol in BlockProtocols: " << token << std::endl;
-		}
-	}
+	ParseBlockProtocols(g_Keys.dextraclient.blockprotocols, "DExtraClient");
 
 	m_BlockedSources.insert(EProtocol::dextraclient);
 	SaveBlockDefaults();

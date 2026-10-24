@@ -4,7 +4,6 @@
 // Licensed under the GNU General Public License v3 or later
 
 #include "HyTalkProtocol.h"
-#include "ProtocolNames.h"
 #include "HyTalkClient.h"
 #include "Global.h"
 
@@ -203,21 +202,7 @@ bool CHyTalkProtocol::Initialize(const char *type, const EProtocol ptype, const 
 		m_GroupVersion = 1 + h % 9999;
 	}
 
-	if (g_Configure.Contains(g_Keys.hytalk.blockprotocols))
-	{
-		const auto &protoMap = ProtocolNames();
-		std::istringstream ss(g_Configure.GetString(g_Keys.hytalk.blockprotocols));
-		std::string token;
-		while (std::getline(ss, token, ','))
-		{
-			auto it = protoMap.find(Trim(token));
-			if (it != protoMap.end())
-			{
-				m_BlockedSources.insert(it->second);
-				std::cout << "HyTalk: blocking protocol " << Trim(token) << std::endl;
-			}
-		}
-	}
+	ParseBlockProtocols(g_Keys.hytalk.blockprotocols, "HyTalk");
 	SaveBlockDefaults();
 
 	// signalling: the base opens the UDP socket on port

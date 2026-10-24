@@ -7,7 +7,6 @@
 #include <sstream>
 
 #include "Global.h"
-#include "ProtocolNames.h"
 #include "DPlusClientPeer.h"
 #include "DPlusClientProtocol.h"
 
@@ -22,25 +21,7 @@ bool CDPlusClientProtocol::Initialize(const char *type, const EProtocol ptype, c
 		m_ClientCallsign = m_ReflectorCallsign;
 
 	// Parse BlockProtocols
-	if (g_Configure.Contains(g_Keys.dplusclient.blockprotocols))
-	{
-		const auto &protoMap = ProtocolNames();
-		std::istringstream ss(g_Configure.GetString(g_Keys.dplusclient.blockprotocols));
-		std::string token;
-		while (std::getline(ss, token, ','))
-		{
-			token.erase(0, token.find_first_not_of(" \t"));
-			token.erase(token.find_last_not_of(" \t") + 1);
-			auto it = protoMap.find(token);
-			if (it != protoMap.end())
-			{
-				m_BlockedSources.insert(it->second);
-				std::cout << "DPlusClient: blocking protocol " << token << std::endl;
-			}
-			else if (!token.empty())
-				std::cerr << "DPlusClient: unknown protocol in BlockProtocols: " << token << std::endl;
-		}
-	}
+	ParseBlockProtocols(g_Keys.dplusclient.blockprotocols, "DPlusClient");
 
 	m_BlockedSources.insert(EProtocol::dplusclient);
 	SaveBlockDefaults();

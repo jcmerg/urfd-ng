@@ -42,11 +42,12 @@ public:
 
 	// the MMDVMClient connections, instance 1 ([MMDVMClient]) to 9; call with the lock held
 	class CMMDVMClientProtocol *FindMmdvmClient(unsigned instance);
-	std::vector<class CMMDVMClientProtocol *> MmdvmClients(void);
+	const std::vector<class CMMDVMClientProtocol *> &MmdvmClients(void) const { return m_Mmdvm; }
 
 
 protected:
 	// data
 	std::mutex m_Mutex;
 	std::list<std::unique_ptr<CProtocol>> m_Protocols;
+	std::vector<class CMMDVMClientProtocol *> m_Mmdvm;	// filled by Init, the list is fixed after it
 };

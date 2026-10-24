@@ -42,7 +42,7 @@ static bool IsMmdvmClientProtocol(const std::string &p)
 // ("mmdvmclient2"), else "client" (1 to 9 or "MMDVMClient2"), else the one
 // with the TG if tg is given, else [MMDVMClient] or the first one.
 // Call with the protocols lock held.
-static CMMDVMClientProtocol *FindMmdvmClient(CProtocols &protocols, const std::string &protocol, const nlohmann::json &cmd, uint32_t tg = 0)
+static CMMDVMClientProtocol *FindMmdvmClient(CProtocols &protocols, const std::string &protocol, const nlohmann::json &cmd, uint32_t tg = 0, std::string *err = nullptr)
 {
 	unsigned n = 0;
 	if (protocol.size() == 12)
@@ -59,11 +59,25 @@ static CMMDVMClientProtocol *FindMmdvmClient(CProtocols &protocols, const std::s
 	}
 	if (n)
 		return protocols.FindMmdvmClient(n);
-	const auto all = protocols.MmdvmClients();
+	const auto &all = protocols.MmdvmClients();
 	if (tg)
+	{
+		// the connection with the TG; with two of them (two networks) it is not ours to pick
+		CMMDVMClientProtocol *found = nullptr;
 		for (auto *c : all)
 			if (c->GetTGMap().IsTGMapped(tg))
-				return c;
+			{
+				if (found)
+				{
+					if (err)
+						*err = "TG" + std::to_string(tg) + " is mapped by " + found->GetName() + " and " + c->GetName() + ", give \"client\"";
+					return nullptr;
+				}
+				found = c;
+			}
+		if (found)
+			return found;
+	}
 	if (auto *c = protocols.FindMmdvmClient(1))
 		return c;
 	return all.empty() ? nullptr : all.front();
@@ -545,11 +559,12 @@ nlohmann::json CAdminSocket::CmdTGRemove(const nlohmann::json &cmd)
 	{
 		auto &protocols = g_Reflector.GetProtocols();
 		protocols.Lock();
-		auto *mmdvm = FindMmdvmClient(protocols, protocol, cmd, tg);
+		std::string err;
+		auto *mmdvm = FindMmdvmClient(protocols, protocol, cmd, tg, &err);
 		if (!mmdvm)
 		{
 			protocols.Unlock();
-			return {{"status", "error"}, {"message", "MMDVMClient connection not active"}};
+			return {{"status", "error"}, {"message", err.empty() ? std::string("MMDVMClient connection not active") : err}};
 		}
 		// Get timeslot before removing (needed for BM API)
 		uint8_t ts = 2;
@@ -826,13 +841,24 @@ nlohmann::json CAdminSocket::CmdStatus(void)
 	status["dplusclient_active"] = (protocols.FindByType(EProtocol::dplusclient) != nullptr);
 	status["ysfclient_active"] = (protocols.FindByType(EProtocol::ysfclient) != nullptr);
 
-	// List all active protocol names
+	// List all active protocol names. With several MMDVMClient connections each
+	// one is listed as MMDVMClient1, MMDVMClient2 ..., and MMDVMClient once for all
+	// of them: the names block and unblock take
+	const bool severalMmdvm = protocols.MmdvmClients().size() > 1;
+	auto protoName = [&](const CProtocol &p) -> std::string {
+		if (severalMmdvm && p.GetMmdvmConnection())
+			return "MMDVMClient" + std::to_string(p.GetMmdvmConnection());
+		const auto nameIt = s_ProtoToName.find(p.GetProtocolType());
+		return (nameIt != s_ProtoToName.end()) ? nameIt->second : std::string();
+	};
 	nlohmann::json activeProtos = nlohmann::json::array();
+	if (severalMmdvm)
+		activeProtos.push_back("MMDVMClient");
 	for (auto it = protocols.begin(); it != protocols.end(); ++it)
 	{
-		auto nameIt = s_ProtoToName.find((*it)->GetProtocolType());
-		if (nameIt != s_ProtoToName.end())
-			activeProtos.push_back(nameIt->second);
+		const std::string name = protoName(**it);
+		if (!name.empty())
+			activeProtos.push_back(name);
 	}
 	status["active_protocols"] = activeProtos;
 
@@ -842,17 +868,19 @@ nlohmann::json CAdminSocket::CmdStatus(void)
 	for (auto it = protocols.begin(); it != protocols.end(); ++it)
 	{
 		auto dstType = (*it)->GetProtocolType();
-		auto dstIt = s_ProtoToName.find(dstType);
-		if (dstIt == s_ProtoToName.end()) continue;
+		const std::string dstName = protoName(**it);
+		if (dstName.empty()) continue;
 
 		for (const auto &[proto, name] : s_ProtoToName)
 		{
-			if (proto == dstType) continue;  // skip self-blocks
+			// skip self-blocks, the client protocols block their own type; between
+			// MMDVMClient connections the type means all the others
+			if (proto == dstType && !(*it)->GetMmdvmConnection()) continue;
 			if ((*it)->IsSourceBlocked(proto))
-			{
-				blocks.push_back({{"from", name}, {"to", dstIt->second}});
-			}
+				blocks.push_back({{"from", name}, {"to", dstName}});
 		}
+		for (unsigned n : (*it)->GetBlockedMmdvm())
+			blocks.push_back({{"from", "MMDVMClient" + std::to_string(n)}, {"to", dstName}});
 	}
 	status["blocks"] = blocks;
 
@@ -1049,11 +1077,12 @@ nlohmann::json CAdminSocket::CmdKerchunk(const nlohmann::json &cmd)
 
 	auto &protocols = g_Reflector.GetProtocols();
 	protocols.Lock();
-	auto *mmdvm = FindMmdvmClient(protocols, cmd.contains("protocol") && cmd["protocol"].is_string() ? cmd["protocol"].get<std::string>() : std::string(), cmd, tg);
+	std::string err;
+	auto *mmdvm = FindMmdvmClient(protocols, cmd.contains("protocol") && cmd["protocol"].is_string() ? cmd["protocol"].get<std::string>() : std::string(), cmd, tg, &err);
 	if (!mmdvm)
 	{
 		protocols.Unlock();
-		return {{"status", "error"}, {"message", "MMDVMClient connection not active"}};
+		return {{"status", "error"}, {"message", err.empty() ? std::string("MMDVMClient connection not active") : err}};
 	}
 
 	// Verify TG is actually mapped
@@ -1077,32 +1106,62 @@ nlohmann::json CAdminSocket::CmdKerchunk(const nlohmann::json &cmd)
 ////////////////////////////////////////////////////////////////////////////////////////
 // Block commands — runtime protocol blocking (not persisted to config)
 
+// one side of a block: a protocol type, or one MMDVMClient connection
+struct SBlockEnd
+{
+	EProtocol type = EProtocol::none;
+	unsigned connection = 0;	// 1 to 9 for "MMDVMClient1" ... "MMDVMClient9"
+	bool Matches(const CProtocol &p) const
+	{
+		return p.GetProtocolType() == type && (connection == 0 || p.GetMmdvmConnection() == connection);
+	}
+};
+
+static bool ParseBlockEnd(const std::string &name, SBlockEnd &e)
+{
+	if (const unsigned n = MmdvmClientConnection(name))
+	{
+		e.type = EProtocol::mmdvmclient;
+		e.connection = n;
+		return true;
+	}
+	const auto it = s_NameToProto.find(name);
+	if (it == s_NameToProto.end())
+		return false;
+	e.type = it->second;
+	return true;
+}
+
 nlohmann::json CAdminSocket::CmdBlock(const nlohmann::json &cmd)
 {
-	if (!cmd.contains("a") || !cmd.contains("b"))
+	if (!cmd.contains("a") || !cmd.contains("b") || !cmd["a"].is_string() || !cmd["b"].is_string())
 		return {{"status", "error"}, {"message", "missing 'a' and 'b' fields"}};
 
-	std::string aName = cmd["a"];
-	std::string bName = cmd["b"];
-
-	auto aIt = s_NameToProto.find(aName);
-	auto bIt = s_NameToProto.find(bName);
-	if (aIt == s_NameToProto.end())
+	const std::string aName = cmd["a"];
+	const std::string bName = cmd["b"];
+	SBlockEnd a, b;
+	if (!ParseBlockEnd(aName, a))
 		return {{"status", "error"}, {"message", "unknown protocol: " + aName}};
-	if (bIt == s_NameToProto.end())
+	if (!ParseBlockEnd(bName, b))
 		return {{"status", "error"}, {"message", "unknown protocol: " + bName}};
 
 	auto &protocols = g_Reflector.GetProtocols();
 	protocols.Lock();
 
-	// Bidirectional: block A as source on B, and B as source on A
+	// Bidirectional: B as a source on every A, and A as a source on every B; an
+	// MMDVMClient connection named alone (MMDVMClient2) is one connection, not the type
+	auto apply = [](CProtocol &p, const SBlockEnd &other) {
+		if (other.connection)
+			p.SetMmdvmConnectionBlocked(other.connection);
+		else
+			p.SetSourceBlocked(other.type);
+	};
 	for (auto it = protocols.begin(); it != protocols.end(); ++it)
 	{
-		auto type = (*it)->GetProtocolType();
-		if (type == aIt->second)
-			(*it)->SetSourceBlocked(bIt->second);
-		if (type == bIt->second)
-			(*it)->SetSourceBlocked(aIt->second);
+		if (a.Matches(**it))
+			apply(**it, b);
+		if (b.Matches(**it))
+			apply(**it, a);
 	}
 
 	protocols.Unlock();
@@ -1112,30 +1171,34 @@ nlohmann::json CAdminSocket::CmdBlock(const nlohmann::json &cmd)
 
 nlohmann::json CAdminSocket::CmdUnblock(const nlohmann::json &cmd)
 {
-	if (!cmd.contains("a") || !cmd.contains("b"))
+	if (!cmd.contains("a") || !cmd.contains("b") || !cmd["a"].is_string() || !cmd["b"].is_string())
 		return {{"status", "error"}, {"message", "missing 'a' and 'b' fields"}};
 
-	std::string aName = cmd["a"];
-	std::string bName = cmd["b"];
-
-	auto aIt = s_NameToProto.find(aName);
-	auto bIt = s_NameToProto.find(bName);
-	if (aIt == s_NameToProto.end())
+	const std::string aName = cmd["a"];
+	const std::string bName = cmd["b"];
+	SBlockEnd a, b;
+	if (!ParseBlockEnd(aName, a))
 		return {{"status", "error"}, {"message", "unknown protocol: " + aName}};
-	if (bIt == s_NameToProto.end())
+	if (!ParseBlockEnd(bName, b))
 		return {{"status", "error"}, {"message", "unknown protocol: " + bName}};
 
 	auto &protocols = g_Reflector.GetProtocols();
 	protocols.Lock();
 
-	// Bidirectional: unblock both directions
+	// Bidirectional: B as a source on every A, and A as a source on every B; an
+	// MMDVMClient connection named alone (MMDVMClient2) is one connection, not the type
+	auto apply = [](CProtocol &p, const SBlockEnd &other) {
+		if (other.connection)
+			p.ClearMmdvmConnectionBlocked(other.connection);
+		else
+			p.ClearSourceBlocked(other.type);
+	};
 	for (auto it = protocols.begin(); it != protocols.end(); ++it)
 	{
-		auto type = (*it)->GetProtocolType();
-		if (type == aIt->second)
-			(*it)->ClearSourceBlocked(bIt->second);
-		if (type == bIt->second)
-			(*it)->ClearSourceBlocked(aIt->second);
+		if (a.Matches(**it))
+			apply(**it, b);
+		if (b.Matches(**it))
+			apply(**it, a);
 	}
 
 	protocols.Unlock();

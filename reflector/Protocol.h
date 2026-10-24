@@ -86,13 +86,24 @@ public:
 
 	// protocol blocking (bidirectional, thread-safe for runtime changes)
 	bool IsSourceBlocked(EProtocol src) const { std::shared_lock lk(m_BlockMutex); return m_BlockedSources.count(src) > 0; }
-	// a block of one source instance, on top of the type (two MMDVMClient connections)
-	virtual bool IsSourceClientBlocked(const CClient &) const { return false; }
+	// a call from one MMDVMClient connection blocked here by its name (MMDVMClient1 ... 9),
+	// on top of the type; an MMDVMClient adds its rules for other connections
+	virtual bool IsSourceClientBlocked(const CClient &client) const;
 	void SetSourceBlocked(EProtocol src)      { std::unique_lock lk(m_BlockMutex); m_BlockedSources.insert(src); }
 	void ClearSourceBlocked(EProtocol src)    { std::unique_lock lk(m_BlockMutex); m_BlockedSources.erase(src); }
 	std::set<EProtocol> GetBlockedSources() const { std::shared_lock lk(m_BlockMutex); return m_BlockedSources; }
-	void ResetBlocksToDefault()               { std::unique_lock lk(m_BlockMutex); m_BlockedSources = m_ConfigBlockedSources; }
-	void SaveBlockDefaults()                  { std::shared_lock lk(m_BlockMutex); m_ConfigBlockedSources = m_BlockedSources; }
+	// one MMDVMClient connection (1 to 9) as a blocked source
+	bool IsMmdvmConnectionBlocked(unsigned n) const { std::shared_lock lk(m_BlockMutex); return m_BlockedMmdvm.count(n) > 0; }
+	void SetMmdvmConnectionBlocked(unsigned n)      { std::unique_lock lk(m_BlockMutex); m_BlockedMmdvm.insert(n); }
+	void ClearMmdvmConnectionBlocked(unsigned n)    { std::unique_lock lk(m_BlockMutex); m_BlockedMmdvm.erase(n); }
+	std::set<unsigned> GetBlockedMmdvm() const      { std::shared_lock lk(m_BlockMutex); return m_BlockedMmdvm; }
+	void ResetBlocksToDefault()               { std::unique_lock lk(m_BlockMutex); m_BlockedSources = m_ConfigBlockedSources; m_BlockedMmdvm = m_ConfigBlockedMmdvm; }
+	void SaveBlockDefaults()                  { std::shared_lock lk(m_BlockMutex); m_ConfigBlockedSources = m_BlockedSources; m_ConfigBlockedMmdvm = m_BlockedMmdvm; }
+	// the BlockProtocols list under key: protocol names, "MMDVMClient" for every
+	// MMDVMClient connection, "MMDVMClient1" ... "MMDVMClient9" for one of them
+	void ParseBlockProtocols(const std::string &key, const std::string &label);
+	// the MMDVMClient connection this is (1 to 9), 0 for every other protocol
+	virtual unsigned GetMmdvmConnection(void) const { return 0; }
 	EProtocol GetProtocolType(void) const { return m_ProtocolType; }
 
 protected:
@@ -153,6 +164,7 @@ protected:
 	mutable std::shared_mutex m_BlockMutex;
 	std::set<EProtocol> m_BlockedSources;
 	std::set<EProtocol> m_ConfigBlockedSources;  // startup defaults for reset
+	std::set<unsigned> m_BlockedMmdvm, m_ConfigBlockedMmdvm;	// single MMDVMClient connections
 
 	// data
 	uint16_t m_Port;

@@ -215,6 +215,9 @@ bool CProtocols::Init(void)
 		}
 
 	}
+	for (auto &p : m_Protocols)
+		if (p->GetProtocolType() == EProtocol::mmdvmclient)
+			m_Mmdvm.push_back(static_cast<CMMDVMClientProtocol *>(p.get()));
 	m_Mutex.unlock();
 
 	// done
@@ -239,21 +242,13 @@ CMMDVMClientProtocol *CProtocols::FindMmdvmClient(unsigned instance)
 	return nullptr;
 }
 
-std::vector<CMMDVMClientProtocol *> CProtocols::MmdvmClients(void)
-{
-	std::vector<CMMDVMClientProtocol *> v;
-	for (auto &p : m_Protocols)
-		if (p->GetProtocolType() == EProtocol::mmdvmclient)
-			v.push_back(static_cast<CMMDVMClientProtocol *>(p.get()));
-	return v;
-}
-
 void CProtocols::Close(void)
 {
 	// take them out under the lock, but stop them without it: a protocol thread
 	// may still be waiting for this lock, and stopping waits for that thread
 	std::list<std::unique_ptr<CProtocol>> protocols;
 	m_Mutex.lock();
+	m_Mmdvm.clear();
 	protocols.swap(m_Protocols);
 	m_Mutex.unlock();
 

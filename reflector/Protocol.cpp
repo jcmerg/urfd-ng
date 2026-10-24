@@ -20,6 +20,10 @@
 #include "Global.h"
 #include "Protocol.h"
 #include "Clients.h"
+#include "ProtocolNames.h"
+#include "MmdvmClientConfig.h"
+#include <sstream>
+#include <iostream>
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructor
@@ -407,3 +411,43 @@ void CProtocol::Dump(const char *title, const uint8_t *data, int length)
 	std::cout << std::dec << std::setfill(' ');
 }
 #endif
+
+////////////////////////////////////////////////////////////////////////////////////////
+// blocking
+
+void CProtocol::ParseBlockProtocols(const std::string &key, const std::string &label)
+{
+	if (!g_Configure.Contains(key))
+		return;
+	std::istringstream ss(g_Configure.GetString(key));
+	std::string token;
+	while (std::getline(ss, token, ','))
+	{
+		token.erase(0, token.find_first_not_of(" \t"));
+		token.erase(token.find_last_not_of(" \t") + 1);
+		if (token.empty())
+			continue;
+		if (const unsigned n = MmdvmClientConnection(token))
+		{
+			if (n == GetMmdvmConnection())
+				continue;	// itself: it never takes its own calls back anyway
+			SetMmdvmConnectionBlocked(n);
+			std::cout << label << ": blocking " << token << std::endl;
+			continue;
+		}
+		const auto it = ProtocolNames().find(token);
+		if (it == ProtocolNames().end())
+		{
+			std::cerr << label << ": unknown protocol in BlockProtocols: " << token << std::endl;
+			continue;
+		}
+		SetSourceBlocked(it->second);
+		std::cout << label << ": blocking protocol " << token << std::endl;
+	}
+}
+
+bool CProtocol::IsSourceClientBlocked(const CClient &client) const
+{
+	const CProtocol *owner = client.GetOwnerProtocol();
+	return owner && owner->GetMmdvmConnection() && IsMmdvmConnectionBlocked(owner->GetMmdvmConnection());
+}

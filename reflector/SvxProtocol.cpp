@@ -25,7 +25,6 @@
 #include <nlohmann/json.hpp>
 
 #include "SvxProtocol.h"
-#include "ProtocolNames.h"
 #include "SvxClient.h"
 #include "Global.h"
 #include "Utils.h"
@@ -1208,23 +1207,7 @@ bool CSvxProtocol::Initialize(const char *type, const EProtocol ptype,
 	}
 
 	// Parse BlockProtocols
-	if (g_Configure.Contains(g_Keys.svxs.blockprotocols))
-	{
-		const auto &protoMap = ProtocolNames();
-		std::istringstream ss(g_Configure.GetString(g_Keys.svxs.blockprotocols));
-		std::string token;
-		while (std::getline(ss, token, ','))
-		{
-			token.erase(0, token.find_first_not_of(" \t"));
-			token.erase(token.find_last_not_of(" \t") + 1);
-			auto it = protoMap.find(token);
-			if (it != protoMap.end())
-			{
-				m_BlockedSources.insert(it->second);
-				std::cout << "SVXServer: blocking protocol " << token << std::endl;
-			}
-		}
-	}
+	ParseBlockProtocols(g_Keys.svxs.blockprotocols, "SVXServer");
 	SaveBlockDefaults();
 
 	// gain in dB, -40 to +40

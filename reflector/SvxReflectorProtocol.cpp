@@ -22,7 +22,6 @@
 #include <map>
 
 #include "SvxReflectorProtocol.h"
-#include "ProtocolNames.h"
 #include "SvxReflectorClient.h"
 #include "Global.h"
 #include "Utils.h"
@@ -552,25 +551,7 @@ bool CSvxReflectorProtocol::Initialize(const char *type, const EProtocol ptype,
 		std::cout << "SvxReflector: reports its software as '" << m_Software << "'" << std::endl;
 
 	// Parse BlockProtocols (comma-separated, e.g. "MMDVMClient,USRP")
-	if (g_Configure.Contains(g_Keys.svx.blockprotocols))
-	{
-		const auto &protoMap = ProtocolNames();
-		std::istringstream ss(g_Configure.GetString(g_Keys.svx.blockprotocols));
-		std::string token;
-		while (std::getline(ss, token, ','))
-		{
-			token.erase(0, token.find_first_not_of(" \t"));
-			token.erase(token.find_last_not_of(" \t") + 1);
-			auto it = protoMap.find(token);
-			if (it != protoMap.end())
-			{
-				m_BlockedSources.insert(it->second);
-				std::cout << "SvxReflector: blocking protocol " << token << std::endl;
-			}
-			else if (!token.empty())
-				std::cerr << "SvxReflector: unknown protocol in BlockProtocols: " << token << std::endl;
-		}
-	}
+	ParseBlockProtocols(g_Keys.svx.blockprotocols, "SvxReflector");
 
 	// Save config defaults for runtime reset
 	SaveBlockDefaults();
