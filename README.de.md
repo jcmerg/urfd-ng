@@ -82,6 +82,7 @@ RxFreq = 430412500
 TxFreq = 439812500
 # FallbackDmrId = 1234567           # DMR ID for unknown callers (0 or omit = drop)
 # BlockProtocols = SvxReflector,YSF # Block protocols bidirectionally
+# Network = brandmeister.network    # Standard: brandmeister.network bei BM-Mastern, sonst der Host (siehe „Mehrere Verbindungen“)
 #
 # BrandMeister API (optional): sync static TGs, add/remove via API instead of kerchunk
 # Get your API key from BrandMeister SelfCare -> Profile -> Security -> API Keys
@@ -120,7 +121,7 @@ TG262 = D,TS2                       # Deutschland auf Modul D
 TG91 = W,TS1                        # Weltweit auf Modul W
 ```
 
-- **Netz.** Eine Verbindung gehört zum Netz aus ihrem Schlüssel `Network`. Ohne ihn ist jeder BrandMeister-Master (`*.brandmeister.network`) `brandmeister.network`, jeder andere Master ein eigenes Netz (sein Hostname oder seine Adresse). `Network` braucht es für zwei Master eines anderen Netzes oder für einen BrandMeister-Master, der per IP-Adresse eingetragen ist.
+- **Netz.** Jede Verbindung, auch `[MMDVMClient]`, gehört zum Netz aus ihrem Schlüssel `Network`. Ohne ihn ist jeder BrandMeister-Master (`*.brandmeister.network`) `brandmeister.network`, jeder andere Master ein eigenes Netz (sein Hostname oder seine Adresse). `Network` braucht es für zwei Master eines anderen Netzes oder für einen BrandMeister-Master, der per IP-Adresse eingetragen ist.
 - **Brücken.** Ein Ruf geht nie an die Verbindung zurück, von der er kam, und nie an eine andere Verbindung im selben Netz (das Netz hat ihn schon). Zwischen verschiedenen Netzen wird ein Modul, das beide gemappt haben, gebrückt; `BlockProtocols = MMDVMClient3` schaltet das für dieses Paar ab.
 - **Namen.** In allen `BlockProtocols` und bei den Admin-Befehlen `block`/`unblock` heißt `MMDVMClient` alle Verbindungen, `MMDVMClient1` bis `MMDVMClient9` eine davon (`MMDVMClient1` ist `[MMDVMClient]`). Bei mehreren Verbindungen listet der Admin-Status sie unter diesen Namen.
 - **Prüfungen.** `inicheck` lehnt eine TG oder Hotspot-ID ab, die zwei Verbindungen desselben Netzes nutzen; die Admin-Seite lehnt so eine dynamische TG ab.

@@ -82,6 +82,7 @@ RxFreq = 430412500
 TxFreq = 439812500
 # FallbackDmrId = 1234567           # DMR ID for unknown callers (0 or omit = drop)
 # BlockProtocols = SvxReflector,YSF # Block protocols bidirectionally
+# Network = brandmeister.network    # default: brandmeister.network for BM masters, else the host (see "Several connections")
 #
 # BrandMeister API (optional): sync static TGs, add/remove via API instead of kerchunk
 # Get your API key from BrandMeister SelfCare -> Profile -> Security -> API Keys
@@ -120,7 +121,7 @@ TG262 = D,TS2                       # Germany on module D
 TG91 = W,TS1                        # Worldwide on module W
 ```
 
-- **Network.** A connection belongs to the network in its `Network` key. Without it every BrandMeister master (`*.brandmeister.network`) is `brandmeister.network`, any other master is a network of its own (its host name or address). Set `Network` for two masters of another network, or for a BrandMeister master given by its IP address.
+- **Network.** Every connection, `[MMDVMClient]` included, belongs to the network in its `Network` key. Without it every BrandMeister master (`*.brandmeister.network`) is `brandmeister.network`, any other master is a network of its own (its host name or address). Set `Network` for two masters of another network, or for a BrandMeister master given by its IP address.
 - **Bridging.** A call never goes back to the connection it came from, nor to another connection in the same network (the network has it already). Between networks, a module that both map is bridged; `BlockProtocols = MMDVMClient3` switches that off for this pair.
 - **Names.** In every `BlockProtocols` and in the admin `block`/`unblock` commands `MMDVMClient` means every connection, `MMDVMClient1` to `MMDVMClient9` one of them (`MMDVMClient1` is `[MMDVMClient]`). With several connections the admin status lists them by these names.
 - **Checks.** `inicheck` refuses a TG or a hotspot ID used by two connections of one network; the admin page refuses such a dynamic TG.
