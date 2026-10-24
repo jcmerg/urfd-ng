@@ -284,6 +284,8 @@ GTRP has no password. urfd takes a position only from the address of the radio l
 
 The app encrypts with a zero IV and PKCS#7 padding (none for RC4), with one of five ciphers chosen by the option word's type: 1 AES-128-CBC, 2 AES-192-CBC, 3 AES-256-CBC, 4 DES-CBC, 5 3DES-CBC, 6 RC4. The keys are fixed in the app, the same in every copy: an 80 byte table in its protocol library, the DES/RC4 key (8 bytes; 3DES reads 24 bytes from here), then the AES-128 key (key id 1, 16 bytes), the AES-192 key (key id 2, 24 bytes) and the AES-256 key (key id 3, 32 bytes). Without them a server cannot read a single message, since the app has no plain fallback.
 
+A word on that encryption: the same fixed keys in every copy of the app, no key exchange, a zero IV. It keeps the signalling from being readable in a packet dump, and that is about all it does; anyone who has the app has the keys, and the keys themselves would not survive a password policy from the nineties. Think of it as a lock with the key taped to the door.
+
 urfd-ng does not ship the keys. `[HyTalk] KeyFile` (default `hytalk.keys` next to `urfd.ini`) holds them as 80 hex bytes, separated by spaces or commas, `#` starts a comment. Where to find them:
 
 | | |
