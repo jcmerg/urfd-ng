@@ -29,4 +29,11 @@ Golay24128.h
 YSFDefines.h
 SHA256.cpp
 SHA256.h
+RejectLog.cpp
+RejectLog.h
 monitor_html.cpp
+# the templates and build options are part of the repository
+!config/tcd.ini
+!config/tcd.mk
+!config/tcd.service
+!tcd.mk
