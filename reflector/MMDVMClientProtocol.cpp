@@ -120,7 +120,11 @@ bool CMMDVMClientProtocol::Initialize(const char *type, const EProtocol ptype, c
 
 bool CMMDVMClientProtocol::Transcoded(char module) const
 {
-	// the live state: the configured list (reloadable), with Modules = auto only while tcd is connected
+	// an open stream keeps what it was given when it opened, even when tcd comes
+	// or goes meanwhile (with Modules = auto); else the live state
+	auto stream = g_Reflector.GetStream(module);
+	if (stream && stream->IsOpen())
+		return stream->IsTranscoding();
 	return g_Reflector.IsTranscoded(module);
 }
 
