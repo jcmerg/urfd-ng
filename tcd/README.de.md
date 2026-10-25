@@ -64,7 +64,7 @@ tcd baut gegen die urfd-Quellen, die er mit dem Reflektor teilt (`TCPacketDef.h`
 - Linux mit systemd: Debian, Ubuntu oder Raspberry Pi OS; x86_64, arm64 oder armhf
 - DVSI-AMBE-USB-Geräte (siehe [Hardware](#hardware)); sie laufen über den Kernel-Treiber `ftdi_sio`, ein zusätzlicher Treiber ist nicht nötig
 - `libspeexdsp-dev` für die Rauschunterdrückung analoger Eingänge und `libwebsockets-dev` für das Web-Dashboard; `build.sh` installiert beide
-- Geringe Latenz zu den AMBE-Geräten: Mit Sticks läuft tcd direkt auf dem System, nicht in Docker (nur in Software geht es, siehe [tcd in Docker](#tcd-in-docker)). Er kann auf dem Rechner des Reflektors laufen oder auf einem anderen, z.B. einem Raspberry Pi neben der Funktechnik.
+- Geringe Latenz zu den AMBE-Geräten: tcd setzt ihren USB-Latenz-Timer auf 1 ms (nativ selbst, in Docker über eine udev-Regel auf dem Host, siehe [tcd in Docker](#tcd-in-docker)). Er kann auf dem Rechner des Reflektors laufen oder auf einem anderen, z.B. einem Raspberry Pi neben der Funktechnik.
 
 ## Hardware
 
@@ -128,7 +128,7 @@ Dieses Repository enthält kein Codec-Plugin: Software-Umsetzungen von AMBE und 
 
 ## tcd in Docker
 
-Ohne AMBE-Sticks kann tcd in einem Container neben urfd laufen: alles in Software mit einem [Codec-Plugin](#codec-plugins) für D-Star und DMR. Für die DVSI-Sticks taugt Docker nicht: Ihr Timing verlangt, dass tcd nativ läuft (siehe [Voraussetzungen](#voraussetzungen)), deshalb hat das Image keinen Gerätezugriff.
+tcd kann in einem Container neben urfd laufen: in Software mit einem [Codec-Plugin](#codec-plugins) für D-Star und DMR, oder mit AMBE-Sticks, die in den Container gereicht werden (siehe unten). `setup.sh` installiert tcd nativ mit systemd.
 
 ```bash
 cd ~/urfd
@@ -138,7 +138,18 @@ sudo nano /opt/urfd/tcd/tcd.ini
 cd docker && sudo docker compose --profile tcd build && sudo docker compose --profile tcd up -d
 ```
 
-In der `tcd.ini`: `ServerAddress = 127.0.0.1` (der Container nutzt das Netz des Hosts), `Modules` so viele wie gewünscht, `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so`, keine `DeviceSerial`, und ein `MonitorHttpPort`, der auf dem Host frei ist. In der `urfd.ini`: `[Transcoder] Modules = auto`, dann entscheidet allein die Liste von tcd. Das Image baut jedes `tcd/plugins/<name>/` mit `Makefile` (Git ignoriert das Verzeichnis); `$URFD_DATA/tcd/` (Standard `/opt/urfd/tcd`) enthält die `tcd.ini`, beschreibbar für „Speichern“ im Monitor. Aktualisieren: `git pull`, dann `docker/build.sh`; es baut und startet auch den tcd-Container neu, wenn `$URFD_DATA/tcd/tcd.ini` existiert (seit 4.26.0). Ohne `--profile tcd` bleibt `docker compose` bei urfd allein.
+In der `tcd.ini`: `ServerAddress = 127.0.0.1` (der Container nutzt das Netz des Hosts), `Modules` so viele wie gewünscht, in Software `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so` und keine `DeviceSerial`, und ein `MonitorHttpPort`, der auf dem Host frei ist. In der `urfd.ini`: `[Transcoder] Modules = auto`, dann entscheidet allein die Liste von tcd. Das Image baut jedes `tcd/plugins/<name>/` mit `Makefile` (Git ignoriert das Verzeichnis); `$URFD_DATA/tcd/` (Standard `/opt/urfd/tcd`) enthält die `tcd.ini`, beschreibbar für „Speichern“ im Monitor. In der `tcd.ini` mit Sticks: `DeviceSerial`, kein `CodecPlugin` nötig.
+
+Mit AMBE-Sticks bekommt der Container die Geräte, und der Host setzt den USB-Latenz-Timer: tcd setzt ihn über `/sys` auf 1 ms, was ein nicht-privilegierter Container nur lesen darf; ohne das bleibt er beim `ftdi_sio`-Standard von 16 ms (tcd zeigt den Wert beim Start im Log; es geht trotzdem, aber ein Frame braucht länger zurück, und mehrere Streams werden knapp). Eine udev-Regel auf dem Host setzt ihn beim Einstecken eines Sticks:
+
+```bash
+echo 'ACTION=="add", SUBSYSTEM=="usb-serial", DRIVER=="ftdi_sio", ATTR{latency_timer}="1"' | sudo tee /etc/udev/rules.d/99-ftdi-latency.rules
+sudo udevadm control --reload && sudo udevadm trigger
+```
+
+In der `docker-compose.yml` beim Dienst `tcd` die Zeilen `devices` und `/dev/serial/by-id` einkommentieren und dort die Gerätedateien der Sticks eintragen (`ls -l /dev/serial/by-id`); `DeviceSerial` in der `tcd.ini` wie bei einer nativen Installation. Bekommt ein Stick nach dem Neueinstecken eine andere Gerätedatei, muss die Zeile angepasst oder der Container mit der neuen neu gestartet werden. tcd beendet sich, wenn ihm ein Gerät verloren geht, und der Container startet neu.
+
+Aktualisieren: `git pull`, dann `docker/build.sh`; es baut und startet auch den tcd-Container neu, wenn `$URFD_DATA/tcd/tcd.ini` existiert (seit 4.26.0). Ohne `--profile tcd` bleibt `docker compose` bei urfd allein.
 
 Der nginx im urfd-Image reicht `/tcd/` an den Monitor weiter (seit 4.26.0), über den TLS-Proxy davor ist er also als `https://<reflektor>/tcd/` erreichbar; der Proxy reicht `/tcd/` mit denselben Upgrade-Headern wie `/ws`, `X-Real-IP` und `X-Forwarded-Proto` weiter. Der Port ist der `MonitorHttpPort` aus `$URFD_DATA/tcd/tcd.ini`: `docker/build.sh` liest ihn und gibt ihn dem urfd-Container als `TCD_MONITOR_PORT` mit (Standard 8080; bei `docker compose` von Hand in der Umgebung setzen). `MonitorBindAddress = 127.0.0.1` reicht dann; `MonitorPassword` setzen. Über HTTPS ist das Session-Cookie `Secure`.
 
