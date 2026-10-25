@@ -23,6 +23,7 @@
 #include "P25Protocol.h"
 
 #include "Global.h"
+#include "RejectLog.h"
 
 const uint8_t REC62[] = {0x62U, 0x02U, 0x02U, 0x0CU, 0x0BU, 0x12U, 0x64U, 0x00U, 0x00U, 0x80U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
 const uint8_t REC63[] = {0x63U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x02U};
@@ -155,9 +156,13 @@ void CP25Protocol::Task(void)
 		else
 		{
 #ifdef DEBUG
-			std::string title("Unknown P25 packet from ");
-			title += Ip.GetAddress();
-			Buffer.Dump(title);
+			// scanners send anything (SIP, DNS, ...): the first of an address each hour
+			if (RejectLog("P25: unknown packets", Ip.GetAddress()))
+			{
+				std::string title("Unknown P25 packet from ");
+				title += Ip.GetAddress();
+				Buffer.Dump(title);
+			}
 #endif
 		}
 	}

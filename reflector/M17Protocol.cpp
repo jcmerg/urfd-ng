@@ -24,6 +24,7 @@
 #include "M17Protocol.h"
 #include "M17Packet.h"
 #include "Global.h"
+#include "RejectLog.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // operation
@@ -230,9 +231,13 @@ void CM17Protocol::Task(void)
 		else
 		{
 			// invalid packet
-			std::string title("Unknown M17 packet from ");
-			title += Ip.GetAddress();
-			Buffer.Dump(title);
+			// scanners send anything (SIP, DNS, ...): the first of an address each hour
+			if (RejectLog("M17: unknown packets", Ip.GetAddress()))
+			{
+				std::string title("Unknown M17 packet from ");
+				title += Ip.GetAddress();
+				Buffer.Dump(title);
+			}
 		}
 	}
 

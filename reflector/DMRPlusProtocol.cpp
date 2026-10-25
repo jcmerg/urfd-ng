@@ -26,6 +26,7 @@
 #include "RS129.h"
 #include "Golay2087.h"
 #include "QR1676.h"
+#include "RejectLog.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // constants
@@ -150,9 +151,13 @@ void CDmrplusProtocol::Task(void)
 		}
 		else
 		{
-			std::string title("Unknown DMR+ packet from ");
-			title += Ip.GetAddress();
-			Buffer.Dump(title);
+			// scanners send anything (SIP, DNS, ...): the first of an address each hour
+			if (RejectLog("DMR+: unknown packets", Ip.GetAddress()))
+			{
+				std::string title("Unknown DMR+ packet from ");
+				title += Ip.GetAddress();
+				Buffer.Dump(title);
+			}
 		}
 	}
 
