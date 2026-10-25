@@ -21,6 +21,7 @@
 #include "XLXPeer.h"
 #include "XLXPeerProtocol.h"
 #include "Global.h"
+#include "RejectLog.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // operation
@@ -163,9 +164,13 @@ void CXlxPeerProtocol::Task(void)
 		}
 		else
 		{
-			std::string title("Unknown XLX packet from ");
-			title += Ip.GetAddress();
-			Buffer.Dump(title);
+			// scanners send anything (SIP, DNS, ...): the first of an address each hour
+			if (RejectLog("XLX: unknown packets", Ip.GetAddress()))
+			{
+				std::string title("Unknown XLX packet from ");
+				title += Ip.GetAddress();
+				Buffer.Dump(title);
+			}
 		}
 	}
 

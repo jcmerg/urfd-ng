@@ -22,6 +22,7 @@
 #include "DCSClient.h"
 #include "DCSPeer.h"
 #include "DCSProtocol.h"
+#include "RejectLog.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // operation
@@ -193,9 +194,13 @@ void CDcsProtocol::Task(void)
 		else
 		{
 #ifdef DEBUG
-			std::string title("Unknown DCS packet from ");
-			title += Ip.GetAddress();
-			Buffer.Dump(title);
+			// scanners send anything (SIP, DNS, ...): the first of an address each hour
+			if (RejectLog("DCS: unknown packets", Ip.GetAddress()))
+			{
+				std::string title("Unknown DCS packet from ");
+				title += Ip.GetAddress();
+				Buffer.Dump(title);
+			}
 #endif
 		}
 	}

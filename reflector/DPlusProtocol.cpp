@@ -22,6 +22,7 @@
 #include "Global.h"
 #include "DPlusClient.h"
 #include "DPlusProtocol.h"
+#include "RejectLog.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // operation
@@ -140,9 +141,13 @@ void CDplusProtocol::Task(void)
 		}
 		else
 		{
-			std::string title("Unknown DPlus packet from ");
-			title += Ip.GetAddress();
-			Buffer.Dump(title);
+			// scanners send anything (SIP, DNS, ...): the first of an address each hour
+			if (RejectLog("DPlus: unknown packets", Ip.GetAddress()))
+			{
+				std::string title("Unknown DPlus packet from ");
+				title += Ip.GetAddress();
+				Buffer.Dump(title);
+			}
 		}
 	}
 

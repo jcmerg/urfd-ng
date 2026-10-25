@@ -22,6 +22,7 @@
 #include "Global.h"
 #include "DExtraClient.h"
 #include "DExtraProtocol.h"
+#include "RejectLog.h"
 #
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -165,9 +166,13 @@ void CDextraProtocol::Task(void)
 		}
 		else
 		{
-			std::string title("Unknown DExtra packet from ");
-			title += Ip.GetAddress();
-			Buffer.Dump(title);
+			// scanners send anything (SIP, DNS, ...): the first of an address each hour
+			if (RejectLog("DExtra: unknown packets", Ip.GetAddress()))
+			{
+				std::string title("Unknown DExtra packet from ");
+				title += Ip.GetAddress();
+				Buffer.Dump(title);
+			}
 		}
 	}
 

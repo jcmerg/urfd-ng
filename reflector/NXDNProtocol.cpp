@@ -24,6 +24,7 @@
 #include "YSFDefines.h"
 #include "Golay24128.h"
 #include "Global.h"
+#include "RejectLog.h"
 
 const uint8_t NXDN_LICH_RFCT_RDCH			= 2U;
 const uint8_t NXDN_LICH_USC_SACCH_NS		= 0U;
@@ -253,9 +254,13 @@ void CNXDNProtocol::Task(void)
 		else
 		{
 #ifdef DEBUG
-			std::string title("Unknown NXDN packet from ");
-			title += Ip.GetAddress();
-			Buffer.Dump(title);
+			// scanners send anything (SIP, DNS, ...): the first of an address each hour
+			if (RejectLog("NXDN: unknown packets", Ip.GetAddress()))
+			{
+				std::string title("Unknown NXDN packet from ");
+				title += Ip.GetAddress();
+				Buffer.Dump(title);
+			}
 #endif
 		}
 	}
