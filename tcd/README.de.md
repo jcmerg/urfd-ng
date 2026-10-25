@@ -168,7 +168,7 @@ tcd öffnet die Geräte über den Kernel-Treiber `ftdi_sio` und setzt ihren USB-
 | `ServerAddress` | `127.0.0.1` | IP-Adresse oder Hostname des urfd-Reflektors; ein Hostname wird bei jedem Neuverbinden neu aufgelöst (seit 0.7.4) |
 | `Port` | `10100` | `[Transcoder] Port` des Reflektors |
 | `Password` | — | `[Transcoder] Password` des Reflektors, nötig, wenn er eins hat (seit 0.8.0) |
-| `Modules` | `FS` | transcodierte Module, dieselben Buchstaben wie `[Transcoder] Modules` im Reflektor |
+| `Modules` | `FS` | transcodierte Module; mit `[Transcoder] Modules = auto` im Reflektor (urfd 4.25.0) beliebige seiner Module, dann entscheidet allein diese Liste; sonst dieselben Buchstaben wie dort |
 | `DeviceSerial` | — | zu verwendendes AMBE-Gerät, je eine Zeile (siehe [oben](#ambe-geräte-auswählen)) |
 
 ### Verstärkung
