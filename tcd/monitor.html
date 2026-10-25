@@ -88,6 +88,21 @@ section > header { display: flex; flex-wrap: wrap; justify-content: space-betwee
                    margin-bottom: 0.75rem; }
 .hint { font-size: var(--fs-xs); color: var(--graphite); margin: 0; }
 
+/* compact view: a key per module, full cards only for the active and the pinned ones */
+.view { display: inline-flex; border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+.view button { font: inherit; font-size: var(--fs-xs); color: var(--graphite); background: none; border: 0; padding: 0.15rem 0.6rem; cursor: pointer; }
+.view button[aria-pressed="true"] { color: var(--panel); background: var(--ink); }
+.keys { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.25rem; }
+.key { font: inherit; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 0.1rem 0.55rem; min-width: 7.5rem;
+       padding: 0.4rem 0.6rem; border: 0; border-radius: 8px; background: var(--bezel); color: var(--lcd-dim); cursor: pointer; text-align: left; }
+.key b { grid-row: 1 / 3; font-size: 1.9rem; font-weight: 700; font-stretch: 62%; line-height: 1; }
+.key span { font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.key .kbar { height: 4px; border-radius: 2px; background: #00000030; overflow: hidden; }
+.key .kbar i { display: block; height: 100%; width: 0; background: currentColor; }
+.key.on { background: var(--lcd); color: var(--lcd-ink); }
+.key.pinned { box-shadow: inset 0 0 0 2px var(--lcd); }
+.key.on.pinned { box-shadow: inset 0 0 0 2px var(--lcd-ink); }
+
 /* module LCDs */
 .mods { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); gap: 1.25rem; }
 .mod { display: grid; grid-template-rows: 1fr auto; gap: 0.5rem; min-width: 0; }
@@ -206,8 +221,11 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
     <section aria-labelledby="h-mods">
       <header>
         <h2 id="h-mods">Modules</h2>
-        <p class="hint">Levels in dBFS before and after the AGC; the dashed line is the AGC target</p>
+        <p class="hint">Levels in dBFS before and after the AGC; the dashed line is the AGC target
+          <span class="view" role="group" aria-label="View"><button type="button" id="view-cards">Cards</button><button type="button" id="view-compact">Compact</button></span></p>
       </header>
+      <div class="keys" id="keys" hidden></div>
+      <p class="empty" id="mods-quiet" hidden>No module on the air. Click a module to keep its card open.</p>
       <div class="mods" id="modules"><p class="empty">Waiting for the first report from tcd</p></div>
     </section>
 
@@ -383,18 +401,58 @@ function makeCard(mod) {
   return { el: el, p: parts };
 }
 
+// the view: Cards (every module as a card) or Compact (a key per module, cards for
+// the active and the pinned ones); without a choice Compact from five modules on
+var view = null, pinned = {};
+try { view = localStorage.getItem('tcd-view'); pinned = JSON.parse(localStorage.getItem('tcd-pinned') || '{}') || {}; } catch (e) {}
+function compactView() { return view ? view === 'compact' : Object.keys(cards).length > 4; }
+function setView(v) {
+  view = v;
+  try { localStorage.setItem('tcd-view', v); } catch (e) {}
+  render();
+}
+$('view-cards').addEventListener('click', function () { setView('cards'); });
+$('view-compact').addEventListener('click', function () { setView('compact'); });
+var keys = {};
+function makeKey(mod) {
+  var k = document.createElement('button');
+  k.type = 'button';
+  k.className = 'key';
+  k.innerHTML = '<b>' + esc(mod) + '</b><span>idle</span><span class="kbar"><i></i></span>';
+  k.addEventListener('click', function () {
+    if (pinned[mod]) delete pinned[mod]; else pinned[mod] = 1;
+    try { localStorage.setItem('tcd-pinned', JSON.stringify(pinned)); } catch (e) {}
+    render();
+  });
+  return { el: k, label: k.querySelector('span'), bar: k.querySelector('.kbar i') };
+}
+
 function render() {
   if (!data) return;
   var cfg = data.config, mods = Object.keys(data.modules).sort();
   var box = $('modules');
   if (mods.join() !== Object.keys(cards).sort().join()) {
-    box.innerHTML = ''; cards = {};
-    mods.forEach(function (m) { cards[m] = makeCard(m); box.appendChild(cards[m].el); });
-    if (!mods.length) box.innerHTML = '<p class="empty">tcd reports no transcoded modules. Check TranscodedModules in urfd.ini.</p>';
+    box.innerHTML = ''; cards = {}; keys = {}; $('keys').innerHTML = '';
+    mods.forEach(function (m) {
+      cards[m] = makeCard(m); box.appendChild(cards[m].el);
+      keys[m] = makeKey(m); $('keys').appendChild(keys[m].el);
+    });
+    if (!mods.length) box.innerHTML = '<p class="empty">tcd reports no transcoded modules. Check Modules in tcd.ini and [Transcoder] in urfd.ini.</p>';
   }
+  var compact = compactView(), shown = 0;
+  $('keys').hidden = !compact || !mods.length;
+  $('view-cards').setAttribute('aria-pressed', String(!compact));
+  $('view-compact').setAttribute('aria-pressed', String(compact));
   mods.forEach(function (mod) {
-    var m = data.modules[mod], p = cards[mod].p;
+    var m = data.modules[mod], p = cards[mod].p, k = keys[mod];
     var active = m.codec_in !== 'none' && m.idle < 2;
+    k.el.classList.toggle('on', active);
+    k.el.classList.toggle('pinned', !!pinned[mod]);
+    k.el.title = 'Module ' + mod + (pinned[mod] ? ': card kept open, click to release' : ': click to keep its card open');
+    k.label.textContent = active ? m.codec_in : 'idle';
+    k.bar.style.width = (active ? pos(m.rms_out) : 0) + '%';
+    cards[mod].el.hidden = compact && !active && !pinned[mod];
+    if (!cards[mod].el.hidden) shown++;
     p.lcd.classList.toggle('idle', !active);
     if (active) {
       p.ann.hidden = false;
@@ -430,6 +488,7 @@ function render() {
       : '<span>No signal path while idle</span>';
     p.flow.innerHTML = flow + '<span class="pkts">' + m.pkts_in + ' in, ' + m.pkts_out + ' out</span>';
   });
+  $('mods-quiet').hidden = !compact || shown > 0 || !mods.length;
 
   // vocoders: DVSI devices and the codecs of codec plugins
   var rows = '';
