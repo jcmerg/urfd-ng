@@ -87,15 +87,27 @@ static void auth_digest(const std::string &password, const uint8_t *nonce, char 
 	hmac_sha256(password, msg, sizeof(msg), out);
 }
 
+void CTCSocket::initLocks(void)
+{
+	m_Locks.clear();
+	for (size_t i = 0; i < m_Pfd.size(); i++)
+		m_Locks.push_back(std::make_unique<std::recursive_mutex>());
+}
+
+void CTCSocket::closePos(size_t pos)
+{
+	auto lock = lockPos(pos);
+	if (m_Pfd[pos].fd < 0)
+		return;
+	shutdown(m_Pfd[pos].fd, SHUT_RDWR); // may fail if already disconnected, that's OK
+	close(m_Pfd[pos].fd);
+	m_Pfd[pos].fd = -1;
+}
+
 void CTCSocket::Close()
 {
-	for (auto &item : m_Pfd)
-	{
-		if (item.fd >= 0)
-		{
-			Close(item.fd);
-		}
-	}
+	for (size_t i = 0; i < m_Pfd.size(); i++)
+		closePos(i);
 	// the entries stay, each now -1: codec threads still running at shutdown look
 	// them up by module and must find a closed socket, not a vector emptied under them
 }
@@ -108,13 +120,13 @@ void CTCSocket::Close(char mod)
 		std::cerr << "Could not find module '" << mod << "'" << std::endl;
 		return;
 	}
+	auto lock = lockPos(pos);
 	if (m_Pfd[pos].fd < 0)
 	{
 		std::cerr << "Close(" << mod << ") is already closed" << std::endl;
 		return;
 	}
-	Close(m_Pfd[pos].fd);
-	m_Pfd[pos].fd = -1;
+	closePos(pos);
 }
 
 void CTCSocket::Close(int fd)
@@ -122,13 +134,13 @@ void CTCSocket::Close(int fd)
 	if (fd < 0)
 		return;
 
-	for (auto &p : m_Pfd)
+	// one module's lock at a time: a caller holding another one must use closePos
+	for (size_t i = 0; i < m_Pfd.size(); i++)
 	{
-		if (fd == p.fd)
+		auto lock = lockPos(i);
+		if (fd == m_Pfd[i].fd)
 		{
-			shutdown(p.fd, SHUT_RDWR); // may fail if already disconnected, that's OK
-			close(p.fd);
-			p.fd = -1;
+			closePos(i);
 			return;
 		}
 	}
@@ -137,7 +149,10 @@ void CTCSocket::Close(int fd)
 bool CTCSocket::IsModuleConnected(char module)
 {
 	auto pos = m_Modules.find(module);
-	if (std::string::npos == pos || m_Pfd[pos].fd < 0)
+	if (std::string::npos == pos)
+		return false;
+	auto lock = lockPos(pos);
+	if (m_Pfd[pos].fd < 0)
 		return false;
 
 	// Quick non-blocking poll to detect dead sockets (POLLHUP/POLLERR from keepalive)
@@ -146,7 +161,7 @@ bool CTCSocket::IsModuleConnected(char module)
 	if (rv > 0 && (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)))
 	{
 		std::cerr << "Transcoder module '" << module << "' connection lost" << std::endl;
-		Close(m_Pfd[pos].fd);
+		closePos(pos);
 		return false;
 	}
 	return true;
@@ -157,6 +172,7 @@ int CTCSocket::GetFD(char module) const
 	auto pos = m_Modules.find(module);
 	if (std::string::npos == pos)
 		return -1;
+	auto lock = lockPos(pos);
 	return m_Pfd[pos].fd;
 }
 
@@ -179,6 +195,7 @@ bool CTCServer::AnyAreClosed()
 	bool any = false;
 	for (unsigned i = 0; i < m_Pfd.size(); i++)
 	{
+		auto lock = lockPos(i);
 		if (m_Pfd[i].fd < 0)
 		{
 			any = true;
@@ -198,7 +215,7 @@ bool CTCServer::AnyAreClosed()
 		if (rv > 0 && (pfd.revents & gone))
 		{
 			std::cerr << "Transcoder module '" << m_Modules[i] << "' connection " << ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) ? "lost" : "closed by the transcoder") << " (maintenance probe)" << std::endl;
-			Close(m_Pfd[i].fd);
+			closePos(i);
 			any = true;
 		}
 	}
@@ -220,6 +237,7 @@ bool CTCSocket::Send(const STCPacket *packet)
 			return true;
 		}
 	}
+	auto lock = lockPos(pos);
 	unsigned count = 0;
 	auto data = (const unsigned char *)packet;
 	do {
@@ -234,7 +252,7 @@ bool CTCSocket::Send(const STCPacket *packet)
 			{
 				perror("CTCSocket::Send");
 			}
-			Close(packet->module);
+			closePos(pos);
 			return true;
 		}
 		count += n;
@@ -271,6 +289,8 @@ bool CTCServer::Receive(char module, STCPacket *packet, int ms)
 		return rv;
 	}
 
+	// held over the poll: the codec threads poll with 0 ms
+	auto lock = lockPos(pos);
 	auto pfds = &m_Pfd[pos];
 	if (pfds->fd < 0)
 	{
@@ -281,7 +301,7 @@ bool CTCServer::Receive(char module, STCPacket *packet, int ms)
 	if (n < 0)
 	{
 		perror("Recieve poll");
-		Close(pfds->fd);
+		closePos(pos);
 		return rv;
 	}
 
@@ -301,7 +321,7 @@ bool CTCServer::Receive(char module, STCPacket *packet, int ms)
 			std::cerr << "POLLERR received on module '" << module << "', closing socket" << std::endl;
 		if (pfds->revents & POLLHUP)
 			std::cerr << "POLLHUP received on module '" << module << "', closing socket" << std::endl;
-		Close(pfds->fd);
+		closePos(pos);
 	}
 	if (pfds->revents & POLLNVAL)
 	{
@@ -312,7 +332,7 @@ bool CTCServer::Receive(char module, STCPacket *packet, int ms)
 	}
 
 	if (rv)
-		Close(pfds->fd);
+		closePos(pos);
 
 	// only an error or hangup, nothing read: there is no packet
 	if (!(pfds->revents & POLLIN))
@@ -327,13 +347,15 @@ bool CTCServer::Receive(char module, STCPacket *packet, int ms)
 bool CTCServer::ReceiveNoPoll(char module, STCPacket *packet)
 {
 	const auto pos = m_Modules.find(module);
-	if (pos == std::string::npos || m_Pfd[pos].fd < 0)
+	if (pos == std::string::npos)
+		return false;
+	auto lock = lockPos(pos);
+	if (m_Pfd[pos].fd < 0)
 		return false;
 
-	int fd = m_Pfd[pos].fd;
-	if (receive(fd, packet))
+	if (receive(m_Pfd[pos].fd, packet))
 	{
-		Close(fd);
+		closePos(pos);
 		return false;
 	}
 	if (packet->codec_in == ECodecType::ping)
@@ -355,6 +377,7 @@ bool CTCServer::Open(const std::string &address, const std::string &modules, uin
 		pf.revents = 0;
 	}
 	m_Standby.assign(m_Modules.size(), false);
+	initLocks();
 
 	// Create persistent listen socket
 	m_ListenFd = socket(m_Ip.GetFamily(), SOCK_STREAM, 0);
@@ -575,6 +598,7 @@ bool CTCServer::advance(SPending &p)
 void CTCServer::establish(SPending &p)
 {
 	const auto pos = m_Modules.find(p.module);
+	auto lock = lockPos(pos);
 
 	if (p.standby)
 	{
@@ -636,6 +660,7 @@ bool CTCClient::Open(const std::string &address, const std::string &modules, uin
 		pf.events = POLLIN;
 	}
 	m_StandbyState.assign(m_Modules.size(), 0);
+	initLocks();
 
 	std::cout << "Connecting to the TCP server..." << std::endl;
 
@@ -787,7 +812,10 @@ bool CTCClient::Connect(char module, bool blocking)
 
 	{ std::ostringstream s; s << "File descriptor " << fd << " on " << ip << " opened for module '" << module << "'"; std::cout << s.str() << std::endl; }
 
-	m_Pfd[pos].fd = fd;
+	{
+		auto lock = lockPos(pos);
+		m_Pfd[pos].fd = fd;
+	}
 
 	return false;
 }

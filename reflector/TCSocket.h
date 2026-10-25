@@ -53,7 +53,15 @@ public:
 
 protected:
 	bool receive(int fd, STCPacket *packet);
+	// one lock per module, for its m_Pfd entry and the socket behind it: the codec
+	// threads send and receive on it while the maintenance, admin and reload
+	// threads probe, replace or close it. Created by Open, recursive as Send and
+	// Receive close on an error
+	void initLocks(void);
+	std::unique_lock<std::recursive_mutex> lockPos(size_t pos) const { return std::unique_lock<std::recursive_mutex>(*m_Locks[pos]); }
+	void closePos(size_t pos);
 	std::vector<struct pollfd> m_Pfd;
+	std::vector<std::unique_ptr<std::recursive_mutex>> m_Locks;
 	std::string m_Modules;
 	std::string m_Password;
 };
