@@ -485,6 +485,8 @@ bool CConfigure::ReadData(const std::string &path)
 					else
 						badParam(key);
 				}
+				else if (3 == key.size() && 0 == key.compare(0, 2, "TG") && isupper(key[2]))
+					data[ModuleTGKey(key[2])] = getUnsigned(value, key, 1, 16777215, 0);	// the module's talkgroup
 				else
 					badParam(key);
 				break;
@@ -755,6 +757,8 @@ bool CConfigure::ReadData(const std::string &path)
 					data[ck.bmapikey] = value;
 				else if (0 == key.compare("Network"))
 					data[ck.network] = value;
+				else if (0 == key.compare("TS1") || 0 == key.compare("TS2"))
+					data[MmdvmClientPrefix(cliInstance) + key] = value;	// the modules' talkgroups on this timeslot, resolved below
 				else if (0 == key.compare(0, 2, "TG"))
 				{
 					// TG<number> = <Module>[,TS<1|2>]
@@ -1091,6 +1095,28 @@ bool CConfigure::ReadData(const std::string &path)
 	if (isDefined(ErrorLevel::fatal, JMODULES, JMODULES, g_Keys.modules.modules, rval))
 	{
 		const auto mods(data[g_Keys.modules.modules].get<std::string>());
+
+		// the modules' talkgroups ([Modules] TG<M>): of a configured module, each number once
+		std::map<unsigned, char> tgOwner;
+		for (char m = 'A'; m <= 'Z'; m++)
+		{
+			if (!data.contains(ModuleTGKey(m)))
+				continue;
+			if (std::string::npos == mods.find(m))
+			{
+				std::cout << "WARNING: [" << JMODULES << "] TG" << m << " is for an unconfigured module. Deleting..." << std::endl;
+				data.erase(ModuleTGKey(m));
+				continue;
+			}
+			const unsigned tg = data[ModuleTGKey(m)].get<unsigned>();
+			if (tgOwner.count(tg))
+			{
+				std::cerr << "ERROR: [" << JMODULES << "] TG" << m << " = " << tg << " is the talkgroup of module " << tgOwner[tg] << " already" << std::endl;
+				rval = true;
+			}
+			else
+				tgOwner[tg] = m;
+		}
 
 		// finally, check the module descriptions
 		for (unsigned i=0; i<26; i++)
@@ -1447,6 +1473,41 @@ bool CConfigure::ReadData(const std::string &path)
 			data[key] = def;
 	}
 
+	// TS1 / TS2 = <modules> in an MMDVMClient section: each module's talkgroup
+	// ([Modules] TG<M>) on that timeslot, as if written TG<number> = <module>,TS<n>
+	for (unsigned n = 1; n <= MMDVMCLI_MAX_INSTANCES; n++)
+	{
+		for (const char *ts : { "TS1", "TS2" })
+		{
+			const std::string key = MmdvmClientPrefix(n) + ts;
+			if (!data.contains(key))
+				continue;
+			const std::string list = data[key].get<std::string>();
+			data.erase(key);
+			const std::string name = data.contains(MmdvmClientNameKey(n)) ? data[MmdvmClientNameKey(n)].get<std::string>() : MmdvmClientDefaultName(n);
+			for (char m : list)
+			{
+				if (m == ',' || m == ' ' || m == '\t')
+					continue;
+				m = char(std::toupper((unsigned char)m));
+				if (!data.contains(ModuleTGKey(m)))
+				{
+					std::cerr << "ERROR: [" << name << "] " << ts << " = " << list << ": module " << m << " has no talkgroup, give it TG" << m << " = <number> in [" << JMODULES << "]" << std::endl;
+					rval = true;
+					continue;
+				}
+				const std::string tgKey = MmdvmClientPrefix(n) + "TG" + std::to_string(data[ModuleTGKey(m)].get<unsigned>());
+				if (data.contains(tgKey))
+				{
+					std::cerr << "ERROR: [" << name << "] module " << m << "'s talkgroup is mapped twice in this section" << std::endl;
+					rval = true;
+					continue;
+				}
+				data[tgKey] = std::string(1, m) + "," + ts;
+			}
+		}
+	}
+
 	// named MMDVMClient connections: what they leave out comes from [MMDVMClient],
 	// a DmrId of one or two digits (or a name of digits without a DmrId) is a
 	// suffix to [MMDVMClient]'s, and [MMDVMClient] without TGs of its own only
@@ -1458,8 +1519,12 @@ bool CConfigure::ReadData(const std::string &path)
 		{
 			const auto ck = MmdvmClientKeys(n);
 			const std::string name = data[MmdvmClientNameKey(n)].get<std::string>();
+			// the network with the master: a connection to the same master is in its network
+			if (!data.contains(ck.address) && !data.contains(ck.network) && data.contains(base.network))
+				data[ck.network] = data[base.network];
 			for (const auto &[own, shared] : { std::pair<std::string, std::string>{ ck.address, base.address }, { ck.port, base.port },
-					{ ck.password, base.password }, { ck.callsign, base.callsign } })
+					{ ck.password, base.password }, { ck.callsign, base.callsign }, { ck.fallbackdmrid, base.fallbackdmrid },
+					{ ck.software, base.software }, { ck.firmware, base.firmware } })
 				if (!data.contains(own) && data.contains(shared))
 					data[own] = data[shared];
 			const std::string suffixKey = MmdvmClientPrefix(n) + "DmrIdSuffix";

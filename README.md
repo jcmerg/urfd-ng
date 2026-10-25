@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both. Originally developed for the URF363 reflector.
 
-**urfd 4.27.0-dht** | tcd 0.11.0 | Dashboard v2.14.0
+**urfd 4.28.0-dht** | tcd 0.11.0 | Dashboard v2.14.0
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -133,7 +133,21 @@ DmrId = 123456790
 TG31665 = T,TS2
 ```
 
-**Named connections** (4.27.0): `[MMDVMClient.<name>]`, the name of letters, digits, `-` and `_`. A named connection takes every key it leaves out from `[MMDVMClient]` (master, port, password, callsign, location, ...), so its section holds what is its own: its hotspot ID and its TGs. Its `DmrId` of one or two digits is a suffix to the `DmrId` of `[MMDVMClient]`, a longer one the whole ID; without a `DmrId` a name of digits is the suffix (`[MMDVMClient.50]` is hotspot `<DmrId>50`). `[MMDVMClient]` with TGs of its own is a connection too, without them it only gives the shared settings. The name shows in the log, the admin page (TG table, reconnect buttons, protocol controls), `BlockProtocols` (`BlockProtocols = MMDVMClient.TGIF`) and the admin commands (`"client": "MMDVMClient.TGIF"`). The numbered `[MMDVMClient2]` to `[MMDVMClient9]` keep working, with all their keys; a file uses named or numbered sections, not both. Adding, removing or reordering connections needs a restart.
+**Module talkgroups** (4.28.0): `[Modules]` can give each module its talkgroup once, `TG<M> = <number>` (each number on one module). A connection then maps it with `TS1 = <modules>` and `TS2 = <modules>` instead of the TG number: `TS1 = R` is `TG2625 = R,TS1` with `TGR = 2625`. The TG lines keep working next to it (e.g. a second, RX only TG on a module). Plugins can take the talkgroups too (`CConfigure::GetModuleTG`).
+
+```ini
+[Modules]
+Modules = ADFR
+TGD = 262
+TGF = 26363
+TGR = 2625
+
+[MMDVMClient.50]
+TS1 = F
+TS2 = D,R                           # several modules on one timeslot
+```
+
+**Named connections** (4.27.0): `[MMDVMClient.<name>]`, the name of letters, digits, `-` and `_`. A named connection takes what it leaves out from `[MMDVMClient]`: master, port, password, callsign, `FallbackDmrId`, `Software`, `Firmware`, the location keys, `Network` with the master, and in that network the `BrandMeisterApiKey`. So its section holds what is its own: its hotspot ID and its TGs (`LocalPort`, `BlockProtocols` and `Enable` stay per connection). Its `DmrId` of one or two digits is a suffix to the `DmrId` of `[MMDVMClient]`, a longer one the whole ID; without a `DmrId` a name of digits is the suffix (`[MMDVMClient.50]` is hotspot `<DmrId>50`). `[MMDVMClient]` with TGs of its own is a connection too, without them it only gives the shared settings. The name shows in the log, the admin page (TG table, reconnect buttons, protocol controls), `BlockProtocols` (`BlockProtocols = MMDVMClient.TGIF`) and the admin commands (`"client": "MMDVMClient.TGIF"`). The numbered `[MMDVMClient2]` to `[MMDVMClient9]` keep working, with all their keys; a file uses named or numbered sections, not both. Adding, removing or reordering connections needs a restart.
 
 - **Network.** Every connection, `[MMDVMClient]` included, belongs to the network in its `Network` key. Without it every BrandMeister master (`*.brandmeister.network`) is `brandmeister.network`, any other master is a network of its own (its host name or address). Set `Network` for two masters of another network, or for a BrandMeister master given by its IP address.
 - **Bridging.** A call never goes back to the connection it came from, nor to another connection in the same network (the network has it already). Between networks, a module that both map is bridged; `BlockProtocols = MMDVMClient3` switches that off for this pair.
@@ -925,6 +939,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dynamic TG management**: Add/remove TGs at runtime with configurable TTL, cross-protocol timer refresh, BM API or kerchunk activation, expired SVX TGs leave the monitored TGs
 - **Credential database**: Logins of MMDVM and SVXServer (and plugins) from SQLite, MySQL/MariaDB or PostgreSQL besides `urfd.ini`, LRU cache with TTL and negative caching, cached logins survive a database outage, admin flush and status
 - **Transcoded modules from tcd (4.25.0)**: `[Transcoder] Modules = auto` transcodes a module while tcd is connected for it, so only `tcd.ini` lists the modules; a stream on a module without tcd passes as on a module without transcoding, the dashboard and the DHT entry follow
+- **Module talkgroups (4.28.0)**: `[Modules] TG<M> = <number>` gives a module its talkgroup once; an MMDVMClient section maps it with `TS1 = <modules>` / `TS2 = <modules>`, plugins can take it (`CConfigure::GetModuleTG`)
 - **Named MMDVMClient connections (4.27.0)**: `[MMDVMClient.<name>]` instead of `[MMDVMClient2]` ... `[MMDVMClient9]`, taking what they leave out from `[MMDVMClient]`; a `DmrId` of one or two digits (or a name of digits) is a suffix to its `DmrId`; the name shows in the log, the admin page, `BlockProtocols` and the admin commands
 - **MMDVMClient sends right after login (4.26.0)**: BrandMeister takes the options without an ACK, so a connection waited for its beacon request (second 18 of a minute, up to a minute) before it sent any audio to the master, and resent the options every 10 s meanwhile; the options are sent once and count as taken after 2 s without a NAK
 - **BrandMeister API sync retried (4.26.0)**: a static TG sync that did not go through (a new hotspot ID is known to the API only some minutes after its first login, "Device not found") is tried again after 1 minute, then less often up to every 30 minutes, instead of only at the next start; the log names the connection

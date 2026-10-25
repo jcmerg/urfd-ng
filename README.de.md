@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert. Ursprünglich für den Reflektor URF363 entwickelt.
 
-**urfd 4.27.0-dht** | tcd 0.11.0 | Dashboard v2.14.0
+**urfd 4.28.0-dht** | tcd 0.11.0 | Dashboard v2.14.0
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -133,7 +133,21 @@ DmrId = 123456790
 TG31665 = T,TS2
 ```
 
-**Verbindungen mit Namen** (4.27.0): `[MMDVMClient.<name>]`, der Name aus Buchstaben, Ziffern, `-` und `_`. Eine benannte Verbindung übernimmt jeden Schlüssel, den sie weglässt, aus `[MMDVMClient]` (Master, Port, Passwort, Rufzeichen, Standort, ...), ihre Sektion enthält also nur ihr Eigenes: ihre Hotspot-ID und ihre TGs. Eine `DmrId` mit ein oder zwei Ziffern ist eine Endung an die `DmrId` aus `[MMDVMClient]`, eine längere die ganze ID; ohne `DmrId` ist ein Name aus Ziffern die Endung (`[MMDVMClient.50]` ist Hotspot `<DmrId>50`). `[MMDVMClient]` mit eigenen TGs ist selbst auch eine Verbindung, ohne sie liefert es nur die gemeinsamen Einstellungen. Der Name steht im Log, auf der Admin-Seite (TG-Tabelle, Reconnect-Knöpfe, Protokoll-Steuerung), in `BlockProtocols` (`BlockProtocols = MMDVMClient.TGIF`) und bei den Admin-Befehlen (`"client": "MMDVMClient.TGIF"`). Die nummerierten `[MMDVMClient2]` bis `[MMDVMClient9]` gehen weiter, mit allen ihren Schlüsseln; eine Datei nutzt benannte oder nummerierte Sektionen, nicht beides. Verbindungen hinzufügen, entfernen oder umsortieren braucht einen Neustart.
+**Modul-Talkgroups** (4.28.0): `[Modules]` kann jedem Modul einmal seine Talkgroup geben, `TG<M> = <nummer>` (jede Nummer auf einem Modul). Eine Verbindung bindet sie dann mit `TS1 = <module>` und `TS2 = <module>` statt der TG-Nummer ein: `TS1 = R` ist `TG2625 = R,TS1` bei `TGR = 2625`. Die TG-Zeilen gehen daneben weiter (z. B. für eine zweite, nur empfangene TG auf einem Modul). Plugins können die Talkgroups ebenfalls nehmen (`CConfigure::GetModuleTG`).
+
+```ini
+[Modules]
+Modules = ADFR
+TGD = 262
+TGF = 26363
+TGR = 2625
+
+[MMDVMClient.50]
+TS1 = F
+TS2 = D,R                           # mehrere Module auf einem Zeitschlitz
+```
+
+**Verbindungen mit Namen** (4.27.0): `[MMDVMClient.<name>]`, der Name aus Buchstaben, Ziffern, `-` und `_`. Eine benannte Verbindung übernimmt, was sie weglässt, aus `[MMDVMClient]`: Master, Port, Passwort, Rufzeichen, `FallbackDmrId`, `Software`, `Firmware`, die Standort-Schlüssel, `Network` zusammen mit dem Master und in diesem Netz den `BrandMeisterApiKey`. Ihre Sektion enthält also nur ihr Eigenes: ihre Hotspot-ID und ihre TGs (`LocalPort`, `BlockProtocols` und `Enable` gelten je Verbindung). Eine `DmrId` mit ein oder zwei Ziffern ist eine Endung an die `DmrId` aus `[MMDVMClient]`, eine längere die ganze ID; ohne `DmrId` ist ein Name aus Ziffern die Endung (`[MMDVMClient.50]` ist Hotspot `<DmrId>50`). `[MMDVMClient]` mit eigenen TGs ist selbst auch eine Verbindung, ohne sie liefert es nur die gemeinsamen Einstellungen. Der Name steht im Log, auf der Admin-Seite (TG-Tabelle, Reconnect-Knöpfe, Protokoll-Steuerung), in `BlockProtocols` (`BlockProtocols = MMDVMClient.TGIF`) und bei den Admin-Befehlen (`"client": "MMDVMClient.TGIF"`). Die nummerierten `[MMDVMClient2]` bis `[MMDVMClient9]` gehen weiter, mit allen ihren Schlüsseln; eine Datei nutzt benannte oder nummerierte Sektionen, nicht beides. Verbindungen hinzufügen, entfernen oder umsortieren braucht einen Neustart.
 
 - **Netz.** Jede Verbindung, auch `[MMDVMClient]`, gehört zum Netz aus ihrem Schlüssel `Network`. Ohne ihn ist jeder BrandMeister-Master (`*.brandmeister.network`) `brandmeister.network`, jeder andere Master ein eigenes Netz (sein Hostname oder seine Adresse). `Network` braucht es für zwei Master eines anderen Netzes oder für einen BrandMeister-Master, der per IP-Adresse eingetragen ist.
 - **Brücken.** Ein Ruf geht nie an die Verbindung zurück, von der er kam, und nie an eine andere Verbindung im selben Netz (das Netz hat ihn schon). Zwischen verschiedenen Netzen wird ein Modul, das beide gemappt haben, gebrückt; `BlockProtocols = MMDVMClient3` schaltet das für dieses Paar ab.
@@ -902,6 +916,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Protokoll-Sperren zur Laufzeit**: Beliebige Protokoll-Paare in beide Richtungen im Admin-Dashboard sperren und freigeben: threadsicher mit shared_mutex, per Klick entfernbar, Rücksetzen auf die Konfiguration, wird nicht gespeichert (gilt nach Neustart nicht mehr)
 - **Dynamische TG-Verwaltung**: TGs zur Laufzeit mit einstellbarer Laufzeit hinzufügen und entfernen, Timer über alle Protokolle hinweg erneuert, Aktivierung per BM-API oder Kerchunk, abgelaufene SVX-TGs fallen aus den überwachten TGs
 - **Transcodierte Module von tcd (4.25.0)**: `[Transcoder] Modules = auto` transcodiert ein Modul, solange tcd dafür verbunden ist, nur noch die `tcd.ini` nennt also die Module; ein Stream auf einem Modul ohne tcd läuft wie auf einem Modul ohne Transcoding, Dashboard und DHT-Eintrag folgen
+- **Modul-Talkgroups (4.28.0)**: `[Modules] TG<M> = <nummer>` legt die Talkgroup eines Moduls einmal fest; eine MMDVMClient-Sektion bindet sie mit `TS1 = <module>` / `TS2 = <module>` ein, Plugins können sie übernehmen (`CConfigure::GetModuleTG`)
 - **MMDVMClient-Verbindungen mit Namen (4.27.0)**: `[MMDVMClient.<name>]` statt `[MMDVMClient2]` ... `[MMDVMClient9]`, mit allem Weggelassenen aus `[MMDVMClient]`; eine `DmrId` aus ein oder zwei Ziffern (oder ein Name aus Ziffern) ist eine Endung an dessen `DmrId`; der Name steht im Log, auf der Admin-Seite, in `BlockProtocols` und bei den Admin-Befehlen
 - **MMDVMClient sendet gleich nach dem Login (4.26.0)**: BrandMeister nimmt die Optionen ohne ACK an, deshalb wartete eine Verbindung auf dessen Beacon-Anfrage (Sekunde 18 einer Minute, bis zu einer Minute), bevor sie Ton zum Master schickte, und schickte die Optionen dabei alle 10 s neu; die Optionen gehen einmal raus und gelten nach 2 s ohne NAK als angenommen
 - **BrandMeister-API-Abgleich wiederholt (4.26.0)**: Ein Abgleich der statischen TGs, der nicht durchging (eine neue Hotspot-ID kennt die API erst einige Minuten nach ihrem ersten Login, „Device not found“), wird nach 1 Minute wiederholt, danach seltener bis alle 30 Minuten, statt erst beim nächsten Start; das Log nennt die Verbindung

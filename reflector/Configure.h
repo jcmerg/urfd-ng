@@ -26,6 +26,7 @@
 #include <utility>
 #include <functional>
 #include <nlohmann/json.hpp>
+#include "JsonKeys.h"
 
 enum class ErrorLevel { fatal, mild };
 enum class ERefreshType { file, http, both };
@@ -41,6 +42,8 @@ using CIniSections = std::map<std::string, CIniSection>;
 class CConfigure
 {
 public:
+	// a module's talkgroup ([Modules] TG<M> = <number>), 0 for none
+	unsigned GetModuleTG(char module) const { return Contains(ModuleTGKey(module)) ? GetUnsigned(ModuleTGKey(module)) : 0; }
 	CConfigure();
 	bool ReadData(const std::string &path);
 	bool Contains(const std::string &key) const;
