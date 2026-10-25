@@ -169,7 +169,7 @@ CPacket::CPacket(uint16_t sid, bool isusrp, bool lastpacket)
 	m_uiM17FrameNumber = 0xffffffffu;
 	m_cModule = ' ';
 	m_eOrigin = EOrigin::local;
-	isusrp ? m_eCodecIn = ECodecType::usrp : ECodecType::p25;
+	m_eCodecIn = isusrp ? ECodecType::usrp : ECodecType::p25;
 	m_bLastPacket = lastpacket;
 };
 
