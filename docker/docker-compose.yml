@@ -42,6 +42,9 @@ services:
       - ${URFD_DATA:-/opt/urfd}/xlxd-ch:/var/lib/xlxd-ch
       # XML status file shared between urfd and the dashboard
       - urfd-xml:/var/log
+    environment:
+      # the Docker tcd's MonitorHttpPort, for the dashboard's /tcd/ (build.sh takes it from its tcd.ini)
+      - TCD_MONITOR_PORT=${TCD_MONITOR_PORT:-8080}
     # keep the log from filling the disk on a reflector that runs for months
     logging:
       driver: json-file

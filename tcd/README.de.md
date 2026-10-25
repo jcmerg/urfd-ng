@@ -140,7 +140,7 @@ cd docker && sudo docker compose --profile tcd build && sudo docker compose --pr
 
 In der `tcd.ini`: `ServerAddress = 127.0.0.1` (der Container nutzt das Netz des Hosts), `Modules` so viele wie gewünscht, `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so`, keine `DeviceSerial`, und ein `MonitorHttpPort`, der auf dem Host frei ist. In der `urfd.ini`: `[Transcoder] Modules = auto`, dann entscheidet allein die Liste von tcd. Das Image baut jedes `tcd/plugins/<name>/` mit `Makefile` (Git ignoriert das Verzeichnis); `$URFD_DATA/tcd/` (Standard `/opt/urfd/tcd`) enthält die `tcd.ini`, beschreibbar für „Speichern“ im Monitor. Aktualisieren: `git pull`, dann `docker/build.sh`; es baut und startet auch den tcd-Container neu, wenn `$URFD_DATA/tcd/tcd.ini` existiert (seit 4.26.0). Ohne `--profile tcd` bleibt `docker compose` bei urfd allein.
 
-Der nginx im Image reicht `/tcd/` an den Monitor auf Port 8080 weiter (der `MonitorHttpPort` der Vorlage, seit 4.26.0), über den TLS-Proxy davor ist er also als `https://<reflektor>/tcd/` erreichbar, mit denselben Upgrade-Headern wie `/ws` und `X-Real-IP`. `MonitorBindAddress = 127.0.0.1` reicht dann; `MonitorPassword` setzen.
+Der nginx im urfd-Image reicht `/tcd/` an den Monitor weiter (seit 4.26.0), über den TLS-Proxy davor ist er also als `https://<reflektor>/tcd/` erreichbar; der Proxy reicht `/tcd/` mit denselben Upgrade-Headern wie `/ws`, `X-Real-IP` und `X-Forwarded-Proto` weiter. Der Port ist der `MonitorHttpPort` aus `$URFD_DATA/tcd/tcd.ini`: `docker/build.sh` liest ihn und gibt ihn dem urfd-Container als `TCD_MONITOR_PORT` mit (Standard 8080; bei `docker compose` von Hand in der Umgebung setzen). `MonitorBindAddress = 127.0.0.1` reicht dann; `MonitorPassword` setzen. Über HTTPS ist das Session-Cookie `Secure`.
 
 ### Standby: ein zweiter tcd für dieselben Module
 
@@ -318,7 +318,7 @@ Die Grenzen sind absichtlich ungleich: Absenken ist unkritisch, Anheben hebt auc
 - DVSI-Geräte: Seriennummer, Typ, Rolle, belegte Kanäle mit ihren Modulen, Puffertiefe
 - Codec-Plugins: ihr Codec, Zähler und Streams, und welcher Vocoder neue D-Star- und DMR-Streams bekommt (umschaltbar, siehe [Codec-Plugins](#codec-plugins))
 - Verbindung zum Reflektor und Paketzähler; ein Standby-Modul zeigt „standby“, solange ein anderer tcd es hat, und „taken over“, solange dieser tcd es hat
-- hinter einem Reverse-Proxy unter einem Pfad (seit 0.11.0): Die Seite nutzt relative Pfade, `https://<host>/tcd/` funktioniert also (siehe [tcd in Docker](#tcd-in-docker)); hinter einem Proxy auf demselben Rechner zählt die Pause nach Fehlanmeldungen je Adresse aus dem letzten `X-Forwarded-For`-Eintrag
+- hinter einem Reverse-Proxy unter einem Pfad (seit 0.11.0): Die Seite nutzt relative Pfade, `https://<host>/tcd/` funktioniert also (siehe [tcd in Docker](#tcd-in-docker)); hinter einem Proxy auf demselben Rechner zählt die Pause nach Fehlanmeldungen je Adresse aus dem letzten `X-Forwarded-For`-Eintrag, und das Session-Cookie ist `Secure`, wenn der Proxy `X-Forwarded-Proto: https` schickt; tcdmon zeigt Standby-Module ebenfalls
 
 ### tcdmon
 

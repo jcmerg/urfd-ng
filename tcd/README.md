@@ -140,7 +140,7 @@ cd docker && sudo docker compose --profile tcd build && sudo docker compose --pr
 
 In `tcd.ini`: `ServerAddress = 127.0.0.1` (the container uses the host's network), `Modules` as many as wanted, `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so`, no `DeviceSerial`, and a `MonitorHttpPort` that is free on the host. In `urfd.ini`: `[Transcoder] Modules = auto`, so tcd's list alone decides. The image builds every `tcd/plugins/<name>/` with a `Makefile` (git ignores that directory); `$URFD_DATA/tcd/` (default `/opt/urfd/tcd`) holds `tcd.ini`, writable for the monitor's Save. To update: `git pull`, then `docker/build.sh`; it builds and restarts the tcd container too when `$URFD_DATA/tcd/tcd.ini` exists (since 4.26.0). Without `--profile tcd`, `docker compose` keeps to urfd alone.
 
-The image's nginx passes `/tcd/` to the monitor on port 8080 (the template's `MonitorHttpPort`, since 4.26.0), so it is reachable as `https://<reflector>/tcd/` through the TLS proxy in front, with the same Upgrade headers as `/ws` and `X-Real-IP`. `MonitorBindAddress = 127.0.0.1` is enough then; set `MonitorPassword`.
+The urfd image's nginx passes `/tcd/` to the monitor (since 4.26.0), so it is reachable as `https://<reflector>/tcd/` through the TLS proxy in front, which passes `/tcd/` with the same Upgrade headers as `/ws`, `X-Real-IP` and `X-Forwarded-Proto`. The port is the `MonitorHttpPort` of `$URFD_DATA/tcd/tcd.ini`: `docker/build.sh` reads it and hands it to the urfd container as `TCD_MONITOR_PORT` (default 8080; with `docker compose` by hand, set it in the environment). `MonitorBindAddress = 127.0.0.1` is enough then; set `MonitorPassword`. Over HTTPS the session cookie is `Secure`.
 
 ### Standby: a second tcd for the same modules
 
@@ -318,7 +318,7 @@ The gain limits are asymmetric on purpose: attenuating is safe, amplifying also 
 - DVSI devices: serial, type, role, channels in use and their modules, buffer depth
 - codec plugins: their codec, counters and streams, and which vocoder new D-Star and DMR streams get (switchable, see [Codec plugins](#codec-plugins))
 - reflector connection and packet counters; a standby module shows "standby" while another tcd has it and "taken over" while this tcd has it
-- behind a reverse proxy under a path (since 0.11.0): the page uses relative paths, so `https://<host>/tcd/` works (see [tcd in Docker](#tcd-in-docker)); behind a proxy on the same machine the failed-login pause counts per address in the last `X-Forwarded-For` entry
+- behind a reverse proxy under a path (since 0.11.0): the page uses relative paths, so `https://<host>/tcd/` works (see [tcd in Docker](#tcd-in-docker)); behind a proxy on the same machine the failed-login pause counts per address in the last `X-Forwarded-For` entry, and the session cookie is `Secure` when the proxy sends `X-Forwarded-Proto: https`; tcdmon shows standby modules too
 
 ### tcdmon
 

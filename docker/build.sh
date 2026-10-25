@@ -14,9 +14,13 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 PROFILE=()
 NAMES="^urfd$"
-if [ -f "${URFD_DATA:-/opt/urfd}/tcd/tcd.ini" ]; then
+TCD_INI="${URFD_DATA:-/opt/urfd}/tcd/tcd.ini"
+if [ -f "$TCD_INI" ]; then
     PROFILE=(--profile tcd)
     NAMES="^(urfd|tcd)$"
+    # the dashboard's /tcd/ goes to the monitor port of this tcd.ini
+    port=$(sed -n 's/^[[:space:]]*MonitorHttpPort[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$TCD_INI" | tail -1)
+    export TCD_MONITOR_PORT="${TCD_MONITOR_PORT:-${port:-8080}}"
     echo "=== Building the urfd and tcd Docker images ==="
 else
     echo "=== Building urfd Docker image ==="
