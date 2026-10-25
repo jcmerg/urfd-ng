@@ -594,13 +594,15 @@ bool CTCClient::Open(const std::string &address, const std::string &modules, uin
 
 	std::cout << "Connecting to the TCP server..." << std::endl;
 
+	// a module the reflector does not take now (not in its [Transcoder] Modules,
+	// a wrong password, the reflector down) is tried again by ReConnect(), so tcd
+	// keeps running for the others instead of exiting
+	std::string missing;
 	for (char c : modules)
-	{
 		if (Connect(c, true))
-		{
-			return true;
-		}
-	}
+			missing += c;
+	if (!missing.empty())
+		std::cerr << "Module(s) " << missing << " not connected yet, tried again every few seconds" << std::endl;
 	return false;
 }
 
