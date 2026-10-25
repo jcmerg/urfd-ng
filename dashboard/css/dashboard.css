@@ -296,6 +296,8 @@ details.nodes li span { color: var(--graphite); font-size: var(--fs-xs); margin-
 .admin-index a:hover { color: var(--ink); border-left-color: var(--rule); }
 .admin-index hr { border: 0; border-top: 1px solid var(--rule); margin: 0.5rem 0; }
 .admin-body { display: grid; gap: 2.5rem; min-width: 0; }
+/* the plugins' sections are items of that grid too, with its gap between them */
+#plugin-sections { display: contents; }
 .admin-sec { display: grid; gap: 0.9rem; scroll-margin-top: 1rem; }
 .admin-sec > header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0.5rem 1rem;
                       border-bottom: 1px solid var(--rule); padding-bottom: 0.4rem; }
