@@ -278,7 +278,7 @@ function DashboardProtocols($Reflector) {
 
 // how a station reached us: its node, and the peer when it came in from another reflector
 function StationVia($Reflector, $st) {
-    // the log string pads the module with spaces: "DL4JC  S" is DL4JC-S
+    // the log string pads the module with spaces: "N0CALL S" is N0CALL-S
     $via = preg_replace('/\s+/', '-', trim($st->GetVia()));
     $peer = trim($st->GetPeer());
     $refl = trim((string)$Reflector->GetReflectorName());

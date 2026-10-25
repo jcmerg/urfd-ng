@@ -863,7 +863,7 @@ void CSvxReflectorProtocol::OnTalkerStart(const std::vector<uint8_t> &payload)
 	char module = TGToModule(tg);
 	if (module == ' ')
 		return;
-	std::string talkerCs = SvxExtractCallsign(SvxUnpackString(payload, pos));  // "DL4JC-APP" -> "DL4JC"
+	std::string talkerCs = SvxExtractCallsign(SvxUnpackString(payload, pos));  // "N0CALL-APP" -> "N0CALL"
 
 	// a talker on a monitored TG: select it if this side is idle, else it is busy
 	if (tg != m_SelectedTG)
@@ -1053,7 +1053,7 @@ void CSvxReflectorProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> 
 	CClients *clients = g_Reflector.GetClients();
 	char module = Header->GetRpt2Module();
 	CCallsign cs;
-	cs.SetCallsign(SvxExtractCallsign(m_Callsign), false); // "DL4JC-HS" -> "DL4JC"
+	cs.SetCallsign(SvxExtractCallsign(m_Callsign), false); // "N0CALL-HS" -> "N0CALL"
 	cs.SetCSModule(module);
 	std::shared_ptr<CClient> client = clients->FindClient(cs, module, Ip, EProtocol::svxreflector);
 	if (client == nullptr)
