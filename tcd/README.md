@@ -281,6 +281,7 @@ The gain limits are asymmetric on purpose: attenuating is safe, amplifying also 
 
 - in the look of the urfd dashboard (since 0.4.0): an amber LCD per module with the input codec, the targets and the AGC state, light and dark theme; the Saira font is built into the page, so it loads nothing from outside
 - LCD bar graphs before and after the AGC, with peak hold and the AGC target marked
+- for many modules a compact view (from five modules on, or chosen with "Compact"): a key per module with its codec and level, full cards only for the modules on the air and for the ones clicked to keep open; the choice stays in the browser
 - signal path of the active stream with the level at each stage
 - AGC and gain controls that apply immediately, and a button to save them to `tcd.ini`
 - DVSI devices: serial, type, role, channels in use and their modules, buffer depth
