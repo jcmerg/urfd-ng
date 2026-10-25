@@ -25,6 +25,7 @@
 #include <vector>
 #include <utility>
 #include <functional>
+#include <mutex>
 #include <shared_mutex>
 #include <nlohmann/json.hpp>
 #include "JsonKeys.h"
