@@ -151,6 +151,9 @@ td b { font-weight: 650; font-stretch: 85%; }
 .group { display: grid; gap: 0.15rem; align-content: start; }
 .group h3 { margin-bottom: 0.35rem; }
 .group p { margin: 0 0 0.4rem; font-size: var(--fs-xs); color: var(--graphite); }
+.group.codecs { grid-column: 1 / -1; }
+.codec-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.15rem 3rem; }
+@media (max-width: 760px) { .codec-rows { grid-template-columns: minmax(0, 1fr); } }
 .row { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr) 3.6rem; align-items: center; gap: 0.75rem;
        font-size: var(--fs-s); min-height: 2rem; }
 .row label { color: var(--graphite); }
@@ -230,6 +233,14 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
         <p class="hint">Changes apply at once; save them to keep them after a restart</p>
       </header>
       <div class="settings">
+        <div class="group codecs" id="codec_group" hidden>
+          <h3>Vocoder</h3>
+          <p>Who codes AMBE for the streams that start from now on; modules beyond the AMBE devices always use a codec plugin</p>
+          <div class="codec-rows">
+            <div class="row" id="codec_dstar_row"><label for="codec_dstar">D-Star</label><select id="codec_dstar"></select></div>
+            <div class="row" id="codec_dmr_row"><label for="codec_dmr">DMR and YSF</label><select id="codec_dmr"></select></div>
+          </div>
+        </div>
         <div class="group">
           <h3>Output gain</h3>
           <p>After the AGC, per target, in dB</p>
@@ -241,12 +252,6 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
           <div class="row"><label for="og_usrp">USRP and SVX</label><input type="range" min="-24" max="10" id="og_usrp"><output id="v_og_usrp" for="og_usrp">0</output></div>
         </div>
         <div class="group">
-          <div id="codec_group" hidden>
-            <h3>Vocoder</h3>
-            <p>Who codes AMBE for the streams that start from now on</p>
-            <div class="row" id="codec_dstar_row"><label for="codec_dstar">D-Star</label><select id="codec_dstar"></select></div>
-            <div class="row" id="codec_dmr_row"><label for="codec_dmr">DMR and YSF</label><select id="codec_dmr"></select></div>
-          </div>
           <h3>DVSI hardware gain</h3>
           <p>In the AMBE chips, in dB (also applied by a codec plugin)</p>
           <div class="row"><label for="g_dstar_in">D-Star in</label><input type="range" min="-24" max="24" id="g_dstar_in"><output id="v_dstar_in" for="g_dstar_in">0</output></div>
@@ -441,8 +446,9 @@ function render() {
     var act = x.active_module && x.active_module.length > 0;
     rows += '<tr><td><b>' + esc(x.name) + '</b></td><td>Codec plugin <span class="muted">' + esc(x.codec) + '</span></td>' +
       '<td>' + (act ? '<span class="state-use">in use</span>' : '<span class="state-ok">ready</span>') + '</td>' +
-      '<td>' + (act ? '<span class="mod-tag">' + esc(x.active_module) + '</span>' : '') + '<span class="muted">' + (x.codec === 'dmr' ? 're-encode ' + (x.reencode_active ? 'on' : 'off') + ', ' : '') + x.cached_streams + ' streams</span></td>' +
-      '<td class="r opt">' + x.encodes + ' / ' + x.decodes + '</td><td class="r">' + (x.codec === 'dmr' ? x.reencodes + ' re' : '') + '</td></tr>';
+      '<td>' + (act ? '<span class="mod-tag">' + esc(x.active_module) + '</span>' : '') + '<span class="muted">' + x.cached_streams + ' streams, ' +
+      x.encodes + ' encoded, ' + x.decodes + ' decoded' + (x.reencodes || x.reencode_active ? ', ' + x.reencodes + ' re-encoded' : '') + '</span></td>' +
+      '<td class="r opt muted">-</td><td class="r muted">-</td></tr>';
   });
   $('devices').innerHTML = rows || '<tr><td colspan="6" class="empty">No vocoder found. Check the DeviceSerial lines in tcd.ini.</td></tr>';
 
