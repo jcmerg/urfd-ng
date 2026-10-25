@@ -74,6 +74,8 @@ protected:
 
 	// pure virtual methods unique to the device type
 	virtual void PushWaitingPacket(unsigned int channel, std::shared_ptr<CTranscoderPacket> packet) = 0;
+	// the packet a vocoder answers, without waiting: nullptr when none waits on the
+	// channel (an answer the device sends for nothing it was given)
 	virtual std::shared_ptr<CTranscoderPacket> PopWaitingPacket(unsigned int channel) = 0;
 	virtual void ProcessPacket(const SDV_Packet &p) = 0;
 	virtual bool SendAudio(const uint8_t channel, const int16_t *audio) const = 0;

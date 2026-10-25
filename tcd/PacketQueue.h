@@ -55,6 +55,17 @@ public:
 		return rval;
 	}
 
+	// without waiting: nullptr when it is empty
+	std::shared_ptr<CTranscoderPacket> try_pop()
+	{
+		std::lock_guard<std::mutex> lock(mx);
+		if (q.empty())
+			return nullptr;
+		auto rval = q.front();
+		q.pop();
+		return rval;
+	}
+
 	std::size_t push(std::shared_ptr<CTranscoderPacket> item)
 	{
 		std::unique_lock<std::mutex> lock(mx);
