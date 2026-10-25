@@ -33,6 +33,12 @@ CController    g_Cont;
 CTcdStats      g_Stats;
 CMonitorServer g_Monitor;
 
+// SIGTERM and SIGINT only end pause() in main, which then stops tcd. Without a
+// handler SIGTERM ended tcd at once, without stopping the devices, and in a
+// container, where tcd is PID 1, not at all: the kernel ignores it there, and
+// docker killed tcd after 10 s
+static void OnSignal(int) {}
+
 int main(int argc, char *argv[])
 {
 	// Ignore SIGPIPE so send() on a broken connection returns EPIPE
@@ -114,8 +120,16 @@ int main(int argc, char *argv[])
 
 	std::cout << "Hybrid Transcoder version " TCD_VERSION " successfully started" << std::endl;
 
+	struct sigaction sa = {};
+	sa.sa_handler = OnSignal;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGTERM, &sa, nullptr);
+	sigaction(SIGINT, &sa, nullptr);
 	pause();
 
+	// a stop that hangs still ends: SIGALRM's default action
+	alarm(5);
+	std::cout << "Stopping tcd" << std::endl;
 	g_StatsLog.Stop();
 	g_Monitor.Stop();
 	g_Cont.Stop();
