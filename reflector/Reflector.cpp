@@ -253,6 +253,19 @@ void CReflector::ReloadConfig(const std::string &configPath)
 			std::cerr << "Config reload: ReadData returned error, keeping the previous configuration" << std::endl;
 			return;
 		}
+		// named [MMDVMClient.<name>] sections are numbered in the order of the file;
+		// a running connection keeps its number, so it must still find its section there
+		for (auto *mmdvm : m_Protocols.MmdvmClients())
+		{
+			const unsigned n = mmdvm->GetInstance();
+			const std::string key = MmdvmClientNameKey(n);
+			const std::string name = fresh.Contains(key) ? fresh.GetString(key) : MmdvmClientDefaultName(n);
+			if (name != mmdvm->GetName())
+			{
+				std::cerr << "Config reload: " << mmdvm->GetName() << " is no longer section " << n << " of the MMDVMClient sections (renamed, moved or removed), that needs a restart; keeping the previous configuration" << std::endl;
+				return;
+			}
+		}
 		g_Configure.SetData(fresh.GetData());
 
 		// Reload TG mappings (preserve dynamic entries)
