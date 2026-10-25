@@ -18,6 +18,8 @@
 #include <cstring>
 #include <csignal>
 #include <iostream>
+#include <thread>
+#include <chrono>
 
 #include "Controller.h"
 #include "Configure.h"
@@ -127,8 +129,13 @@ int main(int argc, char *argv[])
 	sigaction(SIGINT, &sa, nullptr);
 	pause();
 
-	// a stop that hangs still ends: SIGALRM's default action
-	alarm(5);
+	// a stop that hangs still ends (a thread: as PID 1 in a container tcd would
+	// ignore SIGALRM's default action as well)
+	std::thread([] {
+		std::this_thread::sleep_for(std::chrono::seconds(5));
+		std::cerr << "tcd did not stop within 5 s, ending it" << std::endl;
+		_exit(EXIT_FAILURE);
+	}).detach();
 	std::cout << "Stopping tcd" << std::endl;
 	g_StatsLog.Stop();
 	g_Monitor.Stop();

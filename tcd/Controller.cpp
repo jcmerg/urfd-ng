@@ -293,10 +293,15 @@ void CController::Stop()
 {
 	keep_running = false;
 
-	if (reflectorFuture.valid())
-		reflectorFuture.get();
-	if (c2Future.valid())
-		c2Future.get();
+	// the worker threads wait in their queues: wake them up, then wait for all
+	codec2_queue.Shutdown();
+	imbe_queue.Shutdown();
+	usrp_queue.Shutdown();
+	swambe2_queue.Shutdown();
+	swdstar_queue.Shutdown();
+	for (auto *f : { &reflectorFuture, &c2Future, &imbeFuture, &usrpFuture, &swambe2Future, &swdstarFuture })
+		if (f->valid())
+			f->get();
 
 	tcClient.Close();
 	if (dstar_device) dstar_device->CloseDevice();
@@ -893,13 +898,9 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 				ms.agc_gain_db.load(), ms.agc_gate.load());
 		}
 	}
-	// D-Star: DVSI (gain applied in FeedDevice) or a codec plugin
-	ToDStar(packet);
-
-	// DMR/YSF: DVSI (gain applied in FeedDevice) or a codec plugin
-	ToDmr(packet);
-
-	// IMBE/P25
+	// IMBE/P25 and USRP first: the packet goes to the reflector when its last codec
+	// is set, and a codec plugin sets D-Star and DMR at once, before these would be
+	// (the packet was never sent; with the DVSI devices only when one answered fast)
 	{
 		int16_t imbe_buf[160];
 		memcpy(imbe_buf, packet->GetAudioSamples(), sizeof(imbe_buf));
@@ -909,13 +910,18 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	}
 	packet->SetP25Data(imbe);
 
-	// USRP
 	{
 		int16_t usrp_buf[160];
 		memcpy(usrp_buf, packet->GetAudioSamples(), sizeof(usrp_buf));
 		ApplyGain(usrp_buf, 160, outgain_usrp_num);
 		packet->SetUSRPData(usrp_buf);
 	}
+
+	// D-Star: DVSI (gain applied in FeedDevice) or a codec plugin
+	ToDStar(packet);
+
+	// DMR/YSF: DVSI (gain applied in FeedDevice) or a codec plugin
+	ToDmr(packet);
 }
 
 void CController::ProcessC2Thread()
@@ -923,6 +929,8 @@ void CController::ProcessC2Thread()
 	while (keep_running)
 	{
 		auto packet = codec2_queue.pop();
+		if (!packet)
+			break;	// the queue was shut down: tcd stops
 
 		switch (packet->GetCodecIn())
 		{
@@ -1018,6 +1026,8 @@ void CController::ProcessSWAMBE2Thread()
 	while (keep_running)
 	{
 		auto packet = swambe2_queue.pop();
+		if (!packet)
+			break;	// the queue was shut down: tcd stops
 
 		switch (packet->GetCodecIn())
 		{
@@ -1074,6 +1084,8 @@ void CController::ProcessSWDStarThread()
 	while (keep_running)
 	{
 		auto packet = swdstar_queue.pop();
+		if (!packet)
+			break;	// the queue was shut down: tcd stops
 		if (ECodecType::dstar == packet->GetCodecIn())
 			SWDStarToAudio(packet);
 		else
@@ -1197,6 +1209,8 @@ void CController::ProcessIMBEThread()
 	while (keep_running)
 	{
 		auto packet = imbe_queue.pop();
+		if (!packet)
+			break;	// the queue was shut down: tcd stops
 
 		switch (packet->GetCodecIn())
 		{
@@ -1265,6 +1279,8 @@ void CController::ProcessUSRPThread()
 	while (keep_running)
 	{
 		auto packet = usrp_queue.pop();
+		if (!packet)
+			break;	// the queue was shut down: tcd stops
 
 		switch (packet->GetCodecIn())
 		{
