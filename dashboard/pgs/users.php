@@ -83,10 +83,12 @@ if ($ShowFilter) {
                 <?php if ($ShowFilter) { ?><p class="hint">Tap one to follow it in the display and the log</p><?php } ?>
             </div>
 <?php
-// up to 8 modules get wide keys with their name, more get a compact pad of 7 columns
-$Cols = (count($Keys) > 8) ? 7 : 4;
+// up to 8 modules get 4 columns of tall keys; more get flatter keys, spread evenly over
+// at most 5 columns (9 = 5 + 4, 10 = 5 x 2, 12 = 4 x 3), every key with its module's name
+$Many = (count($Keys) > 8);
+$Cols = $Many ? (int)ceil(count($Keys) / ceil(count($Keys) / 5)) : 4;
 ?>
-            <div class="keys<?php echo ($Cols == 7) ? ' many' : ''; ?>" id="keys">
+            <div class="keys<?php echo $Many ? ' many' : ''; ?>" id="keys"<?php if ($Many) echo ' style="grid-template-columns: repeat('.$Cols.', minmax(0, 1fr))"'; ?>>
 <?php
 $n = 0;
 foreach ($Keys as $mod => $info) {

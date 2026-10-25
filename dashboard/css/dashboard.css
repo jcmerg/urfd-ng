@@ -191,11 +191,9 @@ button.key.busy:hover { background: var(--lcd-press); }
 .key.tx .led { background: var(--tx); }
 .key[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--ink); }
 .key.blank { background: var(--panel-sunk); }
-.keys.many { grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.keys.many .key { min-height: 3.4rem; padding: 0.4rem 0.45rem; }
+.keys.many .key { min-height: 3.6rem; padding: 0.4rem 0.5rem 0.35rem; }
 .keys.many .key .l { font-size: var(--fs-l); }
-.keys.many .key .d { display: none; }
-.keys.many .key .led { left: 0.45rem; width: 0.9rem; }
+.keys.many .key .led { left: 0.5rem; width: 0.9rem; }
 
 /* Tables */
 .tbl-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 0.75rem 1.5rem; margin-bottom: 0.75rem; }
