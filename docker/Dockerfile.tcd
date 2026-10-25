@@ -25,6 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 COPY reflector/ ./reflector/
 COPY tcd/ ./tcd/
+# the dashboard's font, which embed_html.sh puts into the monitor page
+COPY dashboard/fonts/saira-latin.woff2 ./dashboard/fonts/
 
 WORKDIR /build/tcd
 RUN make clean >/dev/null 2>&1 || true; make -j$(nproc)
