@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.29.3-dht** | tcd 0.12.2 | Dashboard v2.14.0
+**urfd 4.29.3-dht** | tcd 0.12.2 | Dashboard v2.14.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -679,7 +679,7 @@ Module names are configured once in `urfd.ini` and automatically available in th
 
 The JSON report also includes a `DynamicTGs` array with protocol, TG, module, and remaining seconds for all active dynamic mappings.
 
-### Dashboard v2.14.0
+### Dashboard v2.14.1
 Redesigned in v2.9.0 as the front panel of a radio: an amber LCD shows who is on the air, the modules are a keypad, the rest are plain tables. Before that: dark mode (v2.6.0), hardened against directory outages (v2.6.1), M17 positions in the last-heard list (v2.7.0), directory registration moved to the reflector (v2.8.0), security fixes (v2.8.1, v2.8.2), status file and admin socket fixes (v2.8.3). Since v2.10.0 the operator's first name stands next to the callsign, from the ID databases urfd loads (urfd 4.12.0 and later).
 
 **Pages:**
@@ -976,6 +976,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.6.0**: Dark mode redesign, admin panel, module overview with TG mappings and NXDN RAN, protocol-specific columns hidden when disabled, protocol list, QuadNet Live proxy, reflector list with search/pagination
 - **Dashboard v2.6.1**: Survives an outage of the XLX directory. Explicit timeouts on every outbound request, CallingHome failures logged instead of aborting the page render, reflector and peer lists served from an on-disk cache, admin API no longer serialized behind the PHP session lock
 - **Dashboard v2.7.0**: Locator column for stations that send an M17 GNSS position, also in `/json/stations`
+- **Dashboard v2.14.1**: the Links page shows a band only for D-Star links, where the suffix is the repeater's port letter; elsewhere it is the module, and a node on module D was shown as a dongle
 - **Dashboard v2.14.0**: Admin page: the sections of loaded plugins, drawn from the description each plugin gives in `status` (urfd 4.24.0 and later); the protocol list shows a plugin's description. Since urfd 4.26.0 more than 8 modules spread evenly over at most 5 columns (9 = 5 + 4, 12 = 4 x 3), each key with its module's name, and the plugin sections have the same space between them as the others
 - **Dashboard v2.13.0**: Admin page: several MMDVMClient connections, each one offered when adding a TG, its name and network in the TG table, a reconnect button per connection (urfd 4.21.0 and later); the protocol list leaves out MMDVMClient2 to 9 like the first
 - **Dashboard v2.12.3**: Admin page: a "Credential database" card with backend, connection, cache counters and a button that flushes the cache (urfd 4.20.0 and later); users from the database are marked "(database)" in the user lists

@@ -5,9 +5,12 @@ $IPMode = $PageOptions['RepeatersPage']['IPModus'];
 $MC = $PageOptions['RepeatersPage']['MasqueradeCharacter'];
 $ShowIP = ($IPMode != 'HideIP');
 
+// the suffix is a band only in D-Star (the repeater's port letter); elsewhere it
+// is the module or a connection's name
 function NodeBand($node) {
     if ($node->GetPrefix() == 'REF') return 'REF link';
     if ($node->GetPrefix() == 'XRF') return 'XRF link';
+    if (!in_array($node->GetProtocol(), array('DCS', 'DExtra', 'DPlus', 'Icom G3', 'DCSClient', 'DExtraClient', 'DPlusClient'))) return '';
     switch ($node->GetSuffix()) {
         case 'A' : return '23cm';
         case 'B' : return '70cm';
