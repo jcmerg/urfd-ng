@@ -4,6 +4,7 @@
 // Copyright (C) 2024-2026
 // Licensed under the GNU General Public License v3 or later
 
+#include <algorithm>
 #include <string.h>
 #include <cstdlib>
 #include <sstream>
@@ -164,11 +165,17 @@ void CMMDVMClientProtocol::Task(void)
 		m_RetryTimer.start();
 	}
 
-	// Sync BrandMeister static TGs once after first connect
-	if (m_State == EHBState::RUNNING && m_BmApi.IsConfigured() && !m_BmSynced)
+	// Sync BrandMeister static TGs after the first connect, again later until it went through
+	if (m_State == EHBState::RUNNING && m_BmApi.IsConfigured() && !m_BmSynced && std::chrono::steady_clock::now() >= m_BmNextSync)
 	{
-		m_BmSynced = true;
-		SyncBrandMeisterTGs();
+		if (SyncBrandMeisterTGs())
+			m_BmSynced = true;
+		else
+		{
+			std::cerr << m_Name << ": BrandMeister API sync incomplete, tried again in " << m_BmSyncDelay << " s (a new hotspot ID is known to BrandMeister only some minutes after its first login)" << std::endl;
+			m_BmNextSync = std::chrono::steady_clock::now() + std::chrono::seconds(m_BmSyncDelay);
+			m_BmSyncDelay = std::min(m_BmSyncDelay * 2, 1800);
+		}
 	}
 
 	// Handle pending kerchunk (only when RUNNING — waits for reconnect to complete)
@@ -1205,9 +1212,9 @@ void CMMDVMClientProtocol::ReplaceEMBInBuffer(CBuffer *buffer, uint8_t uiDmrPack
 ////////////////////////////////////////////////////////////////////////////////////////
 // BrandMeister API — sync static talkgroups
 
-void CMMDVMClientProtocol::SyncBrandMeisterTGs()
+bool CMMDVMClientProtocol::SyncBrandMeisterTGs()
 {
-	std::cout << "BrandMeister API: syncing static talkgroups..." << std::endl;
+	std::cout << m_Name << ": BrandMeister API: syncing static talkgroups..." << std::endl;
 
 	// Get all active TGs (static + dynamic) — dynamic TGs added via admin
 	// have already been registered on BM via API and must not be removed
@@ -1222,15 +1229,16 @@ void CMMDVMClientProtocol::SyncBrandMeisterTGs()
 	std::vector<BMTalkgroup> bmTGs;
 	if (!m_BmApi.GetStaticTGs(bmTGs))
 	{
-		std::cerr << "BrandMeister API: failed to get static TGs, skipping sync" << std::endl;
-		return;
+		std::cerr << m_Name << ": BrandMeister API: failed to get static TGs" << std::endl;
+		return false;
 	}
+	bool ok = true;
 
 	// Remove BM TGs that are not in our config
 	for (const auto &bm : bmTGs)
 	{
-		if (desired.find({bm.talkgroup, bm.slot}) == desired.end())
-			m_BmApi.RemoveStaticTG(bm.talkgroup, bm.slot);
+		if (desired.find({bm.talkgroup, bm.slot}) == desired.end() && !m_BmApi.RemoveStaticTG(bm.talkgroup, bm.slot))
+			ok = false;
 	}
 
 	// Add our TGs that are missing on BM
@@ -1240,11 +1248,13 @@ void CMMDVMClientProtocol::SyncBrandMeisterTGs()
 
 	for (const auto &d : desired)
 	{
-		if (bmSet.find(d) == bmSet.end())
-			m_BmApi.AddStaticTG(d.first, d.second);
+		if (bmSet.find(d) == bmSet.end() && !m_BmApi.AddStaticTG(d.first, d.second))
+			ok = false;
 	}
 
-	std::cout << "BrandMeister API: sync complete (" << desired.size() << " static TGs)" << std::endl;
+	if (ok)
+		std::cout << m_Name << ": BrandMeister API: sync complete (" << desired.size() << " static TGs)" << std::endl;
+	return ok;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////

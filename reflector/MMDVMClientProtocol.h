@@ -16,6 +16,7 @@
 #include "BPTC19696.h"
 #include "BrandMeisterApi.h"
 #include "MmdvmClientConfig.h"
+#include <chrono>
 #include <set>
 
 // MMDVM protocol constants
@@ -158,7 +159,11 @@ private:
 	void            ResolveMaster(void);
 	CBrandMeisterApi m_BmApi;
 	bool             m_BmSynced = false;
-	void SyncBrandMeisterTGs();
+	// a sync that did not go through is tried again: a new hotspot ID is known to
+	// the API only some minutes after its first login ("Device not found")
+	std::chrono::steady_clock::time_point m_BmNextSync {};
+	int              m_BmSyncDelay = 60;	// seconds, doubled up to 30 minutes
+	bool SyncBrandMeisterTGs();	// true when BrandMeister has every static TG now
 
 	// State machine
 	std::atomic<EHBState> m_State{EHBState::DISCONNECTED};
