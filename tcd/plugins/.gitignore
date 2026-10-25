@@ -1,0 +1,4 @@
+# codec plugins built here (Docker image, see docker/Dockerfile.tcd) are not part of this repository
+*
+!.gitignore
+!README.md
