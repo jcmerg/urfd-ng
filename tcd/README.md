@@ -11,6 +11,7 @@ tcd converts voice between the digital modes on a URF reflector, so a D-Star use
 - [Install](#install)
 - [Hardware](#hardware)
 - [Codec plugins](#codec-plugins)
+- [tcd in Docker](#tcd-in-docker)
 - [Selecting the AMBE devices](#selecting-the-ambe-devices)
 - [Configuration (tcd.ini)](#configuration-tcdini)
 - [Audio levels](#audio-levels)
@@ -63,7 +64,7 @@ tcd builds against the urfd sources it shares with the reflector (`TCPacketDef.h
 - Linux with systemd: Debian, Ubuntu or Raspberry Pi OS; x86_64, arm64 or armhf
 - DVSI AMBE USB devices (see [Hardware](#hardware)); they use the kernel's `ftdi_sio` driver, no extra driver needed
 - `libspeexdsp-dev` for the noise suppression of analog input and `libwebsockets-dev` for the web dashboard; `build.sh` installs them
-- Low latency to the AMBE devices: tcd runs natively, not in Docker. It can run on the reflector's machine or on another one, e.g. a Raspberry Pi next to the radio gear.
+- Low latency to the AMBE devices: with sticks tcd runs natively, not in Docker (software only, it can, see [tcd in Docker](#tcd-in-docker)). It can run on the reflector's machine or on another one, e.g. a Raspberry Pi next to the radio gear.
 
 ## Hardware
 
@@ -124,6 +125,20 @@ CodecDMR    = foo                         # the same for DMR/YSF
 - **Frames**: D-Star as the 9 data bytes of a DV frame, DMR/YSF as the 72 bits of an AMBE2+ frame in air order, MSB first, the formats the DVSI devices use.
 
 No codec plugin is part of this repository: software implementations of AMBE and AMBE2+ may touch patents (AMBE2+ half rate, US 8,359,197, projected to run until 2028-05-20), so whether to build and use one is the operator's decision. A plugin for D-Star and DMR/YSF with [mbelib-neo](https://github.com/arancormonk/mbelib-neo) is [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin); read its patent notice first.
+
+## tcd in Docker
+
+Without AMBE sticks, tcd can run in a container next to urfd: everything in software with a [codec plugin](#codec-plugins) for D-Star and DMR. The DVSI sticks are no case for Docker: their timing needs tcd to run natively (see [Requirements](#requirements)), so the image has no device access.
+
+```bash
+cd ~/urfd
+git clone https://github.com/jcmerg/tcd-mbelib-neo-plugin.git tcd/plugins/mbelib-neo   # read its patent notice first
+sudo mkdir -p /opt/urfd/tcd && sudo cp tcd/config/tcd.ini /opt/urfd/tcd/tcd.ini
+sudo nano /opt/urfd/tcd/tcd.ini
+cd docker && sudo docker compose --profile tcd build && sudo docker compose --profile tcd up -d
+```
+
+In `tcd.ini`: `ServerAddress = 127.0.0.1` (the container uses the host's network), `Modules` as many as wanted, `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so`, no `DeviceSerial`, and a `MonitorHttpPort` that is free on the host. In `urfd.ini`: `[Transcoder] Modules = auto`, so tcd's list alone decides. The image builds every `tcd/plugins/<name>/` with a `Makefile` (git ignores that directory); `$URFD_DATA/tcd/` (default `/opt/urfd/tcd`) holds `tcd.ini`, writable for the monitor's Save. To update: `git pull`, then the same `build` and `up -d`. Without `--profile tcd`, `docker compose` keeps to urfd alone.
 
 ## Selecting the AMBE devices
 

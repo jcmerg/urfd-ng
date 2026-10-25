@@ -1,0 +1,57 @@
+## tcd, the transcoder, in Docker: for software only operation with a codec
+## plugin (tcd/plugins/<name>/, see tcd/plugins/README.md). The DVSI AMBE sticks
+## need tcd to run natively for their timing, see "tcd in Docker" in tcd/README.md.
+##
+##   cd docker && docker compose --profile tcd build tcd
+
+## ----- Build Stage -----
+FROM ubuntu:24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    g++ \
+    make \
+    cmake \
+    curl \
+    ca-certificates \
+    python3 \
+    libspeexdsp-dev \
+    libwebsockets-dev \
+    libncurses-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY reflector/ ./reflector/
+COPY tcd/ ./tcd/
+
+WORKDIR /build/tcd
+RUN make clean >/dev/null 2>&1 || true; make -j$(nproc)
+
+# the codec plugins in tcd/plugins/<name>/, each with a Makefile taking TCD=
+RUN set -e; mkdir -p /build/plugin-lib; \
+    for d in /build/tcd/plugins/*/; do \
+        [ -f "$d/Makefile" ] || continue; \
+        make -C "$d" -j$(nproc) TCD=/build/tcd; \
+        cp "$d"*.so /build/plugin-lib/; \
+    done
+
+## ----- Runtime Stage -----
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libspeexdsp1 \
+    libwebsockets19t64 \
+    libncurses6 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/tcd/tcd /build/tcd/tcdmon /usr/local/bin/
+COPY --from=builder /build/plugin-lib/ /usr/local/lib/tcd/
+COPY tcd/config/tcd.ini /usr/local/share/tcd/tcd.ini.template
+
+# tcd.ini comes from the host ($URFD_DATA/tcd/tcd.ini, see docker-compose.yml)
+CMD ["/usr/local/bin/tcd", "/usr/local/etc/tcd/tcd.ini"]

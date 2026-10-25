@@ -1,0 +1,16 @@
+# Only reflector/ (the shared sources) and tcd/ go into the tcd image
+.git
+.claude
+dashboard
+dashboard-ws
+docs
+docker
+config
+plugins
+**/*.o
+**/*.d
+**/*.so
+tcd/tcd
+tcd/tcdmon
+# built in the image, for its architecture
+tcd/plugins/*/mbelib-neo-*
