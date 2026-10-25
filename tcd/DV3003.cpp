@@ -145,7 +145,7 @@ void CDV3003::PushWaitingPacket(unsigned int channel, std::shared_ptr<CTranscode
 
 std::shared_ptr<CTranscoderPacket> CDV3003::PopWaitingPacket(unsigned int channel)
 {
-	return waiting_packet[channel].pop();
+	return waiting_packet[channel].try_pop();
 }
 
 bool CDV3003::SendAudio(const uint8_t channel, const int16_t *audio) const
@@ -204,8 +204,19 @@ bool CDV3003::SendData(const uint8_t channel, const uint8_t *data) const
 void CDV3003::ProcessPacket(const SDV_Packet &p)
 {
 	unsigned int channel = p.field_id - PKT_CHANNEL0;
+	if (channel >= 3)
+	{
+		dump("ReadDevice() ERROR: a packet for no channel:", &p, packet_size(p));
+		return;
+	}
 	auto packet = PopWaitingPacket(channel);
-	if (packet)
+	if (!packet)
+	{
+		// a blocking wait here held up the reader for good: nothing that will come
+		// answers it, and every channel of the device stood still
+		std::cerr << description << " channel " << channel << ": an answer without a packet waiting for it, dropped" << std::endl;
+		return;
+	}
 	{
 		Encoding ch_enc = GetChannelEncoding(channel);
 

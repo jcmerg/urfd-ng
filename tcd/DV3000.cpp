@@ -52,7 +52,7 @@ void CDV3000::PushWaitingPacket(unsigned int /* channel */, std::shared_ptr<CTra
 
 std::shared_ptr<CTranscoderPacket> CDV3000::PopWaitingPacket(unsigned int /* channel */)
 {
-	return waiting_packet.pop();
+	return waiting_packet.try_pop();
 }
 
 bool CDV3000::SendAudio(const uint8_t /*channel*/, const int16_t *audio) const
@@ -115,7 +115,13 @@ bool CDV3000::SendData(const uint8_t /* channel */, const uint8_t *data) const
 void CDV3000::ProcessPacket(const SDV_Packet &p)
 {
 	auto packet = PopWaitingPacket(PKT_CHANNEL0);
-	if (packet)
+	if (!packet)
+	{
+		// a blocking wait here held up the reader for good: nothing that will come
+		// answers it, and every module of the device stood still
+		std::cerr << description << ": an answer without a packet waiting for it, dropped" << std::endl;
+		return;
+	}
 	{
 		if (PKT_CHANNEL == p.header.packet_type)
 		{
