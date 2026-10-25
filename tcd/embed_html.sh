@@ -9,7 +9,11 @@ echo "" >> "$OUTPUT"
 # the dashboard's Saira font goes in as a data URI, so the page needs nothing from outside
 FONT="../dashboard/fonts/saira-latin.woff2"
 B64=""
-[ -f "$FONT" ] && B64=$(base64 < "$FONT" | tr -d '\n')
+if [ -f "$FONT" ]; then
+    B64=$(base64 < "$FONT" | tr -d '\n')
+else
+    echo "embed_html.sh: $FONT is missing, the monitor page falls back to other fonts" >&2
+fi
 HTML=$(cat "$INPUT")
 echo -n 'extern const char monitor_html[] = R"RAWHTML(' >> "$OUTPUT"
 printf '%s\n' "${HTML//\/\*SAIRA_WOFF2\*\//$B64}" >> "$OUTPUT"

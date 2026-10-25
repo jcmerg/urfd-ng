@@ -1,7 +1,8 @@
-# Only reflector/ (the shared sources) and tcd/ go into the tcd image
+# Only reflector/ (the shared sources), tcd/ and the monitor's font go into the tcd image
 .git
 .claude
 dashboard
+!dashboard/fonts/saira-latin.woff2
 dashboard-ws
 docs
 docker
