@@ -171,7 +171,8 @@ std::string CMonitorServer::BuildStatsJson()
 	   << ",\"pkts_rx\":" << g_Stats.reflector.packets_rx.load(std::memory_order_relaxed)
 	   << ",\"pkts_tx\":" << g_Stats.reflector.packets_tx.load(std::memory_order_relaxed)
 	   << "},\"config\":{"
-	   << "\"agc_enabled\":" << (g_Stats.config.agc_enabled.load() ? "true" : "false")
+	   << "\"monitor_view\":" << g_Stats.config.monitor_view.load()
+	   << ",\"agc_enabled\":" << (g_Stats.config.agc_enabled.load() ? "true" : "false")
 	   << ",\"agc_target\":" << g_Stats.config.agc_target.load()
 	   << ",\"agc_attack\":" << g_Stats.config.agc_attack.load()
 	   << ",\"agc_release\":" << g_Stats.config.agc_release.load()
@@ -359,6 +360,14 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 			reply = "{\"status\":\"ok\"}";
 			return 200;
 		}
+	}
+	else if (uri == "/api/view" && !body.empty())
+	{
+		// POST {"view": "auto"|"cards"|"compact"}: the module view for every browser; Save keeps it
+		const int v = body.find("\"compact\"") != std::string::npos ? 2 : body.find("\"cards\"") != std::string::npos ? 1 : 0;
+		g_Stats.config.monitor_view.store(v);
+		reply = "{\"status\":\"ok\"}";
+		return 200;
 	}
 	else if (uri == "/api/save")
 	{
@@ -650,8 +659,11 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 
 	std::ostringstream out;
 	std::string line;
-	// the codec choice: replaced where it stands, else written at the end when there is a choice
-	bool codecDStarWritten = false, codecDmrWritten = false;
+	// the codec choice: replaced where it stands, else written at the end when there is a choice;
+	// the module view likewise, written when it is not auto
+	bool codecDStarWritten = false, codecDmrWritten = false, viewWritten = false;
+	static const char *views[] = { "auto", "cards", "compact" };
+	const int view = std::clamp(g_Stats.config.monitor_view.load(), 0, 2);
 	while (std::getline(in, line))
 	{
 		// Check if this line matches a configurable key
@@ -685,6 +697,7 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 				if (key == "OutputGainM17")    { out << key << " = " << g_Stats.config.outgain_m17.load() << "\n"; continue; }
 				if (key == "DmrGainMode")      { int m = g_Stats.config.dmr_gain_mode.load(); out << key << " = " << (m==2 ? "reencode" : m==1 ? "ambe" : "off") << "\n"; continue; }
 				if (key == "AmbeGainDb")       { out << key << " = " << g_Stats.config.ambe_gain_db.load() << "\n"; continue; }
+				if (key == "MonitorView") { out << key << " = " << views[view] << "\n"; viewWritten = true; continue; }
 				if (key == "CodecDStar" && !g_Stats.dstar_options.empty()) { out << key << " = " << g_Stats.dstar_options[g_Stats.config.codec_dstar.load()] << "\n"; codecDStarWritten = true; continue; }
 				if (key == "CodecDMR" && !g_Stats.dmr_options.empty())     { out << key << " = " << g_Stats.dmr_options[g_Stats.config.codec_dmr.load()] << "\n"; codecDmrWritten = true; continue; }
 				if (key == "AGC")               { out << key << " = " << (g_Stats.config.agc_enabled.load() ? "true" : "false") << "\n"; continue; }
@@ -714,6 +727,8 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 		out << "CodecDStar = " << g_Stats.dstar_options[g_Stats.config.codec_dstar.load()] << "\n";
 	if (!codecDmrWritten && g_Stats.dmr_options.size() > 1)
 		out << "CodecDMR = " << g_Stats.dmr_options[g_Stats.config.codec_dmr.load()] << "\n";
+	if (!viewWritten && view != 0)
+		out << "MonitorView = " << views[view] << "\n";
 
 	std::ofstream of(ini_path);
 	if (!of.is_open()) return false;

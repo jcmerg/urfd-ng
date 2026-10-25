@@ -255,10 +255,11 @@ ask_reflector() {
 
 ask_tc_modules() {
     echo
-    echo "Transcoded modules get audio converted between all modes. Each one needs"
-    echo "AMBE capacity: one device (with a codec plugin for DMR) handles 1 module,"
-    echo "DV3000+DV3003 handle 2, two DV3000 1, two DV3003 up to 3."
-    ask TC_MODULES "Transcoded modules" "${MODULES:0:1}" "^[$MODULES]{1,3}$" "1 to 3 letters out of $MODULES."
+    echo "Transcoded modules get audio converted between all modes. The AMBE devices"
+    echo "handle: one device 1 module (with a codec plugin for DMR), DV3000+DV3003 2,"
+    echo "two DV3000 1, two DV3003 up to 3; more modules need a codec plugin for D-Star"
+    echo "and DMR (not part of this repository, see 'Codec plugins' in tcd/README.md)."
+    ask TC_MODULES "Transcoded modules" "${MODULES:0:1}" "^[$MODULES]{1,26}$" "Letters out of $MODULES."
 }
 
 ask_transcoder() {
@@ -268,8 +269,9 @@ ask_transcoder() {
         TCD_SERVER="127.0.0.1"
     else
         ask TCD_SERVER "IP address or host name of the reflector" "" '^[0-9a-fA-F:]+$|^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$' "Please enter an IP address or a host name."
-        echo "Enter the transcoded modules exactly as in the reflector's urfd.ini [Transcoder] Modules."
-        ask TC_MODULES "Transcoded modules" "A" '^[A-Z]{1,3}$' "1 to 3 capital letters."
+        echo "Enter the modules to transcode: any of the reflector's modules when its urfd.ini"
+        echo "says [Transcoder] Modules = auto (setup.sh writes that), else exactly that list."
+        ask TC_MODULES "Transcoded modules" "A" '^[A-Z]{1,26}$' "Capital letters A-Z."
         echo "Enter the reflector's urfd.ini [Transcoder] Password, empty if it has none."
         ask TC_PASSWORD "Transcoder password" "" '^[^#[:space:]]*$' "No '#' and no spaces."
     fi
@@ -277,13 +279,17 @@ ask_transcoder() {
     echo "Which AMBE hardware is plugged in?"
     echo "  1) one device: a DV3000 / ThumbDV or a DV3003   (DMR/YSF then needs a codec plugin)"
     echo "  2) two devices: DV3000 + DV3003, two DV3000 or two DV3003"
-    ask HW "Choice" "1" '^[12]$' "Please enter 1 or 2."
-    if [ "$HW" = "1" ]; then
-        warn "a single device needs a codec plugin for DMR/YSF, which is not part of this repository: add 'CodecPlugin = <path>' to $TCD_INI, tcd does not start without it (see tcd/CodecPlugin.h)"
-        if [ ${#TC_MODULES} -gt 1 ]; then
-            warn "a single device handles one transcoded module, only ${TC_MODULES:0:1} will be transcoded"
-            TC_MODULES=${TC_MODULES:0:1}
-        fi
+    echo "  3) none: D-Star and DMR/YSF from a codec plugin, in software"
+    ask HW "Choice" "1" '^[123]$' "Please enter 1, 2 or 3."
+    # how many modules the devices cover; the rest needs a codec plugin
+    local cover=1
+    [ "$HW" = "2" ] && cover=3
+    [ "$HW" = "3" ] && cover=0
+    if [ "$HW" != "2" ] || [ ${#TC_MODULES} -gt $cover ]; then
+        warn "this needs a codec plugin (CodecPlugin = <path> in $TCD_INI), which is not part of this repository and not installed by setup.sh; tcd does not start without it. See 'Codec plugins' in tcd/README.md, e.g. https://github.com/jcmerg/tcd-mbelib-neo-plugin (read its patent notice)"
+    fi
+    if [ "$HW" = "2" ] && [ ${#TC_MODULES} -gt 1 ]; then
+        echo "  (DV3000 + DV3003 cover 2 modules, two DV3000 1, two DV3003 3; tcd tells which at start)"
     fi
 }
 
@@ -316,7 +322,8 @@ write_urfd_config() {
 
     if [ -n "$TC_MODULES" ]; then
         set_ini "$ini" Transcoder Port 10100
-        set_ini "$ini" Transcoder Modules "$TC_MODULES"
+        # tcd's Modules decide (urfd 4.25.0): a module is transcoded while tcd is connected for it
+        set_ini "$ini" Transcoder Modules auto
         if [ "$TCD_REMOTE" = true ]; then
             set_ini "$ini" Transcoder BindingAddress 0.0.0.0
             set_ini "$ini" Transcoder Password "$TC_PASSWORD"

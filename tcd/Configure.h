@@ -64,6 +64,8 @@ public:
 	const std::string &GetMonitorBindAddress(void) const { return monitor_bind; }
 	uint16_t GetMonitorHttpPort(void) const  { return monitor_http_port; }
 	uint16_t GetMonitorStatsPort(void) const { return monitor_stats_port; }
+	// the monitor's module view: 0 = auto (compact from five modules on), 1 = cards, 2 = compact
+	int      GetMonitorView(void) const      { return monitor_view; }
 	bool     GetMonitorEnabled(void) const   { return monitor_enabled; }
 	const std::string &GetIniPath(void) const { return ini_path; }
 	// the part of OutputGainDMR (dB) that non-DMR sources get through b2 in the AMBE2+ frame after the encoder
@@ -106,6 +108,7 @@ private:
 	float agc_analog_gatefloor  = 0.0f;    // SVX/USRP: gain with the gate closed (dB), the noise suppression lowers the pauses
 	float agc_analog_noisesuppress = -10.0f; // SVX/USRP: speexdsp noise suppression (dB, 0 = off)
 	bool     monitor_enabled    = true;
+	int      monitor_view       = 0;
 	std::string monitor_bind    = "127.0.0.1";   // the monitor has no password
 	uint16_t monitor_http_port  = 8080;
 	uint16_t monitor_stats_port = 8081;

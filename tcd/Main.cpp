@@ -97,6 +97,7 @@ int main(int argc, char *argv[])
 		g_Stats.config.dmr_gain_mode.store((int)mode);
 	}
 	g_Stats.config.ambe_gain_db.store(g_Conf.GetAmbeGainDb());
+	g_Stats.config.monitor_view.store(g_Conf.GetMonitorView());
 
 	// Start monitor server (web dashboard + stats socket)
 	if (g_Conf.GetMonitorEnabled())

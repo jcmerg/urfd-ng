@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.9.0** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.10.4** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF (AMBE2+), and software vocoders for M17 (Codec2) and P25/NXDN (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF in software. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -168,7 +168,7 @@ tcd opens the devices through the kernel's `ftdi_sio` driver and sets their USB 
 | `ServerAddress` | `127.0.0.1` | IP address or host name of the urfd reflector; a host name is resolved again on every reconnect (since 0.7.4) |
 | `Port` | `10100` | the reflector's `[Transcoder] Port` |
 | `Password` | — | the reflector's `[Transcoder] Password`, needed when it has one (since 0.8.0) |
-| `Modules` | `FS` | transcoded modules, the same letters as the reflector's `[Transcoder] Modules` |
+| `Modules` | `FS` | transcoded modules; with the reflector's `[Transcoder] Modules = auto` (urfd 4.25.0) any of its modules, this list alone decides; else the same letters as there |
 | `DeviceSerial` | — | AMBE device to use, one line each (see [above](#selecting-the-ambe-devices)) |
 
 ### Gains
@@ -296,7 +296,7 @@ The gain limits are asymmetric on purpose: attenuating is safe, amplifying also 
 
 - in the look of the urfd dashboard (since 0.4.0): an amber LCD per module with the input codec, the targets and the AGC state, light and dark theme; the Saira font is built into the page, so it loads nothing from outside
 - LCD bar graphs before and after the AGC, with peak hold and the AGC target marked
-- for many modules a compact view (from five modules on, or chosen with "Compact"): a key per module with its codec and level, full cards only for the modules on the air and for the ones clicked to keep open; the choice stays in the browser
+- for many modules a compact view (from five modules on, or chosen with "Compact"): a key per module with its codec and level, full cards only for the modules on the air and for the ones clicked to keep open; tcd keeps the view for every browser (`MonitorView`, written by Save), the pinned modules stay in the browser
 - signal path of the active stream with the level at each stage
 - AGC and gain controls that apply immediately, and a button to save them to `tcd.ini`
 - DVSI devices: serial, type, role, channels in use and their modules, buffer depth

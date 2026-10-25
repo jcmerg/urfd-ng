@@ -59,6 +59,7 @@
 #define MONITORBIND    "MonitorBindAddress"
 #define MONITORHTTP    "MonitorHttpPort"
 #define MONITORSTATS   "MonitorStatsPort"
+#define MONITORVIEW    "MonitorView"
 #define STATSLOG       "StatsLog"
 #define STATSLOGDIR    "StatsLogDir"
 #define STATSLOGRETAIN "StatsLogRetain"
@@ -222,6 +223,13 @@ bool CConfigure::ReadData(const std::string &path)
 			monitor_bind = value;
 		else if (0 == key.compare(MONITORHTTP))
 			monitor_http_port = (uint16_t)std::stoul(value);
+		else if (0 == key.compare(MONITORVIEW))
+		{
+			if (value == "cards") monitor_view = 1;
+			else if (value == "compact") monitor_view = 2;
+			else if (value == "auto") monitor_view = 0;
+			else std::cerr << "Warning: unknown " << MONITORVIEW << " '" << value << "', using 'auto'" << std::endl;
+		}
 		else if (0 == key.compare(MONITORSTATS))
 			monitor_stats_port = (uint16_t)std::stoul(value);
 		else if (0 == key.compare(STATSLOG))

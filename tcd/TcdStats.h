@@ -123,6 +123,7 @@ public:
 		std::atomic<int>   ambe_gain_db{-2};
 		std::atomic<int>   codec_dstar{0};     // index into dstar_options
 		std::atomic<int>   codec_dmr{0};       // index into dmr_options
+		std::atomic<int>   monitor_view{0};    // 0 auto, 1 cards, 2 compact
 	} config;
 
 	// Module name list (set at startup)

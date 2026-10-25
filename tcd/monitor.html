@@ -402,13 +402,18 @@ function makeCard(mod) {
 }
 
 // the view: Cards (every module as a card) or Compact (a key per module, cards for
-// the active and the pinned ones); without a choice Compact from five modules on
-var view = null, pinned = {};
-try { view = localStorage.getItem('tcd-view'); pinned = JSON.parse(localStorage.getItem('tcd-pinned') || '{}') || {}; } catch (e) {}
-function compactView() { return view ? view === 'compact' : Object.keys(cards).length > 4; }
+// the active and the pinned ones); tcd keeps it (MonitorView in tcd.ini, Save), so
+// every browser shows the same; auto = Compact from five modules on. The pinned
+// modules stay in this browser.
+var pinned = {};
+try { pinned = JSON.parse(localStorage.getItem('tcd-pinned') || '{}') || {}; } catch (e) {}
+function compactView() {
+  var v = data && data.config ? data.config.monitor_view : 0;
+  return v === 2 || (v !== 1 && Object.keys(cards).length > 4);
+}
 function setView(v) {
-  view = v;
-  try { localStorage.setItem('tcd-view', v); } catch (e) {}
+  if (data && data.config) data.config.monitor_view = v === 'compact' ? 2 : 1;
+  post('/api/view', { view: v });
   render();
 }
 $('view-cards').addEventListener('click', function () { setView('cards'); });
