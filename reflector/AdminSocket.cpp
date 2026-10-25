@@ -856,7 +856,8 @@ nlohmann::json CAdminSocket::CmdStatus(void)
 	status["reflector"] = g_Configure.GetString(g_Keys.names.callsign);
 	status["version"] = g_Version.GetVersion();
 	status["modules"] = g_Reflector.GetModules();
-	status["tc_modules"] = g_Configure.GetString(g_Keys.tc.modules);
+	status["tc_modules"] = g_Reflector.GetTranscodedModules();	// transcoded now
+	status["tc_auto"] = g_Configure.GetBoolean(g_Keys.tc.automatic);
 
 	// Report which protocols are active and their block lists
 	auto &protocols = g_Reflector.GetProtocols();
@@ -1043,7 +1044,8 @@ nlohmann::json CAdminSocket::CmdTCStats(void)
 	result["status"] = "ok";
 	result["modules"] = nlohmann::json::array();
 
-	const std::string tcModules = g_Configure.GetString(g_Keys.tc.modules);
+	// with Modules = auto every module may be transcoded: list those tcd is connected for
+	const std::string tcModules = g_Configure.GetBoolean(g_Keys.tc.automatic) ? g_Reflector.GetTranscodedModules() : g_Configure.GetString(g_Keys.tc.modules);
 
 	for (char mod : tcModules)
 	{

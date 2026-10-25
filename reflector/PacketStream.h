@@ -81,6 +81,7 @@ protected:
 	CDvHeaderPacket     m_DvHeader;
 	std::shared_ptr<CClient> m_OwnerClient;
 	std::unique_ptr<CCodecStream> m_CodecStream;
+	bool             m_Transcode = false;	// this stream goes through the transcoder (decided when it opens)
 	uint32_t            m_uiSourceTG;
 	CDStarDprs          m_Dprs;
 };

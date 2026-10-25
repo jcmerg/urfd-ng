@@ -77,8 +77,7 @@ static nlohmann::json BuildInitialConnectPayload()
 		else
 			moduleEntry["on_air"] = nullptr;
 
-		auto tcmods = g_Configure.GetString(g_Keys.tc.modules);
-		moduleEntry["transcoded"] = (tcmods.find(module) != std::string::npos);
+		moduleEntry["transcoded"] = g_Reflector.IsTranscoded(module);
 
 		int modIdx = module - 'A';
 		if (!g_Configure.Contains(g_Keys.dmrplus.enable) || g_Configure.GetBoolean(g_Keys.dmrplus.enable))

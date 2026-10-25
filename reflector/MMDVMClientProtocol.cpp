@@ -100,7 +100,8 @@ bool CMMDVMClientProtocol::Initialize(const char *type, const EProtocol ptype, c
 
 bool CMMDVMClientProtocol::Transcoded(char module) const
 {
-	return m_TCModules.find(module) != std::string::npos;
+	// with [Transcoder] Modules = auto only while tcd is connected for the module
+	return m_TCModules.find(module) != std::string::npos && g_Reflector.IsTranscoded(module);
 }
 
 bool CMMDVMClientProtocol::IsSourceClientBlocked(const CClient &client) const
