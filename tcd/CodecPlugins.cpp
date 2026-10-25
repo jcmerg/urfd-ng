@@ -50,7 +50,10 @@ void *CSoftCodec::State(uint16_t streamid)
 		}
 		void *state = m_Plugin->open(m_Codec);
 		if (!state)
+		{
+			std::cerr << "Codec plugin " << m_Plugin->name << ": no state for stream " << streamid << ", its frames stay empty" << std::endl;
 			return nullptr;
+		}
 		it = m_States.emplace(streamid, SState{ state, now }).first;
 	}
 	it->second.last_used = now;
@@ -124,6 +127,14 @@ bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vecto
 			dlclose(handle);
 			return true;
 		}
+		// the name chooses the plugin (CodecDStar/CodecDMR, the monitor), so it must be unique
+		for (const auto &l : m_Loaded)
+			if (std::string(l.plugin->name) == plugin->name)
+			{
+				std::cerr << "ERROR: CodecPlugin " << path << ": a plugin named " << plugin->name << " is loaded already (from " << l.path << ")" << std::endl;
+				dlclose(handle);
+				return true;
+			}
 		m_Loaded.push_back({ path, handle, plugin, false, std::make_shared<std::mutex>() });
 	}
 
