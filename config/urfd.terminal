@@ -1,0 +1,24 @@
+##############################################################################
+#  URFD G3 Terminal Options
+#
+#  Configures Icom Terminal/Access Point mode (G3 protocol).
+#  One option per line.
+#
+#  Options:
+#    address <ip>       Public IP for terminal route responder.
+#                        Leave unset if running on a public IP.
+#                        Set to public IP if behind NAT/router.
+#    modules <modules>  Modules that accept terminal connections.
+#                        Default: * (all modules)
+#    alias <callsign>   Additional reflector callsign accepted from terminals
+#                        (e.g. to accept both URFxxx and XLXxxx). Repeatable.
+#
+#  Examples:
+#    address 203.0.113.1
+#    modules BCD
+#    alias XLX363
+#
+##############################################################################
+#address 203.0.113.1
+#modules BCD
+#alias XLX363

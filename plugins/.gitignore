@@ -1,0 +1,4 @@
+# plugins built here are not part of this repository
+*
+!.gitignore
+!README.md

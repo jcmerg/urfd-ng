@@ -1,0 +1,54 @@
+# urfd reflector with its dashboard, built from this repository.
+#
+# The image is built from the checkout this file lives in. Configuration and
+# state live outside the checkout, in $URFD_DATA (default /opt/urfd), so a
+# git pull never touches them:
+#   $URFD_DATA/config/                     urfd.ini, interlink, black/whitelist, databases
+#   $URFD_DATA/dashboard/config.inc.php    dashboard settings
+#   $URFD_DATA/xlxd-ch/                    CallingHome state
+#
+# setup.sh in the repository root creates all of this. By hand:
+#   cd docker && docker compose build && docker compose up -d
+name: urfd
+
+services:
+  urfd:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      additional_contexts:
+        optfiles: .
+    image: urfd:latest
+    container_name: urfd
+    network_mode: host
+    restart: unless-stopped
+    # realtime scheduling for steady voice timing
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+    ulimits:
+      rtprio: 99
+      nice: -20
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - ${URFD_DATA:-/opt/urfd}/config:/usr/local/etc/urfd
+      - ${URFD_DATA:-/opt/urfd}/dashboard/config.inc.php:/var/www/urfd-dashboard/pgs/config.inc.php
+      - ${URFD_DATA:-/opt/urfd}/xlxd-ch:/var/lib/xlxd-ch
+      # XML status file shared between urfd and the dashboard
+      - urfd-xml:/var/log
+    # keep the log from filling the disk on a reflector that runs for months
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "pgrep", "urfd"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  urfd-xml:

@@ -1,0 +1,318 @@
+﻿//  Copyright © 2015 Jean-Luc Deltombe (LX3JL). All rights reserved.
+
+// urfd -- The universal reflector
+// Copyright © 2021 Thomas A. Early N7TAE
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+#include "Timer.h"
+#include "Global.h"
+#include "Plugins.h"
+
+////////////////////////////////////////////////////////////////////////////////////////
+// constructor
+
+CGateKeeper::CGateKeeper()
+{
+	keep_running = true;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// destructor
+
+CGateKeeper::~CGateKeeper()
+{
+	Close();
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////////
+// init & close
+
+bool CGateKeeper::Init(void)
+{
+
+	// load lists from files
+	m_WhiteSet.LoadFromFile(g_Configure.GetString(g_Keys.files.white));
+	m_BlackSet.LoadFromFile(g_Configure.GetString(g_Keys.files.black));
+	m_InterlinkMap.LoadFromFile(g_Configure.GetString(g_Keys.files.interlink));
+
+	// reset run flag
+	keep_running = true;
+
+	// start  thread;
+	m_Future = std::async(std::launch::async, &CGateKeeper::Thread, this);
+
+	return true;
+}
+
+void CGateKeeper::ReloadLists(void)
+{
+	m_WhiteSet.LoadFromFile(g_Configure.GetString(g_Keys.files.white));
+	m_BlackSet.LoadFromFile(g_Configure.GetString(g_Keys.files.black));
+	m_InterlinkMap.LoadFromFile(g_Configure.GetString(g_Keys.files.interlink));
+	std::cout << "GateKeeper: lists reloaded" << std::endl;
+}
+
+void CGateKeeper::Close(void)
+{
+	// kill threads
+	keep_running = false;
+	if ( m_Future.valid() )
+	{
+		m_Future.get();
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// authorisations
+
+bool CGateKeeper::MayLink(const CCallsign &callsign, const CIp &ip, EProtocol protocol, char *modules) const
+{
+	bool ok;
+	const std::string base(callsign.GetBase());
+
+	switch (protocol)
+	{
+	// repeaters
+	case EProtocol::dextra:
+	case EProtocol::dplus:
+	case EProtocol::dcs:
+	case EProtocol::dmrplus:
+	case EProtocol::dmrmmdvm:
+	case EProtocol::mmdvmclient:
+	case EProtocol::dcsclient:
+	case EProtocol::dextraclient:
+	case EProtocol::dplusclient:
+	case EProtocol::ysfclient:
+	case EProtocol::ysf:
+	case EProtocol::m17:
+	case EProtocol::p25:
+	case EProtocol::usrp:
+	case EProtocol::nxdn:
+	case EProtocol::g3:
+	case EProtocol::svx:
+		// DCS reflectors (prefix "DCS") must be in interlink map
+		if ( protocol == EProtocol::dcs && base.substr(0, 3) == "DCS" )
+			ok = IsPeerListedOk(base, ip, modules);
+		else
+			ok = IsNodeListedOk(base);
+		break;
+
+	// URF and XLX peer interlinks
+	case EProtocol::xlxpeer:
+	case EProtocol::urf:
+		ok = IsPeerListedOk(base, ip, modules);
+		break;
+
+	// a plugin's nodes, others are unsupported
+	default:
+		ok = IsPluginProtocol(protocol) && IsNodeListedOk(base);
+		break;
+	}
+
+	// report
+	if ( ! ok )
+	{
+		std::cout << "Gatekeeper blocking linking of " << callsign << " @ " << ip << " using protocol " << ProtocolName(protocol) << std::endl;
+	}
+
+	// done
+	return ok;
+}
+
+bool CGateKeeper::MayTransmit(const CCallsign &callsign, const CIp &ip, const EProtocol protocol, char module) const
+{
+	bool ok;
+
+	const std::string base(callsign.GetBase());
+
+	switch (protocol)
+	{
+	// repeaters, protocol specific
+	case EProtocol::any:
+	case EProtocol::dextra:
+	case EProtocol::dplus:
+	case EProtocol::dcs:
+	case EProtocol::dmrplus:
+	case EProtocol::dmrmmdvm:
+	case EProtocol::mmdvmclient:
+	case EProtocol::dcsclient:
+	case EProtocol::dextraclient:
+	case EProtocol::dplusclient:
+	case EProtocol::ysfclient:
+	case EProtocol::ysf:
+	case EProtocol::m17:
+	case EProtocol::p25:
+	case EProtocol::nxdn:
+	case EProtocol::usrp:
+	case EProtocol::g3:
+	case EProtocol::svx:
+		// first check is IP & callsigned listed OK
+		ok = IsNodeListedOk(base);
+		// if not a node, check if it's a DCS peer
+		if ( !ok && protocol == EProtocol::dcs )
+			ok = IsPeerListedOk(base, module);
+		break;
+
+	// URF interlinks
+	case EProtocol::urf:
+	case EProtocol::xlxpeer:
+		ok = IsPeerListedOk(base, module);
+		break;
+
+	// unsupported, but a plugin's nodes
+	case EProtocol::none:
+	default:
+		ok = IsPluginProtocol(protocol) && IsNodeListedOk(base);
+		break;
+	}
+
+	// report
+	if ( !ok )
+	{
+		std::cout << "Gatekeeper blocking transmitting of " << callsign << " @ " << ip << " using protocol " << ProtocolName(protocol) << std::endl;
+	}
+
+	// done
+	return ok;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// thread
+
+void CGateKeeper::Thread()
+{
+	while (keep_running)
+	{
+		// Wait 30 seconds
+		for (int i=0; i<15 && keep_running; i++)
+			std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+
+		// have lists files changed ?
+		if ( m_WhiteSet.NeedReload() )
+		{
+			m_WhiteSet.ReloadFromFile();
+		}
+		if ( m_BlackSet.NeedReload() )
+		{
+			m_BlackSet.ReloadFromFile();
+		}
+		if ( m_InterlinkMap.NeedReload() )
+		{
+			m_InterlinkMap.ReloadFromFile();
+		}
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// operation helpers
+
+bool CGateKeeper::IsNodeListedOk(const std::string &callsign) const
+{
+	bool ok = true;
+
+	// next, check callsign
+	if ( ok )
+	{
+		// first check if callsign is in white list
+		// note if white list is empty, everybody is authorized
+		m_WhiteSet.Lock();
+		if ( ! m_WhiteSet.empty() )
+		{
+			ok = m_WhiteSet.IsMatched(callsign);
+		}
+		m_WhiteSet.Unlock();
+
+		// then check if not blacklisted
+		if (ok)
+		{
+			m_BlackSet.Lock();
+			ok = ! m_BlackSet.IsMatched(callsign);
+			m_BlackSet.Unlock();
+		}
+	}
+
+	// done
+	return ok;
+
+}
+
+// only reflectors in the interlink file may peer, an empty file means none
+bool CGateKeeper::IsPeerListedOk(const std::string &callsign, char module) const
+{
+	m_InterlinkMap.Lock();
+	bool ok = m_InterlinkMap.IsCallsignListed(callsign, module);
+	m_InterlinkMap.Unlock();
+	return ok;
+}
+
+bool CGateKeeper::IsPeerListedOk(const std::string &callsign, const CIp &ip, char *modules) const
+{
+	m_InterlinkMap.Lock();
+	bool ok = m_InterlinkMap.IsCallsignListed(callsign, ip, modules);
+	m_InterlinkMap.Unlock();
+	return ok;
+}
+
+const std::string CGateKeeper::ProtocolName(const EProtocol p) const
+{
+	switch (p) {
+		case EProtocol::any:
+			return "ANY";
+		case EProtocol::dcs:
+			return "DCS";
+		case EProtocol::dextra:
+			return "DExtra";
+		case EProtocol::dmrmmdvm:
+			return "MMDVM DMR";
+		case EProtocol::mmdvmclient:
+			return "MMDVMClient";
+		case EProtocol::dmrplus:
+			return "DMR+";
+		case EProtocol::urf:
+			return "URF";
+		case EProtocol::ysf:
+			return "YSF";
+		case EProtocol::p25:
+			return "P25";
+		case EProtocol::nxdn:
+			return "NXDN";
+		case EProtocol::usrp:
+			return "USRP";
+		case EProtocol::xlxpeer:
+			return "XLXPeer";
+		case EProtocol::g3:
+			return "Icom G3";
+		case EProtocol::svxreflector:
+			return "SvxReflector";
+		case EProtocol::svx:
+			return "SVX";
+		case EProtocol::m17:
+			return "M17";
+		case EProtocol::dplus:
+			return "DPlus";
+		case EProtocol::dcsclient:
+			return "DCSClient";
+		case EProtocol::dextraclient:
+			return "DExtraClient";
+		case EProtocol::dplusclient:
+			return "DPlusClient";
+		case EProtocol::ysfclient:
+			return "YSFClient";
+		default:
+			return IsPluginProtocol(p) && !g_Plugins.GetName(p).empty() ? g_Plugins.GetName(p) : "NONE";
+	}
+}
