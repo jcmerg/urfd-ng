@@ -29,13 +29,8 @@ RUN make clean 2>/dev/null; make -j$(nproc)
 
 # the plugins in plugins/<name>/, each with a Makefile taking URFD= (see Plugins
 # in the README)
-RUN set -e; mkdir -p /build/plugin-lib; \
-    for d in /build/plugins/*/; do \
-        [ -f "$d/Makefile" ] || continue; \
-        make -C "$d" clean >/dev/null 2>&1 || true; \
-        make -C "$d" -j$(nproc) URFD=/build/reflector; \
-        cp "$d"*.so /build/plugin-lib/; \
-    done
+RUN make plugins-clean >/dev/null 2>&1 || true; \
+    make -j$(nproc) plugins-install PLUGINDIR=/build/plugin-lib
 
 ## ----- Runtime Stage -----
 FROM ubuntu:24.04

@@ -103,3 +103,18 @@ uninstall :
 	$(RM) /etc/systemd/system/$(EXE).service
 	systemctl daemon-reload
 	$(RM) $(BINDIR)/$(EXE)
+
+# the protocol plugins in ../plugins/<name>/, each with a Makefile taking URFD=
+# (see Plugins in the README); they must be rebuilt with every urfd update
+PLUGINS = $(patsubst %/Makefile,%,$(wildcard ../plugins/*/Makefile))
+PLUGINDIR ?= /usr/local/lib/urfd
+
+plugins :
+	@for d in $(PLUGINS); do $(MAKE) -C $$d URFD=$(CURDIR) || exit 1; done
+
+plugins-install : plugins
+	mkdir -p $(PLUGINDIR)
+	@for d in $(PLUGINS); do cp -f $$d/*.so $(PLUGINDIR)/ || exit 1; done
+
+plugins-clean :
+	@for d in $(PLUGINS); do $(MAKE) -C $$d clean URFD=$(CURDIR); done

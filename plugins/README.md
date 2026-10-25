@@ -12,9 +12,11 @@ make -C plugins/<name> URFD=$PWD/reflector
 ```
 
 The Docker image builds every `plugins/<name>/` that has a `Makefile` and puts
-the shared objects into `/usr/local/lib/urfd/`. Git ignores everything here but
-this README, so a plugin from elsewhere can sit in its directory without ending
-up in the repository. `urfd.ini` loads a plugin with
+the shared objects into `/usr/local/lib/urfd/`; natively `make plugins` and
+`sudo make plugins-install` in `reflector/` do the same. Git ignores everything
+here but this README, so a plugin from elsewhere can sit in its directory
+without ending up in the repository, best as a `git clone` of its own
+repository: `setup.sh update` pulls such a directory along with urfd. `urfd.ini` loads a plugin with
 
 ```ini
 [Plugins]
