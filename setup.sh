@@ -296,12 +296,11 @@ ask_transcoder() {
     [ "$HW" = "3" ] && cover=0
     if [ "$HW" != "2" ] || [ ${#TC_MODULES} -gt $cover ]; then
         warn "this needs a codec plugin (CodecPlugin = <path> in $TCD_INI), which is not part of this repository and not installed by setup.sh; tcd does not start without it. See 'Codec plugins' in tcd/README.md, e.g. https://github.com/jcmerg/tcd-mbelib-neo-plugin (read its patent notice)"
-        if [ "$TCD_DOCKER" = true ]; then
-            echo "  In Docker: clone it to $REPO_DIR/tcd/plugins/<name>/ now, before the image is built"
-            echo "  (git clone https://github.com/jcmerg/tcd-mbelib-neo-plugin.git $REPO_DIR/tcd/plugins/mbelib-neo),"
-            echo "  then CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so in $TCD_INI"
-            ask_yn "Continue?" y || exit 0
-        fi
+        # Docker and tcd/build.sh build every tcd/plugins/<name>/ with tcd, update pulls it
+        echo "  Clone it to $REPO_DIR/tcd/plugins/<name>/ now, before tcd is built"
+        echo "  (git clone https://github.com/jcmerg/tcd-mbelib-neo-plugin.git $REPO_DIR/tcd/plugins/mbelib-neo),"
+        echo "  then CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so in $TCD_INI"
+        ask_yn "Continue?" y || exit 0
     fi
     if [ "$HW" = "2" ] && [ ${#TC_MODULES} -gt 1 ]; then
         echo "  (DV3000 + DV3003 cover 2 modules, two DV3000 1, two DV3003 3; tcd tells which at start)"

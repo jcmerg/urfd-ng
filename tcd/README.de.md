@@ -41,9 +41,9 @@ cd urfd
 sudo bash tcd/build.sh
 ```
 
-`build.sh` installiert die Build-Werkzeuge, `libspeexdsp-dev` und `libwebsockets-dev`, baut tcd als Eigentümer des Klons und installiert `tcd`, `tcdmon`, `agc-analyze` und die systemd-Unit. Ein laufender tcd wird neu gestartet. Bei der ersten Installation landet die Vorlage unter `/usr/local/etc/tcd.ini`; die bitte anpassen (siehe [Konfiguration](#konfiguration-tcdini)) und mit `sudo systemctl start tcd` starten.
+`build.sh` installiert die Build-Werkzeuge, `libspeexdsp-dev` und `libwebsockets-dev`, baut tcd als Eigentümer des Klons und installiert `tcd`, `tcdmon`, `agc-analyze` und die systemd-Unit. Ein Codec-Plugin in `tcd/plugins/<name>/` (ein `git clone` seines Repositorys, siehe [Codec-Plugins](#codec-plugins)) wird gegen diesen tcd mitgebaut und nach `/usr/local/lib/tcd/` installiert. Ein laufender tcd wird neu gestartet. Bei der ersten Installation landet die Vorlage unter `/usr/local/etc/tcd.ini`; die bitte anpassen (siehe [Konfiguration](#konfiguration-tcdini)) und mit `sudo systemctl start tcd` starten.
 
-Aktualisieren: im Klon `git pull` und `build.sh` erneut aufrufen, oder `sudo ./setup.sh update`.
+Aktualisieren: `sudo ./setup.sh update` (holt auch die Plugin-Klone in `tcd/plugins/`), oder von Hand `git pull` im Klon und in jedem Plugin-Klon, dann `build.sh` erneut aufrufen.
 
 ### Von Hand
 
@@ -126,6 +126,8 @@ CodecDMR    = foo                         # dasselbe für DMR/YSF
 
 Dieses Repository enthält kein Codec-Plugin: Software-Umsetzungen von AMBE und AMBE2+ können Patente berühren (AMBE2+ Halbrate, US 8,359,197, voraussichtlich bis 20.05.2028), ob man eines baut und nutzt, entscheidet der Betreiber. Ein Plugin für D-Star und DMR/YSF mit [mbelib-neo](https://github.com/arancormonk/mbelib-neo) ist [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin); bitte zuerst dessen Patenthinweis lesen.
 
+`tools/` enthält Testwerkzeuge für Plugins (`make` dort): `codectest <plugin.so> dmr|dstar|p25 in.raw out.frames out.raw [option=wert ...]` kodiert und dekodiert 8-kHz-s16le-PCM, gibt die Zeit pro Frame aus und prüft, dass zwei verschachtelte Streams getrennt bleiben; `decode` dekodiert eine Frame-Datei; `dvsitest <Gerät> enc|dec dstar|dmr ein aus` tut dasselbe auf einem DV3003 (tcd gestoppt), um ein Plugin mit der Hardware zu vergleichen.
+
 ## tcd in Docker
 
 tcd läuft genauso gut in einem Container, neben urfd oder auf einem eigenen Rechner: mit AMBE-Sticks oder in Software mit einem [Codec-Plugin](#codec-plugins) für D-Star und DMR. `setup.sh` fragt, ob tcd in Docker oder nativ mit systemd läuft.
@@ -143,7 +145,7 @@ sudo docker/build.sh start
 
 `docker/build.sh` baut und startet, wofür der Rechner eine Konfiguration hat: urfd mit `$URFD_DATA/config/urfd.ini`, tcd mit `$URFD_DATA/tcd/tcd.ini`, es taugt also auch für einen Rechner nur mit tcd. Eine `tcd.ini` mit `DeviceSerial` oder ohne `CodecPlugin` heißt AMBE-Sticks: build.sh nimmt `docker/docker-compose.tcd-sticks.yml` dazu, die dem Container das `/dev` des Hosts nur lesend und die USB-Seriell-Geräte (Major 188) freigibt. tcd findet die Sticks wie nativ über `/dev/serial/by-id`, auch wenn ein Stick nach dem Neueinstecken eine andere Gerätedatei hat, und setzt ihren USB-Latenz-Timer selbst auf 1 ms (per Low-Latency-ioctl, ohne `/sys`; tcd zeigt den Wert beim Start im Log). tcd beendet sich, wenn ihm ein Gerät verloren geht, und der Container startet neu. Im Container: `docker exec -it tcd tcdmon`.
 
-In der `tcd.ini`: `ServerAddress = 127.0.0.1` neben urfd (der Container nutzt das Netz des Hosts), sonst die Adresse des Reflektors; `Modules` so viele wie gewünscht; mit Sticks `DeviceSerial` wie nativ, in Software `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so` und keine `DeviceSerial`; ein `MonitorHttpPort`, der auf dem Host frei ist. In der `urfd.ini`: `[Transcoder] Modules = auto`, dann entscheidet allein die Liste von tcd. Das Image baut jedes `tcd/plugins/<name>/` mit `Makefile` (Git ignoriert das Verzeichnis); die `tcd.ini` ist beschreibbar für „Speichern“ im Monitor. Aktualisieren: `git pull`, dann `docker/build.sh`. Die Container tragen ein Label, das watchtower vom Ersetzen abhält, denn sie werden hier gebaut und nicht geladen.
+In der `tcd.ini`: `ServerAddress = 127.0.0.1` neben urfd (der Container nutzt das Netz des Hosts), sonst die Adresse des Reflektors; `Modules` so viele wie gewünscht; mit Sticks `DeviceSerial` wie nativ, in Software `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so` und keine `DeviceSerial`; ein `MonitorHttpPort`, der auf dem Host frei ist. In der `urfd.ini`: `[Transcoder] Modules = auto`, dann entscheidet allein die Liste von tcd. Das Image baut jedes `tcd/plugins/<name>/` mit `Makefile` (Git ignoriert das Verzeichnis); die `tcd.ini` ist beschreibbar für „Speichern“ im Monitor. Aktualisieren: `sudo ./setup.sh update`, oder von Hand `git pull` im Klon und in jedem Plugin-Klon (`git -C tcd/plugins/<name> pull`), dann `docker/build.sh`. Die Container tragen ein Label, das watchtower vom Ersetzen abhält, denn sie werden hier gebaut und nicht geladen.
 
 Neben urfd reicht der nginx im urfd-Image `/tcd/` an den Monitor weiter (seit 4.26.0), über den TLS-Proxy davor ist er also als `https://<reflektor>/tcd/` erreichbar; der Proxy reicht `/tcd/` mit denselben Upgrade-Headern wie `/ws`, `X-Real-IP` und `X-Forwarded-Proto` weiter. Der Port ist der `MonitorHttpPort` aus `$URFD_DATA/tcd/tcd.ini`: `docker/build.sh` liest ihn und gibt ihn dem urfd-Container als `TCD_MONITOR_PORT` mit (Standard 8080; bei `docker compose` von Hand in der Umgebung setzen). `MonitorBindAddress = 127.0.0.1` reicht dann; `MonitorPassword` setzen. Über HTTPS ist das Session-Cookie `Secure`.
 
