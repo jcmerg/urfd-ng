@@ -653,16 +653,7 @@ void CController::ReadReflectorThread()
 	uint32_t reconf_counter = 0;
 	while (keep_running)
 	{
-		// preemptively check the connection(s)... (a standby module waits while a
-		// stream runs here, see CTCClient::PauseStandby)
-		if (! g_Conf.GetStandbyMods().empty())
-		{
-			bool streaming = false;
-			for (char mod : g_Conf.GetTCMods())
-				if (mod >= 'A' && mod <= 'Z' && g_Stats.modules[mod - 'A'].last_activity.load(std::memory_order_relaxed) < 1.5f)
-					streaming = true;
-			tcClient.PauseStandby(streaming);
-		}
+		// preemptively check the connection(s)...
 		tcClient.ReConnect();
 
 		// Every ~1s: re-read config + age idle modules
