@@ -1519,8 +1519,12 @@ bool CConfigure::ReadData(const std::string &path)
 		{
 			const auto ck = MmdvmClientKeys(n);
 			const std::string name = data[MmdvmClientNameKey(n)].get<std::string>();
+			// the network with the master: a connection to the same master is in its network
+			if (!data.contains(ck.address) && !data.contains(ck.network) && data.contains(base.network))
+				data[ck.network] = data[base.network];
 			for (const auto &[own, shared] : { std::pair<std::string, std::string>{ ck.address, base.address }, { ck.port, base.port },
-					{ ck.password, base.password }, { ck.callsign, base.callsign } })
+					{ ck.password, base.password }, { ck.callsign, base.callsign }, { ck.fallbackdmrid, base.fallbackdmrid },
+					{ ck.software, base.software }, { ck.firmware, base.firmware } })
 				if (!data.contains(own) && data.contains(shared))
 					data[own] = data[shared];
 			const std::string suffixKey = MmdvmClientPrefix(n) + "DmrIdSuffix";
