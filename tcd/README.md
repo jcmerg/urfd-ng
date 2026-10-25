@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.12.1** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.12.2** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF (AMBE2+), and software vocoders for M17 (Codec2) and P25/NXDN (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF in software. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -159,7 +159,7 @@ Modules        = AP      # its own modules
 StandbyModules = FS      # the modules of the tcd with the sticks, while it is gone
 ```
 
-The standby tcd sends the module letter in lower case; the reflector takes it only for a module without a tcd and answers busy otherwise, and a normal connection replaces a standby one. The standby tcd asks again every 3 s, quietly; when asking takes long (a reflector far away), only every 30 s while one of its own streams runs, so asking does not hold those up. A tcd that stops or loses its link hands over within seconds (urfd notices a closed connection on Linux at once); one that vanished without closing its connection (power, network) is noticed by the reflector through TCP keepalive after about 25 s. A stream on the air while a module changes hands is not transcoded until its next transmission. urfd needs `[Transcoder] Modules = auto` (or the letters listed there) and 4.26.0; an older urfd refuses the standby connections, and the tcd says so once.
+The standby tcd sends the module letter in lower case; the reflector takes it only for a module without a tcd and answers busy otherwise, and a normal connection replaces a standby one. The standby tcd asks again every 3 s, quietly, on a thread of its own, so asking never holds up its own streams (since 0.12.2). A tcd that stops or loses its link hands over within seconds (urfd notices a closed connection on Linux at once); one that vanished without closing its connection (power, network) is noticed by the reflector through TCP keepalive after about 25 s. A stream on the air while a module changes hands is not transcoded until its next transmission. urfd needs `[Transcoder] Modules = auto` (or the letters listed there) and 4.26.0; an older urfd refuses the standby connections, and the tcd says so once.
 
 ## Selecting the AMBE devices
 
