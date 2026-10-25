@@ -110,8 +110,9 @@ public:
 	// taken only while no other tcd has them; set it before Open()
 	void SetStandby(const std::string &modules) { m_StandbyModules = modules; }
 	bool IsStandby(char module) const { return std::string::npos != m_StandbyModules.find(module); }
-	// no standby attempts while true: they hold up the thread that reads the
-	// reflector for a few round trips, tcd sets it while one of its streams runs
+	// fewer standby attempts while true, when they take long (a far reflector):
+	// they hold up the thread that reads the reflector for a few round trips;
+	// tcd sets it while one of its streams runs
 	void PauseStandby(bool pause) { m_StandbyPaused.store(pause, std::memory_order_relaxed); }
 
 private:

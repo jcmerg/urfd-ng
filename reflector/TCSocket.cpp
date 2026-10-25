@@ -185,12 +185,19 @@ bool CTCServer::AnyAreClosed()
 			continue;
 		}
 
-		// Actively probe for dead connections (e.g. half-open after network outage)
-		struct pollfd pfd = { m_Pfd[i].fd, POLLIN, 0 };
+		// Actively probe for dead connections (e.g. half-open after network outage),
+		// and on Linux for a tcd that closed its end (stopped): that is only readable
+		// otherwise, and a standby tcd would be told busy until something reads it
+#ifdef POLLRDHUP
+		const short gone = POLLERR | POLLHUP | POLLNVAL | POLLRDHUP;
+#else
+		const short gone = POLLERR | POLLHUP | POLLNVAL;
+#endif
+		struct pollfd pfd = { m_Pfd[i].fd, (short)(POLLIN | gone), 0 };
 		int rv = poll(&pfd, 1, 0);
-		if (rv > 0 && (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)))
+		if (rv > 0 && (pfd.revents & gone))
 		{
-			std::cerr << "Transcoder module '" << m_Modules[i] << "' connection lost (maintenance probe)" << std::endl;
+			std::cerr << "Transcoder module '" << m_Modules[i] << "' connection " << ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) ? "lost" : "closed by the transcoder") << " (maintenance probe)" << std::endl;
 			Close(m_Pfd[i].fd);
 			any = true;
 		}
@@ -835,15 +842,22 @@ void CTCClient::ReConnect() // and sometimes ping
 	for (char m : m_Modules)
 		IsModuleConnected(m);
 
-	// a standby module another tcd has: asked again every few seconds, quietly and
-	// outside the backoff of the others
+	// a standby module another tcd has: asked again every 3 s, quietly and outside
+	// the backoff of the others. Asking holds up this thread for a few round trips:
+	// when that took noticeably long (a reflector far away), tcd asks while one of
+	// its streams runs (PauseStandby) only every 30 s, so a busy module still lets
+	// the standby take over in time
+	static std::chrono::steady_clock::duration last_standby_took {};
 	auto steady = std::chrono::steady_clock::now();
-	if (steady - last_standby >= std::chrono::seconds(3) && ! m_StandbyPaused.load(std::memory_order_relaxed))
+	const bool slow = last_standby_took > std::chrono::milliseconds(20);
+	const auto wait = (slow && m_StandbyPaused.load(std::memory_order_relaxed)) ? std::chrono::seconds(30) : std::chrono::seconds(3);
+	if (steady - last_standby >= wait)
 	{
 		last_standby = steady;
 		for (char m : m_Modules)
 			if (IsStandby(m) && 0 > GetFD(m))
 				Connect(m, false);
+		last_standby_took = std::chrono::steady_clock::now() - steady;
 	}
 
 	// Check if any module needs reconnecting
