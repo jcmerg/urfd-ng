@@ -10,5 +10,6 @@ repository. For example, after reading its patent notice:
 git clone https://github.com/jcmerg/tcd-mbelib-neo-plugin.git tcd/plugins/mbelib-neo
 ```
 
-`setup.sh update` pulls a plugin directory that is a git clone along with the
+Natively `tcd/build.sh` builds them the same way and installs them to
+`/usr/local/lib/tcd/`. `setup.sh update` pulls a plugin directory that is a git clone along with the
 project. See "Codec plugins" and "tcd in Docker" in [tcd/README.md](../README.md).

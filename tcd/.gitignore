@@ -37,3 +37,8 @@ monitor_html.cpp
 !config/tcd.mk
 !config/tcd.service
 !tcd.mk
+
+# test tools built in tools/
+tools/codectest
+tools/decode
+tools/dvsitest

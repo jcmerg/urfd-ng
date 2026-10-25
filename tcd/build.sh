@@ -10,7 +10,8 @@
 # (/dev/serial/by-id), no FTDI D2XX library is needed. Codec2 and the P25 IMBE
 # vocoder are part of the source (codec2/, imbe/); speexdsp, libwebsockets and
 # ncurses come from the distribution. A single AMBE device needs a codec plugin for DMR
-# (CodecPlugin in tcd.ini, see CodecPlugin.h), which is built on its own.
+# (CodecPlugin in tcd.ini, see CodecPlugin.h): every plugins/<name>/ with a Makefile
+# taking TCD= is built here too and installed to /usr/local/lib/tcd/.
 # The urfd sources tcd shares (TCPacketDef.h, TCSocket.*, ...) come from
 # ../reflector in the same repository.
 
@@ -26,6 +27,7 @@ done
 
 TCD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/usr/local/bin"
+PLUGIN_DIR="/usr/local/lib/tcd"
 
 echo "=== Building tcd ==="
 
@@ -72,6 +74,28 @@ echo "Compiling tcd..."
 as_owner make clean
 as_owner make -j"$(nproc)"
 
+# the codec plugins in plugins/<name>/ (git clones, which setup.sh update pulls),
+# built against this tcd's CodecPlugin.h; one that does not build stops here, so
+# tcd is never installed next to a plugin of another interface
+PLUGINS=()
+for d in "$TCD_DIR"/plugins/*/; do
+    [ -f "$d/Makefile" ] || continue
+    if [ "${#PLUGINS[@]}" -eq 0 ]; then
+        for cmd in cmake curl; do
+            command -v $cmd &>/dev/null || { apt-get update && apt-get install -y cmake curl; break; }
+        done
+    fi
+    echo "Compiling the codec plugin in ${d%/}..."
+    as_owner make -C "$d" -j"$(nproc)" TCD="$TCD_DIR"
+    PLUGINS+=("$d")
+done
+install_plugins() {
+    local d
+    [ "${#PLUGINS[@]}" -gt 0 ] || return 0
+    mkdir -p "$PLUGIN_DIR"
+    for d in "${PLUGINS[@]}"; do cp -f "$d"*.so "$PLUGIN_DIR/"; done
+}
+
 # ---------------------------------------------------------------
 # 2. Install
 # ---------------------------------------------------------------
@@ -79,6 +103,7 @@ echo "Installing..."
 if systemctl is-active --quiet tcd 2>/dev/null; then
     systemctl stop tcd
     cp tcd tcdmon "$INSTALL_DIR/"
+    install_plugins
     cp tools/agc-analyze.py "$INSTALL_DIR/agc-analyze"
     chmod +x "$INSTALL_DIR/agc-analyze"
     if [ ! -f /usr/local/etc/tcd.ini ]; then
@@ -94,6 +119,7 @@ if systemctl is-active --quiet tcd 2>/dev/null; then
     echo "=== tcd restarted ==="
 else
     cp tcd tcdmon "$INSTALL_DIR/"
+    install_plugins
     cp tools/agc-analyze.py "$INSTALL_DIR/agc-analyze"
     chmod +x "$INSTALL_DIR/agc-analyze"
     if [ ! -f /usr/local/etc/tcd.ini ]; then
