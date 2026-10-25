@@ -8,6 +8,7 @@
 #include <future>
 #include <string>
 #include <unordered_map>
+#include <chrono>
 #include <libwebsockets.h>
 
 class CMonitorServer
@@ -16,7 +17,7 @@ public:
 	CMonitorServer();
 	~CMonitorServer();
 
-	bool Start(const std::string &bind, uint16_t http_port, uint16_t stats_port);
+	bool Start(const std::string &bind, uint16_t http_port, uint16_t stats_port, const std::string &password);
 	void Stop();
 	bool IsRunning() const { return m_running.load(); }
 
@@ -36,6 +37,7 @@ private:
 		std::string out;		// the response body still to send
 		size_t sent = 0;
 		bool responded = false;	// a POST with Content-Length: 0 also gets HTTP_BODY_COMPLETION
+		std::string cookie;		// a Set-Cookie value for the response (login, logout)
 	};
 	static int Callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 	int Respond(struct lws *wsi);
@@ -45,6 +47,15 @@ private:
 	struct lws_protocols m_Protocols[2];
 	std::unordered_map<struct lws *, SSession> m_Sessions;
 	std::string m_Push;					// the stats being sent to the WebSocket clients
+
+	// MonitorPassword: sessions (cookie token -> last use) and failed logins per address,
+	// used by the service thread only (the stats thread keeps its own failures)
+	std::string m_Password;
+	std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_Tokens;
+	struct SFails { int count = 0; std::chrono::steady_clock::time_point until; };
+	std::unordered_map<std::string, SFails> m_Fails;
+	bool Authorized(struct lws *wsi);
+	int Login(struct lws *wsi, SSession &s);
 	std::atomic<bool> m_PushDue{false};
 
 	// Stats socket (plain TCP, line-delimited JSON)

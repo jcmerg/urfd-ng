@@ -403,9 +403,11 @@ write_tcd_config() {
     info "Writing the transcoder configuration to $TCD_INI"
     mkdir -p "$(dirname "$TCD_INI")"
     cp "$REPO_DIR/tcd/config/tcd.ini" "$TCD_INI"
-    python3 - "$TCD_INI" "$TCD_SERVER" "$TC_MODULES" "$TCD_SERIALS" "${TC_PASSWORD:-}" <<'PY'
+    # a password for the monitor page (and tcdmon from other hosts)
+    TCD_MONITOR_PASSWORD=$(python3 -c 'import secrets, string; print("".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12)))')
+    python3 - "$TCD_INI" "$TCD_SERVER" "$TC_MODULES" "$TCD_SERIALS" "${TC_PASSWORD:-}" "$TCD_MONITOR_PASSWORD" <<'PY'
 import re, sys
-path, server, modules, serials, password = sys.argv[1:6]
+path, server, modules, serials, password, monpass = sys.argv[1:7]
 lines = open(path).read().split('\n')
 out = []
 for l in lines:
@@ -415,6 +417,8 @@ for l in lines:
         l = 'Modules = ' + modules
     elif password and re.match(r'^\s*#?\s*Password\s*=', l):
         l = 'Password = ' + password
+    elif re.match(r'^\s*#?\s*MonitorPassword\s*=', l):
+        l = 'MonitorPassword = ' + monpass
     elif re.match(r'^\s*#?\s*DeviceSerial\s*=', l):
         continue
     out.append(l)
@@ -513,6 +517,7 @@ EOF
    Logs:           journalctl -u tcd -f
    Monitor:        'tcdmon' in a terminal, or http://localhost:8080 on this machine
                    (MonitorBindAddress in tcd.ini opens it to the network)
+   Monitor password: ${TCD_MONITOR_PASSWORD:-see MonitorPassword in $TCD_INI}
 EOF
     fi
     cat <<EOF
