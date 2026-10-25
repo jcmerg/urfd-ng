@@ -5,8 +5,14 @@
 //
 // urfd connects to up to MMDVMCLI_MAX_INSTANCES DMR masters at once:
 // [MMDVMClient] (instance 1, with the keys it always had, "mmdvmcliEnable")
-// and [MMDVMClient2] to [MMDVMClient9] ("mmdvmcli2Enable", ...). Each has its
-// own hotspot ID, two timeslots and TG map.
+// and further connections, either named, [MMDVMClient.<name>] (4.27.0), or
+// numbered, [MMDVMClient2] to [MMDVMClient9] ("mmdvmcli2Enable", ...); the named
+// ones get the instances 2, 3, ... in the order of the file, a file uses one of
+// the two ways. Each has its own hotspot ID, two timeslots and TG map. A named
+// connection takes what it leaves out from [MMDVMClient], and a DmrId of one or
+// two digits (or a name of digits without a DmrId) is a suffix to the DmrId of
+// [MMDVMClient]: [MMDVMClient.50] is hotspot <DmrId>50. [MMDVMClient] without
+// TGs of its own then only gives the shared settings.
 //
 // Connections in the same network (two hotspots on BrandMeister) never pass a
 // call to each other, the network would get it twice. Connections in different
@@ -27,11 +33,21 @@ inline std::string MmdvmClientPrefix(unsigned n)
 	return (n > 1) ? "mmdvmcli" + std::to_string(n) : std::string("mmdvmcli");
 }
 
-// the section and protocol name: "MMDVMClient", "MMDVMClient2", ...
-inline std::string MmdvmClientName(unsigned n)
+// the name of a numbered section and connection: "MMDVMClient", "MMDVMClient2", ...
+inline std::string MmdvmClientDefaultName(unsigned n)
 {
 	return (n > 1) ? "MMDVMClient" + std::to_string(n) : std::string("MMDVMClient");
 }
+
+// where the configuration keeps the name of a named connection ("MMDVMClient.50")
+inline std::string MmdvmClientNameKey(unsigned n)
+{
+	return MmdvmClientPrefix(n) + "Name";
+}
+
+// in urfd (MMDVMClientProtocol.cpp, from g_Configure): the name of instance n, its
+// section's name for a named one, else MmdvmClientDefaultName(n)
+std::string MmdvmClientName(unsigned n);
 
 // 1 for "MMDVMClient", 2 to MMDVMCLI_MAX_INSTANCES for "MMDVMClient2" ..., else 0
 inline unsigned MmdvmClientInstance(const std::string &name)
@@ -43,15 +59,11 @@ inline unsigned MmdvmClientInstance(const std::string &name)
 	return 0;
 }
 
-// 1 to MMDVMCLI_MAX_INSTANCES for "MMDVMClient1" ... "MMDVMClient9", the name of one
-// connection in BlockProtocols and the admin block commands, else 0; there plain
+// in urfd (MMDVMClientProtocol.cpp): 1 to MMDVMCLI_MAX_INSTANCES for "MMDVMClient1" ...
+// "MMDVMClient9" or the name of a named connection ("MMDVMClient.50"), the name of
+// one connection in BlockProtocols and the admin commands, else 0; there plain
 // "MMDVMClient" means every connection
-inline unsigned MmdvmClientConnection(const std::string &name)
-{
-	if (name.size() == 12 && name.compare(0, 11, "MMDVMClient") == 0 && name[11] >= '1' && name[11] <= '0' + MMDVMCLI_MAX_INSTANCES)
-		return unsigned(name[11] - '0');
-	return 0;
-}
+unsigned MmdvmClientConnection(const std::string &name);
 
 inline SJsonKeys::MMDVMCLIENT MmdvmClientKeys(unsigned n)
 {

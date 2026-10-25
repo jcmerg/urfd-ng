@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert. Ursprünglich für den Reflektor URF363 entwickelt.
 
-**urfd 4.26.0-dht** | tcd 0.11.0 | Dashboard v2.14.0
+**urfd 4.27.0-dht** | tcd 0.11.0 | Dashboard v2.14.0
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -106,27 +106,41 @@ TG91 = A,TS2                        # Worldwide -> Module A (primary)
 - **Dynamische TG entfernen**: Wird per API bei BM gelöscht
 - Ohne API-Schlüssel gilt wie bisher das Kerchunk-Verfahren
 
-**Mehrere Verbindungen** (4.21.0): `[MMDVMClient2]` bis `[MMDVMClient9]` neben `[MMDVMClient]`, mit denselben Schlüsseln. Jede ist ein eigener Hotspot mit zwei Zeitschlitzen und eigener TG-Liste. So können mehr Module gleichzeitig mit BrandMeister sprechen (ein Ruf je Zeitschlitz und Verbindung), oder der Reflektor hängt sich an weitere Netze (TGIF, FreeDMR, ...). Jede Verbindung braucht eine eigene Hotspot-ID (z. B. die DMR-ID mit den Endungen `01`, `02`, ...); ein BrandMeister-Hotspot-Passwort gilt für alle. Was eine weitere Sektion weglässt (`Latitude`, `Longitude`, `Location`, `Description`, `URL`, `RxFreq`, `TxFreq`), kommt aus `[MMDVMClient]`: BrandMeister trennt einen Hotspot, der die nackten Standardwerte schickt. Eine Verbindung im Netz von `[MMDVMClient]` ohne eigenen `BrandMeisterApiKey` nutzt dessen Schlüssel (er gilt für alle Hotspots des Kontos): BrandMeister übernimmt die TGs aus den Login-Optionen nicht, erst die API macht sie auf dem neuen Hotspot statisch.
+**Mehrere Verbindungen** (4.21.0, mit Namen seit 4.27.0): weitere Sektionen neben `[MMDVMClient]`, höchstens 9 Verbindungen. Jede ist ein eigener Hotspot mit zwei Zeitschlitzen und eigener TG-Liste. So können mehr Module gleichzeitig mit BrandMeister sprechen (ein Ruf je Zeitschlitz und Verbindung), oder der Reflektor hängt sich an weitere Netze (TGIF, FreeDMR, ...). Jede Verbindung braucht eine eigene Hotspot-ID (z. B. die DMR-ID mit den Endungen `01`, `02`, ...); ein BrandMeister-Hotspot-Passwort gilt für alle. Was eine weitere Sektion weglässt (`Latitude`, `Longitude`, `Location`, `Description`, `URL`, `RxFreq`, `TxFreq`), kommt aus `[MMDVMClient]`: BrandMeister trennt einen Hotspot, der die nackten Standardwerte schickt. Eine Verbindung im Netz von `[MMDVMClient]` ohne eigenen `BrandMeisterApiKey` nutzt dessen Schlüssel (er gilt für alle Hotspots des Kontos): BrandMeister übernimmt die TGs aus den Login-Optionen nicht, erst die API macht sie auf dem neuen Hotspot statisch.
 
 ```ini
-[MMDVMClient2]
+[MMDVMClient]                       # die gemeinsamen Einstellungen der Verbindungen darunter
 Enable = true
 MasterAddress = 2622.master.brandmeister.network
 MasterPort = 62031
-DmrId = 123456702                   # eine zweite Hotspot-ID
+DmrId = 1234567                     # deine DMR-ID; die Verbindungen hängen ihre Endung an
 Password = changeme
 Callsign = N0CALL
-# Network = brandmeister.network    # Standard: brandmeister.network bei BM-Mastern, sonst der Host
+BrandMeisterApiKey = ...
+# keine TG hier: dann ist [MMDVMClient] keine eigene Verbindung
+
+[MMDVMClient.01]                    # Hotspot 123456701
 TG262 = D,TS2                       # Deutschland auf Modul D
 TG91 = W,TS1                        # Weltweit auf Modul W
+
+[MMDVMClient.02]                    # Hotspot 123456702
+TG26363 = F,TS1
+
+[MMDVMClient.TGIF]                  # ein anderes Netz: eigener Master, eigenes Passwort, eigene ID
+MasterAddress = tgif.network
+Password = ...
+DmrId = 123456790
+TG31665 = T,TS2
 ```
+
+**Verbindungen mit Namen** (4.27.0): `[MMDVMClient.<name>]`, der Name aus Buchstaben, Ziffern, `-` und `_`. Eine benannte Verbindung übernimmt jeden Schlüssel, den sie weglässt, aus `[MMDVMClient]` (Master, Port, Passwort, Rufzeichen, Standort, ...), ihre Sektion enthält also nur ihr Eigenes: ihre Hotspot-ID und ihre TGs. Eine `DmrId` mit ein oder zwei Ziffern ist eine Endung an die `DmrId` aus `[MMDVMClient]`, eine längere die ganze ID; ohne `DmrId` ist ein Name aus Ziffern die Endung (`[MMDVMClient.50]` ist Hotspot `<DmrId>50`). `[MMDVMClient]` mit eigenen TGs ist selbst auch eine Verbindung, ohne sie liefert es nur die gemeinsamen Einstellungen. Der Name steht im Log, auf der Admin-Seite (TG-Tabelle, Reconnect-Knöpfe, Protokoll-Steuerung), in `BlockProtocols` (`BlockProtocols = MMDVMClient.TGIF`) und bei den Admin-Befehlen (`"client": "MMDVMClient.TGIF"`). Die nummerierten `[MMDVMClient2]` bis `[MMDVMClient9]` gehen weiter, mit allen ihren Schlüsseln; eine Datei nutzt benannte oder nummerierte Sektionen, nicht beides. Verbindungen hinzufügen, entfernen oder umsortieren braucht einen Neustart.
 
 - **Netz.** Jede Verbindung, auch `[MMDVMClient]`, gehört zum Netz aus ihrem Schlüssel `Network`. Ohne ihn ist jeder BrandMeister-Master (`*.brandmeister.network`) `brandmeister.network`, jeder andere Master ein eigenes Netz (sein Hostname oder seine Adresse). `Network` braucht es für zwei Master eines anderen Netzes oder für einen BrandMeister-Master, der per IP-Adresse eingetragen ist.
 - **Brücken.** Ein Ruf geht nie an die Verbindung zurück, von der er kam, und nie an eine andere Verbindung im selben Netz (das Netz hat ihn schon). Zwischen verschiedenen Netzen wird ein Modul, das beide gemappt haben, gebrückt; `BlockProtocols = MMDVMClient3` schaltet das für dieses Paar ab.
-- **Namen.** In allen `BlockProtocols` und bei den Admin-Befehlen `block`/`unblock` heißt `MMDVMClient` alle Verbindungen, `MMDVMClient1` bis `MMDVMClient9` eine davon (`MMDVMClient1` ist `[MMDVMClient]`). Bei mehreren Verbindungen listet der Admin-Status sie unter diesen Namen.
+- **Namen.** In allen `BlockProtocols` und bei den Admin-Befehlen `block`/`unblock` heißt `MMDVMClient` alle Verbindungen, der Name einer Verbindung (`MMDVMClient.TGIF`, bei nummerierten `MMDVMClient1` bis `MMDVMClient9`; `MMDVMClient1` ist `[MMDVMClient]`) eine davon. Bei mehreren Verbindungen listet der Admin-Status sie unter diesen Namen.
 - **Prüfungen.** `inicheck` lehnt eine TG oder Hotspot-ID ab, die zwei Verbindungen desselben Netzes nutzen; die Admin-Seite lehnt so eine dynamische TG ab.
 - **Module ohne Transcoding.** Eine MMDVMClient-TG darf auf einem Modul liegen, das tcd nicht transkodiert. Von dort gehen nur AMBE+2-Aussendungen (DMR, YSF, NXDN) an den Master, erkannt am ersten Frame; D-Star, M17, SVX und die übrigen bleiben lokal, im Netz kämen sie als Stille an.
-- **Admin.** `tg_add`, `tg_remove`, `reconnect` und `kerchunk` nehmen `"client": 2` (oder das Protokoll `mmdvmclient2`); ohne das ist `[MMDVMClient]` gemeint, bei einer TG die Verbindung, die sie hat, und bei `reconnect` alle. `tg_list` und `status` listen jede Verbindung mit ihrem Netz. Das Dashboard (v2.13.0) bietet beim Hinzufügen einer TG jede Verbindung an und hat für jede einen Reconnect-Button.
+- **Admin.** `tg_add`, `tg_remove`, `reconnect` und `kerchunk` nehmen `"client": 2` oder `"client": "MMDVMClient.50"` (oder das Protokoll `mmdvmclient2`); ohne das ist `[MMDVMClient]` gemeint, bei einer TG die Verbindung, die sie hat, und bei `reconnect` alle. `tg_list` und `status` listen jede Verbindung mit ihrem Netz. Das Dashboard (v2.13.0) bietet beim Hinzufügen einer TG jede Verbindung an und hat für jede einen Reconnect-Button.
 
 ### SvxReflector-Client
 Verbindet sich mit SvxLink-SvxReflector-Servern (z.B. FM-Funknetz) und überträgt FM-Audio in beide Richtungen. Signalisierung über TCP, OPUS-kodiertes Audio über UDP. Benötigt transcodierte Module. Dynamische TGs lassen sich zur Laufzeit über die Admin-Oberfläche hinzufügen.
@@ -888,6 +902,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Protokoll-Sperren zur Laufzeit**: Beliebige Protokoll-Paare in beide Richtungen im Admin-Dashboard sperren und freigeben: threadsicher mit shared_mutex, per Klick entfernbar, Rücksetzen auf die Konfiguration, wird nicht gespeichert (gilt nach Neustart nicht mehr)
 - **Dynamische TG-Verwaltung**: TGs zur Laufzeit mit einstellbarer Laufzeit hinzufügen und entfernen, Timer über alle Protokolle hinweg erneuert, Aktivierung per BM-API oder Kerchunk, abgelaufene SVX-TGs fallen aus den überwachten TGs
 - **Transcodierte Module von tcd (4.25.0)**: `[Transcoder] Modules = auto` transcodiert ein Modul, solange tcd dafür verbunden ist, nur noch die `tcd.ini` nennt also die Module; ein Stream auf einem Modul ohne tcd läuft wie auf einem Modul ohne Transcoding, Dashboard und DHT-Eintrag folgen
+- **MMDVMClient-Verbindungen mit Namen (4.27.0)**: `[MMDVMClient.<name>]` statt `[MMDVMClient2]` ... `[MMDVMClient9]`, mit allem Weggelassenen aus `[MMDVMClient]`; eine `DmrId` aus ein oder zwei Ziffern (oder ein Name aus Ziffern) ist eine Endung an dessen `DmrId`; der Name steht im Log, auf der Admin-Seite, in `BlockProtocols` und bei den Admin-Befehlen
 - **MMDVMClient sendet gleich nach dem Login (4.26.0)**: BrandMeister nimmt die Optionen ohne ACK an, deshalb wartete eine Verbindung auf dessen Beacon-Anfrage (Sekunde 18 einer Minute, bis zu einer Minute), bevor sie Ton zum Master schickte, und schickte die Optionen dabei alle 10 s neu; die Optionen gehen einmal raus und gelten nach 2 s ohne NAK als angenommen
 - **BrandMeister-API-Abgleich wiederholt (4.26.0)**: Ein Abgleich der statischen TGs, der nicht durchging (eine neue Hotspot-ID kennt die API erst einige Minuten nach ihrem ersten Login, „Device not found“), wird nach 1 Minute wiederholt, danach seltener bis alle 30 Minuten, statt erst beim nächsten Start; das Log nennt die Verbindung
 - **Standby-Transcoder (4.26.0, tcd 0.11.0)**: Ein tcd mit `StandbyModules` bekommt ein Modul nur, solange kein anderer tcd es hat, und gibt es zurück, sobald der wiederkommt; der Reflektor beantwortet seinen Handshake mit übernommen oder belegt und prüft jede Transcoder-Verbindung auf eine tote, nicht nur bis zum ersten Modul ohne Verbindung

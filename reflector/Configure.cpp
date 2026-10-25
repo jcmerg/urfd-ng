@@ -168,6 +168,8 @@ bool CConfigure::ReadData(const std::string &path)
 	SJsonKeys::DB *pdb;
 	unsigned tcport = 0;
 	unsigned cliInstance = 1;	// [MMDVMClient<n>] being read
+	unsigned cliNamed = 0;		// [MMDVMClient.<name>] sections so far, instances 2, 3, ...
+	bool cliNumbered = false;	// an [MMDVMClient2] ... [MMDVMClient9] seen
 	CIniSections extra;			// the sections urfd does not know, for the plugins
 	std::string extraName;
 
@@ -261,6 +263,47 @@ bool CConfigure::ReadData(const std::string &path)
 			{
 				section = ESection::mmdvmclient;
 				cliInstance = MmdvmClientInstance(hname);
+				if (cliInstance > 1)
+					cliNumbered = true;
+				if (cliInstance > 1 && cliNamed)
+				{
+					std::cerr << "ERROR: [" << hname << "] next to named [MMDVMClient.<name>] sections: use one of the two ways" << std::endl;
+					rval = true;
+					section = ESection::none;
+				}
+			}
+			else if (0 == hname.compare(0, 12, "MMDVMClient.") && hname.size() > 12)
+			{
+				// a named connection: the next instance from 2 on
+				const std::string cname = hname.substr(12);
+				bool ok = std::all_of(cname.begin(), cname.end(), [](char c) { return std::isalnum((unsigned char)c) || c == '-' || c == '_'; });
+				for (unsigned n = 2; ok && n < 2 + cliNamed; n++)
+				{
+					std::string other = data[MmdvmClientNameKey(n)].get<std::string>(), a = hname;
+					for (auto &c : other) c = char(std::tolower((unsigned char)c));
+					for (auto &c : a) c = char(std::tolower((unsigned char)c));
+					if (other == a)
+					{
+						std::cerr << "ERROR: [" << hname << "] is there twice" << std::endl;
+						ok = false;
+					}
+				}
+				if (!ok || cliNumbered || cliNamed + 1 >= MMDVMCLI_MAX_INSTANCES)
+				{
+					if (ok)
+						std::cerr << "ERROR: [" << hname << "] " << (cliNumbered ? "next to numbered [MMDVMClient2] ... sections: use one of the two ways" : "is one MMDVMClient connection too many") << std::endl;
+					else if (!std::all_of(cname.begin(), cname.end(), [](char c) { return std::isalnum((unsigned char)c) || c == '-' || c == '_'; }))
+						std::cerr << "ERROR: [" << hname << "]: a connection's name has letters, digits, '-' and '_' only" << std::endl;
+					rval = true;
+					section = ESection::none;
+				}
+				else
+				{
+					section = ESection::mmdvmclient;
+					cliInstance = 2 + cliNamed++;
+					data[MmdvmClientNameKey(cliInstance)] = hname;
+					data[MmdvmClientKeys(cliInstance).enable] = true;	// unless Enable says otherwise
+				}
 			}
 			else if (0 == hname.compare("Echo"))
 				section = ESection::echo;
@@ -675,7 +718,13 @@ bool CConfigure::ReadData(const std::string &path)
 				else if (0 == key.compare("LocalPort"))
 					data[ck.localport] = getUnsigned(value, "MMDVMClient LocalPort", 0, 65535, 0);
 				else if (0 == key.compare("DmrId"))
-					data[ck.dmrid] = getUnsigned(value, "MMDVMClient DmrId", 1, 999999999, 0);
+				{
+					// in a named section one or two digits are a suffix to [MMDVMClient]'s DmrId
+					if (data.contains(MmdvmClientNameKey(cliInstance)) && value.size() <= 2 && std::all_of(value.begin(), value.end(), ::isdigit))
+						data[MmdvmClientPrefix(cliInstance) + "DmrIdSuffix"] = value;
+					else
+						data[ck.dmrid] = getUnsigned(value, "MMDVMClient DmrId", 1, 999999999, 0);
+				}
 				else if (0 == key.compare("Password"))
 					data[ck.password] = value;
 				else if (0 == key.compare("Callsign"))
@@ -1398,16 +1447,79 @@ bool CConfigure::ReadData(const std::string &path)
 			data[key] = def;
 	}
 
-	// MMDVMClient, MMDVMClient2 ... MMDVMClient9
+	// named MMDVMClient connections: what they leave out comes from [MMDVMClient],
+	// a DmrId of one or two digits (or a name of digits without a DmrId) is a
+	// suffix to [MMDVMClient]'s, and [MMDVMClient] without TGs of its own only
+	// gives these shared settings
+	if (cliNamed)
+	{
+		const auto base = MmdvmClientKeys(1);
+		for (unsigned n = 2; n < 2 + cliNamed; n++)
+		{
+			const auto ck = MmdvmClientKeys(n);
+			const std::string name = data[MmdvmClientNameKey(n)].get<std::string>();
+			for (const auto &[own, shared] : { std::pair<std::string, std::string>{ ck.address, base.address }, { ck.port, base.port },
+					{ ck.password, base.password }, { ck.callsign, base.callsign } })
+				if (!data.contains(own) && data.contains(shared))
+					data[own] = data[shared];
+			const std::string suffixKey = MmdvmClientPrefix(n) + "DmrIdSuffix";
+			std::string suffix;
+			if (data.contains(suffixKey))
+			{
+				suffix = data[suffixKey].get<std::string>();
+				data.erase(suffixKey);
+			}
+			else if (!data.contains(ck.dmrid))
+			{
+				const std::string cname = name.substr(12);
+				if (std::all_of(cname.begin(), cname.end(), ::isdigit))
+				{
+					if (cname.size() <= 2)
+						suffix = cname;
+					else if (cname.size() >= 6 && cname.size() <= 9)
+						data[ck.dmrid] = std::stoul(cname);
+				}
+			}
+			if (!suffix.empty())
+			{
+				if (!data.contains(base.dmrid))
+				{
+					std::cerr << "ERROR: [" << name << "] DmrId suffix " << suffix << " needs a DmrId in [MMDVMClient]" << std::endl;
+					rval = true;
+				}
+				else
+				{
+					const unsigned long id = std::stoul(std::to_string(data[base.dmrid].get<unsigned>()) + suffix);
+					if (id > 999999999)
+					{
+						std::cerr << "ERROR: [" << name << "] DmrId " << id << " is too long" << std::endl;
+						rval = true;
+					}
+					else
+						data[ck.dmrid] = unsigned(id);
+				}
+			}
+		}
+		const std::string baseTG = MmdvmClientPrefix(1) + "TG";
+		bool baseHasTG = false;
+		for (auto it = data.begin(); it != data.end() && !baseHasTG; ++it)
+			baseHasTG = it.key().compare(0, baseTG.size(), baseTG) == 0 && it.key().size() > baseTG.size() && std::isdigit((unsigned char)it.key()[baseTG.size()]);
+		if (!baseHasTG)
+			data[base.enable] = false;	// a connection of its own only with TGs of its own
+	}
+
+	// MMDVMClient, the named ones or MMDVMClient2 ... MMDVMClient9
 	{
 		struct SUsed { std::string network, name; };
 		std::map<std::string, SUsed> usedTG, usedId;	// "<network>/<TG or DMR ID>" -> first user
 		for (unsigned n = 1; n <= MMDVMCLI_MAX_INSTANCES; n++)
 		{
 			const auto ck = MmdvmClientKeys(n);
-			const std::string name = MmdvmClientName(n);
+			const std::string name = data.contains(MmdvmClientNameKey(n)) ? data[MmdvmClientNameKey(n)].get<std::string>() : MmdvmClientDefaultName(n);
 			if (n > 1 && !data.contains(ck.enable))
 				continue;	// no such section
+			if (n == 1 && cliNamed && !GetBoolean(ck.enable))
+				continue;	// only the shared settings of the named ones
 			if (!isDefined(ErrorLevel::mild, name, JENABLE, ck.enable, rval) || !GetBoolean(ck.enable))
 				continue;
 			isDefined(ErrorLevel::fatal, name, "MasterAddress", ck.address, rval);
