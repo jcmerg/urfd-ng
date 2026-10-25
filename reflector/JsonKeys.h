@@ -20,6 +20,9 @@
 
 #pragma once
 
+// where the configuration keeps a module's talkgroup ([Modules] TG<M> = <number>)
+inline std::string ModuleTGKey(char module) { return std::string("ModuleTG") + module; }
+
 // configuration key names
 struct SJsonKeys {
 	struct DCS { const std::string port, enable, peercallsign; }
