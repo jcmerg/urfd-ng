@@ -338,8 +338,11 @@ void CURFProtocol::HandlePeerLinks(void)
 							ok = false;
 							std::cerr << it->first << " has no module '" << c << "'" << std::endl;
 						}
-						else if ((std::string::npos == it->second.GetTCMods().find(c)) != !g_Reflector.IsTranscoded(c))
-						{	// are the transcoding states on both sides mismatched?
+						// are the transcoding states on both sides mismatched? Not with
+						// Modules = auto: ours follows tcd and changes with every tcd
+						// restart, which must not take the interlink down
+						else if (!g_Configure.GetBoolean(g_Keys.tc.automatic) && (std::string::npos == it->second.GetTCMods().find(c)) != !g_Reflector.IsTranscoded(c))
+						{
 							ok = false;
 							std::cerr << "The transcode states for module '" << c << "' don't match for this reflector and " << it->first << std::endl;
 						}
