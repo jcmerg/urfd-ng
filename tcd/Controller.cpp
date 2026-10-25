@@ -230,6 +230,7 @@ bool CController::Start()
 	m_nsAnalog.Configure(g_Conf.GetAGCAnalogNoiseSuppress());
 
 	tcClient.SetPassword(g_Conf.GetPassword());
+	tcClient.SetStandby(g_Conf.GetStandbyMods());
 	if (InitVocoders() || tcClient.Open(g_Conf.GetAddress(), g_Conf.GetTCMods(), g_Conf.GetPort()))
 	{
 		keep_running = false;
@@ -652,7 +653,16 @@ void CController::ReadReflectorThread()
 	uint32_t reconf_counter = 0;
 	while (keep_running)
 	{
-		// preemptively check the connection(s)...
+		// preemptively check the connection(s)... (a standby module waits while a
+		// stream runs here, see CTCClient::PauseStandby)
+		if (! g_Conf.GetStandbyMods().empty())
+		{
+			bool streaming = false;
+			for (char mod : g_Conf.GetTCMods())
+				if (mod >= 'A' && mod <= 'Z' && g_Stats.modules[mod - 'A'].last_activity.load(std::memory_order_relaxed) < 1.5f)
+					streaming = true;
+			tcClient.PauseStandby(streaming);
+		}
 		tcClient.ReConnect();
 
 		// Every ~1s: re-read config + age idle modules
@@ -737,7 +747,12 @@ void CController::ReadReflectorThread()
 		{
 			bool conn = false;
 			for (char m : g_Conf.GetTCMods())
-				if (tcClient.GetFD(m) >= 0) { conn = true; break; }
+			{
+				const bool linked = tcClient.GetFD(m) >= 0;
+				conn = conn || linked;
+				if (m >= 'A' && m <= 'Z')
+					g_Stats.modules[m - 'A'].linked.store(linked, std::memory_order_relaxed);
+			}
 			g_Stats.reflector.connected.store(conn, std::memory_order_relaxed);
 		}
 

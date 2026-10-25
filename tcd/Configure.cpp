@@ -39,6 +39,7 @@
 #define DMRGAINMODE    "DmrGainMode"
 #define AMBEGAIN_DB    "AmbeGainDb"
 #define MODULES        "Modules"
+#define STANDBYMODULES "StandbyModules"
 #define SERVERADDRESS  "ServerAddress"
 #define PASSWORD       "Password"
 #define PORT           "Port"
@@ -105,7 +106,7 @@ bool CConfigure::ReadData(const std::string &path)
 	// a host name is resolved by getaddrinfo() on every connect, so a changed DNS entry is picked up on reconnect
 	std::regex HostRegEx = std::regex("^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)*[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.?$", std::regex::extended);
 
-	std::string modstmp, porttmp;
+	std::string modstmp, standbytmp, porttmp;
 
 	std::ifstream cfgfile(path.c_str(), std::ifstream::in);
 	if (! cfgfile.is_open()) {
@@ -154,6 +155,8 @@ bool CConfigure::ReadData(const std::string &path)
 			porttmp.assign(value);
 		else if (0 == key.compare(MODULES))
 			modstmp.assign(value);
+		else if (0 == key.compare(STANDBYMODULES))
+			standbytmp.assign(value);
 		else if (0 == key.compare(DSTARGAININ))
 			dstar_in = getSigned(key, value);
 		else if (0 == key.compare(DSTARGAINOUT))
@@ -262,6 +265,22 @@ bool CConfigure::ReadData(const std::string &path)
 				tcmods.append(1, c);
 		}
 	}
+	// standby modules come after the others: the devices take the first modules
+	for (auto c : standbytmp)
+	{
+		if (isalpha(c))
+		{
+			c = toupper(c);
+			if (std::string::npos != tcmods.find(c) && std::string::npos == standbymods.find(c))
+			{
+				std::cerr << "ERROR: module " << c << " is in " << MODULES << " and " << STANDBYMODULES << ". Halt." << std::endl;
+				return true;
+			}
+			if (std::string::npos == standbymods.find(c))
+				standbymods.append(1, c);
+		}
+	}
+	tcmods.append(standbymods);
 	if (tcmods.empty())
 	{
 		std::cerr << "ERROR: no identifable module letters in '" << modstmp << "'. Halt." << std::endl;
@@ -281,7 +300,9 @@ bool CConfigure::ReadData(const std::string &path)
 		return true;
 	}
 
-	std::cout << MODULES << " = " << tcmods << std::endl;
+	std::cout << MODULES << " = " << tcmods.substr(0, tcmods.size() - standbymods.size()) << std::endl;
+	if (! standbymods.empty())
+		std::cout << STANDBYMODULES << " = " << standbymods << " (taken while no other transcoder has them)" << std::endl;
 	std::cout << SERVERADDRESS << " = " << address << std::endl;
 	std::cout << PASSWORD << " = " << (password.empty() ? "(none)" : "(set)") << std::endl;
 	std::cout << PORT << " = " << port << std::endl;

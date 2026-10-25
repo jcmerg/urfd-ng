@@ -43,10 +43,19 @@
 // HMAC-SHA256(Password, challenge + module byte), and the reflector confirms
 // with 'A' or closes the connection. Only an authenticated connection replaces
 // the one a module already has.
+//
+// A standby tcd (StandbyModules in tcd.ini, urfd 4.26.0, tcd 0.11.0) sends the
+// module letter in lower case. After the handshake the reflector answers it with
+// 'S' when it takes the module (no other tcd has it) or 'B' (busy) and closes.
+// A standby connection never replaces another one, a normal connection replaces a
+// standby one: the standby tcd takes over while the other is gone and gives the
+// module back when it returns. The password digest covers the upper case letter.
 #define TC_AUTH_MAGIC     "TCA1"
 #define TC_AUTH_MAGIC_LEN 4
 #define TC_AUTH_NONCE_LEN 32
 #define TC_AUTH_OK        'A'
+#define TC_STANDBY_OK     'S'
+#define TC_STANDBY_BUSY   'B'
 #define TC_PENDING_MAX     8	// connections in their handshake at a time
 #define TC_PENDING_TIMEOUT 2	// seconds for the whole handshake
 
@@ -165,10 +174,16 @@ char CTCSocket::GetMod(int fd) const
 
 bool CTCServer::AnyAreClosed()
 {
+	// every module: a standby tcd must not wait for a dead connection that sits
+	// behind a module nobody has
+	bool any = false;
 	for (unsigned i = 0; i < m_Pfd.size(); i++)
 	{
 		if (m_Pfd[i].fd < 0)
-			return true;
+		{
+			any = true;
+			continue;
+		}
 
 		// Actively probe for dead connections (e.g. half-open after network outage)
 		struct pollfd pfd = { m_Pfd[i].fd, POLLIN, 0 };
@@ -177,10 +192,10 @@ bool CTCServer::AnyAreClosed()
 		{
 			std::cerr << "Transcoder module '" << m_Modules[i] << "' connection lost (maintenance probe)" << std::endl;
 			Close(m_Pfd[i].fd);
-			return true;
+			any = true;
 		}
 	}
-	return false;
+	return any;
 }
 
 bool CTCSocket::Send(const STCPacket *packet)
@@ -332,6 +347,7 @@ bool CTCServer::Open(const std::string &address, const std::string &modules, uin
 		pf.events = POLLIN;
 		pf.revents = 0;
 	}
+	m_Standby.assign(m_Modules.size(), false);
 
 	// Create persistent listen socket
 	m_ListenFd = socket(m_Ip.GetFamily(), SOCK_STREAM, 0);
@@ -464,6 +480,10 @@ bool CTCServer::advance(SPending &p)
 			close(p.fd);
 			return true;
 		}
+		// a standby tcd sends the letter in lower case
+		const bool standby = mod >= 'a' && mod <= 'z';
+		if (standby)
+			mod -= 'a' - 'A';
 		if (0 == mod || std::string::npos == m_Modules.find(mod) || (m_Accept && !m_Accept(mod)))
 		{
 			if (RejectLog("Transcoder: refused connections", p.peer.GetAddress()))
@@ -480,6 +500,7 @@ bool CTCServer::advance(SPending &p)
 			return true;
 		}
 		p.module = mod;
+		p.standby = standby;
 
 		if (m_Password.empty())
 		{
@@ -548,16 +569,32 @@ void CTCServer::establish(SPending &p)
 {
 	const auto pos = m_Modules.find(p.module);
 
+	if (p.standby)
+	{
+		// a standby tcd gets the module only while no other tcd has it
+		const char answer = m_Pfd[pos].fd < 0 ? TC_STANDBY_OK : TC_STANDBY_BUSY;
+		if (1 != send(p.fd, &answer, 1, MSG_NOSIGNAL) || TC_STANDBY_BUSY == answer)
+		{
+			close(p.fd);
+			return;
+		}
+		std::cout << "Standby transcoder from " << p.peer << " takes over module '" << p.module << "'" << std::endl;
+	}
+
 	// blocking again for normal operation
 	fcntl(p.fd, F_SETFL, fcntl(p.fd, F_GETFL, 0) & ~O_NONBLOCK);
 
 	// Close old stale connection if present
 	if (m_Pfd[pos].fd >= 0)
 	{
-		std::cerr << "Replacing stale connection on module '" << p.module << "'" << std::endl;
+		if (m_Standby[pos])
+			std::cout << "Transcoder for module '" << p.module << "' is back, the standby one gives it up" << std::endl;
+		else
+			std::cerr << "Replacing stale connection on module '" << p.module << "'" << std::endl;
 		shutdown(m_Pfd[pos].fd, SHUT_RDWR);
 		close(m_Pfd[pos].fd);
 	}
+	m_Standby[pos] = p.standby;
 
 	// Enable TCP keepalive to detect dead connections
 	int keepalive = 1;
@@ -591,15 +628,17 @@ bool CTCClient::Open(const std::string &address, const std::string &modules, uin
 		pf.fd = -1;
 		pf.events = POLLIN;
 	}
+	m_StandbyState.assign(m_Modules.size(), 0);
 
 	std::cout << "Connecting to the TCP server..." << std::endl;
 
 	// a module the reflector does not take now (not in its [Transcoder] Modules,
 	// a wrong password, the reflector down or not started yet) is tried again by
-	// ReConnect(), so tcd starts completely (monitor included) and keeps running
+	// ReConnect(), so tcd starts completely (monitor included) and keeps running;
+	// a standby module that another tcd has is no news, Connect() tells about it
 	std::string missing;
 	for (char c : modules)
-		if (Connect(c, false) || GetFD(c) < 0)
+		if ((Connect(c, false) || GetFD(c) < 0) && !IsStandby(c))
 			missing += c;
 	if (!missing.empty())
 		std::cerr << "Module(s) " << missing << " not connected yet (reflector not reachable or refused them), tried again every few seconds" << std::endl;
@@ -668,7 +707,9 @@ bool CTCClient::Connect(char module, bool blocking)
 		}
 	}
 
-	int sent = send(fd, &module, 1, 0); // send the identification byte
+	const bool standby = IsStandby(module);
+	const char id = standby ? module + ('a' - 'A') : module;	// a standby tcd sends it in lower case
+	int sent = send(fd, &id, 1, 0); // send the identification byte
 	if (sent < 0)
 	{
 		std::cerr << "Error sending ID byte to module '" << module << "':" << std::endl;
@@ -683,10 +724,44 @@ bool CTCClient::Connect(char module, bool blocking)
 		return true;
 	}
 
-	if (! m_Password.empty() && authenticate(fd, module))
+	if (! m_Password.empty() && authenticate(fd, module, standby))
 	{
 		close(fd);
+		if (standby && 2 != m_StandbyState[pos])
+		{
+			std::cerr << "Module " << module << " (standby): the reflector refused it (not in its [Transcoder] Modules, a wrong Password, or urfd older than 4.26.0), tried again quietly" << std::endl;
+			m_StandbyState[pos] = 2;
+		}
 		return true;
+	}
+
+	if (standby)
+	{
+		// the reflector's answer: it takes the module, or another tcd has it
+		struct timeval tv = { 2, 0 };
+		setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+		char answer = 0;
+		const auto n = recv(fd, &answer, 1, MSG_WAITALL);
+		struct timeval notv = { 0, 0 };
+		setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &notv, sizeof(notv));
+		if (1 == n && TC_STANDBY_BUSY == answer)
+		{
+			close(fd);
+			if (1 != m_StandbyState[pos])
+				std::cout << "Module " << module << " (standby): another transcoder has it, taking over when it is gone" << std::endl;
+			m_StandbyState[pos] = 1;
+			return false;
+		}
+		if (1 != n || TC_STANDBY_OK != answer)
+		{
+			close(fd);
+			if (2 != m_StandbyState[pos])
+				std::cerr << "Module " << module << " (standby): the reflector refused it (not in its [Transcoder] Modules, or urfd older than 4.26.0), tried again quietly" << std::endl;
+			m_StandbyState[pos] = 2;
+			return true;
+		}
+		std::cout << "Module " << module << " (standby): no other transcoder has it, taking over" << std::endl;
+		m_StandbyState[pos] = 0;
 	}
 
 	// Enable TCP keepalive to detect dead connections
@@ -710,8 +785,8 @@ bool CTCClient::Connect(char module, bool blocking)
 	return false;
 }
 
-// returns true if the reflector did not accept the password
-bool CTCClient::authenticate(int fd, char module)
+// returns true if the reflector did not accept the password; quiet: no log
+bool CTCClient::authenticate(int fd, char module, bool quiet)
 {
 	struct timeval tv = { 2, 0 };
 	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -720,7 +795,8 @@ bool CTCClient::authenticate(int fd, char module)
 	auto n = recv(fd, challenge, sizeof(challenge), MSG_WAITALL);
 	if (n != (ssize_t)sizeof(challenge) || memcmp(challenge, TC_AUTH_MAGIC, TC_AUTH_MAGIC_LEN))
 	{
-		std::cerr << "Module " << module << ": the reflector sent no password challenge, is Password set in its [Transcoder] section?" << std::endl;
+		if (! quiet)
+			std::cerr << "Module " << module << ": the reflector sent no password challenge, is Password set in its [Transcoder] section?" << std::endl;
 		return true;
 	}
 
@@ -736,7 +812,8 @@ bool CTCClient::authenticate(int fd, char module)
 	n = recv(fd, &ok, 1, MSG_WAITALL);
 	if (n != 1 || ok != TC_AUTH_OK)
 	{
-		std::cerr << "Module " << module << ": the reflector refused the password, Password in tcd.ini must be the one of its [Transcoder] section" << std::endl;
+		if (! quiet)
+			std::cerr << "Module " << module << ": the reflector refused the password, Password in tcd.ini must be the one of its [Transcoder] section" << std::endl;
 		return true;
 	}
 
@@ -749,6 +826,7 @@ void CTCClient::ReConnect() // and sometimes ping
 {
 	static std::chrono::system_clock::time_point start = std::chrono::system_clock::now();
 	static std::chrono::steady_clock::time_point last_attempt = {};
+	static std::chrono::steady_clock::time_point last_standby = {};
 	static double backoff_secs = 0.0;
 	auto now = std::chrono::system_clock::now();
 	std::chrono::duration<double> secs = now - start;
@@ -757,10 +835,21 @@ void CTCClient::ReConnect() // and sometimes ping
 	for (char m : m_Modules)
 		IsModuleConnected(m);
 
+	// a standby module another tcd has: asked again every few seconds, quietly and
+	// outside the backoff of the others
+	auto steady = std::chrono::steady_clock::now();
+	if (steady - last_standby >= std::chrono::seconds(3) && ! m_StandbyPaused.load(std::memory_order_relaxed))
+	{
+		last_standby = steady;
+		for (char m : m_Modules)
+			if (IsStandby(m) && 0 > GetFD(m))
+				Connect(m, false);
+	}
+
 	// Check if any module needs reconnecting
 	bool need_reconnect = false;
 	for (char m : m_Modules)
-		if (0 > GetFD(m)) { need_reconnect = true; break; }
+		if (!IsStandby(m) && 0 > GetFD(m)) { need_reconnect = true; break; }
 
 	if (need_reconnect)
 	{
@@ -771,7 +860,7 @@ void CTCClient::ReConnect() // and sometimes ping
 		{
 			for (char m : m_Modules)
 			{
-				if (0 > GetFD(m))
+				if (!IsStandby(m) && 0 > GetFD(m))
 				{
 					std::cout << "Reconnecting module " << m << "..." << std::endl;
 					Connect(m, false);
@@ -782,7 +871,7 @@ void CTCClient::ReConnect() // and sometimes ping
 			// Check if still disconnected → increase backoff (max 5s)
 			bool still_down = false;
 			for (char m : m_Modules)
-				if (0 > GetFD(m)) { still_down = true; break; }
+				if (!IsStandby(m) && 0 > GetFD(m)) { still_down = true; break; }
 
 			if (still_down)
 				backoff_secs = (backoff_secs < 0.5) ? 0.5 : std::min(backoff_secs * 2.0, 5.0);
@@ -834,6 +923,8 @@ void CTCClient::Receive(std::queue<std::unique_ptr<STCPacket>> &queue, int ms)
 			if (receive(pfd.fd, p_tcpack.get()))
 			{
 				p_tcpack.reset();
+				if (IsStandby(GetMod(pfd.fd)))
+					std::cout << "Module " << GetMod(pfd.fd) << " (standby): given back (its transcoder is back, or the link dropped)" << std::endl;
 				Close(pfd.fd);
 			}
 			else
@@ -842,9 +933,13 @@ void CTCClient::Receive(std::queue<std::unique_ptr<STCPacket>> &queue, int ms)
 			}
 		}
 
-		if (pfd.revents & POLLERR || pfd.revents & POLLHUP)
+		if (pfd.fd >= 0 && (pfd.revents & POLLERR || pfd.revents & POLLHUP))
 		{
-			std::cerr << "Connection lost on module " << GetMod(pfd.fd) << ", reconnecting..." << std::endl;
+			const char m = GetMod(pfd.fd);
+			if (IsStandby(m))
+				std::cout << "Module " << m << " (standby): given back (its transcoder is back, or the link dropped)" << std::endl;
+			else
+				std::cerr << "Connection lost on module " << m << ", reconnecting..." << std::endl;
 			Close(pfd.fd);
 		}
 		if (pfd.revents & POLLNVAL)

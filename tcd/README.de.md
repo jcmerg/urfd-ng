@@ -2,7 +2,7 @@
 
 [English](README.md) | **Deutsch**
 
-**Version 0.10.7** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.11.0** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25/NXDN (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF in Software ergänzen. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
@@ -138,7 +138,21 @@ sudo nano /opt/urfd/tcd/tcd.ini
 cd docker && sudo docker compose --profile tcd build && sudo docker compose --profile tcd up -d
 ```
 
-In der `tcd.ini`: `ServerAddress = 127.0.0.1` (der Container nutzt das Netz des Hosts), `Modules` so viele wie gewünscht, `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so`, keine `DeviceSerial`, und ein `MonitorHttpPort`, der auf dem Host frei ist. In der `urfd.ini`: `[Transcoder] Modules = auto`, dann entscheidet allein die Liste von tcd. Das Image baut jedes `tcd/plugins/<name>/` mit `Makefile` (Git ignoriert das Verzeichnis); `$URFD_DATA/tcd/` (Standard `/opt/urfd/tcd`) enthält die `tcd.ini`, beschreibbar für „Speichern“ im Monitor. Aktualisieren: `git pull`, dann dasselbe `build` und `up -d`. Ohne `--profile tcd` bleibt `docker compose` bei urfd allein.
+In der `tcd.ini`: `ServerAddress = 127.0.0.1` (der Container nutzt das Netz des Hosts), `Modules` so viele wie gewünscht, `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so`, keine `DeviceSerial`, und ein `MonitorHttpPort`, der auf dem Host frei ist. In der `urfd.ini`: `[Transcoder] Modules = auto`, dann entscheidet allein die Liste von tcd. Das Image baut jedes `tcd/plugins/<name>/` mit `Makefile` (Git ignoriert das Verzeichnis); `$URFD_DATA/tcd/` (Standard `/opt/urfd/tcd`) enthält die `tcd.ini`, beschreibbar für „Speichern“ im Monitor. Aktualisieren: `git pull`, dann `docker/build.sh`; es baut und startet auch den tcd-Container neu, wenn `$URFD_DATA/tcd/tcd.ini` existiert (seit 4.26.0). Ohne `--profile tcd` bleibt `docker compose` bei urfd allein.
+
+Der nginx im Image reicht `/tcd/` an den Monitor auf Port 8080 weiter (der `MonitorHttpPort` der Vorlage, seit 4.26.0), über den TLS-Proxy davor ist er also als `https://<reflektor>/tcd/` erreichbar, mit denselben Upgrade-Headern wie `/ws` und `X-Real-IP`. `MonitorBindAddress = 127.0.0.1` reicht dann; `MonitorPassword` setzen.
+
+### Standby: ein zweiter tcd für dieselben Module
+
+`StandbyModules` (seit 0.11.0, urfd 4.26.0) nennt Module, die ein tcd nur übernimmt, solange kein anderer tcd sie hat: Ein Software-tcd in Docker neben urfd steht für die Module des tcd mit den Sticks bereit, übernimmt sie, wenn der weg ist, und gibt sie zurück, sobald er wiederkommt.
+
+```ini
+# tcd in Docker neben urfd, mit dem mbelib-neo-Plugin
+Modules        = AP      # seine eigenen Module
+StandbyModules = FS      # die Module des tcd mit den Sticks, solange der weg ist
+```
+
+Der Standby-tcd schickt den Modulbuchstaben klein; der Reflektor nimmt ihn nur für ein Modul ohne tcd an und antwortet sonst „belegt“, und eine normale Verbindung ersetzt eine Standby-Verbindung. Der Standby-tcd fragt alle 3 s still nach, aber nicht, solange einer seiner eigenen Streams läuft, damit das Nachfragen die nie aufhält. Ein tcd, der beendet wird oder seine Verbindung verliert, übergibt nach Sekunden; einen, der ohne Abbau verschwunden ist (Strom, Netz), bemerkt der Reflektor per TCP-Keepalive nach etwa 25 s. Ein Stream, der gerade läuft, während ein Modul den tcd wechselt, wird erst ab dem nächsten Durchgang transcodiert. urfd braucht `[Transcoder] Modules = auto` (oder die Buchstaben dort) und 4.26.0; ein älterer urfd lehnt die Standby-Verbindungen ab, und tcd sagt das einmal.
 
 ## AMBE-Geräte auswählen
 
@@ -169,6 +183,7 @@ tcd öffnet die Geräte über den Kernel-Treiber `ftdi_sio` und setzt ihren USB-
 | `Port` | `10100` | `[Transcoder] Port` des Reflektors |
 | `Password` | — | `[Transcoder] Password` des Reflektors, nötig, wenn er eins hat (seit 0.8.0) |
 | `Modules` | `FS` | transcodierte Module; mit `[Transcoder] Modules = auto` im Reflektor (urfd 4.25.0) beliebige seiner Module, dann entscheidet allein diese Liste; sonst dieselben Buchstaben wie dort |
+| `StandbyModules` | — | Module, die dieser tcd nur übernimmt, solange kein anderer tcd sie hat (seit 0.11.0, urfd 4.26.0), siehe [Standby](#standby-ein-zweiter-tcd-für-dieselben-module); nicht zusätzlich in `Modules` |
 | `DeviceSerial` | — | zu verwendendes AMBE-Gerät, je eine Zeile (siehe [oben](#ambe-geräte-auswählen)) |
 
 ### Verstärkung
@@ -302,7 +317,8 @@ Die Grenzen sind absichtlich ungleich: Absenken ist unkritisch, Anheben hebt auc
 - AGC- und Verstärkungsregler, die sofort wirken, und ein Knopf, um sie in `tcd.ini` zu speichern
 - DVSI-Geräte: Seriennummer, Typ, Rolle, belegte Kanäle mit ihren Modulen, Puffertiefe
 - Codec-Plugins: ihr Codec, Zähler und Streams, und welcher Vocoder neue D-Star- und DMR-Streams bekommt (umschaltbar, siehe [Codec-Plugins](#codec-plugins))
-- Verbindung zum Reflektor und Paketzähler
+- Verbindung zum Reflektor und Paketzähler; ein Standby-Modul zeigt „standby“, solange ein anderer tcd es hat, und „taken over“, solange dieser tcd es hat
+- hinter einem Reverse-Proxy unter einem Pfad (seit 0.11.0): Die Seite nutzt relative Pfade, `https://<host>/tcd/` funktioniert also (siehe [tcd in Docker](#tcd-in-docker)); hinter einem Proxy auf demselben Rechner zählt die Pause nach Fehlanmeldungen je Adresse aus dem letzten `X-Forwarded-For`-Eintrag
 
 ### tcdmon
 
@@ -382,6 +398,7 @@ journalctl -u tcd -f
 - **Threadsicherheit**: Sperre um den IMBE-Vocoder, SIGPIPE ignoriert für saubere Neuverbindungen
 - **Fehlerbehandlung**: Wiederholung zum Reflektor mit wachsender Pause, Verwerfen bei Überlauf der Warteschlange, Erholung bei Timeouts beim Lesen
 - **Wachsende Pause beim Neuverbinden**: 0,5 s bis 5 s, solange der Reflektor nicht erreichbar ist
+- **Standby-Module** (0.11.0, urfd 4.26.0): Mit `StandbyModules` übernimmt ein zweiter tcd Module, solange ihr tcd weg ist, siehe [Standby](#standby-ein-zweiter-tcd-für-dieselben-module)
 - **Sprachgesteuerte AGC** (0.9.0): Der Pegel wird in dB auf der oberen Hüllkurve der Sprache verfolgt und nur auf deutlich stimmhaften Frames weit über einem pro Stream gemessenen Rauschboden angehoben; bei verrauschten Signalen fällt die Anhebung kleiner aus, ein Hochpass bei 75 Hz säubert das Audio, und die Analyse ignoriert alles unter 300 Hz (CTCSS, Brumm). Die Verstärkung pumpt nicht mehr bei Atem, Rauschen oder in Pausen, das Gate hält 240 ms über die Lücken zwischen den Worten. Gleiche Schlüssel und Standardwerte in `tcd.ini`. Gemessen an 18 FM-Funknetz-Aussendungen von HF-Stationen (23.10.2026) durch den analogen Pfad (Rauschunterdrückung und AGC analog) gegen 0.8.0: Die Stationen liegen gleich nah beieinander (Streuung 1,2 dB) bei etwa gleichem Pegel (−16,4 gegen −15,6 dBFS), die Verstärkung bewegt sich von Frame zu Frame nur ein Drittel so stark (0,20 gegen 0,55 dB), und die Sprache steht 2,5 dB weiter über dem Rauschen in den Pausen
 - **Passwort für die Verbindung zum Reflektor** (0.8.0, urfd 4.16.0): mit `Password` in `tcd.ini` und `[Transcoder] Password` in `urfd.ini` schickt der Reflektor nach dem Modul-Byte eine Zufallszahl, und tcd antwortet mit HMAC-SHA256 darüber; erst dann ersetzt die Verbindung die bisherige des Moduls. Ohne Passwort konnte jeder, der Port 10100 erreichte, ein Modul übernehmen. Die Verbindung bleibt unverschlüsselt. Ohne Passwort auf beiden Seiten ändert sich nichts; steht es nur auf einer Seite, wird die Verbindung mit einer Meldung dazu abgewiesen
 - **Hostname als ServerAddress** (0.7.4): `ServerAddress` nimmt neben einer IP-Adresse auch einen Hostnamen; vorher hielt die Konfig-Prüfung tcd bei allem außer einer IP-Adresse an

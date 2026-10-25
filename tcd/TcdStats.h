@@ -39,6 +39,11 @@ struct ModuleStats
 
 	// Timing
 	std::atomic<float> last_activity{0.0f};   // seconds since last packet (0 = active)
+
+	// the link to the reflector for this module; a standby module (StandbyModules) has
+	// one only while no other tcd has the module
+	std::atomic<bool> linked{false};
+	bool standby = false;                     // set once at start
 };
 
 struct DeviceStats
