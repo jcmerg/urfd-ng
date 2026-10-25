@@ -1,5 +1,5 @@
 # Only reflector/, plugins/, config/urfd.mk, dashboard/ and dashboard-ws/ go into the image
-.git
+**/.git
 .claude
 tcd
 docs

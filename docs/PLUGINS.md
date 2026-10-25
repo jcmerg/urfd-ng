@@ -151,6 +151,11 @@ make -C plugins/foo URFD=$PWD/reflector
   symbols come from the `urfd` executable at run time.
 - Docker: every `plugins/<name>/` with a `Makefile` is built in the image and
   put into `/usr/local/lib/urfd/`.
+- Natively: `make plugins` in `reflector/` builds every `plugins/<name>/`,
+  `make plugins-install` (`PLUGINDIR=`, default `/usr/local/lib/urfd`) copies
+  the shared objects, `make plugins-clean` cleans them. The Docker image uses the
+  same targets.
+- A plugin directory that is a git clone is pulled by `setup.sh update`.
 
 ## Limits
 

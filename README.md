@@ -247,7 +247,7 @@ A plugin is C++ built against this source tree (see [reflector/Plugin.h](reflect
 - **Admin socket**: its own commands work by name or as `{"cmd": "plugin", "name": "Foo", "command": "...", ...}`; `status` lists the plugins (`plugins`) with what they add, `tg_list` their modules.
 - **Dashboard**: the admin page knows no plugin. Each plugin describes its sections in the `status` answer (tables filled by one of its commands, a form and a remove button calling others) and the page draws them, see [docs/PLUGINS.md](docs/PLUGINS.md). The protocol list shows the plugin's description.
 - **Logins**: it may keep its logins in the [credential database](#credential-database-4200) under a service name of its own.
-- **Docker**: put the plugin's source into `plugins/<name>/` (with a `Makefile` that takes `URFD=`); the image builds it with urfd into `/usr/local/lib/urfd/`.
+- **Building**: put the plugin's source into `plugins/<name>/` (with a `Makefile` that takes `URFD=`), e.g. as a `git clone` of its repository; git ignores it there. The Docker image builds it with urfd into `/usr/local/lib/urfd/`; natively `make plugins` and `sudo make plugins-install` in `reflector/` do the same. `setup.sh update` pulls every plugin directory that is a git clone (also in `tcd/plugins/`) before it builds.
 
 ### USRP (AllStar)
 Bridges one AllStar node (app_rpt's USRP channel) to a module. Requires a transcoded module.
@@ -958,6 +958,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **MMDVMClient sends right after login (4.26.0)**: BrandMeister takes the options without an ACK, so a connection waited for its beacon request (second 18 of a minute, up to a minute) before it sent any audio to the master, and resent the options every 10 s meanwhile; the options are sent once and count as taken after 2 s without a NAK
 - **BrandMeister API sync retried (4.26.0)**: a static TG sync that did not go through (a new hotspot ID is known to the API only some minutes after its first login, "Device not found") is tried again after 1 minute, then less often up to every 30 minutes, instead of only at the next start; the log names the connection
 - **Standby transcoder (4.26.0, tcd 0.11.0)**: a tcd with `StandbyModules` gets a module only while no other tcd has it and gives it back when that one returns; the reflector answers its handshake with taken or busy, and probes every transcoder connection for a dead one, not only up to the first module without one
+- **Plugins built and updated with urfd**: `make plugins` / `make plugins-install` in `reflector/` build the plugins in `plugins/<name>/` natively, the Docker image uses the same targets; `setup.sh update` pulls every plugin directory that is a git clone (also codec plugins in `tcd/plugins/`)
 - **Protocol plugins (4.24.0)**: protocols from shared objects loaded at start (`[Plugins]`), with their own ini section, protocol name, admin commands and dashboard parts, checked against the urfd they were built for
 - **SIGHUP config reload**: Hot-reload TG mappings, whitelist/blacklist/interlink, transcoder modules without dropping sessions — thread-safe via sigwait, exception-safe with rollback
 

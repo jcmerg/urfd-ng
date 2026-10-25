@@ -453,6 +453,18 @@ check_urfd_config() {
     fi
 }
 
+# plugins cloned into plugins/<name>/ and tcd/plugins/<name>/ (git ignores them
+# there) are pulled with the project, so they are rebuilt from a version that
+# fits; a plugin that cannot be pulled (e.g. no access) is only noted
+pull_plugins() {
+    local d
+    for d in "$REPO_DIR"/plugins/*/ "$REPO_DIR"/tcd/plugins/*/; do
+        [ -e "$d.git" ] || continue
+        info "Updating the plugin in ${d%/}"
+        repo_git -C "$d" pull --ff-only || warn "could not update the plugin in ${d%/}, it is built as it is"
+    done
+}
+
 # ---------------------------------------------------------------------------
 # build and start
 # ---------------------------------------------------------------------------
@@ -630,6 +642,7 @@ update() {
 
     info "Updating the source in $REPO_DIR"
     repo_git pull --ff-only
+    pull_plugins
 
     if [ "$have_urfd" = true ]; then
         install_docker
