@@ -22,7 +22,7 @@ CSoftCodec::~CSoftCodec()
 		m_Plugin->close(s.second.state);
 }
 
-void *CSoftCodec::State(uint16_t streamid)
+CSoftCodec::SState *CSoftCodec::State(uint16_t streamid, uint32_t sequence)
 {
 	const auto now = std::chrono::steady_clock::now();
 	auto it = m_States.find(streamid);
@@ -54,34 +54,60 @@ void *CSoftCodec::State(uint16_t streamid)
 			std::cerr << "Codec plugin " << m_Plugin->name << ": no state for stream " << streamid << ", its frames stay empty" << std::endl;
 			return nullptr;
 		}
-		it = m_States.emplace(streamid, SState{ state, now }).first;
+		it = m_States.emplace(streamid, SState{ state, now, sequence, false }).first;
+	}
+	// urfd counts the frames of a transmission from 0: a lower count is the same
+	// stream id again, after a transmission whose last frame got lost
+	if (it->second.running && sequence < it->second.sequence)
+		it->second.running = false;
+	if (!it->second.running)
+	{
+		if (m_Plugin->start)
+			m_Plugin->start(it->second.state);
+		it->second.running = true;
 	}
 	it->second.last_used = now;
-	return it->second.state;
+	it->second.sequence = sequence;
+	return &it->second;
 }
 
-bool CSoftCodec::Encode(uint16_t streamid, const int16_t *pcm, uint8_t *frame)
+void CSoftCodec::Stop(SState *s, bool last)
 {
-	std::lock_guard<std::mutex> lock(*m_Mutex);
-	void *state = State(streamid);
-	return state && 0 == m_Plugin->encode(state, pcm, frame);
+	if (s && last && s->running)
+	{
+		if (m_Plugin->stop)
+			m_Plugin->stop(s->state);
+		s->running = false;
+	}
 }
 
-bool CSoftCodec::Decode(uint16_t streamid, const uint8_t *frame, int16_t *pcm)
+bool CSoftCodec::Encode(uint16_t streamid, uint32_t sequence, bool last, const int16_t *pcm, uint8_t *frame)
 {
 	std::lock_guard<std::mutex> lock(*m_Mutex);
-	void *state = State(streamid);
-	return state && 0 == m_Plugin->decode(state, frame, pcm);
+	SState *s = State(streamid, sequence);
+	const bool ok = s && 0 == m_Plugin->encode(s->state, pcm, frame);
+	Stop(s, last);
+	return ok;
+}
+
+bool CSoftCodec::Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm)
+{
+	std::lock_guard<std::mutex> lock(*m_Mutex);
+	SState *s = State(streamid, sequence);
+	const bool ok = s && 0 == m_Plugin->decode(s->state, frame, pcm);
+	Stop(s, last);
+	return ok;
 }
 
 int CSoftCodec::Streams(void)
 {
-	// the streams with a frame in the last 2 s: a state stays 30 s after its stream ended
+	// the transmissions not ended with a frame in the last 2 s: a state stays 30 s
+	// after its stream ended, and a transmission whose last frame got lost gets no stop
 	std::lock_guard<std::mutex> lock(*m_Mutex);
 	const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(2);
 	int active = 0;
 	for (const auto &s : m_States)
-		if (s.second.last_used > cutoff)
+		if (s.second.running && s.second.last_used > cutoff)
 			active++;
 	return active;
 }

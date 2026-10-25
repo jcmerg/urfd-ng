@@ -27,18 +27,21 @@ public:
 	const char *GetName(void) const { return m_Plugin->name; }
 	const tcd_codec_plugin *GetPlugin(void) const { return m_Plugin; }
 	uint32_t GetCodec(void) const { return m_Codec; }
-	// false on an error of the plugin; the frame has the size of the codec
-	bool Encode(uint16_t streamid, const int16_t *pcm, uint8_t *frame);
-	bool Decode(uint16_t streamid, const uint8_t *frame, int16_t *pcm);
+	// false on an error of the plugin; the frame has the size of the codec.
+	// sequence and last of the packet: where a transmission begins and ends
+	bool Encode(uint16_t streamid, uint32_t sequence, bool last, const int16_t *pcm, uint8_t *frame);
+	bool Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm);
 	// the streams it codes right now (a frame in the last 2 s)
 	int Streams(void);
 	// its entry in g_Stats.sw, -1 for none
 	int stats = -1;
 
 private:
-	void *State(uint16_t streamid);	// with m_Mutex held
+	// running: between the plugin's start and stop; sequence: of the last frame
+	struct SState { void *state; std::chrono::steady_clock::time_point last_used; uint32_t sequence; bool running; };
+	SState *State(uint16_t streamid, uint32_t sequence);	// with m_Mutex held; started
+	void Stop(SState *s, bool last);	// after the frame, with m_Mutex held
 
-	struct SState { void *state; std::chrono::steady_clock::time_point last_used; };
 	const tcd_codec_plugin *m_Plugin;
 	uint32_t m_Codec;
 	std::shared_ptr<std::mutex> m_Mutex;	// the plugin's: one call at a time, for all its codecs
