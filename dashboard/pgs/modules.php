@@ -94,8 +94,8 @@ $protoTypes = array(
     'M17' => 'M17', 'YSF' => 'YSF and Wires-X', 'P25' => 'P25', 'NXDN' => 'NXDN',
     'URF' => 'URF peer reflectors', 'USRP' => 'AllStar (USRP)', 'SVX' => 'SvxLink nodes',
 );
-// MMDVMClient2 ... MMDVMClient9 are client connections as well
-$shown = array_filter($Protocols, function ($p) use ($hiddenProtos) { return !in_array($p['name'], $hiddenProtos) && !preg_match('/^MMDVMClient[2-9]$/', $p['name']); });
+// MMDVMClient2 ... MMDVMClient9 and MMDVMClient.<name> are client connections as well
+$shown = array_filter($Protocols, function ($p) use ($hiddenProtos) { return !in_array($p['name'], $hiddenProtos) && !preg_match('/^MMDVMClient([2-9]|\..+)$/', $p['name']); });
 if (count($shown) > 0) {
 ?>
     <section>

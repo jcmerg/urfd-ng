@@ -39,7 +39,8 @@ static bool IsMmdvmClientProtocol(const std::string &p)
 }
 
 // the MMDVMClient connection a command means: the number in the protocol
-// ("mmdvmclient2"), else "client" (1 to 9 or "MMDVMClient2"), else the one
+// ("mmdvmclient2"), else "client" (1 to 9, "MMDVMClient2" or a connection's
+// name like "MMDVMClient.50"), else the one
 // with the TG if tg is given, else [MMDVMClient] or the first one.
 // Call with the protocols lock held.
 static CMMDVMClientProtocol *FindMmdvmClient(CProtocols &protocols, const std::string &protocol, const nlohmann::json &cmd, uint32_t tg = 0, std::string *err = nullptr)
@@ -53,7 +54,7 @@ static CMMDVMClientProtocol *FindMmdvmClient(CProtocols &protocols, const std::s
 		if (c.is_number_integer() && c.get<int>() > 0)
 			n = c.get<unsigned>();
 		else if (c.is_string())
-			n = MmdvmClientInstance(c.get<std::string>());
+			n = (c.get<std::string>() == "MMDVMClient") ? 1 : MmdvmClientConnection(c.get<std::string>());
 		if (!n)
 			return nullptr;
 	}
@@ -886,12 +887,16 @@ nlohmann::json CAdminSocket::CmdStatus(void)
 	status["ysfclient_active"] = (protocols.FindByType(EProtocol::ysfclient) != nullptr);
 
 	// List all active protocol names. With several MMDVMClient connections each
-	// one is listed as MMDVMClient1, MMDVMClient2 ..., and MMDVMClient once for all
-	// of them: the names block and unblock take
+	// one is listed by its name (MMDVMClient.50, or MMDVMClient1, MMDVMClient2 ...),
+	// and MMDVMClient once for all of them: the names block and unblock take
 	const bool severalMmdvm = protocols.MmdvmClients().size() > 1;
+	auto connName = [](unsigned n) -> std::string {
+		const std::string name = MmdvmClientName(n);
+		return (name == "MMDVMClient") ? std::string("MMDVMClient1") : name;
+	};
 	auto protoName = [&](const CProtocol &p) -> std::string {
 		if (severalMmdvm && p.GetMmdvmConnection())
-			return "MMDVMClient" + std::to_string(p.GetMmdvmConnection());
+			return connName(p.GetMmdvmConnection());
 		const auto nameIt = ProtoToName().find(p.GetProtocolType());
 		return (nameIt != ProtoToName().end()) ? nameIt->second : std::string();
 	};
@@ -924,7 +929,7 @@ nlohmann::json CAdminSocket::CmdStatus(void)
 				blocks.push_back({{"from", name}, {"to", dstName}});
 		}
 		for (unsigned n : (*it)->GetBlockedMmdvm())
-			blocks.push_back({{"from", "MMDVMClient" + std::to_string(n)}, {"to", dstName}});
+			blocks.push_back({{"from", connName(n)}, {"to", dstName}});
 	}
 	status["blocks"] = blocks;
 
@@ -1153,7 +1158,7 @@ nlohmann::json CAdminSocket::CmdKerchunk(const nlohmann::json &cmd)
 struct SBlockEnd
 {
 	EProtocol type = EProtocol::none;
-	unsigned connection = 0;	// 1 to 9 for "MMDVMClient1" ... "MMDVMClient9"
+	unsigned connection = 0;	// 1 to 9 for "MMDVMClient1" ... "MMDVMClient9" or a connection's name
 	bool Matches(const CProtocol &p) const
 	{
 		return p.GetProtocolType() == type && (connection == 0 || p.GetMmdvmConnection() == connection);

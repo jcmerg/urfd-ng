@@ -22,6 +22,26 @@
 static uint8_t g_DmrSyncBSVoice[] = { 0x07,0x55,0xFD,0x7D,0xF7,0x5F,0x70 };
 static uint8_t g_DmrSyncBSData[]  = { 0x0D,0xFF,0x57,0xD7,0x5D,0xF5,0xD0 };
 
+// the name of a connection (MmdvmClientConfig.h): its section's for a named one
+std::string MmdvmClientName(unsigned n)
+{
+	const std::string key = MmdvmClientNameKey(n);
+	return g_Configure.Contains(key) ? g_Configure.GetString(key) : MmdvmClientDefaultName(n);
+}
+
+// "MMDVMClient1" ... "MMDVMClient9", or a connection's name (case does not matter)
+unsigned MmdvmClientConnection(const std::string &name)
+{
+	if (name.size() == 12 && name.compare(0, 11, "MMDVMClient") == 0 && name[11] >= '1' && name[11] <= '0' + MMDVMCLI_MAX_INSTANCES)
+		return unsigned(name[11] - '0');
+	auto lower = [](std::string s) { for (auto &c : s) c = char(std::tolower((unsigned char)c)); return s; };
+	const std::string wanted = lower(name);
+	for (unsigned n = 2; n <= MMDVMCLI_MAX_INSTANCES; n++)
+		if (g_Configure.Contains(MmdvmClientNameKey(n)) && lower(g_Configure.GetString(MmdvmClientNameKey(n))) == wanted)
+			return n;
+	return 0;
+}
+
 // Note: DMR_VOICE_LC_HEADER_CRC_MASK, DMR_TERMINATOR_WITH_LC_CRC_MASK,
 // DMR_DT_VOICE_LC_HEADER, DMR_DT_TERMINATOR_WITH_LC are defined in Protocol.h
 
