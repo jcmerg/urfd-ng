@@ -24,6 +24,7 @@
 #define MMDVMCLI_TIMEOUT_PERIOD     60  // seconds before connection is considered dead
 #define MMDVMCLI_PING_PERIOD        10  // seconds between keepalive pings
 #define MMDVMCLI_OPTIONS_WAIT        2  // seconds to wait for an ACK of the options; BrandMeister sends none
+#define MMDVMCLI_OPTIONS_RESENDS     3  // times the options go out again, every MMDVMCLI_RETRY_PERIOD, until the master answers
 
 // MMDVM data packet size
 #define MMDVMCLI_DATA_PACKET_LENGTH 55
@@ -172,6 +173,7 @@ private:
 
 	// Timers
 	CTimer          m_RetryTimer;
+	unsigned        m_OptionsResends = 0;	// RUNNING: the options go out again this many times
 	CTimer          m_TimeoutTimer;
 	CTimer          m_PingTimer;
 

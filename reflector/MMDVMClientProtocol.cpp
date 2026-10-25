@@ -260,6 +260,10 @@ void CMMDVMClientProtocol::HandleStateMachine(void)
 			m_State = EHBState::RUNNING;
 			m_TimeoutTimer.start();
 			m_PingTimer.start();
+			// a master that sets its TGs from the options and lost them gets them
+			// again, a few times, until it answers anything about them
+			m_OptionsResends = MMDVMCLI_OPTIONS_RESENDS;
+			m_RetryTimer.start();
 		}
 		break;
 
@@ -290,6 +294,12 @@ void CMMDVMClientProtocol::HandleStateMachine(void)
 		{
 			SendPing();
 			m_PingTimer.start();
+		}
+		if (m_OptionsResends > 0 && m_RetryTimer.time() > MMDVMCLI_RETRY_PERIOD)
+		{
+			SendOptions();
+			m_OptionsResends--;
+			m_RetryTimer.start();
 		}
 		if (m_TimeoutTimer.time() > MMDVMCLI_TIMEOUT_PERIOD)
 		{
@@ -367,12 +377,14 @@ void CMMDVMClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 			break;
 
 		default:
+			m_OptionsResends = 0;	// RUNNING: the master answers the options late
 			break;
 		}
 	}
 	// RPTSBKN - beacon request (implicit ACK for options)
 	else if (Buffer.size() >= 7 && 0 == Buffer.Compare((uint8_t *)"RPTSBKN", 7))
 	{
+		m_OptionsResends = 0;
 		if (m_State == EHBState::WAITING_OPTIONS || m_State == EHBState::WAITING_CONFIG)
 		{
 			std::cout << m_Name << ": connected (beacon)" << std::endl;
@@ -421,6 +433,7 @@ void CMMDVMClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 	// DMRD
 	else if (Buffer.size() == MMDVMCLI_DATA_PACKET_LENGTH && 0 == Buffer.Compare((uint8_t *)"DMRD", 4))
 	{
+		m_OptionsResends = 0;	// traffic: the master has taken the options
 		if (m_State == EHBState::WAITING_OPTIONS)
 		{
 			m_State = EHBState::RUNNING;
@@ -439,6 +452,7 @@ void CMMDVMClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 
 void CMMDVMClientProtocol::SendLogin(void)
 {
+	m_OptionsResends = 0;	// a new login sends the options in its handshake
 	CBuffer buf;
 	buf.Set((uint8_t *)"RPTL", 4);
 	buf.Append(m_uiId, 4);
