@@ -401,12 +401,23 @@ bool CConfigure::ReadData(const std::string &path)
 				else if (0 == key.compare(JMODULES))
 				{
 					std::string m(value);
-					if (checkModules(m))
+					std::string lower(value);
+					std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+					if (lower == "auto")
 					{
-						std::cerr << "ERROR: line #" << counter << ": no letters found in transcoder Modules: '" << m << "'" << std::endl;
-						rval = true;
+						// tcd's Modules decide: any module of [Modules], transcoded while tcd is connected for it
+						data[g_Keys.tc.automatic] = true;
+						data[g_Keys.tc.modules] = "";
 					}
-					data[g_Keys.tc.modules] = m;
+					else
+					{
+						if (checkModules(m))
+						{
+							std::cerr << "ERROR: line #" << counter << ": no letters found in transcoder Modules: '" << m << "'" << std::endl;
+							rval = true;
+						}
+						data[g_Keys.tc.modules] = m;
+					}
 				}
 				else if (0 == key.compare("Password"))
 					data[g_Keys.tc.password] = value;
@@ -1062,6 +1073,9 @@ bool CConfigure::ReadData(const std::string &path)
 		tcport = GetUnsigned(g_Keys.tc.port);
 		if (tcport)
 		{
+			// no Password in [Transcoder]: an empty one (the template has it commented out)
+			if (!data.contains(g_Keys.tc.password))
+				data[g_Keys.tc.password] = "";
 			if (isDefined(ErrorLevel::fatal, JTRANSCODER, JBINDINGADDRESS, g_Keys.tc.bind, rval))
 			{
 				const auto bind(data[g_Keys.tc.bind].get<std::string>());
@@ -1073,7 +1087,15 @@ bool CConfigure::ReadData(const std::string &path)
 				else if (0 != bind.compare(0, 4, "127.") && 0 != bind.compare("::1") && GetString(g_Keys.tc.password).empty())
 					std::cout << "WARNING: the transcoder port listens on " << bind << " without a [Transcoder] Password, anyone who reaches it can take over the transcoded modules" << std::endl;
 			}
-			if (isDefined(ErrorLevel::fatal, JTRANSCODER, JMODULES, g_Keys.tc.modules, rval))
+			if (!data.contains(g_Keys.tc.automatic))
+				data[g_Keys.tc.automatic] = false;
+			if (data[g_Keys.tc.automatic].get<bool>())
+			{
+				// Modules = auto: every module may be transcoded, tcd's list decides
+				data[g_Keys.tc.modules] = GetString(g_Keys.modules.modules);
+				std::cout << "[" << JTRANSCODER << "] Modules = auto: a module is transcoded while tcd is connected for it (USRP, SvxReflector and SVXServer modules need tcd to have them)" << std::endl;
+			}
+			else if (isDefined(ErrorLevel::fatal, JTRANSCODER, JMODULES, g_Keys.tc.modules, rval))
 			{
 				const auto tcmods(data[g_Keys.tc.modules].get<std::string>());
 
@@ -1092,6 +1114,7 @@ bool CConfigure::ReadData(const std::string &path)
 		else
 		{
 			// there is no transcoder
+			data[g_Keys.tc.automatic] = false;
 			data[g_Keys.tc.modules] = "";
 			data[g_Keys.tc.bind] = "";
 			data[g_Keys.tc.password] = "";

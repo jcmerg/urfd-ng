@@ -86,7 +86,10 @@ public:
 	// protocol access (for admin socket)
 	CProtocols &GetProtocols(void)                  { return m_Protocols; }
 	const std::string &GetModules(void) const       { return m_Modules; }
-	const std::string &GetTCModules(void) const     { return m_TCmodules; }
+	const std::string &GetTCModules(void) const     { return m_TCmodules; }	// configured; with Modules = auto all of them
+	// transcoded now: a configured module, with Modules = auto only while tcd is connected for it
+	bool IsTranscoded(char module) const;
+	std::string GetTranscodedModules(void) const;
 	const std::string &GetConfigPath(void) const    { return m_ConfigPath; }
 	void SetConfigPath(const std::string &p)        { m_ConfigPath = p; }
 

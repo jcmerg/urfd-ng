@@ -218,6 +218,22 @@ bool CReflector::Start(void)
 	return false;
 }
 
+bool CReflector::IsTranscoded(char module) const
+{
+	if (!g_Configure.GetUnsigned(g_Keys.tc.port) || std::string::npos == g_Configure.GetString(g_Keys.tc.modules).find(module))
+		return false;
+	return !g_Configure.GetBoolean(g_Keys.tc.automatic) || g_TCServer.GetFD(module) >= 0;
+}
+
+std::string CReflector::GetTranscodedModules(void) const
+{
+	std::string mods;
+	for (char m : g_Configure.GetString(g_Keys.tc.modules))
+		if (IsTranscoded(m))
+			mods += m;
+	return mods;
+}
+
 void CReflector::ReloadConfig(const std::string &configPath)
 {
 	std::cout << "Reloading configuration from " << configPath << std::endl;
@@ -380,10 +396,11 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 		return nullptr;
 	}
 
-	// check if module needs a transcoder and if it's connected
+	// check if module needs a transcoder and if it's connected; with Modules = auto
+	// a module without tcd is just not transcoded
 	char module = DvHeader->GetRpt2Module();
 	auto tcmods = g_Configure.GetString(g_Keys.tc.modules);
-	if (tcmods.find(module) != std::string::npos && g_TCServer.GetFD(module) < 0)
+	if (!g_Configure.GetBoolean(g_Keys.tc.automatic) && tcmods.find(module) != std::string::npos && g_TCServer.GetFD(module) < 0)
 	{
 		std::cout << "Module " << module << " waiting for transcoder, rejecting stream from " << client->GetCallsign() << std::endl;
 		return nullptr;
@@ -649,6 +666,20 @@ void CReflector::MaintenanceThread()
 
 		// bridges for the WebSocket clients, when they changed
 		NotifyMappings();
+
+#ifndef NO_DHT
+		// with Modules = auto the transcoded modules follow tcd: tell the DHT when they change
+		if (tcport && g_Configure.GetBoolean(g_Keys.tc.automatic))
+		{
+			static std::string published = GetTranscodedModules();
+			const auto now = GetTranscodedModules();
+			if (now != published)
+			{
+				published = now;
+				PutDHTConfig();
+			}
+		}
+#endif
 
 		// json report
 		if (!  jsonpath.empty())
@@ -1002,8 +1033,7 @@ void CReflector::WriteXmlFile(std::ofstream &xmlFile)
 		if (stream && stream->IsOpen())
 			xmlFile << "\t<OnAir>" << CUtils::XmlEscape(stream->GetUserCallsign().GetCS()) << "</OnAir>" << std::endl;
 		// check if transcoded
-		auto tcmods = g_Configure.GetString(g_Keys.tc.modules);
-		bool transcoded = (tcmods.find(m) != std::string::npos);
+		bool transcoded = IsTranscoded(m);
 		xmlFile << "\t<Transcoded>" << (transcoded ? "true" : "false") << "</Transcoded>" << std::endl;
 		// standard protocol IDs for this module
 		int modIdx = m - 'A';
@@ -1230,7 +1260,7 @@ void CReflector::PutDHTConfig()
 	cfg.ipv6addr.assign(g_Configure.GetString(g_Keys.ip.ipv6address));
 	cfg.modules.assign(g_Configure.GetString(g_Keys.modules.modules));
 	if (g_Configure.GetUnsigned(g_Keys.tc.port))
-		cfg.transcodedmods.assign(g_Configure.GetString(g_Keys.tc.modules));
+		cfg.transcodedmods.assign(GetTranscodedModules());
 	cfg.url.assign(g_Configure.GetString(g_Keys.names.url));
 	cfg.email.assign(g_Configure.GetString(g_Keys.names.email));
 	cfg.country.assign(g_Configure.GetString(g_Keys.names.country));

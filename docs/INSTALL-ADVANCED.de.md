@@ -129,7 +129,7 @@ sudo nano /usr/local/etc/tcd.ini     # ServerAddress, Port, Password, Modules, G
 sudo systemctl start tcd
 ```
 
-Die Module in `tcd.ini` müssen zu `[Transcoder] Modules` in `urfd.ini` passen. Läuft tcd auf einem anderen Rechner, dasselbe lange Zufallspasswort als `Password` in `tcd.ini` und in `[Transcoder]` von `urfd.ini` eintragen (ohne `#` und Leerzeichen): ohne Passwort kann jeder, der Port 10100 erreicht, die transcodierten Module übernehmen. Geräte, Verstärkungen, AGC und Monitoring: [tcd/README.de.md](../tcd/README.de.md).
+Die Module in `tcd.ini` müssen zu `[Transcoder] Modules` in `urfd.ini` passen, oder dort steht `auto`, dann entscheidet tcd allein (urfd 4.25.0). Läuft tcd auf einem anderen Rechner, dasselbe lange Zufallspasswort als `Password` in `tcd.ini` und in `[Transcoder]` von `urfd.ini` eintragen (ohne `#` und Leerzeichen): ohne Passwort kann jeder, der Port 10100 erreicht, die transcodierten Module übernehmen. Geräte, Verstärkungen, AGC und Monitoring: [tcd/README.de.md](../tcd/README.de.md).
 
 ## Aktualisieren
 

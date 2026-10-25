@@ -51,8 +51,8 @@ struct SJsonKeys {
 	struct IP { const std::string ipv4bind, ipv4address, ipv6bind, ipv6address; }
 	ip { "ipv4bind", "IPv4Address", "ipv6bind", "IPv6Address" };
 
-	struct TC { const std::string port, bind, modules, password; }
-	tc { "tcport", "tcbind", "TranscodedModules", "tcpassword" };
+	struct TC { const std::string port, bind, modules, password, automatic; }
+	tc { "tcport", "tcbind", "TranscodedModules", "tcpassword", "tcauto" };
 
 	struct MODULES { const std::string modules, descriptor[26]; }
 	modules { "Modules",

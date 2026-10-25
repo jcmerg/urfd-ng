@@ -18,6 +18,7 @@
 
 
 #include "PacketStream.h"
+#include "Global.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructor
@@ -61,7 +62,9 @@ bool CPacketStream::OpenPacketStream(const CDvHeaderPacket &DvHeader, std::share
 		m_OwnerClient = client;
 		m_Dprs.Reset();
 		m_LastPacketTime.start();
-		if (m_CodecStream)
+		// with [Transcoder] Modules = auto a module is transcoded only while tcd is connected for it
+		m_Transcode = m_CodecStream && g_Reflector.IsTranscoded(m_PSModule);
+		if (m_Transcode)
 			m_CodecStream->ResetStats(m_uiStreamId, m_DvHeader.GetCodecIn());
 		return true;
 	}
@@ -74,7 +77,7 @@ void CPacketStream::ClosePacketStream(void)
 	m_bOpen = false;
 	m_uiStreamId = 0;
 	m_OwnerClient.reset();
-	if (m_CodecStream)
+	if (m_Transcode)
 		m_CodecStream->ReportStats();
 }
 
@@ -89,7 +92,7 @@ void CPacketStream::Push(std::unique_ptr<CPacket> Packet)
 	{
 		Packet->UpdatePids(m_uiPacketCntr++);
 	}
-	if ( m_CodecStream && Packet->IsDvFrame() && Packet->IsLocalOrigin())
+	if ( m_Transcode && Packet->IsDvFrame() && Packet->IsLocalOrigin())
 	{
 		// yes, push packet to trancoder queue
 		// first, recast to a CDvFramePacket
