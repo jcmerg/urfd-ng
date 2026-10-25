@@ -244,13 +244,29 @@ void CReflector::ReloadConfig(const std::string &configPath)
 
 	try
 	{
-		// Re-read the configuration file
-		if (g_Configure.ReadData(configPath))
+		// Re-read the configuration file into a new object, so the threads reading
+		// g_Configure never see it half read (ReadData clears it and looks up the
+		// public addresses first), then hand it over at once
+		CConfigure fresh;
+		if (fresh.ReadData(configPath))
 		{
-			std::cerr << "Config reload: ReadData returned error, restoring previous configuration" << std::endl;
-			g_Configure.SetData(savedConfig);
+			std::cerr << "Config reload: ReadData returned error, keeping the previous configuration" << std::endl;
 			return;
 		}
+		// named [MMDVMClient.<name>] sections are numbered in the order of the file;
+		// a running connection keeps its number, so it must still find its section there
+		for (auto *mmdvm : m_Protocols.MmdvmClients())
+		{
+			const unsigned n = mmdvm->GetInstance();
+			const std::string key = MmdvmClientNameKey(n);
+			const std::string name = fresh.Contains(key) ? fresh.GetString(key) : MmdvmClientDefaultName(n);
+			if (name != mmdvm->GetName())
+			{
+				std::cerr << "Config reload: " << mmdvm->GetName() << " is no longer section " << n << " of the MMDVMClient sections (renamed, moved or removed), that needs a restart; keeping the previous configuration" << std::endl;
+				return;
+			}
+		}
+		g_Configure.SetData(fresh.GetData());
 
 		// Reload TG mappings (preserve dynamic entries)
 		for (auto *mmdvm : m_Protocols.MmdvmClients())
@@ -762,7 +778,8 @@ char CReflector::GetStreamModule(std::shared_ptr<CPacketStream> stream)
 
 void CReflector::JsonReport(nlohmann::json &report)
 {
-	for (auto &item : g_Configure.GetData().items())
+	const auto cfg = g_Configure.GetDataCopy();
+	for (auto &item : cfg.items())
 	{
 		if (isupper(item.key().at(0)))
 			report["Configure"][item.key()] = item.value();

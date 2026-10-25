@@ -25,6 +25,8 @@
 #include <vector>
 #include <utility>
 #include <functional>
+#include <mutex>
+#include <shared_mutex>
 #include <nlohmann/json.hpp>
 #include "JsonKeys.h"
 
@@ -45,6 +47,8 @@ public:
 	// a module's talkgroup ([Modules] TG<M> = <number>), 0 for none
 	unsigned GetModuleTG(char module) const { return Contains(ModuleTGKey(module)) ? GetUnsigned(ModuleTGKey(module)) : 0; }
 	CConfigure();
+	// fills this object from the ini; not while other threads read it: a reload
+	// reads into a new CConfigure and hands its data over with SetData
 	bool ReadData(const std::string &path);
 	bool Contains(const std::string &key) const;
 	void Dump(bool justpublic) const;
@@ -54,15 +58,18 @@ public:
 	ERefreshType GetRefreshType(const std::string &key) const;
 	bool IsString(const std::string &key) const;
 	char GetAutolinkModule(const std::string &key) const;
+	// the data itself, for the thread that reads or reloads the configuration
+	// (protocol initialization, reload); other threads use GetDataCopy
 	const nlohmann::json &GetData() { return data; }
+	nlohmann::json GetDataCopy() const { std::shared_lock<std::shared_mutex> lock(m_Lock); return data; }
 	const std::string &GetPath() const { return inipath; }	// the ini last read
-	void SetData(const nlohmann::json &d) { data = d; }
+	void SetData(const nlohmann::json &d) { std::unique_lock<std::shared_mutex> lock(m_Lock); data = d; }
 
 	// for the plugins (Plugin.h): ReadData hands them the sections it does not
 	// know at its end; true on an error. Not set in inicheck and dbutil.
 	static std::function<bool(CConfigure &, const CIniSections &)> PluginHook;
 	// a plugin's settings, under keys of its own
-	void Set(const std::string &key, const nlohmann::json &value) { data[key] = value; }
+	void Set(const std::string &key, const nlohmann::json &value) { std::unique_lock<std::shared_mutex> lock(m_Lock); data[key] = value; }
 	// a plugin's number from min to max, def when it is out of range or no number (with a warning on label)
 	static unsigned ParseUnsigned(const std::string &value, const std::string &label, unsigned min, unsigned max, unsigned def);
 
@@ -70,6 +77,7 @@ private:
 	// CFGDATA data;
 	unsigned counter;
 	nlohmann::json data;
+	mutable std::shared_mutex m_Lock;	// the getters against SetData of a reload
 	std::string inipath;
 	std::regex IPv4RegEx, IPv6RegEx;
 

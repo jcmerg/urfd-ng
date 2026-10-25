@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <atomic>
 #include "Timer.h"
 #include "DVHeaderPacket.h"
 #include "Client.h"
@@ -59,9 +60,11 @@ public:
 	// a D-Star frame's slow data, true with a new DPRS position
 	bool             DprsIn(const CDvFramePacket &frame, double &lat, double &lon) { return m_Dprs.Add(frame.GetDstarPacketId(), frame.GetDvData(), lat, lon); }
 	bool             HasCodecStream(void) const      { return m_CodecStream != nullptr; }
+	// whether the open stream goes through the transcoder, fixed when it opened
+	bool             IsTranscoding(void) const      { return m_Transcode; }
 	bool             IsCodecPipelineEmpty(void) { return !m_CodecStream || m_CodecStream->IsPipelineEmpty(); }
 	uint32_t         GetSourceTG(void) const        { return m_uiSourceTG; }
-	void             SetSourceTG(uint32_t tg)       { m_uiSourceTG = tg; if (m_CodecStream) m_CodecStream->UpdateSlowDataTG(tg); }
+	void             SetSourceTG(uint32_t tg)       { m_uiSourceTG = tg; if (m_Transcode) m_CodecStream->UpdateSlowDataTG(tg); }
 
 	// pass-through
 	std::unique_ptr<CPacket> Pop()        { return m_Queue.Pop(); }
@@ -81,7 +84,7 @@ protected:
 	CDvHeaderPacket     m_DvHeader;
 	std::shared_ptr<CClient> m_OwnerClient;
 	std::unique_ptr<CCodecStream> m_CodecStream;
-	bool             m_Transcode = false;	// this stream goes through the transcoder (decided when it opens)
+	std::atomic<bool> m_Transcode { false };	// this stream goes through the transcoder (decided when it opens)
 	uint32_t            m_uiSourceTG;
 	CDStarDprs          m_Dprs;
 };

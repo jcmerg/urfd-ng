@@ -1946,6 +1946,7 @@ void CConfigure::checkFile(const std::string &section, const std::string &key, c
 
 void CConfigure::Dump(bool justpublic) const
 {
+	std::shared_lock<std::shared_mutex> lock(m_Lock);
 	nlohmann::json tmpjson = data;
 	if (justpublic)
 	{
@@ -1960,6 +1961,7 @@ void CConfigure::Dump(bool justpublic) const
 
 ERefreshType CConfigure::GetRefreshType(const std::string &key) const
 {
+	std::shared_lock<std::shared_mutex> lock(m_Lock);
 	ERefreshType type = ERefreshType::http;
 	if (data.contains(key))
 	{
@@ -1979,11 +1981,13 @@ ERefreshType CConfigure::GetRefreshType(const std::string &key) const
 
 bool CConfigure::Contains(const std::string &key) const
 {
+	std::shared_lock<std::shared_mutex> lock(m_Lock);
 	return data.contains(key);
 }
 
 std::string CConfigure::GetString(const std::string &key) const
 {
+	std::shared_lock<std::shared_mutex> lock(m_Lock);
 	std::string str;
 	if (data.contains(key))
 	{
@@ -2008,6 +2012,7 @@ std::string CConfigure::GetString(const std::string &key) const
 
 unsigned CConfigure::GetUnsigned(const std::string &key) const
 {
+	std::shared_lock<std::shared_mutex> lock(m_Lock);
 	unsigned u = 0;
 	if (data.contains(key))
 	{
@@ -2027,6 +2032,7 @@ unsigned CConfigure::GetUnsigned(const std::string &key) const
 
 bool CConfigure::GetBoolean(const std::string &key) const
 {
+	std::shared_lock<std::shared_mutex> lock(m_Lock);
 	if (data.contains(key) && data[key].is_boolean())
 		return data[key].get<bool>();
 	else
@@ -2035,6 +2041,7 @@ bool CConfigure::GetBoolean(const std::string &key) const
 
 char CConfigure::GetAutolinkModule(const std::string &key) const
 {
+	std::shared_lock<std::shared_mutex> lock(m_Lock);
 	char c = ' ';
 	if (data.contains(key))
 	{
@@ -2048,6 +2055,7 @@ char CConfigure::GetAutolinkModule(const std::string &key) const
 
 bool CConfigure::IsString(const std::string &key) const
 {
+	std::shared_lock<std::shared_mutex> lock(m_Lock);
 	if (data.contains(key))
 		return data[key].is_string();
 	return false;
