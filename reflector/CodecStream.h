@@ -20,6 +20,7 @@
 
 #include <atomic>
 #include <future>
+#include <mutex>
 #include <sys/eventfd.h>
 
 #include "DVFramePacket.h"
@@ -97,12 +98,14 @@ protected:
 	// D-Star slow data for transcoded streams
 	CDStarSlowData m_SlowData;
 	uint32_t     m_uiSuperframeCount;
-	std::string  m_SlowDataMsg1;   // "Max via DMR TG26363", what fits in 20 characters
+	std::mutex   m_SlowDataMutex;  // the slow data below: the protocol thread sets the TG (UpdateSlowDataTG), the codec thread sends them
+	std::string  m_SlowDataMsg1;   // "Max DMR TG26363", what fits in 20 characters
 	std::string  m_SlowDataMsg2;   // the part that did not fit, in turn with Msg1; empty when all fits
-	std::string  m_SlowDataName;   // the operator's first name from the ID databases
-	std::string  m_SlowDataVia;    // "via DMR", "via DCS002 A", ...; empty without an owner
+	std::string  m_SlowDataName;   // the operator's first name from the ID databases, in ASCII
+	std::string  m_SlowDataVia;    // the source: "DMR", "DCS002 A", ...; empty without an owner
 	uint32_t     m_SlowDataTG = 0; // the source TG, known once the stream runs
 	void ComposeSlowData(void);
+	static std::string AsciiName(const std::string &utf8);
 
 	// statistics
 	double       m_RTMin;

@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both. Originally developed for the URF363 reflector.
 
-**urfd 4.29.0-dht** | tcd 0.11.0 | Dashboard v2.14.0
+**urfd 4.29.0-dht** | tcd 0.11.1 | Dashboard v2.14.0
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -420,7 +420,7 @@ Outgoing frames carry the destination ID each client polled with, encoded per di
 
 **NXDN ID Resolution**: Incoming NXDN IDs are resolved to callsigns via the NXDN ID database. If not found, the DMR ID database is used as fallback (many operators reuse their DMR ID as NXDN ID). This enables cross-protocol callsign display and D-Star slow data name lookup. Unknown IDs are dropped unless FallbackNxdnId is configured.
 
-**D-Star Slow Data**: NXDN sources show `via NXDN RAN<n>` in the D-Star text field. Operator names are looked up from both DMR and NXDN databases.
+**D-Star Slow Data**: NXDN sources show `NXDN RAN<n>` in the D-Star text field. Operator names are looked up from both DMR and NXDN databases.
 
 **Dashboard**: The NXDN RAN column is shown in the module overview when NXDN is enabled, and a separate `NXDN DST-ID` column appears next to it once `ModuleDstIdBase` is set. DMR+ and YSF DG-ID columns are hidden when their respective protocols are disabled.
 
@@ -755,36 +755,36 @@ sudo systemctl restart apache2
 ### D-Star Slow Data for Transcoded Streams
 Transcoded streams (DMR, YSF, SVX, M17, P25, USRP, client protocols -> D-Star) now include proper D-Star slow data:
 - **Header**: Caller callsign (MY), reflector callsign (RPT1/RPT2)
-- **Text message**: the operator's first name (if the caller's callsign is in the DMR or NXDN ID database) and the source: `Max via DMR TG26363` (since 4.29.0; before, the name came as a second text that many radios never show)
+- **Text message**: the operator's first name (if the caller's callsign is in the DMR or NXDN ID database) and the source: `Max DMR TG26363` (since 4.29.0; before, the name came as a second text that many radios never show)
 
 Examples of text messages per protocol:
 
 | Source | Slow Data Text |
 |--------|---------------|
-| MMDVMClient | `Max via DMR TG26363` |
-| SvxReflector | `Max via SVX TG317424` |
-| YSF (server) | `via YSF DG28` |
-| NXDN | `via NXDN RAN6` |
-| DCSClient | `via DCS002 A` |
-| DExtraClient | `via XRF757 A` |
-| DPlusClient | `via REF001 C` |
-| YSFClient | `via YSF DG15` |
-| M17, P25, USRP, DMR+ | `via M17`, `via P25`, etc. |
+| MMDVMClient | `Max DMR TG26363` |
+| SvxReflector | `Max SVX TG317424` |
+| YSF (server) | `YSF DG28` |
+| NXDN | `NXDN RAN6` |
+| DCSClient | `DCS002 A` |
+| DExtraClient | `XRF757 A` |
+| DPlusClient | `REF001 C` |
+| YSFClient | `YSF DG15` |
+| M17, P25, USRP, DMR+ | `M17`, `P25`, etc. |
 
-D-Star client protocols extract the remote reflector name from the hostname (e.g. `dcs002.xreflector.net` → `DCS002`) and append the remote module letter. YSFClient appends the DG-ID if configured (otherwise just `via YSF`).
+D-Star client protocols extract the remote reflector name from the hostname (e.g. `dcs002.xreflector.net` → `DCS002`) and append the remote module letter. YSFClient appends the DG-ID if configured (otherwise just `YSF`).
 
-The text message has 20 characters. When `<name> via <source> TG<n>` is longer, the TG moves to a second text that takes turns with the first every ~5 seconds; when it is still too long, the name is shortened so the source stays whole:
+The text message has 20 characters. When `<name> <source> TG<n>` is longer, the TG moves to a second text that takes turns with the first every ~5 seconds; when it is still too long, the name is shortened so the source stays whole:
 
 ```
-Max via DMR TG262                              (all fits)
-Jonas via DMR         <-> via DMR TG263112      (the TG takes turns)
-Barthol via YSF DG15  <-> Bartholomaeus         (the name shortened)
+Max DMR TG262                                  (all fits)
+Maximilian DMR    <-> DMR TG263112              (the TG takes turns)
+Bartholomae YSF DG15  <-> Bartholomaeus         (the name shortened)
 ```
 
 Header and text message alternate every superframe (~420ms):
 
 ```
-[Header: N0CALL > URF999 S] → [Max via DCS002 A] → [Header] → [Max via DCS002 A] → ...
+[Header: N0CALL > URF999 S] → [Max DCS002 A] → [Header] → [Max DCS002 A] → ...
 ```
 
 Name lookup works for all protocols — any callsign with a DMR ID database entry will have its name displayed on D-Star radios.
@@ -949,7 +949,8 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dynamic TG management**: Add/remove TGs at runtime with configurable TTL, cross-protocol timer refresh, BM API or kerchunk activation, expired SVX TGs leave the monitored TGs
 - **Credential database**: Logins of MMDVM and SVXServer (and plugins) from SQLite, MySQL/MariaDB or PostgreSQL besides `urfd.ini`, LRU cache with TTL and negative caching, cached logins survive a database outage, admin flush and status
 - **Transcoded modules from tcd (4.25.0)**: `[Transcoder] Modules = auto` transcodes a module while tcd is connected for it, so only `tcd.ini` lists the modules; a stream on a module without tcd passes as on a module without transcoding, the dashboard and the DHT entry follow
-- **Name in the D-Star text (4.29.0)**: the D-Star slow data text reads `<first name> via <source>` (`Max via DMR TG262`) in its 20 characters, instead of showing the name only as a second text many radios never display; what does not fit takes turns with it
+- **Name in the D-Star text (4.29.0)**: the D-Star slow data text reads `<first name> <source>` (`Max DMR TG262`, without "via") in its 20 characters, instead of showing the name only as a second text many radios never display; what does not fit takes turns with it. The name is written in ASCII (umlauts spelled out), and the text is no longer changed by the protocol's thread while the codec thread sends it
+- **tcd 0.11.1**: the monitor reads a session cookie of any length (behind a reverse proxy the site's other cookies come along), failed logins older than 10 minutes do not count, at most 8 tcdmon connections wait in their password check
 - **TGs = auto for the MMDVM server and SVXServer (4.29.0)**: `[MMDVM]` and `[SVXServer]` take the module talkgroups with `TGs = auto` (and `[MMDVM]` with `TS1` / `TS2` like an MMDVMClient), so hotspots and SvxLink nodes reach every module with a talkgroup
 - **Module talkgroups (4.28.0)**: `[Modules] TG<M> = <number>` gives a module its talkgroup once; an MMDVMClient section maps it with `TS1 = <modules>` / `TS2 = <modules>`, plugins can take it (`CConfigure::GetModuleTG`)
 - **Named MMDVMClient connections (4.27.0)**: `[MMDVMClient.<name>]` instead of `[MMDVMClient2]` ... `[MMDVMClient9]`, taking what they leave out from `[MMDVMClient]`; a `DmrId` of one or two digits (or a name of digits) is a suffix to its `DmrId`; the name shows in the log, the admin page, `BlockProtocols` and the admin commands
@@ -961,7 +962,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 
 ### Audio & Transcoding
 - **NXDN module routing**: Module selection via RAN (Radio Access Number) — RAN 1-26 = Module A-Z, with RAN 1 and the AutoLinkModule's RAN swapped so RAN 1 reaches the AutoLinkModule, RAN 0 = AutoLinkModule. Alternative selection via destination ID (`ModuleDstIdBase`, dstId base+1…base+26 = A-Z) for clients that cannot set a RAN, evaluated in the connect poll and per transmission, with the module's dstId echoed on outgoing frames. NXDN ID resolution via NXDN DB with DMR DB fallback. FallbackNxdnId for unknown callers (drop if unset). Fixed uninitialized `m_uiNXDNid` in CCallsign default constructor.
-- **D-Star slow data**: Transcoded streams include caller callsign, protocol/TG/RAN/module info, operator name from DMR and NXDN ID databases — rotating every ~5 seconds. TG display uses actual source TG (not primary/static) for correct multi-TG display. Client protocols show remote reflector name + module (e.g. `via DCS002 A`), YSFClient shows DG-ID
+- **D-Star slow data**: Transcoded streams include caller callsign, protocol/TG/RAN/module info, operator name from DMR and NXDN ID databases — rotating every ~5 seconds. TG display uses actual source TG (not primary/static) for correct multi-TG display. Client protocols show remote reflector name + module (e.g. `DCS002 A`), YSFClient shows DG-ID
 - **SVX/USRP codec separation**: Independent codec paths (`ECodecType::svx` vs `ECodecType::usrp`) with gains per connection in urfd.ini (`RxGain`/`TxGain` for SvxReflector, SVXServer and USRP); in tcd both go through the AGC analog
 - **MMDVM dual-slot**: Each timeslot (TS1/TS2) independently links to its own reflector module — a hotspot can receive traffic from two modules simultaneously on separate timeslots. Dashboard shows both linked modules per client.
 - **MMDVM NAT rebind handling**: When a hotspot reconnects with a new UDP source port (NAT rebinding), the stale client entry is replaced by matching the exact raw DMR ID. Slot module links are preserved across reconnects. Multiple clients with different DMR IDs (including extensions) from the same IP are supported.
