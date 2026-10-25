@@ -324,7 +324,7 @@ int main(int argc, char *argv[])
 			password = argv[++i];
 		else if (0 == strcmp(argv[i], "-h") || 0 == strcmp(argv[i], "--help"))
 		{
-			printf("usage: %s [-p password] [host [port]]   (default 127.0.0.1 8081; the password also from TCD_MONITOR_PASSWORD)\n", argv[0]);
+			printf("usage: %s [-p password] [host [port]]   (default 127.0.0.1 8081; without -p the password from TCD_MONITOR_PASSWORD or a prompt, -p shows it in the process list)\n", argv[0]);
 			return 0;
 		}
 		else if (pos == 0) { host = argv[i]; pos++; }

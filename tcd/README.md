@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.11.0** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.11.1** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF (AMBE2+), and software vocoders for M17 (Codec2) and P25/NXDN (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF in software. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -263,7 +263,7 @@ Why not the noise suppressor in the AMBE chip: the DVSI devices have one (on by 
 |---|---|---|
 | `Monitor` | `true` | web dashboard and stats socket on/off |
 | `MonitorBindAddress` | `127.0.0.1` | address of web dashboard and stats socket; `0.0.0.0` opens them to the network (then set `MonitorPassword`: the page can change and save levels) |
-| `MonitorPassword` | (none) | the page asks for it and keeps a session cookie for 30 days (5 failed logins from one address pause logins from there for 60 s); `tcdmon` from other hosts than 127.0.0.1 too (`tcdmon -p <password> <host>`, or `TCD_MONITOR_PASSWORD`). Plain HTTP: from outside the LAN use a TLS proxy or an ssh tunnel |
+| `MonitorPassword` | (none) | the page asks for it and keeps a session cookie for 30 days (5 failed logins from one address pause logins from there for 60 s); `tcdmon` from other hosts than 127.0.0.1 too (it asks for it, or takes `TCD_MONITOR_PASSWORD`; `tcdmon -p <password> <host>` works too, but shows the password in the process list). Failed logins older than 10 minutes do not count. Plain HTTP: from outside the LAN use a TLS proxy or an ssh tunnel |
 | `MonitorHttpPort` | `8080` | web dashboard |
 | `MonitorStatsPort` | `8081` | stats socket (JSON, for `tcdmon`) |
 | `StatsLog` | `false` | per-stream CSV files for AGC tuning |

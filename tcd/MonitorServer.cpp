@@ -392,6 +392,8 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 #define LOGIN_TRIES      5      // failed logins from one address, then
 #define LOGIN_PAUSE_S    60     // a pause of this many seconds
 #define LOGIN_PEERS_MAX  4096   // addresses with failed logins kept
+#define LOGIN_FORGET_S   600    // failed logins older than this many seconds do not count
+#define AUTH_WAITING_MAX 8      // tcdmon connections in their password check at a time
 
 // given against secret, in a time that does not depend on where they differ
 static bool SameSecret(const std::string &given, const std::string &secret)
@@ -421,10 +423,14 @@ static std::string NewToken(void)
 // the value of a cookie in the request, empty when there is none
 static std::string RequestCookie(struct lws *wsi, const char *name)
 {
-	char buf[1024];
-	if (lws_hdr_copy(wsi, buf, sizeof(buf), WSI_TOKEN_HTTP_COOKIE) <= 0)
+	// the whole header: behind a reverse proxy the cookies of the rest of the site come along
+	const int len = lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_COOKIE);
+	if (len <= 0 || len > 16384)
 		return std::string();
-	const std::string all(buf), key = std::string(name) + "=";
+	std::vector<char> buf(size_t(len) + 1);
+	if (lws_hdr_copy(wsi, buf.data(), len + 1, WSI_TOKEN_HTTP_COOKIE) <= 0)
+		return std::string();
+	const std::string all(buf.data()), key = std::string(name) + "=";
 	size_t p = 0;
 	while (p < all.size())
 	{
@@ -546,6 +552,8 @@ int CMonitorServer::Login(struct lws *wsi, SSession &s)
 		for (auto it = m_Fails.begin(); it != m_Fails.end();)
 			it = it->second.until > now ? std::next(it) : m_Fails.erase(it);
 	auto &f = m_Fails[peer];
+	if (now - f.last > std::chrono::seconds(LOGIN_FORGET_S))
+		f.count = 0;	// the earlier failed logins are long ago
 	if (f.until > now)
 	{
 		s.out = "{\"status\":\"error\",\"message\":\"too many failed logins, wait a minute\"}";
@@ -553,6 +561,7 @@ int CMonitorServer::Login(struct lws *wsi, SSession &s)
 	}
 	if (m_Password.empty() || !SameSecret(JsonString(s.body, "password"), m_Password))
 	{
+		f.last = now;
 		if (++f.count >= LOGIN_TRIES)
 		{
 			f.count = 0;
@@ -805,7 +814,7 @@ void CMonitorServer::StatsThread()
 	std::vector<int> clients;
 	struct SWaiting { int fd; std::string peer, line; std::chrono::steady_clock::time_point deadline; };
 	std::vector<SWaiting> waiting;
-	std::unordered_map<std::string, std::pair<int, std::chrono::steady_clock::time_point>> fails;
+	std::unordered_map<std::string, SFails> fails;
 
 	while (m_running)
 	{
@@ -825,8 +834,10 @@ void CMonitorServer::StatsThread()
 			else
 			{
 				const auto f = fails.find(peer);
-				if (f != fails.end() && f->second.second > std::chrono::steady_clock::now())
+				if (f != fails.end() && f->second.until > std::chrono::steady_clock::now())
 					close(clientFd);	// too many failed logins from there just now
+				else if (waiting.size() >= AUTH_WAITING_MAX)
+					close(clientFd);	// enough in their check already
 				else
 				{
 					send(clientFd, "AUTH\n", 5, MSG_NOSIGNAL);
@@ -862,10 +873,14 @@ void CMonitorServer::StatsThread()
 				send(w->fd, "DENIED\n", 7, MSG_NOSIGNAL);
 				close(w->fd);
 				auto &f = fails[w->peer];
-				if (++f.first >= LOGIN_TRIES)
+				const auto now = std::chrono::steady_clock::now();
+				if (now - f.last > std::chrono::seconds(LOGIN_FORGET_S))
+					f.count = 0;	// the earlier failed logins are long ago
+				f.last = now;
+				if (++f.count >= LOGIN_TRIES)
 				{
-					f.first = 0;
-					f.second = std::chrono::steady_clock::now() + std::chrono::seconds(LOGIN_PAUSE_S);
+					f.count = 0;
+					f.until = now + std::chrono::seconds(LOGIN_PAUSE_S);
 					std::cerr << "Monitor: " << LOGIN_TRIES << " failed tcdmon logins from " << w->peer << ", pausing them for " << LOGIN_PAUSE_S << " s" << std::endl;
 				}
 			}

@@ -2,7 +2,7 @@
 
 [English](README.md) | **Deutsch**
 
-**Version 0.11.0** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.11.1** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25/NXDN (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF in Software ergänzen. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
@@ -263,7 +263,7 @@ Warum nicht die Rauschunterdrückung im AMBE-Chip: Die DVSI-Geräte haben eine (
 |---|---|---|
 | `Monitor` | `true` | Web-Dashboard und Statistik-Socket ein/aus |
 | `MonitorBindAddress` | `127.0.0.1` | Adresse von Web-Dashboard und Statistik-Socket; `0.0.0.0` öffnet sie ins Netz (ohne Passwort, die Seite kann Pegel ändern und speichern, also nur im vertrauenswürdigen LAN) |
-| `MonitorPassword` | (keins) | die Seite fragt danach und hält eine Sitzung per Cookie 30 Tage (nach 5 Fehlversuchen von einer Adresse 60 s Pause für Anmeldungen von dort); `tcdmon` von anderen Rechnern als 127.0.0.1 ebenfalls (`tcdmon -p <Passwort> <Host>` oder `TCD_MONITOR_PASSWORD`). Unverschlüsseltes HTTP: von außerhalb des LANs über einen TLS-Proxy oder einen SSH-Tunnel |
+| `MonitorPassword` | (keins) | die Seite fragt danach und hält eine Sitzung per Cookie 30 Tage (nach 5 Fehlversuchen von einer Adresse 60 s Pause für Anmeldungen von dort); `tcdmon` von anderen Rechnern als 127.0.0.1 ebenfalls (es fragt danach oder nimmt `TCD_MONITOR_PASSWORD`; `tcdmon -p <Passwort> <Host>` geht auch, zeigt das Passwort aber in der Prozessliste). Fehlversuche, die älter als 10 Minuten sind, zählen nicht. Unverschlüsseltes HTTP: von außerhalb des LANs über einen TLS-Proxy oder einen SSH-Tunnel |
 | `MonitorHttpPort` | `8080` | Web-Dashboard |
 | `MonitorStatsPort` | `8081` | Statistik-Socket (JSON, für `tcdmon`) |
 | `StatsLog` | `false` | CSV-Dateien pro Stream zum Einstellen der AGC |

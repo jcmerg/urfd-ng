@@ -52,7 +52,7 @@ private:
 	// used by the service thread only (the stats thread keeps its own failures)
 	std::string m_Password;
 	std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_Tokens;
-	struct SFails { int count = 0; std::chrono::steady_clock::time_point until; };
+	struct SFails { int count = 0; std::chrono::steady_clock::time_point until, last; };
 	std::unordered_map<std::string, SFails> m_Fails;
 	bool Authorized(struct lws *wsi);
 	int Login(struct lws *wsi, SSession &s);
