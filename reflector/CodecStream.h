@@ -97,8 +97,12 @@ protected:
 	// D-Star slow data for transcoded streams
 	CDStarSlowData m_SlowData;
 	uint32_t     m_uiSuperframeCount;
-	std::string  m_SlowDataMsg1;   // "via DMR TG26363"
-	std::string  m_SlowDataMsg2;   // "Jens-Christian" (name from DB)
+	std::string  m_SlowDataMsg1;   // "Max via DMR TG26363", what fits in 20 characters
+	std::string  m_SlowDataMsg2;   // the part that did not fit, in turn with Msg1; empty when all fits
+	std::string  m_SlowDataName;   // the operator's first name from the ID databases
+	std::string  m_SlowDataVia;    // "via DMR", "via DCS002 A", ...; empty without an owner
+	uint32_t     m_SlowDataTG = 0; // the source TG, known once the stream runs
+	void ComposeSlowData(void);
 
 	// statistics
 	double       m_RTMin;

@@ -955,7 +955,7 @@ $(document).ready(function() {
                 <header><h2>SVX users</h2><button class="btn small quiet" onclick="refreshSvxsUserList()">Refresh</button></header>
                 <form class="form-row" onsubmit="addSvxsUser(); return false;">
                     <label>Callsign
-                        <input type="text" class="field w-s" id="svxs-callsign" placeholder="DL4JC" required>
+                        <input type="text" class="field w-s" id="svxs-callsign" placeholder="N0CALL" required>
                     </label>
                     <label>Password
                         <input type="text" class="field w-m" id="svxs-password" required>
@@ -987,7 +987,7 @@ $(document).ready(function() {
                 <div id="mmdvm-user-alerts"></div>
                 <form class="form-row" onsubmit="addMmdvmUser(); return false;">
                     <label>Callsign or DMR ID
-                        <input type="text" class="field w-m" id="mmdvm-user-id" placeholder="DL4JC or 2634000" required>
+                        <input type="text" class="field w-m" id="mmdvm-user-id" placeholder="N0CALL or 2634000" required>
                     </label>
                     <label>Password, optional
                         <input type="text" class="field w-m" id="mmdvm-user-pw">

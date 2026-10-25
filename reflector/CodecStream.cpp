@@ -236,19 +236,17 @@ void CCodecStream::ResetStats(uint16_t streamid, ECodecType type)
 				protocols.Unlock();
 			}
 
-			// D-Star text message is max 20 chars
-			if (msg.size() > 20)
-				msg.resize(20);
 		}
 
-		// Look up operator name from DMR or NXDN ID database via callsign
-		std::string nameMsg = CUser::OperatorName(my);
-		if (nameMsg.size() > 20)
-			nameMsg.resize(20);
-
-		m_SlowDataMsg1 = msg;
-		m_SlowDataMsg2 = nameMsg;
-		m_SlowData.Init(my, rpt1, rpt2, msg);
+		// the operator's first name from the DMR or NXDN ID database, in front of
+		// the route: "Max via DMR TG262" (ComposeSlowData fits it into 20 characters)
+		const std::string name = CUser::OperatorName(my);
+		const auto first = name.find_first_not_of(' ');
+		m_SlowDataName = (std::string::npos == first) ? std::string() : name.substr(first, name.find(' ', first) - first);
+		m_SlowDataVia = msg;
+		m_SlowDataTG = 0;
+		ComposeSlowData();
+		m_SlowData.Init(my, rpt1, rpt2, m_SlowDataMsg1);
 	}
 }
 
@@ -268,16 +266,42 @@ void CCodecStream::ReportStats()
 	}
 }
 
+// the D-Star text: "<first name> via <route> TG<n>" in the 20 characters a
+// radio shows. When it is too long, the TG goes to the second text, which takes
+// turns with the first; then the name is shortened so the route stays whole.
+void CCodecStream::ComposeSlowData(void)
+{
+	const std::string tg = m_SlowDataTG ? " TG" + std::to_string(m_SlowDataTG) : std::string();
+	auto joined = [](const std::string &a, const std::string &b) { return a.empty() ? b : (b.empty() ? a : a + " " + b); };
+	std::string msg1 = joined(m_SlowDataName, m_SlowDataVia + (m_SlowDataVia.empty() ? std::string() : tg)), msg2;
+	if (msg1.size() > 20 && !tg.empty() && !m_SlowDataVia.empty())
+	{
+		msg2 = m_SlowDataVia + tg;
+		msg1 = joined(m_SlowDataName, m_SlowDataVia);
+	}
+	if (msg1.size() > 20 && !m_SlowDataName.empty())
+	{
+		const size_t room = (m_SlowDataVia.size() + 1 < 20) ? 20 - m_SlowDataVia.size() - 1 : 0;
+		msg1 = (room >= 3) ? m_SlowDataName.substr(0, room) + " " + m_SlowDataVia : m_SlowDataVia;
+		if (msg2.empty())
+			msg2 = m_SlowDataName;
+	}
+	if (msg1.size() > 20)
+		msg1.resize(20);
+	if (msg2.size() > 20)
+		msg2.resize(20);
+	m_SlowDataMsg1 = msg1;
+	m_SlowDataMsg2 = msg2;
+}
+
 void CCodecStream::UpdateSlowDataTG(uint32_t tg)
 {
-	if (tg == 0 || m_SlowDataMsg1.empty())
+	if (tg == 0 || m_SlowDataVia.empty())
 		return;
 
-	// Append TG to existing message (e.g. "via DMR" -> "via DMR TG2625")
-	std::string updated = m_SlowDataMsg1 + " TG" + std::to_string(tg);
-	if (updated.size() > 20)
-		updated.resize(20);
-	m_SlowDataMsg1 = updated;
+	// the TG of a DMR or SVX stream, known once it runs ("Max via DMR TG2625")
+	m_SlowDataTG = tg;
+	ComposeSlowData();
 
 	// Re-init slow data with updated message
 	CCallsign my = m_PacketStream ? m_PacketStream->GetUserCallsign() : CCallsign();

@@ -69,5 +69,5 @@ uint16_t SvxUnpack16(const std::vector<uint8_t> &buf, size_t &pos);
 uint32_t SvxUnpack32(const std::vector<uint8_t> &buf, size_t &pos);
 std::string SvxUnpackString(const std::vector<uint8_t> &buf, size_t &pos);
 
-// "DL4JC-APP" -> "DL4JC"
+// "N0CALL-APP" -> "N0CALL"
 std::string SvxExtractCallsign(const std::string &svxCallsign);

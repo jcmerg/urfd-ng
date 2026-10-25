@@ -293,7 +293,7 @@ TG9 = A,TS2                        # Common hotspot default
 # One entry covers all 9-digit extensions (e.g. 1234567 covers 123456700-99).
 # Password may be empty to allow any password (useful for compat hotspots).
 # 1234567 = changeme               # 7-digit base DMR ID
-# DL4JC = changeme                 # Callsign (resolved to DMR ID at startup)
+# N0CALL = changeme                 # Callsign (resolved to DMR ID at startup)
 # 2632545 =                        # Open access (no password required)
 ```
 
@@ -305,7 +305,7 @@ TG9 = A,TS2                        # Common hotspot default
 
 **Dual-Slot**: Jeder Timeslot verbindet sich unabhängig. Sendet ein Hotspot auf TS1 mit TG 4019 (Modul S) und auf TS2 mit TG 4004 (Modul D), empfängt er beide Module gleichzeitig, Modul S auf dem Timeslot, der für dessen TG eingetragen ist, Modul D auf dem anderen. Dafür müssen TGs verschiedener Module auf verschiedenen Timeslots liegen. Das Dashboard zeigt beide verbundenen Module (z.B. "S (TS1), D (TS2)").
 
-**Talker Alias**: Jeder Ruf kommt bei den Hotspots mit Talker Alias an, wie von BrandMeister: Rufzeichen und Vorname aus der DMR-ID-Datenbank (z.B. `DL4JC Jens-Chri`), höchstens 13 Zeichen in UTF-16 wie bei BrandMeister, denn Motorola-Funkgeräte ignorieren einen Alias in ISO 8 Bit. Schickt die DMR-Quelle einen eigenen Alias (BrandMeister oder ein Funkgerät mit eigenem), wird sein Text weitergegeben, sobald er vollständig angekommen ist, neu kodiert in UTF-16 (Quellen schicken auch 7 Bit, ISO 8 Bit oder UTF-8) und wieder ab dem Header, damit sich keine Blöcke der beiden mischen; bis dahin, und bei D-Star, YSF, M17 und den anderen Betriebsarten, ist es unserer. Er steckt in der Embedded Signalling, ein LC in jedem zweiten Superframe; der Hotspot zeigt ihn an und gibt ihn ans Funkgerät weiter. Die Superframes dazwischen füllt MMDVMHost mit dem Voice-LC (Quelle, TG, seine eigene OVCM-Einstellung), ein Funkgerät, das spät in einen Ruf einsteigt, bekommt es also trotzdem. Die Service Options im Voice-LC (OVCM, Emergency, Privacy) sind immer 0: die Flags einer einzelnen Quelle werden nicht an alle verlinkten Hotspots weitergegeben.
+**Talker Alias**: Jeder Ruf kommt bei den Hotspots mit Talker Alias an, wie von BrandMeister: Rufzeichen und Vorname aus der DMR-ID-Datenbank (z.B. `N0CALL Max`), höchstens 13 Zeichen in UTF-16 wie bei BrandMeister, denn Motorola-Funkgeräte ignorieren einen Alias in ISO 8 Bit. Schickt die DMR-Quelle einen eigenen Alias (BrandMeister oder ein Funkgerät mit eigenem), wird sein Text weitergegeben, sobald er vollständig angekommen ist, neu kodiert in UTF-16 (Quellen schicken auch 7 Bit, ISO 8 Bit oder UTF-8) und wieder ab dem Header, damit sich keine Blöcke der beiden mischen; bis dahin, und bei D-Star, YSF, M17 und den anderen Betriebsarten, ist es unserer. Er steckt in der Embedded Signalling, ein LC in jedem zweiten Superframe; der Hotspot zeigt ihn an und gibt ihn ans Funkgerät weiter. Die Superframes dazwischen füllt MMDVMHost mit dem Voice-LC (Quelle, TG, seine eigene OVCM-Einstellung), ein Funkgerät, das spät in einen Ruf einsteigt, bekommt es also trotzdem. Die Service Options im Voice-LC (OVCM, Emergency, Privacy) sind immer 0: die Flags einer einzelnen Quelle werden nicht an alle verlinkten Hotspots weitergegeben.
 
 **Hotspot-Einstellungen**: Den Hotspot direkt auf die IP des Reflektors, Port 62030, einstellen. In WPSD/Pi-Star "MMDVM_BRIDGE" oder den Einzel-Netzwerk-Modus verwenden. Der Multi-Netzwerk-Modus von DMRGateway leitet standardmäßig zu BrandMeister und muss abgeschaltet werden.
 
@@ -314,7 +314,7 @@ TG9 = A,TS2                        # Common hotspot default
 **Admin-Befehle**:
 ```json
 {"cmd": "mmdvm_user_add", "token": "...", "dmrid": 1234567, "password": "secret"}
-{"cmd": "mmdvm_user_add", "token": "...", "callsign": "DL4JC", "password": "secret"}
+{"cmd": "mmdvm_user_add", "token": "...", "callsign": "N0CALL", "password": "secret"}
 {"cmd": "mmdvm_user_add", "token": "...", "dmrid": 2632545}
 {"cmd": "mmdvm_user_remove", "token": "...", "dmrid": 1234567}
 {"cmd": "mmdvm_user_list", "token": "..."}
@@ -330,19 +330,19 @@ Verbindet sich als Client-Knoten mit fremden D-Star-Reflektoren und ordnet deren
 ```ini
 [DCSClient]
 Enable = true
-Callsign = DL4JC                         # Must be whitelisted on target reflector
+Callsign = N0CALL                         # Must be whitelisted on target reflector
 Map1 = dcs002.xreflector.net,30051,A,S   # DCS002 module A -> local module S
 Map2 = dcs009.xreflector.net,30051,B,F   # DCS009 module B -> local module F
 # BlockProtocols = MMDVMClient,YSF       # Optional: block audio from these protocols
 
 [DExtraClient]
 Enable = true
-Callsign = DL4JC
+Callsign = N0CALL
 Map1 = xrf757.openquad.net,30001,A,A     # XRF757 module A -> local module A
 
 [DPlusClient]
 Enable = true
-Callsign = DL4JC                         # Must be registered at dstargateway.org
+Callsign = N0CALL                         # Must be registered at dstargateway.org
 Map1 = ref001.dstargateway.org,20001,C,A # REF001 module C -> local module A
 ```
 
@@ -366,7 +366,7 @@ Verbindet sich als Client-Knoten mit fremden YSF-Reflektoren. Optional mit DG-ID
 ```ini
 [YSFClient]
 Enable = true
-Callsign = DL4JC
+Callsign = N0CALL
 Map1 = 90.187.72.177,42099,A             # YSF reflector -> local module A
 Map2 = 85.215.138.68,42000,F,15          # YSF reflector -> local module F, DG-ID 15
 # BlockProtocols = MMDVMClient            # Optional
@@ -489,7 +489,7 @@ $Admin['Port']     = 10101;
 {"cmd": "svxs_user_list", "token": "..."}
 {"cmd": "svxs_peer_list", "token": "..."}
 {"cmd": "mmdvm_user_add", "token": "...", "dmrid": 1234567, "password": "secret"}
-{"cmd": "mmdvm_user_add", "token": "...", "callsign": "DL4JC", "password": "secret"}
+{"cmd": "mmdvm_user_add", "token": "...", "callsign": "N0CALL", "password": "secret"}
 {"cmd": "mmdvm_user_add", "token": "...", "dmrid": 2632545}
 {"cmd": "mmdvm_user_remove", "token": "...", "dmrid": 1234567}
 {"cmd": "mmdvm_user_list", "token": "..."}
@@ -733,15 +733,14 @@ sudo systemctl restart apache2
 ### D-Star-Slow-Data für transcodierte Streams
 Transcodierte Streams (DMR, YSF, SVX, M17, P25, USRP, Client-Protokolle -> D-Star) enthalten jetzt korrekte D-Star-Slow-Data:
 - **Header**: Rufzeichen des Anrufers (MY), Reflektor-Rufzeichen (RPT1/RPT2)
-- **Textnachricht**: Quell-Protokoll und TG/DG-ID/RAN/Modul
-- **Betreibername**: Steht das Rufzeichen in der DMR- oder NXDN-ID-Datenbank, wird der Name im Wechsel mit der Protokoll-/TG-Angabe angezeigt (je etwa 5 Sekunden)
+- **Textnachricht**: der Vorname des Betreibers (wenn das Rufzeichen in der DMR- oder NXDN-ID-Datenbank steht) und die Quelle: `Max via DMR TG26363` (seit 4.29.0; vorher kam der Name als zweiter Text, den viele Funkgeräte nie anzeigen)
 
 Beispiele der Textnachricht pro Protokoll:
 
 | Quelle | Slow-Data-Text |
 |--------|---------------|
-| MMDVMClient | `via DMR TG26363` |
-| SvxReflector | `via SVX TG317424` |
+| MMDVMClient | `Max via DMR TG26363` |
+| SvxReflector | `Max via SVX TG317424` |
 | YSF (Server) | `via YSF DG28` |
 | NXDN | `via NXDN RAN6` |
 | DCSClient | `via DCS002 A` |
@@ -752,13 +751,18 @@ Beispiele der Textnachricht pro Protokoll:
 
 Die D-Star-Client-Protokolle entnehmen den Namen des fremden Reflektors dem Hostnamen (z.B. `dcs002.xreflector.net` → `DCS002`) und hängen den Modulbuchstaben an. YSFClient hängt die DG-ID an, wenn eine eingestellt ist (sonst nur `via YSF`).
 
-Header und Textnachricht wechseln mit jedem Superframe (etwa 420 ms). Ist ein Betreibername bekannt, wechselt die Textnachricht etwa alle 5 Sekunden zwischen Protokoll-/TG-Angabe und Name:
+Die Textnachricht hat 20 Zeichen. Ist `<Name> via <Quelle> TG<n>` länger, wandert die TG in einen zweiten Text, der sich etwa alle 5 Sekunden mit dem ersten abwechselt; ist es dann noch zu lang, wird der Name gekürzt, damit die Quelle ganz bleibt:
 
 ```
-[Header: DL4JC > URF363 S] → [via DCS002 A]   → [Header] → [via DCS002 A]   → ...
-                    (after ~5s)
-[Header: DL4JC > URF363 S] → [Jens-Christian]  → [Header] → [Jens-Christian]  → ...
-                    (after ~5s, back to via/info)
+Max via DMR TG262                              (alles passt)
+Jonas via DMR         <-> via DMR TG263112      (die TG wechselt sich ab)
+Barthol via YSF DG15  <-> Bartholomaeus         (der Name gekürzt)
+```
+
+Header und Textnachricht wechseln mit jedem Superframe (etwa 420 ms):
+
+```
+[Header: N0CALL > URF999 S] → [Max via DCS002 A] → [Header] → [Max via DCS002 A] → ...
 ```
 
 Die Namenssuche funktioniert für alle Protokolle: Jedes Rufzeichen mit Eintrag in der DMR-ID-Datenbank erscheint mit Namen auf D-Star-Funkgeräten.
@@ -922,6 +926,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Protokoll-Sperren zur Laufzeit**: Beliebige Protokoll-Paare in beide Richtungen im Admin-Dashboard sperren und freigeben: threadsicher mit shared_mutex, per Klick entfernbar, Rücksetzen auf die Konfiguration, wird nicht gespeichert (gilt nach Neustart nicht mehr)
 - **Dynamische TG-Verwaltung**: TGs zur Laufzeit mit einstellbarer Laufzeit hinzufügen und entfernen, Timer über alle Protokolle hinweg erneuert, Aktivierung per BM-API oder Kerchunk, abgelaufene SVX-TGs fallen aus den überwachten TGs
 - **Transcodierte Module von tcd (4.25.0)**: `[Transcoder] Modules = auto` transcodiert ein Modul, solange tcd dafür verbunden ist, nur noch die `tcd.ini` nennt also die Module; ein Stream auf einem Modul ohne tcd läuft wie auf einem Modul ohne Transcoding, Dashboard und DHT-Eintrag folgen
+- **Name im D-Star-Text (4.29.0)**: Der D-Star-Slow-Data-Text lautet `<Vorname> via <Quelle>` (`Max via DMR TG262`) in seinen 20 Zeichen, statt den Namen nur als zweiten Text zu zeigen, den viele Funkgeräte nie anzeigen; was nicht passt, wechselt sich ab
 - **TGs = auto für MMDVM-Server und SVXServer (4.29.0)**: `[MMDVM]` und `[SVXServer]` übernehmen die Modul-Talkgroups mit `TGs = auto` (und `[MMDVM]` mit `TS1` / `TS2` wie ein MMDVMClient), Hotspots und SvxLink-Knoten erreichen damit jedes Modul mit Talkgroup
 - **Modul-Talkgroups (4.28.0)**: `[Modules] TG<M> = <nummer>` legt die Talkgroup eines Moduls einmal fest; eine MMDVMClient-Sektion bindet sie mit `TS1 = <module>` / `TS2 = <module>` ein, Plugins können sie übernehmen (`CConfigure::GetModuleTG`)
 - **MMDVMClient-Verbindungen mit Namen (4.27.0)**: `[MMDVMClient.<name>]` statt `[MMDVMClient2]` ... `[MMDVMClient9]`, mit allem Weggelassenen aus `[MMDVMClient]`; eine `DmrId` aus ein oder zwei Ziffern (oder ein Name aus Ziffern) ist eine Endung an dessen `DmrId`; der Name steht im Log, auf der Admin-Seite, in `BlockProtocols` und bei den Admin-Befehlen
