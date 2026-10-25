@@ -39,13 +39,16 @@ public:
 private:
 	// running: between the plugin's start and stop; sequence: of the last frame
 	struct SState { void *state; std::chrono::steady_clock::time_point last_used; uint32_t sequence; bool running; };
-	SState *State(uint16_t streamid, uint32_t sequence);	// with m_Mutex held; started
+	// a state per stream and direction: decoding and encoding the same stream (DMR
+	// reencode) each begin and end on their own, a start resets the plugin's state
+	static uint32_t Key(uint16_t streamid, bool encode) { return (encode ? 0x10000u : 0u) | streamid; }
+	SState *State(uint32_t key, uint32_t sequence);	// with m_Mutex held; started
 	void Stop(SState *s, bool last);	// after the frame, with m_Mutex held
 
 	const tcd_codec_plugin *m_Plugin;
 	uint32_t m_Codec;
 	std::shared_ptr<std::mutex> m_Mutex;	// the plugin's: one call at a time, for all its codecs
-	std::unordered_map<uint16_t, SState> m_States;
+	std::unordered_map<uint32_t, SState> m_States;	// by Key()
 };
 
 class CCodecPlugins
