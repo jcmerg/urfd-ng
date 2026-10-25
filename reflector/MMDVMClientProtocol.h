@@ -141,7 +141,6 @@ private:
 	const SJsonKeys::MMDVMCLIENT m_Keys;
 	const std::string m_Name;
 	std::string     m_Network;
-	std::string     m_TCModules;		// [Transcoder] Modules, if tcd runs
 
 	// the client of each module, ours alone: another connection may use the
 	// same callsign to the same master

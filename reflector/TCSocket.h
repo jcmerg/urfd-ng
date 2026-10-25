@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <mutex>
 #include <vector>
+#include <functional>
 #include <queue>
 #include <memory>
 #include <chrono>
@@ -68,6 +69,9 @@ public:
 	bool AnyAreClosed();
 	// Non-blocking: poll listen socket for ms and accept any pending connections
 	void TryAccept(int ms = 100);
+	// which of the modules a tcd may connect for now (urfd: [Transcoder] Modules, reloadable);
+	// without a filter every module given to Open
+	void SetAcceptFilter(std::function<bool(char)> filter) { m_Accept = filter; }
 
 private:
 	// a new connection in its handshake, see TryAccept()
@@ -84,6 +88,7 @@ private:
 
 	CIp m_Ip;
 	int m_ListenFd;
+	std::function<bool(char)> m_Accept;
 	std::vector<SPending> m_Pending;
 	void acceptnew();
 	bool advance(SPending &p);

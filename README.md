@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both. Originally developed for the URF363 reflector.
 
-**urfd 4.25.0-dht** | tcd 0.10.5 | Dashboard v2.14.0
+**urfd 4.25.1-dht** | tcd 0.10.6 | Dashboard v2.14.0
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -492,7 +492,7 @@ The reflector supports hot-reloading configuration without dropping client sessi
 **Reloaded on SIGHUP:**
 - TG mappings (MMDVMClient, SvxReflector and SVXServer) — dynamic TGs are preserved
 - Whitelist, blacklist, and interlink files
-- Transcoder module assignment
+- Transcoded modules (`[Transcoder] Modules`, also to and from `auto`, since 4.25.1); a tcd connection for a module no longer listed is closed
 - Reflector metadata (callsign, sponsor, country, URLs)
 - Database refresh parameters
 
@@ -502,6 +502,7 @@ The reflector supports hot-reloading configuration without dropping client sessi
 - IP address binding changes
 - Admin interface settings
 - Echo module assignment
+- Transcoder port, binding address and password
 
 ```bash
 sudo ./setup.sh reload
