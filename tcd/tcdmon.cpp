@@ -312,9 +312,23 @@ int main(int argc, char *argv[])
 {
 	const char *host = "127.0.0.1";
 	int port = 8081;
+	// tcd's MonitorPassword, asked by tcd from other hosts than 127.0.0.1
+	std::string password = getenv("TCD_MONITOR_PASSWORD") ? getenv("TCD_MONITOR_PASSWORD") : "";
 
-	if (argc >= 2) host = argv[1];
-	if (argc >= 3) port = atoi(argv[2]);
+	// tcdmon [-p password] [host [port]]
+	int pos = 0;
+	for (int i = 1; i < argc; i++)
+	{
+		if (0 == strcmp(argv[i], "-p") && i + 1 < argc)
+			password = argv[++i];
+		else if (0 == strcmp(argv[i], "-h") || 0 == strcmp(argv[i], "--help"))
+		{
+			printf("usage: %s [-p password] [host [port]]   (default 127.0.0.1 8081; the password also from TCD_MONITOR_PASSWORD)\n", argv[0]);
+			return 0;
+		}
+		else if (pos == 0) { host = argv[i]; pos++; }
+		else if (pos == 1) { port = atoi(argv[i]); pos++; }
+	}
 
 	// Connect to tcd stats socket
 	int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -334,6 +348,36 @@ int main(int argc, char *argv[])
 	{
 		fprintf(stderr, "Cannot connect to %s:%d: %s\n", host, port, strerror(errno));
 		return 1;
+	}
+
+	// tcd asks for its MonitorPassword with a line "AUTH", else it starts with the stats
+	std::string first;
+	{
+		struct pollfd pfd = { fd, POLLIN, 0 };
+		char c;
+		while (poll(&pfd, 1, 3000) > 0 && recv(fd, &c, 1, 0) == 1 && c != '\n' && first.size() < 65536)
+			first += c;
+	}
+	if (first == "AUTH")
+	{
+		if (password.empty())
+		{
+			const char *p = getpass("tcd monitor password: ");
+			password = p ? p : "";
+		}
+		const std::string line = "AUTH " + password + "\n";
+		send(fd, line.c_str(), line.size(), 0);
+		std::string answer;
+		struct pollfd pfd = { fd, POLLIN, 0 };
+		char c;
+		while (poll(&pfd, 1, 5000) > 0 && recv(fd, &c, 1, 0) == 1 && c != '\n' && answer.size() < 64)
+			answer += c;
+		if (answer != "OK")
+		{
+			fprintf(stderr, "tcd refused the password\n");
+			return 1;
+		}
+		first.clear();
 	}
 
 	// Non-blocking reads
@@ -363,7 +407,7 @@ int main(int argc, char *argv[])
 	}
 
 	std::string linebuf;
-	std::string last_json;
+	std::string last_json = first;	// the first stats line, read during the login check
 
 	while (true)
 	{
@@ -559,7 +603,7 @@ int main(int argc, char *argv[])
 			mvprintw(row, 2, "%s", active ? ">>" : "OK");
 			attroff(COLOR_PAIR(1) | COLOR_PAIR(7) | A_BOLD);
 
-			printw("  %s (codec plugin) [%s]  streams:%d", name.c_str(), codec.c_str(), cached);
+			printw("  %s (codec plugin) [%s]  active:%d", name.c_str(), codec.c_str(), cached);
 			if (codec == "dmr")
 				printw("  re-enc:%s", reencode ? "ON" : "off");
 			if (active)

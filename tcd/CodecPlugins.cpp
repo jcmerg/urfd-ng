@@ -76,8 +76,14 @@ bool CSoftCodec::Decode(uint16_t streamid, const uint8_t *frame, int16_t *pcm)
 
 int CSoftCodec::Streams(void)
 {
+	// the streams with a frame in the last 2 s: a state stays 30 s after its stream ended
 	std::lock_guard<std::mutex> lock(*m_Mutex);
-	return int(m_States.size());
+	const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(2);
+	int active = 0;
+	for (const auto &s : m_States)
+		if (s.second.last_used > cutoff)
+			active++;
+	return active;
 }
 
 CCodecPlugins::~CCodecPlugins()

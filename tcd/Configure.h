@@ -67,6 +67,8 @@ public:
 	// the monitor's module view: 0 = auto (compact from five modules on), 1 = cards, 2 = compact
 	int      GetMonitorView(void) const      { return monitor_view; }
 	bool     GetMonitorEnabled(void) const   { return monitor_enabled; }
+	// the monitor's password: the web page always asks for it, tcdmon from other hosts than 127.0.0.1; empty = none
+	const std::string &GetMonitorPassword(void) const { return monitor_password; }
 	const std::string &GetIniPath(void) const { return ini_path; }
 	// the part of OutputGainDMR (dB) that non-DMR sources get through b2 in the AMBE2+ frame after the encoder
 	int GetOutputGainDMRBitstream(void) const { return outgain_dmr_bitstream; }
@@ -109,7 +111,8 @@ private:
 	float agc_analog_noisesuppress = -10.0f; // SVX/USRP: speexdsp noise suppression (dB, 0 = off)
 	bool     monitor_enabled    = true;
 	int      monitor_view       = 0;
-	std::string monitor_bind    = "127.0.0.1";   // the monitor has no password
+	std::string monitor_bind    = "127.0.0.1";
+	std::string monitor_password;
 	uint16_t monitor_http_port  = 8080;
 	uint16_t monitor_stats_port = 8081;
 	bool        statslog_enabled = false;

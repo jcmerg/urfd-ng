@@ -60,6 +60,7 @@
 #define MONITORHTTP    "MonitorHttpPort"
 #define MONITORSTATS   "MonitorStatsPort"
 #define MONITORVIEW    "MonitorView"
+#define MONITORPASS    "MonitorPassword"
 #define STATSLOG       "StatsLog"
 #define STATSLOGDIR    "StatsLogDir"
 #define STATSLOGRETAIN "StatsLogRetain"
@@ -223,6 +224,8 @@ bool CConfigure::ReadData(const std::string &path)
 			monitor_bind = value;
 		else if (0 == key.compare(MONITORHTTP))
 			monitor_http_port = (uint16_t)std::stoul(value);
+		else if (0 == key.compare(MONITORPASS))
+			monitor_password = value;
 		else if (0 == key.compare(MONITORVIEW))
 		{
 			if (value == "cards") monitor_view = 1;
@@ -309,7 +312,11 @@ bool CConfigure::ReadData(const std::string &path)
 	else
 		std::cout << "AGC = disabled" << std::endl;
 	if (monitor_enabled)
-		std::cout << "Monitor = " << monitor_bind << ", HTTP:" << monitor_http_port << " Stats:" << monitor_stats_port << std::endl;
+	{
+		std::cout << "Monitor = " << monitor_bind << ", HTTP:" << monitor_http_port << " Stats:" << monitor_stats_port << ", password " << (monitor_password.empty() ? "none" : "set") << std::endl;
+		if (monitor_password.empty() && 0 != monitor_bind.compare(0, 4, "127."))
+			std::cout << "WARNING: the monitor listens on " << monitor_bind << " without a MonitorPassword: anyone who reaches it can change the levels and save them" << std::endl;
+	}
 
 	return false;
 }

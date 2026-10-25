@@ -183,6 +183,14 @@ td b { font-weight: 650; font-stretch: 85%; }
 .btn:active { transform: translateY(1px); }
 .save-state { font-size: var(--fs-s); }
 
+/* login, with MonitorPassword */
+.login { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; background: var(--panel); padding: 16px; }
+.login-box { display: grid; gap: 0.75rem; width: min(100%, 22rem); padding: 1.5rem; border: 1px solid var(--rule); border-radius: 8px; background: var(--panel-raised); }
+.login-box h2 { margin: 0; }
+.login-box p { margin: 0; font-size: var(--fs-s); color: var(--graphite); }
+.login-box input { font: inherit; padding: 0.45rem 0.6rem; border: 1px solid var(--rule); border-radius: 3px; background: var(--panel); color: var(--ink); }
+.login-msg { min-height: 1.2em; color: var(--tx) !important; }
+
 footer { border-top: 1px solid var(--rule); }
 footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphite); }
 
@@ -212,9 +220,20 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
       <span class="ver" id="ver"></span>
       <span class="link-state" id="conn">Connecting</span>
       <button class="theme-btn" id="theme-btn" type="button" aria-label="Theme: system" title="Theme: system. Click to switch">System</button>
+      <button class="theme-btn" id="logout-btn" type="button" hidden>Log out</button>
     </div>
   </div>
 </header>
+
+<div class="login" id="login" hidden>
+  <form class="login-box" id="login-form">
+    <h2>TCD monitor</h2>
+    <p>This monitor is protected by MonitorPassword in tcd.ini.</p>
+    <input type="password" id="login-pw" autocomplete="current-password" placeholder="Password" required>
+    <button class="btn" type="submit">Log in</button>
+    <p class="login-msg" id="login-msg" aria-live="polite"></p>
+  </form>
+</div>
 
 <main>
   <div class="wrap">
@@ -346,7 +365,11 @@ applyTheme();
 function connect() {
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
   ws.onopen = function () { $('conn').className = 'link-state ok'; $('conn').textContent = 'Live'; };
-  ws.onclose = function () { $('conn').className = 'link-state bad'; $('conn').textContent = 'No connection to tcd, retrying'; setTimeout(connect, 2000); };
+  ws.onclose = function () {
+    $('conn').className = 'link-state bad'; $('conn').textContent = 'No connection to tcd, retrying';
+    // a refused WebSocket may mean the session is gone: ask before trying again
+    setTimeout(function () { checkAuth().then(function (ok) { if (ok) connect(); }).catch(function () { connect(); }); }, 2000);
+  };
   ws.onerror = function () { ws.close(); };
   ws.onmessage = function (e) {
     data = JSON.parse(e.data);
@@ -510,7 +533,7 @@ function render() {
     var act = x.active_module && x.active_module.length > 0;
     rows += '<tr><td><b>' + esc(x.name) + '</b></td><td>Codec plugin <span class="muted">' + esc(x.codec) + '</span></td>' +
       '<td>' + (act ? '<span class="state-use">in use</span>' : '<span class="state-ok">ready</span>') + '</td>' +
-      '<td>' + (act ? '<span class="mod-tag">' + esc(x.active_module) + '</span>' : '') + '<span class="muted">' + x.cached_streams + ' streams, ' +
+      '<td>' + (act ? '<span class="mod-tag">' + esc(x.active_module) + '</span>' : '') + '<span class="muted">' + x.cached_streams + ' active, ' +
       x.encodes + ' encoded, ' + x.decodes + ' decoded' + (x.reencodes || x.reencode_active ? ', ' + x.reencodes + ' re-encoded' : '') + '</span></td>' +
       '<td class="r opt muted">-</td><td class="r muted">-</td></tr>';
   });
@@ -543,7 +566,39 @@ function loadConfig(cfg) {
   setVal('og_dmr_bs', 'v_og_dmr_bs', cfg.outgain_dmr_bitstream);
   agcKeys.forEach(function (k) { setVal(k, 'v_' + k, cfg[k]); });
 }
-function post(path, body) { return fetch(path, { method: 'POST', body: JSON.stringify(body) }); }
+function post(path, body) {
+  return fetch(path, { method: 'POST', body: JSON.stringify(body) }).then(function (r) { if (r.status === 401) showLogin(); return r; });
+}
+
+// MonitorPassword: a login form while there is no session
+var authRequired = false, wsWanted = false;
+function showLogin(msg) {
+  $('login').hidden = false;
+  $('login-msg').textContent = msg || '';
+  $('login-pw').value = '';
+  $('login-pw').focus();
+}
+function checkAuth() {
+  return fetch('/api/auth').then(function (r) { return r.json(); }).then(function (j) {
+    authRequired = j.required;
+    $('logout-btn').hidden = !j.required;
+    if (j.required && !j.ok) { showLogin(); return false; }
+    $('login').hidden = true;
+    return true;
+  });
+}
+$('login-form').addEventListener('submit', function (e) {
+  e.preventDefault();
+  fetch('/api/login', { method: 'POST', body: JSON.stringify({ password: $('login-pw').value }) })
+    .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
+    .then(function (x) {
+      if (x.status === 200) { $('login').hidden = true; if (!ws || ws.readyState > 1) connect(); }
+      else showLogin(x.j.message || 'Login failed');
+    }).catch(function () { showLogin('No answer from tcd'); });
+});
+$('logout-btn').addEventListener('click', function () {
+  fetch('/api/logout', { method: 'POST' }).then(function () { if (ws) ws.close(); showLogin(); });
+});
 
 // the vocoder choice: shown when there is one, "dvsi" is the hardware
 function loadCodecs(codecs) {
@@ -599,7 +654,7 @@ $('btn_save').addEventListener('click', function () {
   var s = $('save_status');
   s.className = 'save-state muted'; s.textContent = 'Saving';
   clearTimeout(saveTimer);
-  fetch('/api/save', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (j) {
+  fetch('/api/save', { method: 'POST' }).then(function (r) { if (r.status === 401) showLogin(); return r.json(); }).then(function (j) {
     if (j.status === 'ok') { s.className = 'save-state state-ok'; s.textContent = 'Saved to tcd.ini'; }
     else { s.className = 'save-state state-bad'; s.textContent = 'Not saved: ' + (j.message || 'tcd gave no reason'); }
   }).catch(function () {
@@ -607,7 +662,7 @@ $('btn_save').addEventListener('click', function () {
   }).then(function () { saveTimer = setTimeout(function () { s.textContent = ''; }, 5000); });
 });
 
-connect();
+checkAuth().then(function (ok) { if (ok) connect(); }).catch(function () { connect(); });
 </script>
 </body>
 </html>

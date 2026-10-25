@@ -39,8 +39,9 @@ CMonitorServer::~CMonitorServer()
 	Stop();
 }
 
-bool CMonitorServer::Start(const std::string &bind, uint16_t http_port, uint16_t stats_port)
+bool CMonitorServer::Start(const std::string &bind, uint16_t http_port, uint16_t stats_port, const std::string &password)
 {
+	m_Password = password;
 	struct in_addr test;
 	if (1 != inet_pton(AF_INET, bind.c_str(), &test))
 	{
@@ -56,7 +57,7 @@ bool CMonitorServer::Start(const std::string &bind, uint16_t http_port, uint16_t
 	m_statsFuture = std::async(std::launch::async, &CMonitorServer::StatsThread, this);
 
 	std::cout << "Monitor: HTTP on " << m_bind << " port " << m_httpPort
-	          << ", Stats on port " << m_statsPort << std::endl;
+	          << ", Stats on port " << m_statsPort << (m_Password.empty() ? "" : ", password required (tcdmon: not from 127.0.0.1)") << std::endl;
 	return true;
 }
 
@@ -379,6 +380,151 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 	return 404;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// MonitorPassword: a login gives a session cookie
+
+#define SESSION_COOKIE   "tcd_session"
+#define SESSION_DAYS     30
+#define SESSION_MAX      64
+#define LOGIN_TRIES      5      // failed logins from one address, then
+#define LOGIN_PAUSE_S    60     // a pause of this many seconds
+
+// given against secret, in a time that does not depend on where they differ
+static bool SameSecret(const std::string &given, const std::string &secret)
+{
+	size_t diff = given.size() ^ secret.size();
+	for (size_t i = 0; i < given.size(); i++)
+		diff |= (unsigned char)given[i] ^ (unsigned char)(i < secret.size() ? secret[i] : 0);
+	return 0 == diff && !secret.empty();
+}
+
+static std::string NewToken(void)
+{
+	unsigned char raw[24];
+	std::ifstream urandom("/dev/urandom", std::ios::binary);
+	if (!urandom.read((char *)raw, sizeof(raw)))
+		return std::string();
+	static const char hex[] = "0123456789abcdef";
+	std::string t;
+	for (unsigned char c : raw)
+	{
+		t += hex[c >> 4];
+		t += hex[c & 15];
+	}
+	return t;
+}
+
+// the value of a cookie in the request, empty when there is none
+static std::string RequestCookie(struct lws *wsi, const char *name)
+{
+	char buf[1024];
+	if (lws_hdr_copy(wsi, buf, sizeof(buf), WSI_TOKEN_HTTP_COOKIE) <= 0)
+		return std::string();
+	const std::string all(buf), key = std::string(name) + "=";
+	size_t p = 0;
+	while (p < all.size())
+	{
+		while (p < all.size() && (all[p] == ' ' || all[p] == ';'))
+			p++;
+		const size_t e = all.find(';', p);
+		const std::string item = all.substr(p, e == std::string::npos ? std::string::npos : e - p);
+		if (item.compare(0, key.size(), key) == 0)
+			return item.substr(key.size());
+		if (e == std::string::npos)
+			break;
+		p = e + 1;
+	}
+	return std::string();
+}
+
+// a string field of a small JSON body, with \" and \\ undone
+static std::string JsonString(const std::string &body, const char *name)
+{
+	const std::string key = std::string("\"") + name + "\"";
+	auto p = body.find(key);
+	if (p == std::string::npos)
+		return std::string();
+	p = body.find('"', body.find(':', p + key.size()));
+	if (p == std::string::npos)
+		return std::string();
+	std::string v;
+	for (size_t i = p + 1; i < body.size() && body[i] != '"'; i++)
+	{
+		if (body[i] == '\\' && i + 1 < body.size())
+			i++;
+		v += body[i];
+	}
+	return v;
+}
+
+static std::string PeerAddress(struct lws *wsi)
+{
+	char ip[64] = "";
+	lws_get_peer_simple(wsi, ip, sizeof(ip));
+	return ip;
+}
+
+// a valid session cookie, or no MonitorPassword
+bool CMonitorServer::Authorized(struct lws *wsi)
+{
+	if (m_Password.empty())
+		return true;
+	const auto it = m_Tokens.find(RequestCookie(wsi, SESSION_COOKIE));
+	if (it == m_Tokens.end())
+		return false;
+	const auto now = std::chrono::steady_clock::now();
+	if (now - it->second > std::chrono::hours(24 * SESSION_DAYS))
+	{
+		m_Tokens.erase(it);
+		return false;
+	}
+	it->second = now;	// sliding: 30 days after the last use
+	return true;
+}
+
+// POST /api/login {"password": "..."}: a session cookie, or 401 (429 after too many tries)
+int CMonitorServer::Login(struct lws *wsi, SSession &s)
+{
+	const auto now = std::chrono::steady_clock::now();
+	const std::string peer = PeerAddress(wsi);
+	auto &f = m_Fails[peer];
+	if (f.until > now)
+	{
+		s.out = "{\"status\":\"error\",\"message\":\"too many failed logins, wait a minute\"}";
+		return 429;
+	}
+	if (m_Password.empty() || !SameSecret(JsonString(s.body, "password"), m_Password))
+	{
+		if (++f.count >= LOGIN_TRIES)
+		{
+			f.count = 0;
+			f.until = now + std::chrono::seconds(LOGIN_PAUSE_S);
+			std::cerr << "Monitor: " << LOGIN_TRIES << " failed logins from " << peer << ", pausing logins from there for " << LOGIN_PAUSE_S << " s" << std::endl;
+		}
+		s.out = "{\"status\":\"error\",\"message\":\"wrong password\"}";
+		return 401;
+	}
+	m_Fails.erase(peer);
+	const std::string token = NewToken();
+	if (token.empty())
+	{
+		s.out = "{\"status\":\"error\",\"message\":\"no random token\"}";
+		return 500;
+	}
+	while (m_Tokens.size() >= SESSION_MAX)
+	{
+		auto oldest = m_Tokens.begin();
+		for (auto it = m_Tokens.begin(); it != m_Tokens.end(); ++it)
+			if (it->second < oldest->second)
+				oldest = it;
+		m_Tokens.erase(oldest);
+	}
+	m_Tokens[token] = now;
+	s.cookie = std::string(SESSION_COOKIE "=") + token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + std::to_string(SESSION_DAYS * 86400);
+	s.out = "{\"status\":\"ok\"}";
+	return 200;
+}
+
 int CMonitorServer::Callback(struct lws *wsi, enum lws_callback_reasons reason, void *, void *in, size_t len)
 {
 	auto *self = static_cast<CMonitorServer *>(lws_context_user(lws_get_context(wsi)));
@@ -409,6 +555,9 @@ int CMonitorServer::Callback(struct lws *wsi, enum lws_callback_reasons reason, 
 		return self->Respond(wsi);
 	case LWS_CALLBACK_HTTP_WRITEABLE:
 		return self->WriteBody(wsi);
+	case LWS_CALLBACK_FILTER_PROTOCOL_CONNECTION:
+		// the WebSocket only with a session when there is a MonitorPassword
+		return self->Authorized(wsi) ? 0 : -1;
 	case LWS_CALLBACK_ESTABLISHED:
 		self->m_Sessions[wsi] = SSession();
 		self->m_Sessions[wsi].ws = true;
@@ -456,8 +605,26 @@ int CMonitorServer::Respond(struct lws *wsi)
 	s.responded = true;
 	int status = 200;
 	const char *type = "application/json";
-	if (s.uri.compare(0, 5, "/api/") == 0)
-		status = HandleRest(s.uri, s.body, s.out);
+	if (s.uri == "/api/auth")
+		s.out = std::string("{\"required\":") + (m_Password.empty() ? "false" : "true") + ",\"ok\":" + (Authorized(wsi) ? "true" : "false") + "}";
+	else if (s.uri == "/api/login")
+		status = Login(wsi, s);
+	else if (s.uri == "/api/logout")
+	{
+		m_Tokens.erase(RequestCookie(wsi, SESSION_COOKIE));
+		s.cookie = SESSION_COOKIE "=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0";
+		s.out = "{\"status\":\"ok\"}";
+	}
+	else if (s.uri.compare(0, 5, "/api/") == 0)
+	{
+		if (Authorized(wsi))
+			status = HandleRest(s.uri, s.body, s.out);
+		else
+		{
+			status = 401;
+			s.out = "{\"status\":\"error\",\"message\":\"login required\"}";
+		}
+	}
 	else
 	{
 		s.out.assign(monitor_html, monitor_html_len);
@@ -465,11 +632,12 @@ int CMonitorServer::Respond(struct lws *wsi)
 	}
 	s.sent = 0;
 
-	unsigned char headers[LWS_PRE + 512];
+	unsigned char headers[LWS_PRE + 1024];
 	unsigned char *start = headers + LWS_PRE, *p = start, *end = headers + sizeof(headers) - 1;
 	static const char cors[] = "*";
 	if (lws_add_http_common_headers(wsi, (unsigned)status, type, (lws_filepos_t)s.out.size(), &p, end)
-	 || lws_add_http_header_by_name(wsi, (const unsigned char *)"Access-Control-Allow-Origin:", (const unsigned char *)cors, sizeof(cors) - 1, &p, end)
+	 || (m_Password.empty() && lws_add_http_header_by_name(wsi, (const unsigned char *)"Access-Control-Allow-Origin:", (const unsigned char *)cors, sizeof(cors) - 1, &p, end))
+	 || (!s.cookie.empty() && lws_add_http_header_by_name(wsi, (const unsigned char *)"Set-Cookie:", (const unsigned char *)s.cookie.c_str(), (int)s.cookie.size(), &p, end))
 	 || lws_finalize_write_http_header(wsi, start, &p, end))
 		return -1;
 	lws_callback_on_writable(wsi);
@@ -574,8 +742,12 @@ void CMonitorServer::StatsThread()
 
 	listen(listenFd, 4);
 
-	// Track connected stats clients
+	// Track connected stats clients; with a MonitorPassword one from another host
+	// than 127.0.0.1 first gets "AUTH" and must answer "AUTH <password>" within 5 s
 	std::vector<int> clients;
+	struct SWaiting { int fd; std::string peer, line; std::chrono::steady_clock::time_point deadline; };
+	std::vector<SWaiting> waiting;
+	std::unordered_map<std::string, std::pair<int, std::chrono::steady_clock::time_point>> fails;
 
 	while (m_running)
 	{
@@ -588,7 +760,58 @@ void CMonitorServer::StatsThread()
 			// Set non-blocking
 			int fl = fcntl(clientFd, F_GETFL, 0);
 			fcntl(clientFd, F_SETFL, fl | O_NONBLOCK);
-			clients.push_back(clientFd);
+			char peer[INET_ADDRSTRLEN] = "";
+			inet_ntop(AF_INET, &clientAddr.sin_addr, peer, sizeof(peer));
+			if (m_Password.empty() || 0 == strncmp(peer, "127.", 4))
+				clients.push_back(clientFd);
+			else
+			{
+				const auto f = fails.find(peer);
+				if (f != fails.end() && f->second.second > std::chrono::steady_clock::now())
+					close(clientFd);	// too many failed logins from there just now
+				else
+				{
+					send(clientFd, "AUTH\n", 5, MSG_NOSIGNAL);
+					waiting.push_back({ clientFd, peer, std::string(), std::chrono::steady_clock::now() + std::chrono::seconds(5) });
+				}
+			}
+		}
+
+		// the logins of the waiting clients
+		for (auto w = waiting.begin(); w != waiting.end(); )
+		{
+			char b[256];
+			ssize_t n;
+			while (w->line.find('\n') == std::string::npos && (n = recv(w->fd, b, sizeof(b), MSG_DONTWAIT)) > 0 && w->line.size() < 1024)
+				w->line.append(b, size_t(n));
+			const auto nl = w->line.find('\n');
+			if (nl == std::string::npos && std::chrono::steady_clock::now() < w->deadline && w->line.size() < 1024)
+			{
+				++w;
+				continue;
+			}
+			std::string given = nl == std::string::npos ? std::string() : w->line.substr(0, nl);
+			if (!given.empty() && given.back() == '\r')
+				given.pop_back();
+			if (given.compare(0, 5, "AUTH ") == 0 && SameSecret(given.substr(5), m_Password))
+			{
+				send(w->fd, "OK\n", 3, MSG_NOSIGNAL);
+				clients.push_back(w->fd);
+				fails.erase(w->peer);
+			}
+			else
+			{
+				send(w->fd, "DENIED\n", 7, MSG_NOSIGNAL);
+				close(w->fd);
+				auto &f = fails[w->peer];
+				if (++f.first >= LOGIN_TRIES)
+				{
+					f.first = 0;
+					f.second = std::chrono::steady_clock::now() + std::chrono::seconds(LOGIN_PAUSE_S);
+					std::cerr << "Monitor: " << LOGIN_TRIES << " failed tcdmon logins from " << w->peer << ", pausing them for " << LOGIN_PAUSE_S << " s" << std::endl;
+				}
+			}
+			w = waiting.erase(w);
 		}
 
 		if (!clients.empty())
@@ -620,6 +843,8 @@ void CMonitorServer::StatsThread()
 
 	for (int fd : clients)
 		close(fd);
+	for (auto &w : waiting)
+		close(w.fd);
 	close(listenFd);
 }
 

@@ -30,7 +30,7 @@ public:
 	// false on an error of the plugin; the frame has the size of the codec
 	bool Encode(uint16_t streamid, const int16_t *pcm, uint8_t *frame);
 	bool Decode(uint16_t streamid, const uint8_t *frame, int16_t *pcm);
-	// the streams that have a state
+	// the streams it codes right now (a frame in the last 2 s)
 	int Streams(void);
 	// its entry in g_Stats.sw, -1 for none
 	int stats = -1;

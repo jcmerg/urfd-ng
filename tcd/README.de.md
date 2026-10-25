@@ -2,7 +2,7 @@
 
 [English](README.md) | **Deutsch**
 
-**Version 0.10.6** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.10.7** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25/NXDN (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF in Software ergänzen. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
@@ -243,6 +243,7 @@ Warum nicht die Rauschunterdrückung im AMBE-Chip: Die DVSI-Geräte haben eine (
 |---|---|---|
 | `Monitor` | `true` | Web-Dashboard und Statistik-Socket ein/aus |
 | `MonitorBindAddress` | `127.0.0.1` | Adresse von Web-Dashboard und Statistik-Socket; `0.0.0.0` öffnet sie ins Netz (ohne Passwort, die Seite kann Pegel ändern und speichern, also nur im vertrauenswürdigen LAN) |
+| `MonitorPassword` | (keins) | die Seite fragt danach und hält eine Sitzung per Cookie 30 Tage (nach 5 Fehlversuchen von einer Adresse 60 s Pause für Anmeldungen von dort); `tcdmon` von anderen Rechnern als 127.0.0.1 ebenfalls (`tcdmon -p <Passwort> <Host>` oder `TCD_MONITOR_PASSWORD`). Unverschlüsseltes HTTP: von außerhalb des LANs über einen TLS-Proxy oder einen SSH-Tunnel |
 | `MonitorHttpPort` | `8080` | Web-Dashboard |
 | `MonitorStatsPort` | `8081` | Statistik-Socket (JSON, für `tcdmon`) |
 | `StatsLog` | `false` | CSV-Dateien pro Stream zum Einstellen der AGC |
@@ -375,7 +376,7 @@ journalctl -u tcd -f
 - **Umbenannte Schlüssel**: `DmrGainIn/Out` (war `DmrYsfGainIn/Out`), `UsrpGainIn/Out` (war `UsrpRxGain/TxGain`, seit 0.3.2 entfallen), Verstärkungen erweitert auf ±40 dB
 
 ### Zuverlässigkeit
-- **Monitor standardmäßig nur lokal**: `MonitorBindAddress` (Standard `127.0.0.1`) für Web-Dashboard und Statistik-Socket, die kein Passwort haben
+- **Monitor standardmäßig nur lokal**: `MonitorBindAddress` (Standard `127.0.0.1`) für Web-Dashboard und Statistik-Socket; seit 0.10.7 fragen mit `MonitorPassword` die Seite und ein `tcdmon` von außen nach einem Passwort
 - **Keine Grauzone im Kern** (0.10.0): Die MD380-Firmware ist aus tcd verschwunden; ohne Codec-Plugin sind zwei AMBE-Geräte nötig, und `ambe` deckt DMR → DMR/YSF ab
 - **Leistung**: blockierendes Lesen mit Timeout statt Dauerabfrage; seit 0.2.12 mit `-O2` gebaut, ein transkodierter Stream (Codec2, IMBE und AGC in Software) braucht etwa 7 % eines Kerns auf einem Raspberry Pi 4 und 3 % auf einem Pi 5, ein Pi 4 reicht für zwei Module also locker
 - **Threadsicherheit**: Sperre um den IMBE-Vocoder, SIGPIPE ignoriert für saubere Neuverbindungen

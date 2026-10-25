@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
 	if (g_Conf.GetMonitorEnabled())
 	{
 		g_Stats.module_letters = g_Conf.GetTCMods();
-		g_Monitor.Start(g_Conf.GetMonitorBindAddress(), g_Conf.GetMonitorHttpPort(), g_Conf.GetMonitorStatsPort());
+		g_Monitor.Start(g_Conf.GetMonitorBindAddress(), g_Conf.GetMonitorHttpPort(), g_Conf.GetMonitorStatsPort(), g_Conf.GetMonitorPassword());
 	}
 
 	// Start stats CSV logger

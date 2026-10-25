@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.10.6** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.10.7** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF (AMBE2+), and software vocoders for M17 (Codec2) and P25/NXDN (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF in software. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -242,7 +242,8 @@ Why not the noise suppressor in the AMBE chip: the DVSI devices have one (on by 
 | Key | Template | Meaning |
 |---|---|---|
 | `Monitor` | `true` | web dashboard and stats socket on/off |
-| `MonitorBindAddress` | `127.0.0.1` | address of web dashboard and stats socket; `0.0.0.0` opens them to the network (no password, the page can change and save levels, so only on a trusted LAN) |
+| `MonitorBindAddress` | `127.0.0.1` | address of web dashboard and stats socket; `0.0.0.0` opens them to the network (then set `MonitorPassword`: the page can change and save levels) |
+| `MonitorPassword` | (none) | the page asks for it and keeps a session cookie for 30 days (5 failed logins from one address pause logins from there for 60 s); `tcdmon` from other hosts than 127.0.0.1 too (`tcdmon -p <password> <host>`, or `TCD_MONITOR_PASSWORD`). Plain HTTP: from outside the LAN use a TLS proxy or an ssh tunnel |
 | `MonitorHttpPort` | `8080` | web dashboard |
 | `MonitorStatsPort` | `8081` | stats socket (JSON, for `tcdmon`) |
 | `StatsLog` | `false` | per-stream CSV files for AGC tuning |
@@ -375,7 +376,7 @@ journalctl -u tcd -f
 - **Renamed keys**: `DmrGainIn/Out` (was `DmrYsfGainIn/Out`), `UsrpGainIn/Out` (was `UsrpRxGain/TxGain`, gone since 0.3.2), gains extended to ±40 dB
 
 ### Reliability
-- **Monitor on loopback by default**: `MonitorBindAddress` (default `127.0.0.1`) for the web dashboard and stats socket, which have no password
+- **Monitor on loopback by default**: `MonitorBindAddress` (default `127.0.0.1`) for the web dashboard and stats socket; since 0.10.7 with `MonitorPassword` the page and remote `tcdmon` ask for a password
 - **No grey zone in the core** (0.10.0): the MD380 firmware is gone from tcd; without a codec plugin two AMBE devices are needed, and `ambe` covers DMR → DMR/YSF
 - **Performance**: blocking reads with a timeout instead of busy polling; built with `-O2` since 0.2.12, a transcoded stream (Codec2, IMBE and AGC in software) takes about 7 % of one core on a Raspberry Pi 4 and 3 % on a Pi 5, so a Pi 4 is plenty for two modules
 - **Thread safety**: lock around the IMBE vocoder, SIGPIPE ignored for clean reconnects
