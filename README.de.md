@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.29.3-dht** | tcd 0.12.2 | Dashboard v2.14.0
+**urfd 4.29.3-dht** | tcd 0.12.2 | Dashboard v2.14.1
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -669,7 +669,7 @@ Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Das
 
 Der JSON-Report enthält außerdem ein Array `DynamicTGs` mit Protokoll, TG, Modul und Restlaufzeit aller aktiven dynamischen Zuordnungen.
 
-### Dashboard v2.14.0
+### Dashboard v2.14.1
 In v2.9.0 neu gestaltet als Frontplatte eines Funkgeräts: Ein bernsteinfarbenes LCD zeigt, wer gerade sendet, die Module sind ein Tastenfeld, der Rest sind schlichte Tabellen. Davor: dunkles Design (v2.6.0), robust gegen Ausfälle des Verzeichnisses (v2.6.1), M17-Positionen in der Last-Heard-Liste (v2.7.0), Eintrag ins Verzeichnis an den Reflektor abgegeben (v2.8.0), Sicherheitskorrekturen (v2.8.1, v2.8.2), Korrekturen an Statusdatei und Admin-Socket (v2.8.3). Seit v2.10.0 steht der Vorname neben dem Rufzeichen, aus den ID-Datenbanken, die urfd lädt (ab urfd 4.12.0).
 
 **Seiten:**
@@ -954,6 +954,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v2.14.1**: die Seite Links zeigt ein Band nur bei D-Star-Links, wo der Suffix der Port-Buchstabe des Repeaters ist; sonst ist er das Modul, und ein Knoten auf Modul D erschien als Dongle
 - **Dashboard v2.14.0**: Admin-Seite: die Abschnitte geladener Plugins, gezeichnet aus der Beschreibung, die jedes Plugin in `status` liefert (ab urfd 4.24.0); die Protokoll-Liste zeigt die Beschreibung eines Plugins. Seit urfd 4.26.0 verteilen sich mehr als 8 Module gleichmäßig auf höchstens 5 Spalten (9 = 5 + 4, 12 = 4 x 3), jede Taste mit dem Namen ihres Moduls, und die Plugin-Abschnitte haben denselben Abstand zueinander wie die übrigen
 - **Dashboard v2.13.0**: Admin-Seite: mehrere MMDVMClient-Verbindungen, jede beim Hinzufügen einer TG wählbar, Name und Netz in der TG-Tabelle, ein Reconnect-Button pro Verbindung (ab urfd 4.21.0); die Protokoll-Liste lässt MMDVMClient2 bis 9 wie die erste weg
 - **Dashboard v2.12.3**: Admin-Seite: eine Karte „Credential database“ mit Backend, Verbindung, Cache-Zählern und einem Button, der den Cache leert (ab urfd 4.20.0); Nutzer aus der Datenbank stehen in den Nutzerlisten mit „(database)“
