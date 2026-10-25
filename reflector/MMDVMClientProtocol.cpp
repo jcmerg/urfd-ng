@@ -226,10 +226,22 @@ void CMMDVMClientProtocol::HandleStateMachine(void)
 		}
 		break;
 
+	case EHBState::WAITING_OPTIONS:
+		// BrandMeister takes the options without an ACK (and asks for a beacon at
+		// second 18 of a minute only): without a NAK they count as taken, so the
+		// connection does not wait up to a minute without sending
+		if (m_RetryTimer.time() > MMDVMCLI_OPTIONS_WAIT)
+		{
+			std::cout << m_Name << ": connected (options sent, the master confirms none)" << std::endl;
+			m_State = EHBState::RUNNING;
+			m_TimeoutTimer.start();
+			m_PingTimer.start();
+		}
+		break;
+
 	case EHBState::WAITING_LOGIN:
 	case EHBState::WAITING_AUTH:
 	case EHBState::WAITING_CONFIG:
-	case EHBState::WAITING_OPTIONS:
 		if (m_RetryTimer.time() > MMDVMCLI_RETRY_PERIOD)
 		{
 			switch (m_State)
@@ -237,7 +249,6 @@ void CMMDVMClientProtocol::HandleStateMachine(void)
 			case EHBState::WAITING_LOGIN:  SendLogin();   break;
 			case EHBState::WAITING_AUTH:   SendAuth();    break;
 			case EHBState::WAITING_CONFIG: SendConfig();  break;
-			case EHBState::WAITING_OPTIONS:SendOptions(); break;
 			default: break;
 			}
 			m_RetryTimer.start();
