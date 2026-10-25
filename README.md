@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.29.1-dht** | tcd 0.11.1 | Dashboard v2.14.0
+**urfd 4.29.1-dht** | tcd 0.12.0 | Dashboard v2.14.0
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -950,6 +950,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Credential database**: Logins of MMDVM and SVXServer (and plugins) from SQLite, MySQL/MariaDB or PostgreSQL besides `urfd.ini`, LRU cache with TTL and negative caching, cached logins survive a database outage, admin flush and status
 - **Transcoded modules from tcd (4.25.0)**: `[Transcoder] Modules = auto` transcodes a module while tcd is connected for it, so only `tcd.ini` lists the modules; a stream on a module without tcd passes as on a module without transcoding, the dashboard and the DHT entry follow
 - **Name in the D-Star text (4.29.0)**: the D-Star slow data text reads `<first name> <source>` (`Max DMR TG262`, without "via") in its 20 characters, instead of showing the name only as a second text many radios never display; what does not fit takes turns with it. The name is written in ASCII (umlauts spelled out), and the text is no longer changed by the protocol's thread while the codec thread sends it
+- **tcd 0.12.0**: codec plugin interface 2 (`TCD_CODEC_API 2`): `start` and `stop` tell a plugin where a transmission begins and ends, so it begins every transmission afresh, also under a stream id used again within 30 s; the monitor stops counting a stream at its last frame. Plugins built for interface 1 have to be rebuilt (tcd-mbelib-neo-plugin: `git pull`, `make clean && make`)
 - **tcd 0.11.1**: the monitor reads a session cookie of any length (behind a reverse proxy the site's other cookies come along), failed logins older than 10 minutes do not count, at most 8 tcdmon connections wait in their password check
 - **TGs = auto for the MMDVM server and SVXServer (4.29.0)**: `[MMDVM]` and `[SVXServer]` take the module talkgroups with `TGs = auto` (and `[MMDVM]` with `TS1` / `TS2` like an MMDVMClient), so hotspots and SvxLink nodes reach every module with a talkgroup
 - **Module talkgroups (4.28.0)**: `[Modules] TG<M> = <number>` gives a module its talkgroup once; an MMDVMClient section maps it with `TS1 = <modules>` / `TS2 = <modules>`, plugins can take it (`CConfigure::GetModuleTG`)

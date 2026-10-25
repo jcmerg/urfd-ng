@@ -21,7 +21,9 @@
 // tcd calls a plugin from one thread at a time. A frame is 20 ms, 160 samples of
 // 8 kHz PCM. Each stream gets a state of its own (open/close), so streams do not
 // mix their vocoder state; tcd closes the state of a stream that has been quiet
-// for 30 s.
+// for 30 s. start and stop tell the plugin where a transmission begins and ends:
+// a state can carry several transmissions one after the other (the same stream
+// id again), each between a start and a stop.
 //
 // Copyright (C) 2026
 // Licensed under the GNU General Public License v3 or later
@@ -32,7 +34,7 @@
 extern "C" {
 #endif
 
-#define TCD_CODEC_API 1
+#define TCD_CODEC_API 2	// 2: start and stop
 
 // the codecs, also as bits in tcd_codec_plugin.codecs
 #define TCD_CODEC_DSTAR 0x01u   // D-Star AMBE 3600x2400, 9 bytes with FEC
@@ -59,6 +61,13 @@ struct tcd_codec_plugin
 	// 0 = ok; frame has the size of the codec
 	int (*encode)(void *state, const int16_t *pcm, uint8_t *frame);
 	int (*decode)(void *state, const uint8_t *frame, int16_t *pcm);
+
+	// both may be NULL. start: before the first frame of a transmission, the
+	// state is to begin afresh (a new state gets a start too). stop: after its
+	// last frame. A transmission whose last frame got lost gets no stop: the
+	// next start on the state, or close, ends it.
+	void (*start)(void *state);
+	void (*stop)(void *state);
 };
 
 typedef const struct tcd_codec_plugin *(*tcd_codec_plugin_func)(void);

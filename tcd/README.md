@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.11.1** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.12.0** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF (AMBE2+), and software vocoders for M17 (Codec2) and P25/NXDN (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF in software. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -121,7 +121,7 @@ CodecDMR    = foo                         # the same for DMR/YSF
 - **More modules than channels**: the devices take the first modules of `Modules`, as many as they have channels (mixed mode 2, two DV3003 3, ...); the other modules always go to a plugin. With DV3000 + DV3003 and `Modules = FSABC`, F and S are transcoded on the devices and A, B and C in software. Without a plugin for the rest, tcd does not start.
 - **Switching at run time**: the web dashboard (settings, "Vocoder") and `POST /api/codec` with `{"codec": "dstar", "use": "foo"}` choose the vocoder for the streams that start from then on: a running transmission keeps its vocoder. Everything loaded at start is offered: a device for the codec and every plugin that does it. "Save" writes the choice to `tcd.ini`.
 - **Options**: lines of `tcd.ini` that tcd does not know go to the plugins, e.g. a path the plugin needs; a line nobody takes is warned about.
-- **Interface**: plain C, [`CodecPlugin.h`](CodecPlugin.h): `open`/`close` a state per stream, `encode`/`decode` 160 samples of 8 kHz PCM to and from a 9 byte frame. tcd calls a plugin from one thread at a time and closes the state of a stream that has been quiet for 30 s. A plugin is built against this header only and does not have to be rebuilt with every tcd update; tcd checks `TCD_CODEC_API`.
+- **Interface**: plain C, [`CodecPlugin.h`](CodecPlugin.h): `open`/`close` a state per stream, `encode`/`decode` 160 samples of 8 kHz PCM to and from a 9 byte frame, `start`/`stop` at the first and after the last frame of a transmission (since 0.12.0, `TCD_CODEC_API 2`), so a plugin begins every transmission afresh, also when a stream id comes again. tcd calls a plugin from one thread at a time and closes the state of a stream that has been quiet for 30 s. A plugin is built against this header only and does not have to be rebuilt with every tcd update; tcd checks `TCD_CODEC_API`.
 - **Frames**: D-Star as the 9 data bytes of a DV frame, DMR/YSF as the 72 bits of an AMBE2+ frame in air order, MSB first, the formats the DVSI devices use.
 
 No codec plugin is part of this repository: software implementations of AMBE and AMBE2+ may touch patents (AMBE2+ half rate, US 8,359,197, projected to run until 2028-05-20), so whether to build and use one is the operator's decision. A plugin for D-Star and DMR/YSF with [mbelib-neo](https://github.com/arancormonk/mbelib-neo) is [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin); read its patent notice first.
@@ -386,7 +386,7 @@ journalctl -u tcd -f
 - **DMR level in the bitstream for other codecs** (0.6.0, experimental until 0.7.1): `OutputGainDMRBitstream` applies `OutputGainDMR` to D-Star, M17, P25, USRP and SVX audio through b2 after the encoder instead of before it; 0.6.0 had a switch for all of it, which left artifacts on quiet syllables, since 0.7.0 it is the number of dB in b2 (-24 to 0), live in the monitor; default -6 since 0.7.2 (0 before)
 - **Noise suppression for analog input** (0.5.0): SVX and USRP go through the speexdsp preprocessor before the AGC analog (`AGCAnalogNoiseSuppress`, default -15 dB, live in the monitor; 0.5.1 lowered it to -10 dB and `AGCAnalogGateFloor` from -12 to 0, the noise suppression lowers the pauses), so the FM noise under the speech no longer turns into robotic AMBE artifacts on DMR; new build dependency `libspeexdsp-dev`
 - **DMR re-encode** (with a DMR codec plugin): `DmrGainMode = reencode` with AGC and `DmrReencodeGain` on DMR → DMR/YSF
-- **Codec plugins** (0.10.0): software vocoders for D-Star and DMR/YSF from shared objects with a plain C interface, a vocoder state per stream; replace the built-in MD380 support. The vocoder for new streams can be switched at run time between the devices and the plugins
+- **Codec plugins** (0.10.0): software vocoders for D-Star and DMR/YSF from shared objects with a plain C interface, a vocoder state per stream; replace the built-in MD380 support. The vocoder for new streams can be switched at run time between the devices and the plugins; since 0.12.0 (`TCD_CODEC_API 2`) a plugin learns where a transmission starts and stops, plugins built for API 1 have to be rebuilt
 - **Mixed mode output gains** (0.2.3): the DV3003's D-Star channel uses `OutputGainDStar`, not `OutputGainDMR`; M17 at 1600 bit/s no longer runs the second half of each packet through the AGC twice; since 0.2.11 a module missing from the module list is not sent to a DMR channel
 
 ### Monitoring and configuration

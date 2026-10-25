@@ -966,7 +966,7 @@ void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 			gained[i] = int16_t((gained[i] * ambe_in_num) >> 8);
 	}
 	auto *sw = SwCodec(false, packet);
-	sw->Encode(packet->GetStreamId(), gained, ambe2);
+	sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), gained, ambe2);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 	BitstreamDmrGain(ambe2, packet->GetStreamId());
 	packet->SetDMRData(ambe2);
@@ -981,7 +981,7 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t tmp[160] = {};
 	auto *sw = SwCodec(false, packet);
-	sw->Decode(packet->GetStreamId(), packet->GetDMRData(), tmp);
+	sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDMRData(), tmp);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::decodes);
 	if (ambe_out_num != 256)
 	{
@@ -1057,7 +1057,7 @@ void CController::AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 	ApplyGain(pcm, 160, dstar_in_num);
 	uint8_t frame[9] = {};
 	auto *sw = SwCodec(true, packet);
-	sw->Encode(packet->GetStreamId(), pcm, frame);
+	sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), pcm, frame);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 	packet->SetDStarData(frame);
 	dstar_mux.lock();
@@ -1069,7 +1069,7 @@ void CController::SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t pcm[160] = {};
 	auto *sw = SwCodec(true, packet);
-	sw->Decode(packet->GetStreamId(), packet->GetDStarData(), pcm);
+	sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDStarData(), pcm);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::decodes);
 	ApplyGain(pcm, 160, dstar_out_num);
 	packet->SetAudioSamples(pcm, false);
@@ -1431,7 +1431,7 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 					tmp[i] = (int16_t)((tmp[i] * dmr_reencode_num) >> 8);
 			}
 			// the plugin keeps a state per stream; on its error the original frame stays
-			if (dmr_sw->Encode(packet->GetStreamId(), tmp, ambe2))
+			if (dmr_sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), tmp, ambe2))
 				packet->SetDMRData(ambe2);
 			SwStat(dmr_sw, packet->GetModule(), &SwVocoderStats::reencodes);
 		}
