@@ -149,6 +149,7 @@ struct ModuleData
 	double agc_gain, idle;
 	bool agc_gate;
 	int pkts_in, pkts_out;
+	bool standby, linked;   // StandbyModules: a standby module has a link only while no other tcd has it
 };
 
 struct DeviceData
@@ -219,7 +220,7 @@ static void draw_flow(int y, int x, int width, const ModuleData &m, const std::s
 	if (m.codec_in == "none" || m.idle > 2.0)
 	{
 		attron(COLOR_PAIR(5));
-		mvprintw(y, x, "idle");
+		mvprintw(y, x, "%s", !m.standby ? "idle" : m.linked ? "idle (standby, taken over)" : "standby: another transcoder has this module");
 		attroff(COLOR_PAIR(5));
 		return;
 	}
@@ -504,6 +505,8 @@ int main(int argc, char *argv[])
 			m.idle = json_num(mj, "idle");
 			m.pkts_in = json_int(mj, "pkts_in");
 			m.pkts_out = json_int(mj, "pkts_out");
+			m.standby = json_bool(mj, "standby");
+			m.linked = json_bool(mj, "linked");
 
 			bool active = (m.codec_in != "none" && m.idle < 2.0);
 

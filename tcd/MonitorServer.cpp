@@ -5,6 +5,7 @@
 #include <fstream>
 #include <vector>
 #include <cstring>
+#include <strings.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -460,16 +461,26 @@ static std::string JsonString(const std::string &body, const char *name)
 	return v;
 }
 
-// the address a login comes from: behind a reverse proxy on this host (the peer is
-// 127.x or ::1) the last X-Forwarded-For entry, the one that proxy added, so one
-// client's failed logins do not pause everybody's; from anywhere else the header
-// is not trusted
-static std::string PeerAddress(struct lws *wsi)
+static std::string Peer(struct lws *wsi)
 {
 	char ip[64] = "";
 	lws_get_peer_simple(wsi, ip, sizeof(ip));
-	const std::string peer(ip);
-	if (peer.compare(0, 4, "127.") == 0 || peer == "::1" || peer.compare(0, 11, "::ffff:127.") == 0)
+	return ip;
+}
+
+// a reverse proxy on this host: its headers are trusted, nobody else's
+static bool LoopbackPeer(const std::string &peer)
+{
+	return peer.compare(0, 4, "127.") == 0 || peer == "::1" || peer.compare(0, 11, "::ffff:127.") == 0;
+}
+
+// the address a login comes from: behind a reverse proxy on this host the last
+// X-Forwarded-For entry, the one that proxy added, so one client's failed logins
+// do not pause everybody's
+static std::string PeerAddress(struct lws *wsi)
+{
+	const std::string peer = Peer(wsi);
+	if (LoopbackPeer(peer))
 	{
 		char buf[256];
 		if (lws_hdr_copy(wsi, buf, sizeof(buf), WSI_TOKEN_X_FORWARDED_FOR) > 0)
@@ -485,6 +496,26 @@ static std::string PeerAddress(struct lws *wsi)
 		}
 	}
 	return peer;
+}
+
+// the session cookie's attributes: Secure when a reverse proxy on this host says
+// the page came over HTTPS (X-Forwarded-Proto), so the browser never sends it in
+// the clear
+static std::string CookieAttributes(struct lws *wsi)
+{
+	std::string attr = "; Path=/; HttpOnly; SameSite=Strict";
+#if defined(LWS_WITH_CUSTOM_HEADERS)
+	if (LoopbackPeer(Peer(wsi)))
+	{
+		char proto[16];
+		int n = lws_hdr_custom_copy(wsi, proto, sizeof(proto), "x-forwarded-proto:", 18);
+		if (n <= 0)
+			n = lws_hdr_custom_copy(wsi, proto, sizeof(proto), "X-Forwarded-Proto:", 18);
+		if (n == 5 && strncasecmp(proto, "https", 5) == 0)
+			attr += "; Secure";
+	}
+#endif
+	return attr;
 }
 
 // a valid session cookie, or no MonitorPassword
@@ -547,7 +578,7 @@ int CMonitorServer::Login(struct lws *wsi, SSession &s)
 		m_Tokens.erase(oldest);
 	}
 	m_Tokens[token] = now;
-	s.cookie = std::string(SESSION_COOKIE "=") + token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + std::to_string(SESSION_DAYS * 86400);
+	s.cookie = std::string(SESSION_COOKIE "=") + token + CookieAttributes(wsi) + "; Max-Age=" + std::to_string(SESSION_DAYS * 86400);
 	s.out = "{\"status\":\"ok\"}";
 	return 200;
 }
@@ -639,7 +670,7 @@ int CMonitorServer::Respond(struct lws *wsi)
 	else if (s.uri == "/api/logout")
 	{
 		m_Tokens.erase(RequestCookie(wsi, SESSION_COOKIE));
-		s.cookie = SESSION_COOKIE "=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0";
+		s.cookie = std::string(SESSION_COOKIE "=") + CookieAttributes(wsi) + "; Max-Age=0";
 		s.out = "{\"status\":\"ok\"}";
 	}
 	else if (s.uri.compare(0, 5, "/api/") == 0)
