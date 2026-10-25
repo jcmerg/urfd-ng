@@ -445,9 +445,11 @@ void CCodecStream::Task(void)
 
 	if (!receivedAny && m_Queue.IsEmpty())
 	{
-		// Nothing to receive and nothing to send — wait for eventfd signal
+		// Nothing to receive and nothing to send — wait for eventfd signal; a module
+		// without a transcoder connection has nothing to receive and waits longer
+		// (every module has a codec stream, most of them idle)
 		struct pollfd pfd = { m_EventFD, POLLIN, 0 };
-		poll(&pfd, 1, 20);
+		poll(&pfd, 1, g_TCServer.GetFD(m_CSModule) < 0 ? 500 : 20);
 		if (pfd.revents & POLLIN)
 		{
 			uint64_t val;
