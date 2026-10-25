@@ -102,6 +102,7 @@ section > header { display: flex; flex-wrap: wrap; justify-content: space-betwee
 .key.on { background: var(--lcd); color: var(--lcd-ink); }
 .key.pinned { box-shadow: inset 0 0 0 2px var(--lcd); }
 .key.on.pinned { box-shadow: inset 0 0 0 2px var(--lcd-ink); }
+.key.standby, .mod.standby .lcd { opacity: 0.55; }
 
 /* module LCDs */
 .mods { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); gap: 1.25rem; }
@@ -363,7 +364,8 @@ $('theme-btn').addEventListener('click', function () {
 applyTheme();
 
 function connect() {
-  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  // relative to the page, so it works behind a reverse proxy under a path (/tcd/)
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + location.pathname.replace(/[^\/]*$/, '') + 'ws');
   ws.onopen = function () { $('conn').className = 'link-state ok'; $('conn').textContent = 'Live'; };
   ws.onclose = function () {
     $('conn').className = 'link-state bad'; $('conn').textContent = 'No connection to tcd, retrying';
@@ -436,7 +438,7 @@ function compactView() {
 }
 function setView(v) {
   if (data && data.config) data.config.monitor_view = v === 'compact' ? 2 : 1;
-  post('/api/view', { view: v });
+  post('api/view', { view: v });
   render();
 }
 $('view-cards').addEventListener('click', function () { setView('cards'); });
@@ -477,7 +479,11 @@ function render() {
     k.el.classList.toggle('on', active);
     k.el.classList.toggle('pinned', !!pinned[mod]);
     k.el.title = 'Module ' + mod + (pinned[mod] ? ': card kept open, click to release' : ': click to keep its card open');
-    k.label.textContent = active ? m.codec_in : 'idle';
+    // a standby module (StandbyModules) without a link: another tcd has it
+    var waiting = m.standby && !m.linked;
+    k.el.classList.toggle('standby', waiting);
+    cards[mod].el.classList.toggle('standby', waiting);
+    k.label.textContent = active ? m.codec_in : waiting ? 'standby' : m.standby ? 'taken over' : 'idle';
     k.bar.style.width = (active ? pos(m.rms_out) : 0) + '%';
     cards[mod].el.hidden = compact && !active && !pinned[mod];
     if (!cards[mod].el.hidden) shown++;
@@ -492,8 +498,8 @@ function render() {
     } else {
       p.ann.hidden = true;
       p.state.textContent = m.last_codec === 'none' ? 'No stream since tcd started' : 'Last stream ' + m.last_codec + ', ' + ago(m.idle);
-      p.codec.textContent = 'Idle';
-      p.to.textContent = 'Waiting for a stream';
+      p.codec.textContent = waiting ? 'Standby' : 'Idle';
+      p.to.textContent = waiting ? 'Another transcoder has this module' : m.standby ? 'Standby, taken over: waiting for a stream' : 'Waiting for a stream';
     }
     p.fin.style.width = pos(m.rms_in) + '%';
     p.pin.style.left = 'calc(' + pos(m.peak_in) + '% - 1.5px)';
@@ -579,7 +585,7 @@ function showLogin(msg) {
   $('login-pw').focus();
 }
 function checkAuth() {
-  return fetch('/api/auth').then(function (r) { return r.json(); }).then(function (j) {
+  return fetch('api/auth').then(function (r) { return r.json(); }).then(function (j) {
     authRequired = j.required;
     $('logout-btn').hidden = !j.required;
     if (j.required && !j.ok) { showLogin(); return false; }
@@ -589,7 +595,7 @@ function checkAuth() {
 }
 $('login-form').addEventListener('submit', function (e) {
   e.preventDefault();
-  fetch('/api/login', { method: 'POST', body: JSON.stringify({ password: $('login-pw').value }) })
+  fetch('api/login', { method: 'POST', body: JSON.stringify({ password: $('login-pw').value }) })
     .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
     .then(function (x) {
       if (x.status === 200) { $('login').hidden = true; if (!ws || ws.readyState > 1) connect(); }
@@ -597,7 +603,7 @@ $('login-form').addEventListener('submit', function (e) {
     }).catch(function () { showLogin('No answer from tcd'); });
 });
 $('logout-btn').addEventListener('click', function () {
-  fetch('/api/logout', { method: 'POST' }).then(function () { if (ws) ws.close(); showLogin(); });
+  fetch('api/logout', { method: 'POST' }).then(function () { if (ws) ws.close(); showLogin(); });
 });
 
 // the vocoder choice: shown when there is one, "dvsi" is the hardware
@@ -614,34 +620,34 @@ function loadCodecs(codecs) {
   $('codec_group').hidden = !any;
 }
 ['dstar', 'dmr'].forEach(function (k) {
-  $('codec_' + k).addEventListener('change', function (e) { post('/api/codec', { codec: k, use: e.target.value }); });
+  $('codec_' + k).addEventListener('change', function (e) { post('api/codec', { codec: k, use: e.target.value }); });
 });
 
 gainKeys.forEach(function (k) {
   var el = $('g_' + k); if (!el) return;
-  el.addEventListener('input', function () { $('v_' + k).textContent = el.value; post('/api/gain', { type: k, db: parseInt(el.value, 10) }); });
+  el.addEventListener('input', function () { $('v_' + k).textContent = el.value; post('api/gain', { type: k, db: parseInt(el.value, 10) }); });
 });
 outgainKeys.forEach(function (k) {
   var s = k.replace('outgain_', ''), el = $('og_' + s); if (!el) return;
-  el.addEventListener('input', function () { $('v_og_' + s).textContent = el.value; post('/api/gain', { type: k, db: parseInt(el.value, 10) }); });
+  el.addEventListener('input', function () { $('v_og_' + s).textContent = el.value; post('api/gain', { type: k, db: parseInt(el.value, 10) }); });
 });
 agcKeys.forEach(function (k) {
   var el = $(k); if (!el) return;
   el.addEventListener('input', function () {
     $('v_' + k).textContent = el.value;
     var body = {}; body[k.replace('agc_', '')] = parseFloat(el.value);
-    post('/api/agc', body);
+    post('api/agc', body);
   });
 });
-$('agc_en').addEventListener('change', function (e) { post('/api/agc', { enabled: e.target.checked }); });
-$('og_dmr_bs').addEventListener('input', function (e) { $('v_og_dmr_bs').textContent = e.target.value; post('/api/agc', { outgain_dmr_bitstream: parseInt(e.target.value, 10) }); });
+$('agc_en').addEventListener('change', function (e) { post('api/agc', { enabled: e.target.checked }); });
+$('og_dmr_bs').addEventListener('input', function (e) { $('v_og_dmr_bs').textContent = e.target.value; post('api/agc', { outgain_dmr_bitstream: parseInt(e.target.value, 10) }); });
 $('dmr_gain_mode').addEventListener('change', function (e) {
-  post('/api/agc', { dmr_gain_mode: { off: 0, ambe: 1, reencode: 2 }[e.target.value] || 0 });
+  post('api/agc', { dmr_gain_mode: { off: 0, ambe: 1, reencode: 2 }[e.target.value] || 0 });
   updateDmrGainMode();
 });
 $('ambe_gain_db').addEventListener('input', function (e) {
   $('v_ambe_gain_db').textContent = e.target.value;
-  post('/api/agc', { ambe_gain_db: parseInt(e.target.value, 10) });
+  post('api/agc', { ambe_gain_db: parseInt(e.target.value, 10) });
 });
 function updateDmrGainMode() {
   var m = $('dmr_gain_mode').value;
@@ -654,7 +660,7 @@ $('btn_save').addEventListener('click', function () {
   var s = $('save_status');
   s.className = 'save-state muted'; s.textContent = 'Saving';
   clearTimeout(saveTimer);
-  fetch('/api/save', { method: 'POST' }).then(function (r) { if (r.status === 401) showLogin(); return r.json(); }).then(function (j) {
+  fetch('api/save', { method: 'POST' }).then(function (r) { if (r.status === 401) showLogin(); return r.json(); }).then(function (j) {
     if (j.status === 'ok') { s.className = 'save-state state-ok'; s.textContent = 'Saved to tcd.ini'; }
     else { s.className = 'save-state state-bad'; s.textContent = 'Not saved: ' + (j.message || 'tcd gave no reason'); }
   }).catch(function () {

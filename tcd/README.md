@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.10.7** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.11.0** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF (AMBE2+), and software vocoders for M17 (Codec2) and P25/NXDN (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF in software. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -138,7 +138,21 @@ sudo nano /opt/urfd/tcd/tcd.ini
 cd docker && sudo docker compose --profile tcd build && sudo docker compose --profile tcd up -d
 ```
 
-In `tcd.ini`: `ServerAddress = 127.0.0.1` (the container uses the host's network), `Modules` as many as wanted, `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so`, no `DeviceSerial`, and a `MonitorHttpPort` that is free on the host. In `urfd.ini`: `[Transcoder] Modules = auto`, so tcd's list alone decides. The image builds every `tcd/plugins/<name>/` with a `Makefile` (git ignores that directory); `$URFD_DATA/tcd/` (default `/opt/urfd/tcd`) holds `tcd.ini`, writable for the monitor's Save. To update: `git pull`, then the same `build` and `up -d`. Without `--profile tcd`, `docker compose` keeps to urfd alone.
+In `tcd.ini`: `ServerAddress = 127.0.0.1` (the container uses the host's network), `Modules` as many as wanted, `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so`, no `DeviceSerial`, and a `MonitorHttpPort` that is free on the host. In `urfd.ini`: `[Transcoder] Modules = auto`, so tcd's list alone decides. The image builds every `tcd/plugins/<name>/` with a `Makefile` (git ignores that directory); `$URFD_DATA/tcd/` (default `/opt/urfd/tcd`) holds `tcd.ini`, writable for the monitor's Save. To update: `git pull`, then `docker/build.sh`; it builds and restarts the tcd container too when `$URFD_DATA/tcd/tcd.ini` exists (since 4.26.0). Without `--profile tcd`, `docker compose` keeps to urfd alone.
+
+The image's nginx passes `/tcd/` to the monitor on port 8080 (the template's `MonitorHttpPort`, since 4.26.0), so it is reachable as `https://<reflector>/tcd/` through the TLS proxy in front, with the same Upgrade headers as `/ws` and `X-Real-IP`. `MonitorBindAddress = 127.0.0.1` is enough then; set `MonitorPassword`.
+
+### Standby: a second tcd for the same modules
+
+`StandbyModules` (since 0.11.0, urfd 4.26.0) lists modules a tcd takes only while no other tcd has them: a software tcd in Docker next to urfd stands by for the modules of the tcd with the sticks, takes them over when that one is gone and gives them back when it returns.
+
+```ini
+# tcd in Docker next to urfd, with the mbelib-neo plugin
+Modules        = AP      # its own modules
+StandbyModules = FS      # the modules of the tcd with the sticks, while it is gone
+```
+
+The standby tcd sends the module letter in lower case; the reflector takes it only for a module without a tcd and answers busy otherwise, and a normal connection replaces a standby one. The standby tcd asks again every 3 s, quietly, and not while one of its own streams runs, so asking never holds those up. A tcd that stops or loses its link hands over within seconds; one that vanished without closing its connection (power, network) is noticed by the reflector through TCP keepalive after about 25 s. A stream on the air while a module changes hands is not transcoded until its next transmission. urfd needs `[Transcoder] Modules = auto` (or the letters listed there) and 4.26.0; an older urfd refuses the standby connections, and the tcd says so once.
 
 ## Selecting the AMBE devices
 
@@ -169,6 +183,7 @@ tcd opens the devices through the kernel's `ftdi_sio` driver and sets their USB 
 | `Port` | `10100` | the reflector's `[Transcoder] Port` |
 | `Password` | — | the reflector's `[Transcoder] Password`, needed when it has one (since 0.8.0) |
 | `Modules` | `FS` | transcoded modules; with the reflector's `[Transcoder] Modules = auto` (urfd 4.25.0) any of its modules, this list alone decides; else the same letters as there |
+| `StandbyModules` | — | modules this tcd takes only while no other tcd has them (since 0.11.0, urfd 4.26.0), see [Standby](#standby-a-second-tcd-for-the-same-modules); not in `Modules` as well |
 | `DeviceSerial` | — | AMBE device to use, one line each (see [above](#selecting-the-ambe-devices)) |
 
 ### Gains
@@ -302,7 +317,8 @@ The gain limits are asymmetric on purpose: attenuating is safe, amplifying also 
 - AGC and gain controls that apply immediately, and a button to save them to `tcd.ini`
 - DVSI devices: serial, type, role, channels in use and their modules, buffer depth
 - codec plugins: their codec, counters and streams, and which vocoder new D-Star and DMR streams get (switchable, see [Codec plugins](#codec-plugins))
-- reflector connection and packet counters
+- reflector connection and packet counters; a standby module shows "standby" while another tcd has it and "taken over" while this tcd has it
+- behind a reverse proxy under a path (since 0.11.0): the page uses relative paths, so `https://<host>/tcd/` works (see [tcd in Docker](#tcd-in-docker)); behind a proxy on the same machine the failed-login pause counts per address in the last `X-Forwarded-For` entry
 
 ### tcdmon
 
@@ -382,6 +398,7 @@ journalctl -u tcd -f
 - **Thread safety**: lock around the IMBE vocoder, SIGPIPE ignored for clean reconnects
 - **Error handling**: retries towards the reflector with backoff, dropping on queue overflow, timeout recovery while reading
 - **Reconnect backoff**: 0.5 s growing to 5 s while the reflector is unreachable
+- **Standby modules** (0.11.0, urfd 4.26.0): `StandbyModules` makes a second tcd take over modules while their tcd is gone, see [Standby](#standby-a-second-tcd-for-the-same-modules)
 - **Speech-driven AGC** (0.9.0): the level is tracked in dB on the upper envelope of the speech and only raised on clearly voiced frames well above a noise floor measured per stream; the boost shrinks on noisy signals, a 75 Hz high-pass cleans the audio and the analysis ignores everything below 300 Hz (CTCSS, hum). The gain no longer pumps on breath, hiss or pauses, the gate holds 240 ms across the gaps between words. Same keys and defaults in `tcd.ini`. Measured on 18 FM-Funknetz transmissions of RF stations (2026-10-23) through the analog path (noise suppression and AGC analog) against 0.8.0: the stations end up as close together (spread 1.2 dB) at about the same level (-16.4 against -15.6 dBFS), the gain moves a third as much from frame to frame (0.20 against 0.55 dB) and the speech stands 2.5 dB further above the noise in the pauses
 - **Password for the reflector connection** (0.8.0, urfd 4.16.0): with `Password` in `tcd.ini` and `[Transcoder] Password` in `urfd.ini`, the reflector sends a random challenge after the module byte and tcd answers with HMAC-SHA256 over it; only then does the connection replace the module's current one. Without the password, anyone who reached port 10100 could take over a module. The link stays unencrypted. Without a password on both sides nothing changes; with it on one side only, the connection is refused with a message saying so
 - **Host name as ServerAddress** (0.7.4): `ServerAddress` takes a host name as well as an IP address; before, the config check stopped tcd at anything but an IP address

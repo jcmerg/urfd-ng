@@ -33,7 +33,10 @@ class CConfigure
 public:
 	bool ReadData(const std::string &path);
 	int GetGain(EGainType gt) const;
+	// Modules and then StandbyModules
 	std::string GetTCMods(void) const { return tcmods; }
+	// StandbyModules: modules taken only while no other tcd has them
+	const std::string &GetStandbyMods(void) const { return standbymods; }
 	std::string GetAddress(void) const { return address; }
 	const std::string &GetPassword(void) const { return password; }
 	unsigned GetPort(void) const { return port; }
@@ -86,7 +89,7 @@ public:
 	const std::string &GetCodecDMR(void) const { return codec_dmr; }
 
 private:
-	std::string tcmods, address, password, ini_path;
+	std::string tcmods, standbymods, address, password, ini_path;
 	std::vector<std::string> device_serials;
 	std::vector<std::string> codec_plugins;
 	std::string codec_dstar, codec_dmr;

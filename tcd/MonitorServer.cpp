@@ -113,6 +113,8 @@ std::string CMonitorServer::BuildStatsJson()
 		   << ",\"pkts_in\":" << m.packets_in.load(std::memory_order_relaxed)
 		   << ",\"pkts_out\":" << m.packets_out.load(std::memory_order_relaxed)
 		   << ",\"idle\":" << m.last_activity.load(std::memory_order_relaxed)
+		   << ",\"linked\":" << (m.linked.load(std::memory_order_relaxed) ? "true" : "false")
+		   << ",\"standby\":" << (m.standby ? "true" : "false")
 		   << "}";
 	}
 	js << "},\"devices\":[";
@@ -388,6 +390,7 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 #define SESSION_MAX      64
 #define LOGIN_TRIES      5      // failed logins from one address, then
 #define LOGIN_PAUSE_S    60     // a pause of this many seconds
+#define LOGIN_PEERS_MAX  4096   // addresses with failed logins kept
 
 // given against secret, in a time that does not depend on where they differ
 static bool SameSecret(const std::string &given, const std::string &secret)
@@ -457,11 +460,31 @@ static std::string JsonString(const std::string &body, const char *name)
 	return v;
 }
 
+// the address a login comes from: behind a reverse proxy on this host (the peer is
+// 127.x or ::1) the last X-Forwarded-For entry, the one that proxy added, so one
+// client's failed logins do not pause everybody's; from anywhere else the header
+// is not trusted
 static std::string PeerAddress(struct lws *wsi)
 {
 	char ip[64] = "";
 	lws_get_peer_simple(wsi, ip, sizeof(ip));
-	return ip;
+	const std::string peer(ip);
+	if (peer.compare(0, 4, "127.") == 0 || peer == "::1" || peer.compare(0, 11, "::ffff:127.") == 0)
+	{
+		char buf[256];
+		if (lws_hdr_copy(wsi, buf, sizeof(buf), WSI_TOKEN_X_FORWARDED_FOR) > 0)
+		{
+			std::string fwd(buf);
+			const auto comma = fwd.rfind(',');
+			if (comma != std::string::npos)
+				fwd.erase(0, comma + 1);
+			fwd.erase(0, fwd.find_first_not_of(' '));
+			fwd.erase(fwd.find_last_not_of(' ') + 1);
+			if (!fwd.empty() && fwd.size() < 64)
+				return fwd;
+		}
+	}
+	return peer;
 }
 
 // a valid session cookie, or no MonitorPassword
@@ -487,6 +510,10 @@ int CMonitorServer::Login(struct lws *wsi, SSession &s)
 {
 	const auto now = std::chrono::steady_clock::now();
 	const std::string peer = PeerAddress(wsi);
+	// bounded: from the internet (a reverse proxy) the addresses do not end
+	if (m_Fails.size() >= LOGIN_PEERS_MAX)
+		for (auto it = m_Fails.begin(); it != m_Fails.end();)
+			it = it->second.until > now ? std::next(it) : m_Fails.erase(it);
 	auto &f = m_Fails[peer];
 	if (f.until > now)
 	{

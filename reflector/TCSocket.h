@@ -24,6 +24,7 @@
 #include <queue>
 #include <memory>
 #include <chrono>
+#include <atomic>
 #include <poll.h>
 
 #include "IP.h"
@@ -80,6 +81,7 @@ private:
 		int fd;
 		CIp peer;
 		char module;        // 0 until the module byte is in
+		bool standby;       // a standby tcd: takes the module only while no other tcd has it
 		uint8_t nonce[32];
 		uint8_t answer[32];
 		unsigned got;       // bytes of the answer so far
@@ -90,6 +92,7 @@ private:
 	int m_ListenFd;
 	std::function<bool(char)> m_Accept;
 	std::vector<SPending> m_Pending;
+	std::vector<bool> m_Standby;	// per module: the connection is a standby tcd's
 	void acceptnew();
 	bool advance(SPending &p);
 	void establish(SPending &p);
@@ -103,10 +106,20 @@ public:
 	bool Open(const std::string &address, const std::string &modules, uint16_t port);
 	void Receive(std::queue<std::unique_ptr<STCPacket>> &queue, int ms);
 	void ReConnect();
+	// the modules of modules given to Open() that are standby (StandbyModules in tcd.ini):
+	// taken only while no other tcd has them; set it before Open()
+	void SetStandby(const std::string &modules) { m_StandbyModules = modules; }
+	bool IsStandby(char module) const { return std::string::npos != m_StandbyModules.find(module); }
+	// no standby attempts while true: they hold up the thread that reads the
+	// reflector for a few round trips, tcd sets it while one of its streams runs
+	void PauseStandby(bool pause) { m_StandbyPaused.store(pause, std::memory_order_relaxed); }
 
 private:
 	std::string m_Address;
 	uint16_t m_Port;
+	std::string m_StandbyModules;
+	std::vector<int> m_StandbyState;	// per module: 0 unknown, 1 another tcd has it, 2 refused (urfd too old?)
+	std::atomic<bool> m_StandbyPaused{false};
 	bool Connect(char module, bool blocking = false);
-	bool authenticate(int fd, char module);
+	bool authenticate(int fd, char module, bool quiet = false);
 };

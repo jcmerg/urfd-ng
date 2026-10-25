@@ -2,7 +2,7 @@
 
 Docker deployment for the urfd reflector.
 
-The tcd transcoder (in [`../tcd`](../tcd/)) runs natively when it uses DVSI AMBE sticks: Docker adds too much USB latency for reliable hardware access. Without sticks, in software with a codec plugin, it can run here too: `Dockerfile.tcd` and the `tcd` service behind the profile `tcd` (`docker compose --profile tcd up -d`), see "tcd in Docker" in [tcd/README.md](../tcd/README.md#tcd-in-docker).
+The tcd transcoder (in [`../tcd`](../tcd/)) runs natively when it uses DVSI AMBE sticks: Docker adds too much USB latency for reliable hardware access. Without sticks, in software with a codec plugin, it can run here too: `Dockerfile.tcd` and the `tcd` service behind the profile `tcd` (`docker compose --profile tcd up -d`), see "tcd in Docker" in [tcd/README.md](../tcd/README.md#tcd-in-docker). `build.sh` builds and restarts it too when `$URFD_DATA/tcd/tcd.ini` exists, and nginx passes `/tcd/` to its monitor on port 8080.
 
 ## Quick Start
 
@@ -55,9 +55,9 @@ defines no `unix_http_server` socket. Restart with `docker restart urfd`.
 | `Dockerfile` | Multi-stage build (Ubuntu 24.04) |
 | `docker-compose.yml` | Compose file, builds from this checkout, data in `$URFD_DATA` |
 | `Dockerfile.dockerignore` | Keeps `.git`, `tcd/` and build output out of the build context |
-| `build.sh` | Build + restart helper |
+| `build.sh` | Build + restart helper, the tcd service too when `$URFD_DATA/tcd/tcd.ini` exists |
 | `supervisord.conf` | Process manager (urfd, nginx, php-fpm) |
-| `nginx-dashboard.conf` | Dashboard web server config: the PHP dashboard at `/`, the live dashboard (`dashboard-ws`) at `/live/`, urfd's WebSocket at `/ws` |
+| `nginx-dashboard.conf` | Dashboard web server config: the PHP dashboard at `/`, the live dashboard (`dashboard-ws`) at `/live/`, urfd's WebSocket at `/ws`, the monitor of the Docker tcd at `/tcd/` (port 8080) |
 
 ## Synology NAS
 
