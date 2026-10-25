@@ -24,6 +24,9 @@ services:
         optfiles: .
     image: urfd:latest
     container_name: urfd
+    # built here, not pulled: watchtower and the like must leave it alone
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
     network_mode: host
     restart: unless-stopped
     # realtime scheduling for steady voice timing
@@ -65,6 +68,9 @@ services:
       dockerfile: docker/Dockerfile.tcd
     image: urfd-tcd:latest
     container_name: tcd
+    # built here, not pulled: watchtower and the like must leave it alone
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
     network_mode: host
     restart: unless-stopped
     cap_add:
@@ -72,12 +78,7 @@ services:
     volumes:
       # tcd.ini, writable: the monitor's Save writes to it
       - ${URFD_DATA:-/opt/urfd}/tcd:/usr/local/etc/tcd
-      # with AMBE sticks: their names, and below their device nodes (ls -l /dev/serial/by-id);
-      # the host sets their USB latency timer with a udev rule, see tcd/README.md
-      # - /dev/serial/by-id:/dev/serial/by-id:ro
-    # devices:
-    #   - /dev/ttyUSB0
-    #   - /dev/ttyUSB1
+    # with AMBE sticks docker-compose.tcd-sticks.yml adds the devices (build.sh does that by itself)
     logging:
       driver: json-file
       options:

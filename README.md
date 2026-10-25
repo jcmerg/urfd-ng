@@ -761,7 +761,7 @@ This build supports dual-stack operation (IPv4 + IPv6).
 
 ## Docker Deployment
 
-The reflector and its dashboard run in Docker, the transcoder natively with systemd, on the same machine or on a second one; tcd can run in Docker too, in software with a codec plugin or with the AMBE devices passed in ([tcd in Docker](tcd/README.md#tcd-in-docker)). See [`docker/README.md`](docker/README.md) for details.
+The reflector and its dashboard run in Docker, the transcoder in Docker or natively with systemd (setup.sh asks), with AMBE devices or in software with a codec plugin, on the same machine or on a second one ([tcd in Docker](tcd/README.md#tcd-in-docker)). See [`docker/README.md`](docker/README.md) for details.
 
 ### Quick start
 

@@ -1,0 +1,14 @@
+# tcd in Docker with DVSI AMBE sticks: docker/build.sh adds this file when the
+# tcd.ini in $URFD_DATA/tcd/ names a DeviceSerial or loads no CodecPlugin
+# (by hand: docker compose -f docker-compose.yml -f docker-compose.tcd-sticks.yml ...).
+#
+# The host's /dev, read only, and the USB serial devices (major 188, ttyUSB*)
+# opened read and write: tcd finds the sticks by /dev/serial/by-id, also after a
+# replug gives a stick another node, without a list of devices here. tcd sets
+# their USB latency timer to 1 ms itself (the low latency ioctl, no /sys needed).
+services:
+  tcd:
+    volumes:
+      - /dev:/dev:ro
+    device_cgroup_rules:
+      - 'c 188:* rmw'

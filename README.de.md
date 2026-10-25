@@ -739,7 +739,7 @@ Diese Version unterstützt den Betrieb mit IPv4 und IPv6 gleichzeitig (Dual-Stac
 
 ## Betrieb mit Docker
 
-Reflektor und Dashboard laufen in Docker, der Transcoder direkt mit systemd, auf demselben Rechner oder auf einem zweiten; tcd kann auch in Docker laufen, in Software mit einem Codec-Plugin oder mit durchgereichten AMBE-Geräten ([tcd in Docker](tcd/README.de.md#tcd-in-docker)). Details in [`docker/README.md`](docker/README.md).
+Reflektor und Dashboard laufen in Docker, der Transcoder in Docker oder direkt mit systemd (setup.sh fragt), mit AMBE-Geräten oder in Software mit einem Codec-Plugin, auf demselben Rechner oder auf einem zweiten ([tcd in Docker](tcd/README.de.md#tcd-in-docker)). Details in [`docker/README.md`](docker/README.md).
 
 ### Schnellstart
 
