@@ -21,7 +21,7 @@ Diese Anleitung ist für alle, die sich mit Linux auskennen und selbst einrichte
 | Konfiguration | `$URFD_DATA/config/` (Standard `/opt/urfd/config`), eingebunden als `/usr/local/etc/urfd` | `/usr/local/etc/urfd/` |
 | Dashboard | im Container (nginx + php-fpm, Port 8363), Einstellungen in `$URFD_DATA/dashboard/config.inc.php` | eigener Webserver, z. B. `/var/www/urfd-dashboard` |
 | Dienst | Container `urfd`, `restart: unless-stopped` | systemd-Unit `urfd` |
-| tcd | in beiden Fällen nativ mit systemd (`tcd/build.sh`) | |
+| tcd | Container `tcd` mit `$URFD_DATA/tcd/tcd.ini` (`docker/build.sh`, siehe [tcd in Docker](../tcd/README.de.md#tcd-in-docker)) | systemd-Unit `tcd`, aus `tcd/build.sh` |
 
 Voraussetzungen: Debian 12, Ubuntu 22.04 oder neuer oder Raspberry Pi OS; x86_64, arm64 oder armhf. Die zu öffnenden Ports stehen in [INSTALL.de.md](INSTALL.de.md#ports).
 
@@ -121,7 +121,7 @@ Das Dashboard ist dann auf Port 8363; für einen anderen Port `listen` in der Ko
 
 ## Transcoder
 
-tcd läuft nativ mit systemd, auf dem Rechner des Reflektors oder auf einem anderen; er verbindet sich mit dem `[Transcoder]`-Port des Reflektors (10100/tcp).
+tcd läuft nativ mit systemd (unten) oder in Docker ([tcd in Docker](../tcd/README.de.md#tcd-in-docker)), auf dem Rechner des Reflektors oder auf einem anderen; er verbindet sich mit dem `[Transcoder]`-Port des Reflektors (10100/tcp).
 
 ```bash
 sudo bash tcd/build.sh

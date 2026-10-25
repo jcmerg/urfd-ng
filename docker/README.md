@@ -2,7 +2,7 @@
 
 Docker deployment for the urfd reflector.
 
-The tcd transcoder (in [`../tcd`](../tcd/)) can run here too, in software with a codec plugin or with AMBE sticks passed into the container (the host then sets their USB latency timer with a udev rule): `Dockerfile.tcd` and the `tcd` service behind the profile `tcd` (`docker compose --profile tcd up -d`), see "tcd in Docker" in [tcd/README.md](../tcd/README.md#tcd-in-docker). `build.sh` builds and restarts it too when `$URFD_DATA/tcd/tcd.ini` exists, and nginx passes `/tcd/` to its monitor (`TCD_MONITOR_PORT`, which `build.sh` takes from the `MonitorHttpPort` of that tcd.ini, default 8080).
+The tcd transcoder (in [`../tcd`](../tcd/)) runs here too, with AMBE sticks or in software with a codec plugin: `Dockerfile.tcd` and the `tcd` service behind the profile `tcd`, see "tcd in Docker" in [tcd/README.md](../tcd/README.md#tcd-in-docker). `build.sh` builds and starts what this machine has a configuration for (urfd with `$URFD_DATA/config/urfd.ini`, tcd with `$URFD_DATA/tcd/tcd.ini`), with sticks it adds `docker-compose.tcd-sticks.yml`; nginx passes `/tcd/` to the tcd monitor (`TCD_MONITOR_PORT`, which `build.sh` takes from the `MonitorHttpPort` of that tcd.ini, default 8080).
 
 ## Quick Start
 
@@ -55,7 +55,8 @@ defines no `unix_http_server` socket. Restart with `docker restart urfd`.
 | `Dockerfile` | Multi-stage build (Ubuntu 24.04) |
 | `docker-compose.yml` | Compose file, builds from this checkout, data in `$URFD_DATA` |
 | `Dockerfile.dockerignore` | Keeps `.git`, `tcd/` and build output out of the build context |
-| `build.sh` | Build + restart helper, the tcd service too when `$URFD_DATA/tcd/tcd.ini` exists |
+| `build.sh` | Build + restart helper for urfd and/or tcd, whichever has its configuration in `$URFD_DATA` |
+| `docker-compose.tcd-sticks.yml` | Added by `build.sh` for tcd with AMBE sticks: `/dev` read only and the USB serial devices |
 | `supervisord.conf` | Process manager (urfd, nginx, php-fpm) |
 | `nginx-dashboard.conf` | Dashboard web server config: the PHP dashboard at `/`, the live dashboard (`dashboard-ws`) at `/live/`, urfd's WebSocket at `/ws`, the monitor of the Docker tcd at `/tcd/` (`TCD_MONITOR_PORT`, default 8080) |
 

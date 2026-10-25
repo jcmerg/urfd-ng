@@ -10,10 +10,11 @@
 #   sudo ./setup.sh status|start|stop|restart|logs|reload|check
 #                              day-to-day commands, see 'setup.sh help'.
 #
-# The reflector runs in Docker (with its dashboard), the transcoder natively
-# with systemd, because the AMBE USB devices need low latency. Both can run on
-# this machine, or the transcoder on a second one (e.g. a Raspberry Pi with the
-# AMBE sticks).
+# The reflector runs in Docker (with its dashboard), the transcoder in Docker or
+# natively with systemd, with or without AMBE USB sticks. Both can run on this
+# machine, or the transcoder on a second one (e.g. a Raspberry Pi with the AMBE
+# sticks). docker/build.sh builds and starts whatever of the two has its
+# configuration in $URFD_DATA here.
 #
 # Supported: Debian, Ubuntu, Raspberry Pi OS (x86_64, arm64, armhf).
 # Guide: docs/INSTALL.md
@@ -23,7 +24,10 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_DIR="${URFD_DATA:-/opt/urfd}"
 CFG_DIR="$DATA_DIR/config"
-TCD_INI="/usr/local/etc/tcd.ini"
+# the transcoder's configuration: natively (systemd) or in Docker
+TCD_INI_NATIVE="/usr/local/etc/tcd.ini"
+TCD_INI_DOCKER="$DATA_DIR/tcd/tcd.ini"
+if [ -f "$TCD_INI_DOCKER" ]; then TCD_DOCKER=true; TCD_INI="$TCD_INI_DOCKER"; else TCD_DOCKER=false; TCD_INI="$TCD_INI_NATIVE"; fi
 LOG_FILE="/var/log/urfd-setup.log"
 export URFD_DATA="$DATA_DIR"
 
@@ -174,8 +178,8 @@ install_docker() {
         return
     fi
     echo
-    echo "The reflector runs in Docker, which is not installed (or lacks 'docker compose')."
-    ask_yn "Install Docker from download.docker.com now?" y || die "Docker is required for the reflector"
+    echo "The reflector (and the transcoder in Docker) runs in Docker, which is not installed (or lacks 'docker compose')."
+    ask_yn "Install Docker from download.docker.com now?" y || die "Docker is required"
     info "Installing Docker"
     curl -fsSL https://get.docker.com | sh
     systemctl enable --now docker
@@ -265,6 +269,11 @@ ask_tc_modules() {
 ask_transcoder() {
     echo
     bold "Transcoder"
+    echo "Run the transcoder"
+    echo "  1) in Docker, next to the reflector or on its own (with or without AMBE sticks)"
+    echo "  2) natively with systemd"
+    ask TCD_WHERE "Choice" "1" '^[12]$' "Please enter 1 or 2."
+    if [ "$TCD_WHERE" = "1" ]; then TCD_DOCKER=true; TCD_INI="$TCD_INI_DOCKER"; else TCD_DOCKER=false; TCD_INI="$TCD_INI_NATIVE"; fi
     if [ "$WITH_URFD" = true ]; then
         TCD_SERVER="127.0.0.1"
     else
@@ -287,6 +296,12 @@ ask_transcoder() {
     [ "$HW" = "3" ] && cover=0
     if [ "$HW" != "2" ] || [ ${#TC_MODULES} -gt $cover ]; then
         warn "this needs a codec plugin (CodecPlugin = <path> in $TCD_INI), which is not part of this repository and not installed by setup.sh; tcd does not start without it. See 'Codec plugins' in tcd/README.md, e.g. https://github.com/jcmerg/tcd-mbelib-neo-plugin (read its patent notice)"
+        if [ "$TCD_DOCKER" = true ]; then
+            echo "  In Docker: clone it to $REPO_DIR/tcd/plugins/<name>/ now, before the image is built"
+            echo "  (git clone https://github.com/jcmerg/tcd-mbelib-neo-plugin.git $REPO_DIR/tcd/plugins/mbelib-neo),"
+            echo "  then CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so in $TCD_INI"
+            ask_yn "Continue?" y || exit 0
+        fi
     fi
     if [ "$HW" = "2" ] && [ ${#TC_MODULES} -gt 1 ]; then
         echo "  (DV3000 + DV3003 cover 2 modules, two DV3000 1, two DV3003 3; tcd tells which at start)"
@@ -444,23 +459,34 @@ check_urfd_config() {
 
 build_urfd() {
     info "Building the reflector image (this takes a few minutes, longer on a Raspberry Pi)"
-    (cd "$REPO_DIR/docker" && docker compose build)
+    (cd "$REPO_DIR/docker" && docker compose build urfd)
 }
 
-start_urfd() {
-    info "Starting the reflector"
-    (cd "$REPO_DIR/docker" && docker compose up -d --force-recreate)
+# builds and (re)starts the reflector and/or the transcoder in Docker, whichever
+# has its configuration in $DATA_DIR
+start_docker() {
+    info "Starting the containers"
+    bash "$REPO_DIR/docker/build.sh" start
 }
 
 build_tcd() {
     info "Building the transcoder"
-    bash "$REPO_DIR/tcd/build.sh"
+    if [ "$TCD_DOCKER" = true ]; then
+        install_docker
+        (cd "$REPO_DIR/docker" && docker compose --profile tcd build tcd)
+    else
+        bash "$REPO_DIR/tcd/build.sh"
+    fi
 }
 
 ask_tcd_serials() {
     echo
     echo "Connected USB serial devices (the AMBE sticks show up here):"
-    /usr/local/bin/tcd --list-devices || true
+    if [ "$TCD_DOCKER" = true ]; then
+        docker run --rm -v /dev:/dev:ro --device-cgroup-rule='c 188:* rmw' urfd-tcd:latest tcd --list-devices || true
+    else
+        /usr/local/bin/tcd --list-devices || true
+    fi
     echo
     echo "Enter the serial number(s) of the AMBE device(s), separated by spaces."
     echo "Leave empty to use every AMBE device tcd finds."
@@ -508,7 +534,18 @@ EOF
             echo "   enter it when you install tcd on the other machine (Password in tcd.ini)"
         fi
     fi
-    if [ "$WITH_TCD" = true ]; then
+    if [ "$WITH_TCD" = true ] && [ "$TCD_DOCKER" = true ]; then
+        cat <<EOF
+
+ Transcoder in Docker (modules $TC_MODULES)
+   Configuration:  $TCD_INI
+   After changes:  docker restart tcd
+   Logs:           docker logs -f tcd
+   Monitor:        'docker exec -it tcd tcdmon' in a terminal, or http://localhost:8080 on this machine
+EOF
+        [ "$WITH_URFD" = true ] && echo "                   and ${DASHURL%/}/tcd/ (a TLS proxy in front passes /tcd/ like /ws)"
+        echo "   Monitor password: ${TCD_MONITOR_PASSWORD:-see MonitorPassword in $TCD_INI}"
+    elif [ "$WITH_TCD" = true ]; then
         cat <<EOF
 
  Transcoder (modules $TC_MODULES)
@@ -599,14 +636,16 @@ update() {
         migrate_callinghome
         migrate_websocket
         secure_files
-        build_urfd
         # the dashboard version shown in the top bar lives in the kept config
         local ver
         ver=$(sed -n "s/^\$PageOptions\['DashboardVersion'\] *= *'\(.*\)';/\1/p" "$REPO_DIR/dashboard/pgs/config.inc.php")
         [ -n "$ver" ] && set_php "$DATA_DIR/dashboard/config.inc.php" "PageOptions['DashboardVersion']" "'$ver'"
-        start_urfd
     fi
-    if [ "$have_tcd" = true ]; then
+    if [ "$have_urfd" = true ] || [ "$TCD_DOCKER" = true ]; then
+        install_docker
+        start_docker   # builds and restarts urfd and/or tcd in Docker
+    fi
+    if [ "$have_tcd" = true ] && [ "$TCD_DOCKER" != true ]; then
         build_tcd   # restarts tcd if it was running
         systemctl is-active --quiet tcd || systemctl start tcd
     fi
@@ -618,13 +657,16 @@ update() {
 # ---------------------------------------------------------------------------
 
 has_urfd() { command -v docker >/dev/null && docker container inspect urfd >/dev/null 2>&1; }
-has_tcd()  { systemctl cat tcd >/dev/null 2>&1; }
+has_tcd()  {
+    if [ "$TCD_DOCKER" = true ]; then command -v docker >/dev/null && docker container inspect tcd >/dev/null 2>&1
+    else systemctl cat tcd >/dev/null 2>&1; fi
+}
 
 # which of urfd/tcd a command acts on: the one named, or every one installed
 targets() {
     case "${1:-}" in
         urfd) has_urfd || die "the reflector (Docker container 'urfd') is not installed here"; echo urfd ;;
-        tcd)  has_tcd  || die "the transcoder (systemd service 'tcd') is not installed here";  echo tcd ;;
+        tcd)  has_tcd  || die "the transcoder (Docker container or systemd service 'tcd') is not installed here";  echo tcd ;;
         "")   has_urfd && echo urfd; has_tcd && echo tcd; has_urfd || has_tcd || die "neither urfd nor tcd is installed here" ;;
         *)    die "unknown target '$1', use urfd or tcd" ;;
     esac
@@ -639,6 +681,10 @@ cmd_status() {
             docker ps -a -f name='^urfd$' --format '{{.Status}}' | sed 's/^/  /'
             docker logs urfd 2>&1 | grep 'Starting URF' | tail -1 | sed 's/^/  /' || true
             echo "  Configuration: $CFG_DIR/urfd.ini"
+        elif [ "$TCD_DOCKER" = true ]; then
+            bold "Transcoder (Docker container tcd)"
+            docker ps -a -f name='^tcd$' --format '{{.Status}}' | sed 's/^/  /'
+            echo "  Configuration: $TCD_INI"
         else
             bold "Transcoder (systemd service tcd)"
             echo "  $(systemctl is-active tcd) since $(systemctl show -p ActiveEnterTimestamp --value tcd)"
@@ -655,7 +701,7 @@ cmd_service() {
     list=$(targets "${2:-}")
     for t in $list; do
         info "${action^} $t"
-        if [ "$t" = urfd ]; then docker "$action" urfd >/dev/null; else systemctl "$action" tcd; fi
+        if [ "$t" = urfd ] || [ "$TCD_DOCKER" = true ]; then docker "$action" "$t" >/dev/null; else systemctl "$action" tcd; fi
     done
 }
 
@@ -664,7 +710,7 @@ cmd_logs() {
     list=$(targets "${1:-}")
     t=${list%%$'\n'*}
     [ -z "${1:-}" ] && has_urfd && has_tcd && echo "(reflector log; 'setup.sh logs tcd' for the transcoder)"
-    if [ "$t" = urfd ]; then docker logs -f --tail 100 urfd; else journalctl -u tcd -f -n 100; fi
+    if [ "$t" = urfd ] || [ "$TCD_DOCKER" = true ]; then docker logs -f --tail 100 "$t"; else journalctl -u tcd -f -n 100; fi
 }
 
 # SIGHUP rereads TG mappings, whitelist, blacklist and interlink. It goes to urfd itself:
@@ -752,12 +798,16 @@ main() {
         write_urfd_config
         build_urfd
         check_urfd_config
-        start_urfd
     fi
     if [ "$WITH_TCD" = true ]; then
         build_tcd
         ask_tcd_serials
         write_tcd_config
+    fi
+    if [ "$WITH_URFD" = true ] || [ "$TCD_DOCKER" = true ]; then
+        start_docker
+    fi
+    if [ "$WITH_TCD" = true ] && [ "$TCD_DOCKER" != true ]; then
         start_tcd
     fi
     summary

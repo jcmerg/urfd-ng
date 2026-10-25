@@ -21,7 +21,7 @@ This guide is for people who know their way around Linux and want to set things 
 | Configuration | `$URFD_DATA/config/` (default `/opt/urfd/config`), mounted as `/usr/local/etc/urfd` | `/usr/local/etc/urfd/` |
 | Dashboard | in the container (nginx + php-fpm, port 8363), settings in `$URFD_DATA/dashboard/config.inc.php` | your web server, e.g. `/var/www/urfd-dashboard` |
 | Service | container `urfd`, `restart: unless-stopped` | systemd unit `urfd` |
-| tcd | natively with systemd, in both cases (`tcd/build.sh`) | |
+| tcd | container `tcd` with `$URFD_DATA/tcd/tcd.ini` (`docker/build.sh`, see [tcd in Docker](../tcd/README.md#tcd-in-docker)) | systemd unit `tcd`, from `tcd/build.sh` |
 
 Requirements: Debian 12, Ubuntu 22.04 or newer, or Raspberry Pi OS; x86_64, arm64 or armhf. The ports to open are listed in [INSTALL.md](INSTALL.md#ports).
 
@@ -121,7 +121,7 @@ The dashboard is then on port 8363; change `listen` in the configuration for ano
 
 ## Transcoder
 
-tcd runs natively with systemd, on the reflector's machine or on another one; it connects to the reflector's `[Transcoder]` port (10100/tcp).
+tcd runs natively with systemd (below) or in Docker ([tcd in Docker](../tcd/README.md#tcd-in-docker)), on the reflector's machine or on another one; it connects to the reflector's `[Transcoder]` port (10100/tcp).
 
 ```bash
 sudo bash tcd/build.sh

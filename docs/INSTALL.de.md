@@ -5,7 +5,7 @@
 Diese Anleitung richtet mit dem Setup-Script einen URF-Reflektor mit Web-Dashboard und auf Wunsch den Transcoder tcd ein. Linux-Kenntnisse brauchst du dafür kaum, nur ein paar Befehle zum Eintippen. Das Script stellt ein paar Fragen, schreibt die Konfiguration für dich und baut und startet alles.
 
 - **urfd** ist der Reflektor. Er läuft zusammen mit dem Dashboard in Docker.
-- **tcd** ist der Transcoder. Er wandelt das Audio zwischen D-Star, DMR/YSF, M17, P25 und NXDN um und nutzt dafür DVSI-AMBE-USB-Sticks. Das Setup-Script installiert ihn direkt auf dem Rechner (mit systemd); er kann auch in Docker laufen, siehe „tcd in Docker“ in [tcd/README.de.md](../tcd/README.de.md#tcd-in-docker). Ohne Transcoder funktioniert der Reflektor auch, die Nutzer hören dann aber nur Stationen derselben Betriebsart.
+- **tcd** ist der Transcoder. Er wandelt das Audio zwischen D-Star, DMR/YSF, M17, P25 und NXDN um und nutzt dafür DVSI-AMBE-USB-Sticks. Das Setup-Script lässt ihn nach Wahl in Docker oder direkt auf dem Rechner mit systemd laufen; beides geht mit den Sticks (siehe „tcd in Docker“ in [tcd/README.de.md](../tcd/README.de.md#tcd-in-docker)). Ohne Transcoder funktioniert der Reflektor auch, die Nutzer hören dann aber nur Stationen derselben Betriebsart.
 
 ## Was du brauchst
 
@@ -113,9 +113,9 @@ Der Reflektor meldet sich dann alle 5 Minuten beim Verzeichnis; `docker logs urf
 | Log des Reflektors | `sudo ~/urfd/setup.sh logs urfd` (oder `docker logs -f urfd`) |
 | Reflektor neu starten | `sudo ~/urfd/setup.sh restart urfd` (oder `docker restart urfd`) |
 | Listen, Interlink, TG-Zuordnungen neu laden | `sudo ~/urfd/setup.sh reload` |
-| Log des Transcoders | `sudo ~/urfd/setup.sh logs tcd` (oder `journalctl -u tcd -f`) |
-| Transcoder neu starten | `sudo ~/urfd/setup.sh restart tcd` (oder `sudo systemctl restart tcd`) |
-| Transcoder-Monitor | `tcdmon` im Terminal, oder `http://localhost:8080` im Browser auf diesem Rechner (von einem anderen Rechner: `ssh -L 8080:localhost:8080 <rechner>`, oder `MonitorBindAddress = 0.0.0.0` in `tcd.ini` in einem vertrauenswürdigen LAN) |
+| Log des Transcoders | `sudo ~/urfd/setup.sh logs tcd` (oder `docker logs -f tcd`, nativ `journalctl -u tcd -f`) |
+| Transcoder neu starten | `sudo ~/urfd/setup.sh restart tcd` (oder `docker restart tcd`, nativ `sudo systemctl restart tcd`) |
+| Transcoder-Monitor | `docker exec -it tcd tcdmon` (nativ `tcdmon`) im Terminal, neben dem Reflektor `http://<reflektor>:8363/tcd/`, oder `http://localhost:8080` im Browser auf diesem Rechner (von einem anderen Rechner: `ssh -L 8080:localhost:8080 <rechner>`, oder `MonitorBindAddress = 0.0.0.0` in `tcd.ini` in einem vertrauenswürdigen LAN) |
 
 Das Update behält deine Konfiguration. Es holt die neue Version, baut neu und startet neu.
 
@@ -127,7 +127,7 @@ Das Update behält deine Konfiguration. Es holt die neue Version, baut neu und s
 | `/opt/urfd/config/urfd.interlink` | Kopplungen mit anderen Reflektoren |
 | `/opt/urfd/config/urfd.blacklist`, `urfd.whitelist` | Rufzeichen, die sich verbinden dürfen oder nicht |
 | `/opt/urfd/dashboard/config.inc.php` | Dashboard: Banner-Text, Anzeige der IP-Adressen, Admin-Seite |
-| `/usr/local/etc/tcd.ini` | Transcoder: Adresse des Reflektors, Module, Seriennummern der AMBE-Geräte, Pegel |
+| `/opt/urfd/tcd/tcd.ini` (nativ `/usr/local/etc/tcd.ini`) | Transcoder: Adresse des Reflektors, Module, Seriennummern der AMBE-Geräte, Pegel |
 
 Nach dem Ändern den Reflektor (`sudo ~/urfd/setup.sh restart urfd`) oder den Transcoder (`sudo ~/urfd/setup.sh restart tcd`) neu starten. Whitelist, Blacklist, Interlink und TG-Zuordnungen brauchen keinen Neustart: `sudo ~/urfd/setup.sh reload`. `urfd.ini` vorher prüfen mit:
 
@@ -145,7 +145,7 @@ Die transcodierten Module stehen in der `tcd.ini` (`Modules`); in der `urfd.ini`
 
 **Nutzer können sich nicht verbinden.** Der Port ihres Protokolls ist nicht freigegeben oder weitergeleitet, siehe [Ports](#ports). Teste von außerhalb deines Netzes, z.B. mit einem Hotspot am Handy-Hotspot.
 
-**Module werden nicht transcodiert.** `docker logs urfd | grep -i transcoder` zeigt, ob sich tcd verbunden hat. Auf dem tcd-Rechner zeigt `journalctl -u tcd`, ob er die AMBE-Sticks gefunden hat; `tcd --list-devices` listet sie. Läuft tcd auf einem anderen Rechner, muss `ServerAddress` in `tcd.ini` die Adresse des Reflektors sein, und Port 10100/tcp muss von dort erreichbar sein; `Password` in `tcd.ini` muss das `[Transcoder] Password` des Reflektors sein (das Setup-Script zeigt es am Ende der Reflektor-Installation). Ein falsches steht als `refused: wrong password` in `docker logs urfd`.
+**Module werden nicht transcodiert.** `docker logs urfd | grep -i transcoder` zeigt, ob sich tcd verbunden hat. Auf dem tcd-Rechner zeigt `docker logs tcd` (nativ `journalctl -u tcd`), ob er die AMBE-Sticks gefunden hat; `docker exec tcd tcd --list-devices` (nativ `tcd --list-devices`) listet sie. Läuft tcd auf einem anderen Rechner, muss `ServerAddress` in `tcd.ini` die Adresse des Reflektors sein, und Port 10100/tcp muss von dort erreichbar sein; `Password` in `tcd.ini` muss das `[Transcoder] Password` des Reflektors sein (das Setup-Script zeigt es am Ende der Reflektor-Installation). Ein falsches steht als `refused: wrong password` in `docker logs urfd`.
 
 **Das Setup noch einmal ausführen.** `sudo ./setup.sh` bietet auf einem eingerichteten Rechner ein Update an. Um neu anzufangen, das Update ablehnen und dem Neu-Einrichten zustimmen: Das überschreibt `urfd.ini`, die Dashboard-Konfiguration und `tcd.ini`.
 
@@ -158,6 +158,7 @@ Ohne Setup-Script oder ohne Docker: [INSTALL-ADVANCED.de.md](INSTALL-ADVANCED.de
 ```bash
 cd ~/urfd/docker && sudo docker compose down --rmi all -v
 sudo rm -rf /opt/urfd
+# ein nativer Transcoder:
 sudo systemctl disable --now tcd
 sudo rm -f /etc/systemd/system/tcd.service /usr/local/bin/tcd /usr/local/bin/tcdmon /usr/local/bin/agc-analyze /usr/local/etc/tcd.ini /usr/local/etc/tcd-build.conf
 ```

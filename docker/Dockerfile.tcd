@@ -1,7 +1,7 @@
-## tcd, the transcoder, in Docker: in software with a codec plugin
-## (tcd/plugins/<name>/, see tcd/plugins/README.md), or with AMBE sticks passed in
-## (devices in docker-compose.yml, the USB latency timer set on the host by a udev
-## rule), see "tcd in Docker" in tcd/README.md.
+## tcd, the transcoder, in Docker: with AMBE sticks (docker-compose.tcd-sticks.yml,
+## which docker/build.sh adds) or in software with a codec plugin
+## (tcd/plugins/<name>/, see tcd/plugins/README.md); see "tcd in Docker" in
+## tcd/README.md.
 ##
 ##   cd docker && docker compose --profile tcd build tcd
 
