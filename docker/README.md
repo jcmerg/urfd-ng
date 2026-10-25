@@ -2,7 +2,7 @@
 
 Docker deployment for the urfd reflector.
 
-The tcd transcoder (in [`../tcd`](../tcd/)) runs natively, not in Docker: Docker adds too much USB latency for reliable DVSI hardware access.
+The tcd transcoder (in [`../tcd`](../tcd/)) runs natively when it uses DVSI AMBE sticks: Docker adds too much USB latency for reliable hardware access. Without sticks, in software with a codec plugin, it can run here too: `Dockerfile.tcd` and the `tcd` service behind the profile `tcd` (`docker compose --profile tcd up -d`), see "tcd in Docker" in [tcd/README.md](../tcd/README.md#tcd-in-docker).
 
 ## Quick Start
 
@@ -27,6 +27,7 @@ The image is built from this checkout; configuration and state live outside it, 
 | `$URFD_DATA/config/` | `/usr/local/etc/urfd` | `urfd.ini`, interlink, black/whitelist, downloaded ID databases |
 | `$URFD_DATA/dashboard/config.inc.php` | dashboard `pgs/config.inc.php` | Dashboard settings |
 | `$URFD_DATA/xlxd-ch/` | `/var/lib/xlxd-ch` | Reflector list cache of the dashboard |
+| `$URFD_DATA/tcd/` | `/usr/local/etc/tcd` (tcd service) | `tcd.ini`, only with `--profile tcd` |
 
 `urfd.ini` must exist. See the main [README](../README.md) and the commented templates in [config/](../config/) for details.
 

@@ -15,6 +15,7 @@ Diese Anleitung richtet mit dem Setup-Script einen URF-Reflektor mit Web-Dashboa
 - **Für den Transcoder**: DVSI-AMBE-USB-Sticks (DV3000/ThumbDV oder DV3003), eingesteckt in den Rechner, auf dem tcd läuft.
   - Ein Gerät (DV3000 oder DV3003): 1 transcodiertes Modul, DMR/YSF braucht dann ein [Codec-Plugin](../tcd/README.de.md#codec-plugins).
   - DV3000 + DV3003: 2 Module. Zwei DV3000: 1 Modul. Zwei DV3003: bis zu 3 Module.
+  - Mehr Module oder gar kein Stick: Ein [Codec-Plugin](../tcd/README.de.md#codec-plugins) für D-Star und DMR macht sie in Software (nicht Teil dieses Repositorys, `setup.sh` installiert es nicht).
 - **Ein Reflektor-Rufzeichen**: `URF` plus drei Buchstaben oder Ziffern, z.B. `URF363`. Prüfe in der [Reflektorliste](https://xlxapi.rlx.lu/api/exportreflectors), dass es noch frei ist.
 
 ## Welcher Aufbau?
@@ -56,11 +57,11 @@ Das Script stellt seine Fragen nacheinander (auf Englisch). Ein Wert in `[eckige
 | Dashboard address | Wie das Dashboard von außen erreichbar ist, z.B. `http://urf123.example.com:8363` oder `http://deine-ip:8363`. Der Vorschlag ist die lokale Adresse, für einen ersten Test reicht sie |
 | Modules | Die "Räume" des Reflektors, Buchstaben A bis Z. `ADMSZ` ist ein guter Anfang |
 | Echo/parrot module | Ein Modul, das wiedergibt, was du sagst, ideal zum Testen. Meist `Z` |
-| Transcoded modules | Die Module, deren Audio zwischen den Betriebsarten umgewandelt wird, so viele, wie deine AMBE-Hardware schafft |
+| Transcoded modules | Die Module, deren Audio zwischen den Betriebsarten umgewandelt wird, so viele, wie deine AMBE-Hardware schafft (mehr mit einem Codec-Plugin) |
 | Admin page | Damit verwaltest du Talkgroups und siehst das Live-Log im Dashboard. Das Script erzeugt ein Passwort |
 | Register in the XLX directory | Trägt den Reflektor in Pi-Star, WPSD und andere Hotspot-Software ein. Antworte erst mal **no** und trage ihn später ein, wenn er läuft und aus dem Internet erreichbar ist |
 | Install Docker | Ja, wenn das Script es anbietet |
-| AMBE hardware | 1 für ein einzelnes Gerät (DV3000 oder DV3003), 2 für zwei Geräte |
+| AMBE hardware | 1 für ein einzelnes Gerät (DV3000 oder DV3003), 2 für zwei Geräte, 3 für keines (ein Codec-Plugin macht alles in Software) |
 | Serial numbers | Das Script listet die angeschlossenen seriellen USB-Geräte. Gib die Seriennummern deiner AMBE-Sticks ein, oder drück Enter, dann nimmt tcd die AMBE-Sticks, die er erkennt |
 
 Das Bauen dauert ein paar Minuten, auf einem Raspberry Pi bis zu einer halben Stunde. Am Ende zeigt das Script die Dashboard-Adresse, das Admin-Passwort und die freizugebenden Ports. Alles, was es ausgibt, steht auch in `/var/log/urfd-setup.log`.
@@ -134,7 +135,7 @@ Nach dem Ändern den Reflektor (`sudo ~/urfd/setup.sh restart urfd`) oder den Tr
 sudo ~/urfd/setup.sh check
 ```
 
-Die transcodierten Module müssen in `urfd.ini` (`[Transcoder] Modules`) und `tcd.ini` (`Modules`) gleich sein.
+Die transcodierten Module stehen in der `tcd.ini` (`Modules`); in der `urfd.ini` steht `[Transcoder] Modules = auto` (schreibt das Setup-Script seit 4.25.0), urfd folgt also tcd. Eine ältere `urfd.ini` mit einer Liste dort braucht dieselben Module wie die `tcd.ini`.
 
 **DMR-Hotspots** (Pi-Star, WPSD und andere MMDVM-Hotspots) verbinden sich über den MMDVM-Server, der nach dem Setup aus ist. Um ihn anzubieten, den Abschnitt `[MMDVM]` in `urfd.ini` einkommentieren, Talkgroups auf Module legen (z.B. `TG9 = A,TS2`) und entweder Nutzer mit Passwörtern eintragen oder `RequireAuth = false` für freien Zugang setzen. Dann Port 62030/udp freigeben und den Reflektor neu starten.
 

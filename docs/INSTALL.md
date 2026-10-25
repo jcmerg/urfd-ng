@@ -15,6 +15,7 @@ This guide sets up a URF reflector, with its web dashboard and optionally the tc
 - **For the transcoder**: DVSI AMBE USB sticks (DV3000/ThumbDV or DV3003), plugged into the machine that runs tcd.
   - One device (DV3000 or DV3003): 1 transcoded module, DMR/YSF then needs a [codec plugin](../tcd/README.md#codec-plugins).
   - DV3000 + DV3003: 2 modules. Two DV3000: 1 module. Two DV3003: up to 3 modules.
+  - More modules, or no stick at all: a [codec plugin](../tcd/README.md#codec-plugins) for D-Star and DMR does them in software (not part of this repository, `setup.sh` does not install it).
 - **A reflector callsign**: `URF` plus three letters or digits, e.g. `URF363`. Check that it is not taken in the [reflector list](https://xlxapi.rlx.lu/api/exportreflectors).
 
 ## Which setup?
@@ -56,11 +57,11 @@ The script asks its questions one after another. A value in `[brackets]` is the 
 | Dashboard address | How the dashboard is reached from outside, e.g. `http://urf123.example.com:8363` or `http://your-ip:8363`. The suggestion is the local address, fine for a first test |
 | Modules | The "rooms" of the reflector, letters A to Z. `ADMSZ` is a good start |
 | Echo/parrot module | A module that plays back what you say, ideal for testing. Usually `Z` |
-| Transcoded modules | The modules whose audio is converted between modes, as many as your AMBE hardware allows |
+| Transcoded modules | The modules whose audio is converted between modes, as many as your AMBE hardware allows (more with a codec plugin) |
 | Admin page | Lets you manage talkgroups and see the live log in the dashboard. The script creates a password |
 | Register in the XLX directory | Lists the reflector in Pi-Star, WPSD and other hotspot software. Say **no** for now and register later, once the reflector works and is reachable from the internet |
 | Install Docker | Yes, if the script offers it |
-| AMBE hardware | 1 for a single device (DV3000 or DV3003), 2 for two devices |
+| AMBE hardware | 1 for a single device (DV3000 or DV3003), 2 for two devices, 3 for none (a codec plugin does everything in software) |
 | Serial numbers | The script lists the connected USB serial devices. Enter the serial numbers of your AMBE sticks, or press Enter to let tcd pick the AMBE sticks it recognises |
 
 Building takes a few minutes, on a Raspberry Pi up to half an hour. At the end the script shows the dashboard address, the admin password and the ports to open. Everything it prints is also saved in `/var/log/urfd-setup.log`.
@@ -134,7 +135,7 @@ After editing, restart the reflector (`sudo ~/urfd/setup.sh restart urfd`) or th
 sudo ~/urfd/setup.sh check
 ```
 
-The transcoded modules must be the same in `urfd.ini` (`[Transcoder] Modules`) and `tcd.ini` (`Modules`).
+The transcoded modules are listed in `tcd.ini` (`Modules`); `urfd.ini` says `[Transcoder] Modules = auto` (written by the setup script since 4.25.0), so urfd follows tcd. An older `urfd.ini` with a list there needs the same modules as `tcd.ini`.
 
 **DMR hotspots** (Pi-Star, WPSD and other MMDVM hotspots) link through the MMDVM server, which is off after setup. To offer it, uncomment the `[MMDVM]` section in `urfd.ini`, map talkgroups to modules (e.g. `TG9 = A,TS2`), and either add users with passwords or set `RequireAuth = false` for open access. Then open port 62030/udp and restart the reflector.
 
