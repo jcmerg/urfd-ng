@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both. Originally developed for the URF363 reflector.
 
-**urfd 4.28.0-dht** | tcd 0.11.0 | Dashboard v2.14.0
+**urfd 4.29.0-dht** | tcd 0.11.0 | Dashboard v2.14.0
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -197,6 +197,7 @@ Port = 5300                         # TCP and UDP port (same)
 #
 # TG mapping: TG<number> = <Module>
 # Modules must be transcoded. Multiple TGs per module supported.
+# TGs = auto                       # every module with a talkgroup ([Modules] TG<M>); TG lines win
 # TG26363 = A
 #
 # User authentication: <Callsign> = <Password>
@@ -206,7 +207,7 @@ Port = 5300                         # TCP and UDP port (same)
 
 **User management**: Users can be added/removed at runtime via the Admin interface or configured statically in `urfd.ini`. Each user authenticates with callsign + password using HMAC-SHA1.
 
-**TG mapping**: Modules must be transcoded. Multiple TGs per module supported. Dynamic TGs can be added via the Admin interface with configurable TTL.
+**TG mapping**: Modules must be transcoded. Multiple TGs per module supported. Since 4.29.0 `TGs = auto` maps every (transcoded) module with a talkgroup (`[Modules] TG<M>`); `TG` lines win. Dynamic TGs can be added via the Admin interface with configurable TTL.
 
 **TG selection, like SvxReflector**: A node has one selected TG, `MsgSelectTG` replaces it; `MsgTgMonitor` sets the TGs whose talker start/stop it gets. A TG has one talker at a time. The other nodes on the TG get the talker's OPUS packets as they came (no transcoding), also on TGs that aren't mapped to a module; mapped TGs also go to and come from their urfd module. Nodes must speak protocol 2.0. SvxLink with an `AUTH_KEY` does, also current versions (tested with SvxLink 1.9.99.36 / 25.05, 2026-10-15); a node set up for certificates only uses protocol 3 (TLS), which urfd does not support: it is asked to downgrade and logs that it can't.
 
@@ -279,6 +280,11 @@ Port = 62030
 # TG mapping: TG<number> = <Module>[,TS<1|2>]
 # First TG per module = primary (TX/RX). Additional = secondary (RX only).
 # Default timeslot is TS2. Dual-slot: map different modules to different TSes.
+# From the module talkgroups ([Modules] TG<M>): TS1 / TS2 = <modules> maps
+# them on that timeslot, TGs = auto every other module with a talkgroup
+# (on TS2, or TGs = auto,TS1); TG lines win.
+# TS1 = F
+# TGs = auto
 TG9 = A,TS2                        # Common hotspot default
 # TG26363 = F,TS1                  # Local TG -> Module F on TS1
 #
@@ -295,7 +301,7 @@ TG9 = A,TS2                        # Common hotspot default
 
 **User authentication**: Users can authenticate with a DMR-ID (7-9 digits) or callsign. Callsigns are resolved to DMR IDs at startup via the DMR ID database. If no users are configured, all logins are rejected. Individual users can be configured with an empty password to allow any password (useful for compat hotspots). Set `RequireAuth = false` to disable authentication entirely and accept all connections (legacy behavior). Users can be managed at runtime via the Admin interface.
 
-**TG mapping**: Same semantics as MMDVMClient — first TG per module is primary (TX+RX), additional TGs are secondary (RX only). Dynamic TGs can be added via the Admin interface with configurable TTL.
+**TG mapping**: Same semantics as MMDVMClient — first TG per module is primary (TX+RX), additional TGs are secondary (RX only). Since 4.29.0 the module talkgroups (`[Modules] TG<M>`) map with `TS1 = <modules>` / `TS2 = <modules>`, and `TGs = auto` maps every other module with a talkgroup (on TS2, `TGs = auto,TS1` for TS1), so hotspots reach every module; `TG` lines win. Dynamic TGs can be added via the Admin interface with configurable TTL.
 
 **Dual-slot linking**: Each timeslot links independently. When a hotspot transmits on TS1 with TG 4019 (module S) and on TS2 with TG 4004 (module D), it receives traffic from both modules simultaneously — module S on the timeslot configured for that TG, module D on the other. For this to work, map TGs for different modules to different timeslots. The dashboard shows both linked modules (e.g. "S (TS1), D (TS2)").
 
@@ -939,6 +945,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dynamic TG management**: Add/remove TGs at runtime with configurable TTL, cross-protocol timer refresh, BM API or kerchunk activation, expired SVX TGs leave the monitored TGs
 - **Credential database**: Logins of MMDVM and SVXServer (and plugins) from SQLite, MySQL/MariaDB or PostgreSQL besides `urfd.ini`, LRU cache with TTL and negative caching, cached logins survive a database outage, admin flush and status
 - **Transcoded modules from tcd (4.25.0)**: `[Transcoder] Modules = auto` transcodes a module while tcd is connected for it, so only `tcd.ini` lists the modules; a stream on a module without tcd passes as on a module without transcoding, the dashboard and the DHT entry follow
+- **TGs = auto for the MMDVM server and SVXServer (4.29.0)**: `[MMDVM]` and `[SVXServer]` take the module talkgroups with `TGs = auto` (and `[MMDVM]` with `TS1` / `TS2` like an MMDVMClient), so hotspots and SvxLink nodes reach every module with a talkgroup
 - **Module talkgroups (4.28.0)**: `[Modules] TG<M> = <number>` gives a module its talkgroup once; an MMDVMClient section maps it with `TS1 = <modules>` / `TS2 = <modules>`, plugins can take it (`CConfigure::GetModuleTG`)
 - **Named MMDVMClient connections (4.27.0)**: `[MMDVMClient.<name>]` instead of `[MMDVMClient2]` ... `[MMDVMClient9]`, taking what they leave out from `[MMDVMClient]`; a `DmrId` of one or two digits (or a name of digits) is a suffix to its `DmrId`; the name shows in the log, the admin page, `BlockProtocols` and the admin commands
 - **MMDVMClient sends right after login (4.26.0)**: BrandMeister takes the options without an ACK, so a connection waited for its beacon request (second 18 of a minute, up to a minute) before it sent any audio to the master, and resent the options every 10 s meanwhile; the options are sent once and count as taken after 2 s without a NAK

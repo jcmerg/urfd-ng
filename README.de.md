@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert. Ursprünglich für den Reflektor URF363 entwickelt.
 
-**urfd 4.28.0-dht** | tcd 0.11.0 | Dashboard v2.14.0
+**urfd 4.29.0-dht** | tcd 0.11.0 | Dashboard v2.14.0
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -197,6 +197,7 @@ Port = 5300                         # TCP and UDP port (same)
 #
 # TG mapping: TG<number> = <Module>
 # Modules must be transcoded. Multiple TGs per module supported.
+# TGs = auto                       # every module with a talkgroup ([Modules] TG<M>); TG lines win
 # TG26363 = A
 #
 # User authentication: <Callsign> = <Password>
@@ -279,6 +280,11 @@ Port = 62030
 # TG mapping: TG<number> = <Module>[,TS<1|2>]
 # First TG per module = primary (TX/RX). Additional = secondary (RX only).
 # Default timeslot is TS2. Dual-slot: map different modules to different TSes.
+# From the module talkgroups ([Modules] TG<M>): TS1 / TS2 = <modules> maps
+# them on that timeslot, TGs = auto every other module with a talkgroup
+# (on TS2, or TGs = auto,TS1); TG lines win.
+# TS1 = F
+# TGs = auto
 TG9 = A,TS2                        # Common hotspot default
 # TG26363 = F,TS1                  # Local TG -> Module F on TS1
 #
@@ -916,6 +922,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Protokoll-Sperren zur Laufzeit**: Beliebige Protokoll-Paare in beide Richtungen im Admin-Dashboard sperren und freigeben: threadsicher mit shared_mutex, per Klick entfernbar, Rücksetzen auf die Konfiguration, wird nicht gespeichert (gilt nach Neustart nicht mehr)
 - **Dynamische TG-Verwaltung**: TGs zur Laufzeit mit einstellbarer Laufzeit hinzufügen und entfernen, Timer über alle Protokolle hinweg erneuert, Aktivierung per BM-API oder Kerchunk, abgelaufene SVX-TGs fallen aus den überwachten TGs
 - **Transcodierte Module von tcd (4.25.0)**: `[Transcoder] Modules = auto` transcodiert ein Modul, solange tcd dafür verbunden ist, nur noch die `tcd.ini` nennt also die Module; ein Stream auf einem Modul ohne tcd läuft wie auf einem Modul ohne Transcoding, Dashboard und DHT-Eintrag folgen
+- **TGs = auto für MMDVM-Server und SVXServer (4.29.0)**: `[MMDVM]` und `[SVXServer]` übernehmen die Modul-Talkgroups mit `TGs = auto` (und `[MMDVM]` mit `TS1` / `TS2` wie ein MMDVMClient), Hotspots und SvxLink-Knoten erreichen damit jedes Modul mit Talkgroup
 - **Modul-Talkgroups (4.28.0)**: `[Modules] TG<M> = <nummer>` legt die Talkgroup eines Moduls einmal fest; eine MMDVMClient-Sektion bindet sie mit `TS1 = <module>` / `TS2 = <module>` ein, Plugins können sie übernehmen (`CConfigure::GetModuleTG`)
 - **MMDVMClient-Verbindungen mit Namen (4.27.0)**: `[MMDVMClient.<name>]` statt `[MMDVMClient2]` ... `[MMDVMClient9]`, mit allem Weggelassenen aus `[MMDVMClient]`; eine `DmrId` aus ein oder zwei Ziffern (oder ein Name aus Ziffern) ist eine Endung an dessen `DmrId`; der Name steht im Log, auf der Admin-Seite, in `BlockProtocols` und bei den Admin-Befehlen
 - **MMDVMClient sendet gleich nach dem Login (4.26.0)**: BrandMeister nimmt die Optionen ohne ACK an, deshalb wartete eine Verbindung auf dessen Beacon-Anfrage (Sekunde 18 einer Minute, bis zu einer Minute), bevor sie Ton zum Master schickte, und schickte die Optionen dabei alle 10 s neu; die Optionen gehen einmal raus und gelten nach 2 s ohne NAK als angenommen
