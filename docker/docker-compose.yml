@@ -57,7 +57,7 @@ services:
       timeout: 5s
       retries: 3
 
-  # the transcoder, only with --profile tcd; DVSI sticks need tcd to run natively
+  # the transcoder, only with --profile tcd; see "tcd in Docker" in tcd/README.md
   tcd:
     profiles: [tcd]
     build:
@@ -72,6 +72,12 @@ services:
     volumes:
       # tcd.ini, writable: the monitor's Save writes to it
       - ${URFD_DATA:-/opt/urfd}/tcd:/usr/local/etc/tcd
+      # with AMBE sticks: their names, and below their device nodes (ls -l /dev/serial/by-id);
+      # the host sets their USB latency timer with a udev rule, see tcd/README.md
+      # - /dev/serial/by-id:/dev/serial/by-id:ro
+    # devices:
+    #   - /dev/ttyUSB0
+    #   - /dev/ttyUSB1
     logging:
       driver: json-file
       options:

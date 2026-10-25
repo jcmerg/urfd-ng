@@ -5,7 +5,7 @@
 This guide sets up a URF reflector, with its web dashboard and optionally the tcd transcoder, using the setup script. You need no Linux experience beyond typing a few commands. The script asks a handful of questions, writes the configuration for you, and builds and starts everything.
 
 - **urfd** is the reflector. It runs in Docker, together with the dashboard.
-- **tcd** is the transcoder. It converts audio between D-Star, DMR/YSF, M17, P25 and NXDN, using DVSI AMBE USB sticks. It runs directly on the machine (not in Docker), because the USB sticks need low latency. Without a transcoder the reflector still works, but users only hear stations that use the same mode.
+- **tcd** is the transcoder. It converts audio between D-Star, DMR/YSF, M17, P25 and NXDN, using DVSI AMBE USB sticks. The setup script installs it directly on the machine (with systemd); it can also run in Docker, see "tcd in Docker" in [tcd/README.md](../tcd/README.md#tcd-in-docker). Without a transcoder the reflector still works, but users only hear stations that use the same mode.
 
 ## What you need
 

@@ -2,7 +2,7 @@
 
 Docker deployment for the urfd reflector.
 
-The tcd transcoder (in [`../tcd`](../tcd/)) runs natively when it uses DVSI AMBE sticks: Docker adds too much USB latency for reliable hardware access. Without sticks, in software with a codec plugin, it can run here too: `Dockerfile.tcd` and the `tcd` service behind the profile `tcd` (`docker compose --profile tcd up -d`), see "tcd in Docker" in [tcd/README.md](../tcd/README.md#tcd-in-docker). `build.sh` builds and restarts it too when `$URFD_DATA/tcd/tcd.ini` exists, and nginx passes `/tcd/` to its monitor (`TCD_MONITOR_PORT`, which `build.sh` takes from the `MonitorHttpPort` of that tcd.ini, default 8080).
+The tcd transcoder (in [`../tcd`](../tcd/)) can run here too, in software with a codec plugin or with AMBE sticks passed into the container (the host then sets their USB latency timer with a udev rule): `Dockerfile.tcd` and the `tcd` service behind the profile `tcd` (`docker compose --profile tcd up -d`), see "tcd in Docker" in [tcd/README.md](../tcd/README.md#tcd-in-docker). `build.sh` builds and restarts it too when `$URFD_DATA/tcd/tcd.ini` exists, and nginx passes `/tcd/` to its monitor (`TCD_MONITOR_PORT`, which `build.sh` takes from the `MonitorHttpPort` of that tcd.ini, default 8080).
 
 ## Quick Start
 
