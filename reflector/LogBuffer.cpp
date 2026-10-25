@@ -10,7 +10,10 @@ CLogBuffer g_LogBuffer;
 CLogBuffer::CLogBuffer()
 	: m_Head(0)
 	, m_Count(0)
-	, m_OrigBuf(nullptr)
+	, m_OutBuf(*this, STDOUT_FILENO)
+	, m_ErrBuf(*this, STDERR_FILENO)
+	, m_OrigOut(nullptr)
+	, m_OrigErr(nullptr)
 {
 	m_Lines.resize(LOG_BUFFER_SIZE);
 }
@@ -22,62 +25,75 @@ CLogBuffer::~CLogBuffer()
 
 void CLogBuffer::Install(void)
 {
-	m_OrigBuf = std::cout.rdbuf(this);
+	m_OrigOut = std::cout.rdbuf(&m_OutBuf);
+	m_OrigErr = std::cerr.rdbuf(&m_ErrBuf);
 }
 
 void CLogBuffer::Uninstall(void)
 {
-	if (m_OrigBuf)
+	if (m_OrigOut)
 	{
-		std::cout.rdbuf(m_OrigBuf);
-		m_OrigBuf = nullptr;
+		std::cout.rdbuf(m_OrigOut);
+		m_OrigOut = nullptr;
+	}
+	if (m_OrigErr)
+	{
+		std::cerr.rdbuf(m_OrigErr);
+		m_OrigErr = nullptr;
 	}
 }
 
-int CLogBuffer::overflow(int c)
+// the line this thread is writing to the stream, up to its '\n'
+std::string &CLogBuffer::CLineBuf::Pending(void)
+{
+	thread_local std::string out, err;
+	return (m_Fd == STDERR_FILENO) ? err : out;
+}
+
+int CLogBuffer::CLineBuf::overflow(int c)
 {
 	if (c != EOF)
 	{
-		AddChar((char)c);
-		// Write directly to stdout fd (bypasses rdbuf, works with supervisord)
 		char ch = (char)c;
-		if (::write(STDOUT_FILENO, &ch, 1) < 0) {}  // nothing to do if stdout is gone
+		xsputn(&ch, 1);
 	}
 	return c;
 }
 
-std::streamsize CLogBuffer::xsputn(const char *s, std::streamsize n)
+std::streamsize CLogBuffer::CLineBuf::xsputn(const char *s, std::streamsize n)
 {
+	std::string &line = Pending();
 	for (std::streamsize i = 0; i < n; i++)
-		AddChar(s[i]);
-
-	// Write directly to stdout fd, nothing to do if stdout is gone
-	if (::write(STDOUT_FILENO, s, n) < 0) {}
-
+	{
+		line += s[i];
+		if (s[i] == '\n')
+		{
+			m_Log.WriteLine(m_Fd, line);
+			line.clear();
+		}
+	}
 	return n;
 }
 
-void CLogBuffer::AddChar(char c)
+void CLogBuffer::WriteLine(int fd, const std::string &line)
 {
 	std::lock_guard<std::mutex> lock(m_Mutex);
-	if (c == '\n')
-	{
-		// Prepend timestamp to stored line
-		char ts[20];
-		time_t now = time(nullptr);
-		struct tm *t = localtime(&now);
-		snprintf(ts, sizeof(ts), "%02d:%02d:%02d ", t->tm_hour, t->tm_min, t->tm_sec);
 
-		m_Lines[m_Head] = std::string(ts) + m_Current;
-		m_Head = (m_Head + 1) % LOG_BUFFER_SIZE;
-		if (m_Count < LOG_BUFFER_SIZE)
-			m_Count++;
-		m_Current.clear();
-	}
-	else
-	{
-		m_Current += c;
-	}
+	// Write directly to the fd (bypasses rdbuf, works with supervisord),
+	// nothing to do if it is gone
+	if (::write(fd, line.data(), line.size()) < 0) {}
+
+	// Prepend timestamp to stored line
+	char ts[20];
+	time_t now = time(nullptr);
+	struct tm t;
+	localtime_r(&now, &t);
+	snprintf(ts, sizeof(ts), "%02d:%02d:%02d ", t.tm_hour, t.tm_min, t.tm_sec);
+
+	m_Lines[m_Head] = std::string(ts) + line.substr(0, line.size() - 1);
+	m_Head = (m_Head + 1) % LOG_BUFFER_SIZE;
+	if (m_Count < LOG_BUFFER_SIZE)
+		m_Count++;
 }
 
 std::vector<std::string> CLogBuffer::GetLines(int count) const
