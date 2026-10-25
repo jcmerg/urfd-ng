@@ -43,12 +43,28 @@ void CLogBuffer::Uninstall(void)
 	}
 }
 
-// the line this thread is writing to the stream, up to its '\n'
+// the line this thread is writing to the stream, up to its '\n'; what a thread
+// leaves without a '\n' still reaches the console when it ends (straight to the
+// descriptor: the log buffer may be gone by then)
+namespace
+{
+	struct SPending
+	{
+		std::string out, err;
+		~SPending()
+		{
+			if (!out.empty() && ::write(STDOUT_FILENO, out.data(), out.size()) < 0) {}
+			if (!err.empty() && ::write(STDERR_FILENO, err.data(), err.size()) < 0) {}
+		}
+	};
+}
+
 std::string &CLogBuffer::CLineBuf::Pending(void)
 {
-	thread_local std::string out, err;
-	return (m_Fd == STDERR_FILENO) ? err : out;
+	thread_local SPending pending;
+	return (m_Fd == STDERR_FILENO) ? pending.err : pending.out;
 }
+
 
 int CLogBuffer::CLineBuf::overflow(int c)
 {
