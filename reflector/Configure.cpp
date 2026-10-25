@@ -565,6 +565,10 @@ bool CConfigure::ReadData(const std::string &path)
 					data[g_Keys.mmdvm.fallbackdmrid] = getUnsigned(value, "MMDVM FallbackDmrId", 0, 999999999, 0);
 				else if (0 == key.compare(JENABLE))
 					data[g_Keys.mmdvm.enable] = IS_TRUE(value[0]);
+				else if (0 == key.compare("TGs"))
+					data["mmdvmAutoTGs"] = value;	// auto[,TS<1|2>]: every module with a talkgroup, resolved below
+				else if (0 == key.compare("TS1") || 0 == key.compare("TS2"))
+					data["mmdvm" + key] = value;	// the modules' talkgroups on this timeslot, resolved below
 				else if (0 == key.compare(0, 2, "TG"))
 					data["mmdvmTG" + key.substr(2)] = value;  // TG mapping: TG<N> = <Module>[,TS<1|2>]
 				else if (0 == key.compare("BlockProtocols"))
@@ -808,6 +812,8 @@ bool CConfigure::ReadData(const std::string &path)
 					data[g_Keys.svxs.rxgain] = value;
 				else if (0 == key.compare("TxGain"))
 					data[g_Keys.svxs.txgain] = value;
+				else if (0 == key.compare("TGs"))
+					data["svxsAutoTGs"] = value;	// auto: every module with a talkgroup, resolved below
 				else if (0 == key.compare(0, 2, "TG"))
 				{
 					std::string tgkey = "svxsTG" + key.substr(2);
@@ -1116,6 +1122,71 @@ bool CConfigure::ReadData(const std::string &path)
 			}
 			else
 				tgOwner[tg] = m;
+		}
+
+		// [MMDVM] and [SVXServer] from the module talkgroups: TS1 / TS2 = <modules>
+		// ([MMDVM]), then TGs = auto for every module the section has no TG for yet
+		// ([MMDVM] on TS2, or TS1 with "auto,TS1"); TG lines win
+		auto mapsModule = [this](const std::string &prefix, char m) {
+			for (auto it = data.begin(); it != data.end(); ++it)
+				if (it.key().compare(0, prefix.size(), prefix) == 0 && it.key().size() > prefix.size() && std::isdigit((unsigned char)it.key()[prefix.size()])
+					&& it.value().is_string() && !it.value().get<std::string>().empty() && it.value().get<std::string>()[0] == m)
+					return true;
+			return false;
+		};
+		for (const char *ts : { "TS1", "TS2" })
+		{
+			const std::string key = std::string("mmdvm") + ts;
+			if (!data.contains(key))
+				continue;
+			const std::string list = data[key].get<std::string>();
+			data.erase(key);
+			for (char m : list)
+			{
+				if (!std::isalpha((unsigned char)m))
+					continue;
+				m = char(std::toupper((unsigned char)m));
+				if (!data.contains(ModuleTGKey(m)))
+				{
+					std::cerr << "ERROR: [" << JMMDVM << "] " << ts << " = " << list << ": module " << m << " has no talkgroup, give it TG" << m << " = <number> in [" << JMODULES << "]" << std::endl;
+					rval = true;
+				}
+				else if (!mapsModule("mmdvmTG", m) && !data.contains("mmdvmTG" + std::to_string(data[ModuleTGKey(m)].get<unsigned>())))
+					data["mmdvmTG" + std::to_string(data[ModuleTGKey(m)].get<unsigned>())] = std::string(1, m) + "," + ts;
+			}
+		}
+		const std::pair<const char *, const char *> autoSections[] = { { "mmdvm", JMMDVM }, { "svxs", JSVXSERVER } };
+		for (const auto &[prefix, section] : autoSections)
+		{
+			const std::string key = std::string(prefix) + "AutoTGs";
+			if (!data.contains(key))
+				continue;
+			std::string value = data[key].get<std::string>();
+			data.erase(key);
+			for (auto &c : value) c = char(std::tolower((unsigned char)c));
+			value.erase(std::remove(value.begin(), value.end(), ' '), value.end());
+			std::string ts = "TS2";
+			const bool mmdvm = (0 == std::string(prefix).compare("mmdvm"));
+			if (mmdvm && value == "auto,ts1")
+				ts = "TS1";
+			else if (value != "auto" && !(mmdvm && value == "auto,ts2"))
+			{
+				std::cerr << "ERROR: [" << section << "] TGs = " << value << ": only auto" << (mmdvm ? ", auto,TS1 or auto,TS2" : "") << " is known" << std::endl;
+				rval = true;
+				continue;
+			}
+			// SVXServer takes transcoded modules only: all of them with [Transcoder] Modules = auto
+			const bool tcAll = data.contains(g_Keys.tc.automatic) && data[g_Keys.tc.automatic].get<bool>();
+			const std::string tcList = data.contains(g_Keys.tc.modules) ? data[g_Keys.tc.modules].get<std::string>() : std::string();
+			const std::string tgPrefix = std::string(prefix) + "TG";
+			for (char m : mods)
+			{
+				if (!data.contains(ModuleTGKey(m)) || mapsModule(tgPrefix, m) || (!mmdvm && !tcAll && std::string::npos == tcList.find(m)))
+					continue;
+				const std::string tgKey = tgPrefix + std::to_string(data[ModuleTGKey(m)].get<unsigned>());
+				if (!data.contains(tgKey))	// a TG line with this number wins
+					data[tgKey] = mmdvm ? std::string(1, m) + "," + ts : std::string(1, m);
+			}
 		}
 
 		// finally, check the module descriptions
