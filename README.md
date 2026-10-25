@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both. Originally developed for the URF363 reflector.
+Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
 **urfd 4.29.1-dht** | tcd 0.11.1 | Dashboard v2.14.0
 
