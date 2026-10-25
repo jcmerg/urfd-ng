@@ -35,6 +35,7 @@ private:
 		std::string uri, body;	// a POST collects its body first
 		std::string out;		// the response body still to send
 		size_t sent = 0;
+		bool responded = false;	// a POST with Content-Length: 0 also gets HTTP_BODY_COMPLETION
 	};
 	static int Callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 	int Respond(struct lws *wsi);

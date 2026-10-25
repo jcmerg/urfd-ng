@@ -464,7 +464,7 @@ bool CTCServer::advance(SPending &p)
 			close(p.fd);
 			return true;
 		}
-		if (0 == mod || std::string::npos == m_Modules.find(mod))
+		if (0 == mod || std::string::npos == m_Modules.find(mod) || (m_Accept && !m_Accept(mod)))
 		{
 			if (RejectLog("Transcoder: refused connections", p.peer.GetAddress()))
 			{

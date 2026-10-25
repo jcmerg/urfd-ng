@@ -31,7 +31,6 @@ bool CMMDVMClientProtocol::Initialize(const char *type, const EProtocol ptype, c
 {
 	m_uiDmrId = g_Configure.GetUnsigned(m_Keys.dmrid);
 	// the modules tcd transcodes, fixed until a restart (the reflector's own copy is set by a reload only)
-	m_TCModules = (g_Configure.Contains(g_Keys.tc.port) && g_Configure.GetUnsigned(g_Keys.tc.port)) ? g_Configure.GetString(g_Keys.tc.modules) : std::string();
 	m_FallbackDmrId = 0;
 	if (g_Configure.Contains(m_Keys.fallbackdmrid))
 		m_FallbackDmrId = g_Configure.GetUnsigned(m_Keys.fallbackdmrid);
@@ -100,8 +99,8 @@ bool CMMDVMClientProtocol::Initialize(const char *type, const EProtocol ptype, c
 
 bool CMMDVMClientProtocol::Transcoded(char module) const
 {
-	// with [Transcoder] Modules = auto only while tcd is connected for the module
-	return m_TCModules.find(module) != std::string::npos && g_Reflector.IsTranscoded(module);
+	// the live state: the configured list (reloadable), with Modules = auto only while tcd is connected
+	return g_Reflector.IsTranscoded(module);
 }
 
 bool CMMDVMClientProtocol::IsSourceClientBlocked(const CClient &client) const

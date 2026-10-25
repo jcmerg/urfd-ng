@@ -451,6 +451,9 @@ int CMonitorServer::Callback(struct lws *wsi, enum lws_callback_reasons reason, 
 int CMonitorServer::Respond(struct lws *wsi)
 {
 	auto &s = m_Sessions[wsi];
+	if (s.responded)
+		return 0;
+	s.responded = true;
 	int status = 200;
 	const char *type = "application/json";
 	if (s.uri.compare(0, 5, "/api/") == 0)

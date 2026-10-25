@@ -74,7 +74,6 @@ bool CReflector::Start(void)
 	const auto cs(g_Configure.GetString(g_Keys.names.callsign));
 	m_Callsign.SetCallsign(cs, false);
 	m_Modules.assign(g_Configure.GetString(g_Keys.modules.modules));
-	const auto tcmods(g_Configure.GetString(g_Keys.tc.modules));
 	const auto port = g_Configure.GetUnsigned(g_Keys.tc.port);
 
 #ifndef NO_DHT
@@ -90,8 +89,11 @@ bool CReflector::Start(void)
 	// init transcoder comms
 	if (port)
 	{
+		// a slot and (below) a codec stream for every module, so [Transcoder] Modules
+		// can change with a reload; the filter takes the modules configured now
 		g_TCServer.SetPassword(g_Configure.GetString(g_Keys.tc.password));
-		if (g_TCServer.Open(g_Configure.GetString(g_Keys.tc.bind), tcmods, port))
+		g_TCServer.SetAcceptFilter([](char m) { return std::string::npos != g_Configure.GetString(g_Keys.tc.modules).find(m); });
+		if (g_TCServer.Open(g_Configure.GetString(g_Keys.tc.bind), m_Modules, port))
 			return true;
 	}
 
@@ -147,14 +149,13 @@ bool CReflector::Start(void)
 		auto stream = std::make_shared<CPacketStream>(c);
 		if (stream)
 		{
-			// if it's a transcoded module, then we need to initialize the codec stream
+			// every module gets a codec stream when there is a transcoder: whether a
+			// stream uses it is decided when it opens (IsTranscoded), so a reload can
+			// change [Transcoder] Modules
 			if (port)
 			{
-				if (std::string::npos != tcmods.find(c))
-				{
-					if (stream->InitCodecStream())
-						return true;
-				}
+				if (stream->InitCodecStream())
+					return true;
 			}
 			m_Stream[c] = stream;
 		}
@@ -283,8 +284,16 @@ void CReflector::ReloadConfig(const std::string &configPath)
 		// settings themselves only change with a restart
 		g_Credentials.Flush();
 
-		// Update transcoder modules string
+		// Update transcoder modules string; a tcd connected for a module that is no
+		// longer transcoded is dropped (the accept filter reads the new list)
 		m_TCmodules.assign(g_Configure.GetString(g_Keys.tc.modules));
+		if (g_Configure.GetUnsigned(g_Keys.tc.port))
+			for (char m : m_Modules)
+				if (std::string::npos == m_TCmodules.find(m) && g_TCServer.GetFD(m) >= 0)
+				{
+					std::cout << "Module " << m << " is no longer transcoded, closing its transcoder connection" << std::endl;
+					g_TCServer.Close(m);
+				}
 
 		std::cout << "Configuration reloaded successfully" << std::endl;
 	}
@@ -668,8 +677,8 @@ void CReflector::MaintenanceThread()
 		NotifyMappings();
 
 #ifndef NO_DHT
-		// with Modules = auto the transcoded modules follow tcd: tell the DHT when they change
-		if (tcport && g_Configure.GetBoolean(g_Keys.tc.automatic))
+		// the transcoded modules follow tcd (Modules = auto) and reloads: tell the DHT when they change
+		if (tcport)
 		{
 			static std::string published = GetTranscodedModules();
 			const auto now = GetTranscodedModules();
