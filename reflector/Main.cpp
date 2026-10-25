@@ -85,6 +85,9 @@ int main(int argc, char *argv[])
 	if (g_Reflector.Start())
 	{
 		std::cout << "Error starting reflector" << std::endl;
+		// the streams back to the console before the globals and this thread's line
+		// buffers go, which the destructors would otherwise still write through
+		g_LogBuffer.Uninstall();
 		return EXIT_FAILURE;
 	}
 

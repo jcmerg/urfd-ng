@@ -3,6 +3,7 @@
 // Copyright (C) 2026
 // Licensed under the GNU General Public License v3 or later
 
+#include <unordered_set>
 #include <dlfcn.h>
 #include <iostream>
 
@@ -13,7 +14,7 @@ CCodecPlugins g_Codecs;
 // a stream quiet this long loses its state; at most this many states are kept,
 // more than streams can run at once (one per module and direction)
 #define STATE_TIMEOUT std::chrono::seconds(30)
-#define STATE_MAX     64
+#define STATE_MAX     128	// a stream decoded and encoded has two
 
 CSoftCodec::~CSoftCodec()
 {
@@ -22,10 +23,11 @@ CSoftCodec::~CSoftCodec()
 		m_Plugin->close(s.second.state);
 }
 
-CSoftCodec::SState *CSoftCodec::State(uint16_t streamid, uint32_t sequence)
+CSoftCodec::SState *CSoftCodec::State(uint32_t key, uint32_t sequence)
 {
+	const uint16_t streamid = uint16_t(key);
 	const auto now = std::chrono::steady_clock::now();
-	auto it = m_States.find(streamid);
+	auto it = m_States.find(key);
 	if (it == m_States.end())
 	{
 		// a new stream: first make room, the stale ones and then the oldest go
@@ -54,7 +56,7 @@ CSoftCodec::SState *CSoftCodec::State(uint16_t streamid, uint32_t sequence)
 			std::cerr << "Codec plugin " << m_Plugin->name << ": no state for stream " << streamid << ", its frames stay empty" << std::endl;
 			return nullptr;
 		}
-		it = m_States.emplace(streamid, SState{ state, now, sequence, false }).first;
+		it = m_States.emplace(key, SState{ state, now, sequence, false }).first;
 	}
 	// urfd counts the frames of a transmission from 0: a lower count is the same
 	// stream id again, after a transmission whose last frame got lost
@@ -84,7 +86,7 @@ void CSoftCodec::Stop(SState *s, bool last)
 bool CSoftCodec::Encode(uint16_t streamid, uint32_t sequence, bool last, const int16_t *pcm, uint8_t *frame)
 {
 	std::lock_guard<std::mutex> lock(*m_Mutex);
-	SState *s = State(streamid, sequence);
+	SState *s = State(Key(streamid, true), sequence);
 	const bool ok = s && 0 == m_Plugin->encode(s->state, pcm, frame);
 	Stop(s, last);
 	return ok;
@@ -93,7 +95,7 @@ bool CSoftCodec::Encode(uint16_t streamid, uint32_t sequence, bool last, const i
 bool CSoftCodec::Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm)
 {
 	std::lock_guard<std::mutex> lock(*m_Mutex);
-	SState *s = State(streamid, sequence);
+	SState *s = State(Key(streamid, false), sequence);
 	const bool ok = s && 0 == m_Plugin->decode(s->state, frame, pcm);
 	Stop(s, last);
 	return ok;
@@ -105,11 +107,11 @@ int CSoftCodec::Streams(void)
 	// after its stream ended, and a transmission whose last frame got lost gets no stop
 	std::lock_guard<std::mutex> lock(*m_Mutex);
 	const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(2);
-	int active = 0;
+	std::unordered_set<uint16_t> active;	// a stream decoded and encoded counts once
 	for (const auto &s : m_States)
 		if (s.second.running && s.second.last_used > cutoff)
-			active++;
-	return active;
+			active.insert(uint16_t(s.first));
+	return int(active.size());
 }
 
 CCodecPlugins::~CCodecPlugins()

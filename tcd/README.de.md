@@ -2,7 +2,7 @@
 
 [English](README.md) | **Deutsch**
 
-**Version 0.12.1** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.12.2** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25/NXDN (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF in Software ergänzen. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
@@ -159,7 +159,7 @@ Modules        = AP      # seine eigenen Module
 StandbyModules = FS      # die Module des tcd mit den Sticks, solange der weg ist
 ```
 
-Der Standby-tcd schickt den Modulbuchstaben klein; der Reflektor nimmt ihn nur für ein Modul ohne tcd an und antwortet sonst „belegt“, und eine normale Verbindung ersetzt eine Standby-Verbindung. Der Standby-tcd fragt alle 3 s still nach; dauert das Nachfragen lange (ein entfernter Reflektor), nur alle 30 s, solange einer seiner eigenen Streams läuft, damit es die nicht aufhält. Ein tcd, der beendet wird oder seine Verbindung verliert, übergibt nach Sekunden (eine geschlossene Verbindung bemerkt urfd unter Linux sofort); einen, der ohne Abbau verschwunden ist (Strom, Netz), bemerkt der Reflektor per TCP-Keepalive nach etwa 25 s. Ein Stream, der gerade läuft, während ein Modul den tcd wechselt, wird erst ab dem nächsten Durchgang transcodiert. urfd braucht `[Transcoder] Modules = auto` (oder die Buchstaben dort) und 4.26.0; ein älterer urfd lehnt die Standby-Verbindungen ab, und tcd sagt das einmal.
+Der Standby-tcd schickt den Modulbuchstaben klein; der Reflektor nimmt ihn nur für ein Modul ohne tcd an und antwortet sonst „belegt“, und eine normale Verbindung ersetzt eine Standby-Verbindung. Der Standby-tcd fragt alle 3 s still nach, in einem eigenen Thread, damit das Nachfragen seine eigenen Streams nie aufhält (seit 0.12.2). Ein tcd, der beendet wird oder seine Verbindung verliert, übergibt nach Sekunden (eine geschlossene Verbindung bemerkt urfd unter Linux sofort); einen, der ohne Abbau verschwunden ist (Strom, Netz), bemerkt der Reflektor per TCP-Keepalive nach etwa 25 s. Ein Stream, der gerade läuft, während ein Modul den tcd wechselt, wird erst ab dem nächsten Durchgang transcodiert. urfd braucht `[Transcoder] Modules = auto` (oder die Buchstaben dort) und 4.26.0; ein älterer urfd lehnt die Standby-Verbindungen ab, und tcd sagt das einmal.
 
 ## AMBE-Geräte auswählen
 

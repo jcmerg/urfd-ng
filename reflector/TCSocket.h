@@ -19,6 +19,7 @@
 #include <string>
 #include <cstdint>
 #include <mutex>
+#include <future>
 #include <vector>
 #include <functional>
 #include <queue>
@@ -110,7 +111,7 @@ class CTCClient : public CTCSocket
 {
 public:
 	CTCClient() : CTCSocket(), m_Port(0) {}
-	~CTCClient() {}
+	~CTCClient() { if (m_StandbyWorker.valid()) m_StandbyWorker.wait(); for (auto &p : m_StandbyReady) close(p.second); }
 	bool Open(const std::string &address, const std::string &modules, uint16_t port);
 	void Receive(std::queue<std::unique_ptr<STCPacket>> &queue, int ms);
 	void ReConnect();
@@ -118,17 +119,19 @@ public:
 	// taken only while no other tcd has them; set it before Open()
 	void SetStandby(const std::string &modules) { m_StandbyModules = modules; }
 	bool IsStandby(char module) const { return std::string::npos != m_StandbyModules.find(module); }
-	// fewer standby attempts while true, when they take long (a far reflector):
-	// they hold up the thread that reads the reflector for a few round trips;
-	// tcd sets it while one of its streams runs
-	void PauseStandby(bool pause) { m_StandbyPaused.store(pause, std::memory_order_relaxed); }
 
 private:
 	std::string m_Address;
 	uint16_t m_Port;
 	std::string m_StandbyModules;
-	std::vector<int> m_StandbyState;	// per module: 0 unknown, 1 another tcd has it, 2 refused (urfd too old?)
-	std::atomic<bool> m_StandbyPaused{false};
-	bool Connect(char module, bool blocking = false);
+	std::vector<int> m_StandbyState;	// per module: 0 unknown, 1 another tcd has it, 2 refused (urfd too old?); the standby worker's
+	// the standby modules are asked on a thread of their own, as asking can take
+	// seconds (name lookup, connect, the reflector's answer) and must not hold up
+	// the thread that reads the reflector; what it gets, the reader puts in place
+	std::future<void> m_StandbyWorker;
+	std::mutex m_StandbyMutex;
+	std::vector<std::pair<size_t, int>> m_StandbyReady;	// module position, its new socket
+	// fd: where the new socket goes instead of the module's entry (the standby worker)
+	bool Connect(char module, bool blocking = false, int *fd_out = nullptr);
 	bool authenticate(int fd, char module, bool quiet = false);
 };

@@ -677,7 +677,7 @@ bool CTCClient::Open(const std::string &address, const std::string &modules, uin
 	return false;
 }
 
-bool CTCClient::Connect(char module, bool blocking)
+bool CTCClient::Connect(char module, bool blocking, int *fd_out)
 {
 	const auto pos = m_Modules.find(module);
 	if (pos == std::string::npos)
@@ -812,6 +812,11 @@ bool CTCClient::Connect(char module, bool blocking)
 
 	{ std::ostringstream s; s << "File descriptor " << fd << " on " << ip << " opened for module '" << module << "'"; std::cout << s.str() << std::endl; }
 
+	if (fd_out)
+	{
+		*fd_out = fd;
+		return false;
+	}
 	{
 		auto lock = lockPos(pos);
 		m_Pfd[pos].fd = fd;
@@ -870,22 +875,43 @@ void CTCClient::ReConnect() // and sometimes ping
 	for (char m : m_Modules)
 		IsModuleConnected(m);
 
+	// the standby modules the worker got: in place now, on this thread
+	{
+		std::lock_guard<std::mutex> lock(m_StandbyMutex);
+		for (auto &[pos, fd] : m_StandbyReady)
+		{
+			auto plock = lockPos(pos);
+			if (m_Pfd[pos].fd < 0)
+				m_Pfd[pos].fd = fd;
+			else
+				close(fd);
+		}
+		m_StandbyReady.clear();
+	}
+
 	// a standby module another tcd has: asked again every 3 s, quietly and outside
-	// the backoff of the others. Asking holds up this thread for a few round trips:
-	// when that took noticeably long (a reflector far away), tcd asks while one of
-	// its streams runs (PauseStandby) only every 30 s, so a busy module still lets
-	// the standby take over in time
-	static std::chrono::steady_clock::duration last_standby_took {};
+	// the backoff of the others, on the worker thread, one round at a time
 	auto steady = std::chrono::steady_clock::now();
-	const bool slow = last_standby_took > std::chrono::milliseconds(20);
-	const auto wait = (slow && m_StandbyPaused.load(std::memory_order_relaxed)) ? std::chrono::seconds(30) : std::chrono::seconds(3);
-	if (steady - last_standby >= wait)
+	if (steady - last_standby >= std::chrono::seconds(3)
+	 && (!m_StandbyWorker.valid() || m_StandbyWorker.wait_for(std::chrono::seconds(0)) == std::future_status::ready))
 	{
 		last_standby = steady;
+		std::string ask;
 		for (char m : m_Modules)
 			if (IsStandby(m) && 0 > GetFD(m))
-				Connect(m, false);
-		last_standby_took = std::chrono::steady_clock::now() - steady;
+				ask += m;
+		if (!ask.empty())
+			m_StandbyWorker = std::async(std::launch::async, [this, ask] {
+				for (char m : ask)
+				{
+					int fd = -1;
+					if (!Connect(m, false, &fd) && fd >= 0)
+					{
+						std::lock_guard<std::mutex> lock(m_StandbyMutex);
+						m_StandbyReady.push_back({ m_Modules.find(m), fd });
+					}
+				}
+			});
 	}
 
 	// Check if any module needs reconnecting
