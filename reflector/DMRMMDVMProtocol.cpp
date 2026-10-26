@@ -199,6 +199,14 @@ void CDmrmmdvmProtocol::Task(void)
 			}
 
 		}
+		else if ( IsConnectPacket(Buffer) )
+		{
+			// a login with an id not in the DMR ID database: refuse it, or
+			// MMDVMHost retries forever without telling why (the NAK is
+			// shorter than the request, nothing to amplify)
+			EncodeNackPacket(&Buffer, Callsign);
+			Send(Buffer, Ip);
+		}
 		else if ( IsValidAuthenticationPacket(Buffer, &Callsign, Ip, &rawDmrId) )
 		{
 			std::cout << "MMDVM: auth from " << Callsign << " at " << Ip << std::endl;
@@ -674,12 +682,17 @@ bool CDmrmmdvmProtocol::IsValidKeepAlivePacket(const CBuffer &Buffer, CCallsign 
 	return valid;
 }
 
-bool CDmrmmdvmProtocol::IsValidConnectPacket(const CBuffer &Buffer, CCallsign *callsign, const CIp &Ip, uint32_t *rawDmrId)
+bool CDmrmmdvmProtocol::IsConnectPacket(const CBuffer &Buffer)
 {
 	uint8_t tag[] = { 'R','P','T','L' };
 
+	return (Buffer.size() == 8) && (Buffer.Compare(tag, sizeof(tag)) == 0);
+}
+
+bool CDmrmmdvmProtocol::IsValidConnectPacket(const CBuffer &Buffer, CCallsign *callsign, const CIp &Ip, uint32_t *rawDmrId)
+{
 	bool valid = false;
-	if ( (Buffer.size() == 8) && (Buffer.Compare(tag, sizeof(tag)) == 0) )
+	if ( IsConnectPacket(Buffer) )
 	{
 		uint32_t uiRptrId = MAKEDWORD(MAKEWORD(Buffer.data()[7],Buffer.data()[6]),MAKEWORD(Buffer.data()[5],Buffer.data()[4]));
 		*rawDmrId = uiRptrId;

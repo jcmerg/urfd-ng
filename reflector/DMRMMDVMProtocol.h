@@ -124,6 +124,7 @@ protected:
 	void OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &, const CIp &, uint8_t cmd, uint8_t callType, uint8_t slot, uint32_t sourceTG = 0);
 
 	// packet decoding helpers
+	bool IsConnectPacket(const CBuffer &);
 	bool IsValidConnectPacket(const CBuffer &, CCallsign *, const CIp &, uint32_t *rawDmrId);
 	bool IsValidAuthenticationPacket(const CBuffer &, CCallsign *, const CIp &, uint32_t *rawDmrId);
 	bool IsValidDisconnectPacket(const CBuffer &, CCallsign *, uint32_t *rawDmrId);
