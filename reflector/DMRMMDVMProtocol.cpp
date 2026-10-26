@@ -1092,8 +1092,10 @@ void CDmrmmdvmProtocol::EncodeKeepAlivePacket(CBuffer *Buffer, std::shared_ptr<C
 	uint8_t tag[] = { 'M','S','T','P','O','N','G' };
 
 	Buffer->Set(tag, sizeof(tag));
-	uint32_t uiDmrId = Client->GetCallsign().GetDmrid();
-	Buffer->Append((uint8_t *)&uiDmrId, 4);
+	// the id the hotspot logged in with, big endian as in all its packets
+	const uint32_t uiRptrId = static_cast<CDmrmmdvmClient *>(Client.get())->GetRawDmrId();
+	const uint8_t id[4] = { (uint8_t)(uiRptrId >> 24), (uint8_t)(uiRptrId >> 16), (uint8_t)(uiRptrId >> 8), (uint8_t)uiRptrId };
+	Buffer->Append(id, 4);
 }
 
 void CDmrmmdvmProtocol::EncodeAckPacket(CBuffer *Buffer, const CCallsign &Callsign)
