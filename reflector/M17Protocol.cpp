@@ -188,6 +188,9 @@ void CM17Protocol::Task(void)
 			{
 				std::cout << "M17 disconnect packet from " << Callsign << " at " << Ip << std::endl;
 
+				// a talking client is a master and can't be removed: end its stream first
+				CloseStreamsOf(Ip);
+
 				// find client
 				CClients *clients = g_Reflector.GetClients();
 				std::shared_ptr<CClient>client = clients->FindClient(Ip, EProtocol::m17);
@@ -683,9 +686,9 @@ bool CM17Protocol::IsEchoPlaybackFor(const CClient &client, char module) const
 	if ( item == m_StreamsCache.end() )
 		return false;
 
-	// the echo thread sends with stream ids 0xEC00-0xECFF and the caller as UR
+	// the echo thread's playback has the caller as UR
 	const CDvHeaderPacket &header = item->second.m_dvHeader;
-	return (header.GetStreamId() >= 0xEC00) && (header.GetStreamId() <= 0xECFF) && (header.GetUrCallsign().GetBase() == client.GetCallsign().GetBase());
+	return g_Reflector.IsEchoStream(header.GetStreamId()) && (header.GetUrCallsign().GetBase() == client.GetCallsign().GetBase());
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////

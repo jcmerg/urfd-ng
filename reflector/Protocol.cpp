@@ -210,12 +210,35 @@ void CProtocol::CheckStreamsTimeout(void)
 {
 	for ( auto it=m_Streams.begin(); it!=m_Streams.end(); )
 	{
-		// time out ?
-		if ( it->second->IsExpired() )
+		// its last packet has gone out to the protocols, or it timed out (end lost)?
+		if ( it->second->IsEnded() || it->second->IsExpired() )
 		{
-			// yes, close it
+			// the end out first (a lost one is made up), and sent by this protocol
+			// while the talker is still the master: it doesn't get it back
+			g_Reflector.EndStream(it->second);
+			HandleQueue();
+			// and close it
 			g_Reflector.CloseStream(it->second);
 			// and remove it from the m_Streams map
+			it = m_Streams.erase(it);
+		}
+		else
+		{
+			it++;
+		}
+	}
+}
+
+// a client that leaves while it talks: a master can't be removed, so its
+// stream is closed first. Call it without the clients lock.
+void CProtocol::CloseStreamsOf(const CIp &Ip)
+{
+	for ( auto it=m_Streams.begin(); it!=m_Streams.end(); )
+	{
+		const CIp *owner = it->second->GetOwnerIp();
+		if ( owner && (*owner == Ip) )
+		{
+			g_Reflector.CloseStream(it->second);
 			it = m_Streams.erase(it);
 		}
 		else

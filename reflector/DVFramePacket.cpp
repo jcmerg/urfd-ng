@@ -77,9 +77,10 @@ CDvFramePacket::CDvFramePacket(const uint8_t *ambe, uint16_t sid, uint8_t pid, u
 	memset(m_TCPack.usrp,   0, sizeof(m_TCPack.usrp));
 	memset(m_Nonce,         0, sizeof(m_Nonce));
 	m_TCPack.codec_in = ECodecType::dmr;
-	uint8_t c[12];
-    cs.GetCallsign(c);
-    m_Callsign.SetCallsign((char *)c);
+	// GetCallsign() copies the callsign without a terminating NUL
+	uint8_t c[CALLSIGN_LEN + 1] = {};
+	cs.GetCallsign(c);
+	m_Callsign.SetCallsign((char *)c);
 }
 
 // bm constructor

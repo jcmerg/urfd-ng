@@ -70,6 +70,7 @@ public:
 	bool IsStreaming(char);
 	// a stream opened or closed or a station was heard: write the status file now
 	void StatusChanged(void) { m_StatusChanged = true; }
+	void EndStream(std::shared_ptr<CPacketStream>);
 	void CloseStream(std::shared_ptr<CPacketStream>);
 
 	// get
@@ -82,6 +83,8 @@ public:
 	// check
 	bool IsValidModule(char c) const                { return m_Modules.npos!=m_Modules.find(c); }
 	char GetEchoModule(void) const                  { return m_EchoModule; }
+	// the stream id of the (last) echo playback
+	bool IsEchoStream(uint16_t sid) const           { return (0 != sid) && (sid == m_EchoStreamId); }
 
 	// protocol access (for admin socket)
 	CProtocols &GetProtocols(void)                  { return m_Protocols; }
@@ -129,6 +132,7 @@ protected:
 	bool m_EchoHasHeader;
 	std::chrono::steady_clock::time_point m_EchoLastFrame;
 	std::future<void> m_EchoFuture;
+	std::atomic<uint16_t> m_EchoStreamId { 0 };
 
 	// identity
 	CCallsign   m_Callsign;

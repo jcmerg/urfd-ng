@@ -478,13 +478,18 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 		moduleCs.SetCSModule(module);
 		GetUsers()->StationStarted(stream->GetUserCallsign(), client->GetCallsign(), moduleCs, client->IsPeer() ? client->GetCallsign() : m_Callsign, client->GetProtocolName());
 		ReleaseUsers();
+		return stream;
 	}
-	return stream;
+	// busy: the caller must not keep another one's stream (it would close it too)
+	return nullptr;
 }
 
-void CReflector::CloseStream(std::shared_ptr<CPacketStream> stream)
+// the end of a stream: what the transcoder still has, and a last packet for a
+// stream that ended without one (timeout), so the listeners get their
+// protocol's end of transmission; returns once the router has sent it out
+void CReflector::EndStream(std::shared_ptr<CPacketStream> stream)
 {
-	if ( stream != nullptr )
+	if ( stream != nullptr && stream->IsOpen() )
 	{
 		// Wait for transcoder pipeline to finish (input queue + pending responses)
 		// Without this, the end-of-TX frame gets lost because ClosePacketStream
@@ -497,6 +502,21 @@ void CReflector::CloseStream(std::shared_ptr<CPacketStream> stream)
 				waitMs += 10;
 			}
 		}
+
+		if ( !stream->IsLastPushed() )
+			stream->PushEndPacket();
+
+		// and the router has sent it out (it reads the stream's owner while it does)
+		for (int waitMs = 0; !stream->IsEnded() && waitMs < 200; waitMs += 10)
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	}
+}
+
+void CReflector::CloseStream(std::shared_ptr<CPacketStream> stream)
+{
+	if ( stream != nullptr )
+	{
+		EndStream(stream);
 
 		// Wait for output queue to fully drain (router distributes to protocols)
 		while (!stream->IsEmpty())
@@ -547,6 +567,8 @@ void CReflector::RouterThread(const char ThisModule)
 		auto packet = streamIn->PopWait();
 		if (!packet)
 			break;
+		// the echo playback is not recorded again
+		const bool echoPlayback = streamIn->IsEchoPlayback();
 
 		packet->SetPacketModule(ThisModule);
 
@@ -638,8 +660,12 @@ void CReflector::RouterThread(const char ThisModule)
 		}
 		m_Protocols.Unlock();
 
+		// the last packet is out: the stream can close (CProtocol::CheckStreamsTimeout)
+		if (packet->IsDvFrame() && packet->IsLastPacket())
+			streamIn->SetLastRouted(packet->GetStreamId());
+
 		// echo: buffer packets for echo module (skip echo playback packets)
-		if (ThisModule == m_EchoModule && (packet->GetStreamId() < 0xEC00 || packet->GetStreamId() > 0xECFF))
+		if (ThisModule == m_EchoModule && !echoPlayback)
 		{
 			std::lock_guard<std::mutex> lock(m_EchoMutex);
 			if (packet->IsDvHeader())
@@ -1241,26 +1267,39 @@ void CReflector::EchoThread(void)
 				continue;
 			auto stream = streamIt->second;
 
-			// wait for any current stream to finish
-			while (stream->IsOpen() && keep_running)
-				std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-			if (!keep_running) break;
-
-			// generate a new stream ID
+			// generate a new stream ID, another than the recording's
 			static uint16_t echoStreamId = 0xEC00;
-			echoStreamId++;
-			if (echoStreamId == 0) echoStreamId = 0xEC00;
+			if (++echoStreamId == 0 || echoStreamId == header.GetStreamId())
+				echoStreamId = (header.GetStreamId() == 0xEC00) ? 0xEC01 : 0xEC00;
 
-			// create echo header - swap MY callsign to show "ECHO"
+			// create echo header - MY shows "ECHO", UR is the caller; the caller's DMR
+			// and NXDN ids stay, they are the source id of those protocols
 			CCallsign echoCs;
 			echoCs.SetCallsign("ECHO    ", false);
+			echoCs.SetDmrid(header.GetMyCallsign().GetDmrid(), false);
+			echoCs.SetNXDNid(header.GetMyCallsign().GetNXDNid(), false);
 			CCallsign rpt1 = header.GetRpt1Callsign();
 			CCallsign rpt2 = header.GetRpt2Callsign();
 			auto echoHeader = std::unique_ptr<CDvHeaderPacket>(
 				new CDvHeaderPacket(echoCs, header.GetMyCallsign(), rpt1, rpt2, echoStreamId, (uint8_t)0)
 			);
 			echoHeader->SetPacketModule(m_EchoModule);
+
+			// open the module's stream for the playback, once a current stream has
+			// finished: no one talks into it meanwhile. The recording was made after
+			// the transcoder, so every listener gets its own codec without it.
+			bool opened = false;
+			while (keep_running && !opened)
+			{
+				GetClients();
+				opened = stream->OpenPacketStream(*echoHeader, nullptr, true);
+				ReleaseClients();
+				if (!opened)
+					std::this_thread::sleep_for(std::chrono::milliseconds(50));
+			}
+			if (!keep_running) break;
+			m_EchoStreamId = echoStreamId;
+			StatusChanged();
 
 			// push header to stream
 			stream->Push(std::move(echoHeader));
@@ -1270,11 +1309,13 @@ void CReflector::EchoThread(void)
 			{
 				playback[i]->SetStreamId(echoStreamId);
 				playback[i]->SetPacketModule(m_EchoModule);
-				if (i == playback.size() - 1)
-					playback[i]->SetLastPacket(true);
+				playback[i]->SetLastPacket(i == playback.size() - 1);
 				stream->Push(std::move(playback[i]));
 				std::this_thread::sleep_for(std::chrono::milliseconds(20));
 			}
+
+			// no protocol owns this stream, so it is closed here
+			CloseStream(stream);
 
 			std::cout << "Echo: playback complete" << std::endl;
 		}
