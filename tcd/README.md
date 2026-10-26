@@ -142,7 +142,7 @@ CodecDMR    = foo                         # the same for DMR/YSF
 
 No codec plugin is part of this repository: software implementations of AMBE and AMBE2+ may touch patents (AMBE2+ half rate, US 8,359,197, projected to run until 2028-05-20), so whether to build and use one is the operator's decision. A plugin for D-Star and DMR/YSF with [mbelib-neo](https://github.com/arancormonk/mbelib-neo) is [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin); read its patent notice first.
 
-`tools/` has test tools for plugins (`make` there): `codectest <plugin.so> dmr|dstar|p25 in.raw out.frames out.raw [option=value ...]` encodes and decodes 8 kHz s16le PCM, prints the time per frame and checks that two interleaved streams stay apart; `decode` decodes a frames file; `dvsitest <device> enc|dec dstar|dmr in out` does the same on a DV3003 (tcd stopped), to compare a plugin with the hardware.
+`tools/` has test tools for plugins (`make` there): `codectest <plugin.so> dmr|dstar|p25 in.raw out.frames out.raw [option=value ...]` encodes and decodes 8 kHz s16le PCM, prints the time per frame and checks that two interleaved streams stay apart; `decode` decodes a frames file; `dvsitest <device> enc|dec dstar|dmr in out` does the same on a DV3003, or with `DVSI_TYPE=3000` on a DV3000 (tcd stopped), to compare a plugin with the hardware; `dvsitest <device> info` prints the chip's product ID and version.
 
 ## tcd in Docker
 
