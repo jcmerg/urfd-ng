@@ -139,6 +139,14 @@ void CDplusProtocol::Task(void)
 			}
 			g_Reflector.ReleaseClients();
 		}
+		else if ( (Buffer.size() == 28) && (0 == memcmp(Buffer.data(), "\x1c\xc0\x04\x00", 4)) )
+		{
+			// a login with an invalid callsign: refused, so the gateway does not retry forever
+			if (RejectLog("DPlus: invalid callsigns", Ip.GetAddress()))
+				std::cout << "DPlus login packet with an invalid callsign from " << Ip << std::endl;
+			EncodeLoginNackPacket(&Buffer);
+			Send(Buffer, Ip);
+		}
 		else
 		{
 			// scanners send anything (SIP, DNS, ...): the first of an address each hour
@@ -415,7 +423,7 @@ bool CDplusProtocol::IsValidDvHeaderPacket(const CBuffer &Buffer, std::unique_pt
 	if ( 58==Buffer.size() && 0x3au==Buffer.data()[0] && 0x80u==Buffer.data()[1] && 0==memcmp(Buffer.data()+2, "DSVT", 4) && 0x10u==Buffer.data()[6] && 0x20u==Buffer.data()[10] )
 	{
 		// create packet
-		header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket((struct dstar_header *)&(Buffer.data()[17]), *((uint16_t *)&(Buffer.data()[14])), 0x80u));
+		header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket((struct dstar_header *)&(Buffer.data()[17]), ReadU16(Buffer.data() + 14), 0x80u));
 		// check validity of packet
 		return ( header && header->IsValid() );
 	}
@@ -431,12 +439,12 @@ bool CDplusProtocol::IsValidDvFramePacket(const CBuffer &Buffer, std::unique_ptr
 		auto size = Buffer.size();
 		if (29==size && 0x1du==Buffer.data()[0])
 		{
-			dvframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket((SDStarFrame *)&(Buffer.data()[17]), *((uint16_t *)&(Buffer.data()[14])), Buffer.data()[16]));
+			dvframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket((SDStarFrame *)&(Buffer.data()[17]), ReadU16(Buffer.data() + 14), Buffer.data()[16]));
 			return true;
 		}
 		else if (32==size && 0x20u==Buffer.data()[0])
 		{
-			dvframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket((SDStarFrame *)&(Buffer.data()[17]), *((uint16_t *)&(Buffer.data()[14])), 0x40u | Buffer.data()[16]));
+			dvframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket((SDStarFrame *)&(Buffer.data()[17]), ReadU16(Buffer.data() + 14), 0x40u | Buffer.data()[16]));
 			return true;
 		}
 	}
@@ -495,8 +503,10 @@ bool CDplusProtocol::EncodeDvFramePacket(const CDvFramePacket &Packet, CBuffer &
 	Buffer.Append(Packet.GetStreamId());
 	if (Packet.IsLastPacket())
 	{
-		uint8_t tag2[] = { 0x55,0xC8,0x7A,0x55,0x55,0x55,0x55,0x55,0x55,0x55,0x55,0x55,0x25,0x1A,0xC6 };
+		// the end frame is 32 bytes long, silence and the end pattern (as ircDDBGateway)
+		uint8_t tag2[] = { 0x9E,0x8D,0x32,0x88,0x26,0x1A,0x3F,0x61,0xE8,0x55,0x55,0x55,0x55,0xC8,0x7A };
 
+		Buffer.data()[0] = 0x20;
 		Buffer.Append((uint8_t)((Packet.GetPacketId() % 21) | 0x40));
 		Buffer.Append(tag2, sizeof(tag2));
 	}

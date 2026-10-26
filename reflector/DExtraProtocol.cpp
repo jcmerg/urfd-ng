@@ -164,6 +164,14 @@ void CDextraProtocol::Task(void)
 			}
 			g_Reflector.ReleaseClients();
 		}
+		else if ( (Buffer.size() == 11) && IsLetter(Buffer.data()[9]) )
+		{
+			// a link request with an invalid callsign: refused, so the gateway does not retry forever
+			if (RejectLog("DExtra: invalid callsigns", Ip.GetAddress()))
+				std::cout << "DExtra connect packet with an invalid callsign from " << Ip << std::endl;
+			EncodeConnectNackPacket(&Buffer);
+			Send(Buffer, Ip);
+		}
 		else
 		{
 			// scanners send anything (SIP, DNS, ...): the first of an address each hour
@@ -418,7 +426,7 @@ bool CDextraProtocol::IsValidDvHeaderPacket(const CBuffer &Buffer, std::unique_p
 	if ( 56==Buffer.size() && 0==Buffer.Compare((uint8_t *)"DSVT", 4) && 0x10U==Buffer.data()[4] && 0x20U==Buffer.data()[8] )
 	{
 		// create packet
-		header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket((struct dstar_header *)&(Buffer.data()[15]), *((uint16_t *)&(Buffer.data()[12])), 0x80));
+		header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket((struct dstar_header *)&(Buffer.data()[15]), ReadU16(Buffer.data() + 12), 0x80));
 		// check validity of packet
 		if ( header && header->IsValid() )
 			return true;
@@ -431,7 +439,7 @@ bool CDextraProtocol::IsValidDvFramePacket(const CBuffer &Buffer, std::unique_pt
 	if ( 27==Buffer.size() && 0==Buffer.Compare((uint8_t *)"DSVT", 4) && 0x20U==Buffer.data()[4] && 0x20U==Buffer.data()[8] )
 	{
 		// create packet
-		dvframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket((SDStarFrame *)&(Buffer.data()[15]), *((uint16_t *)&(Buffer.data()[12])), Buffer.data()[14]));
+		dvframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket((SDStarFrame *)&(Buffer.data()[15]), ReadU16(Buffer.data() + 12), Buffer.data()[14]));
 		// check validity of packet
 		if ( dvframe && dvframe->IsValid() )
 			return true;
