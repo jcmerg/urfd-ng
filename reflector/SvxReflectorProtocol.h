@@ -50,6 +50,9 @@
 #define SVX_UDP_MSG_FLUSH_SAMPLES        102
 #define SVX_UDP_MSG_ALL_FLUSHED          103
 
+// audio packets (20 ms each) that wait for a talker start before a stream opens without one
+#define SVX_HOLD_PACKETS                 3
+
 class CSvxReflectorProtocol : public CProtocol
 {
 public:
@@ -102,6 +105,7 @@ protected:
 	void OnUdpPacket(const CBuffer &buffer);
 	void OnUdpAudio(const CBuffer &buffer);
 	void PushInFrame(const int16_t *pcm, bool last);
+	void PushHeldFrames(void);
 	bool EnsureInStream(void);
 	void CloseInStream(void);
 	void EncodeAndSendAudio(const int16_t *pcm);
@@ -178,6 +182,8 @@ protected:
 		bool rejected = false;      // the module was busy, this talker's audio is dropped
 		std::string talkerCallsign;
 		CTimer audioTimer;          // since the last audio packet
+		std::vector<SvxPcmFrame> held;  // audio before the talker start
+		unsigned heldPackets = 0;
 	};
 	SIncomingStream m_InStream;
 	uint8_t m_StreamCounter;

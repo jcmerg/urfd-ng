@@ -348,6 +348,8 @@ Map1 = ref001.dstargateway.org,20001,C,A # REF001 module C -> local module A
 
 **Format der Zuordnung**: `host,port,remote_module,local_module`. Jede Zuordnung baut eine Verbindung zum angegebenen Modul des fremden Reflektors auf und leitet das Audio auf das lokale Modul.
 
+**Routing**: Die Anbindung spricht den Reflektor an wie ein mit ihm verbundenes Gateway: RPT1 ist `<Callsign> <lokales Modul>`, RPT2 der Reflektor mit dem fremden Modul (`DCS002 A`), und der Reflektor leitet nach diesem Modul. Das Rufzeichen des Reflektors kommt aus den Streams, die er schickt, bis dahin aus dem ersten Teil des Hostnamens (`dcs002.xreflector.net` -> `DCS002`); bei einer IP-Adresse und noch ohne Stream steht das eigene Rufzeichen der Anbindung dort, was urfd und xlxd annehmen (sie werten nur das Modul aus). Ein DPlus-Reflektor schickt die Streams aller Module an jeden Client: nur die des zugeordneten fremden Moduls kommen auf das lokale Modul.
+
 **Rufzeichen**: DPlus-Reflektoren verlangen eine Registrierung bei [dstargateway.org](https://regist.dstargateway.org/). DExtra- und DCS-Reflektoren sind meist offen.
 
 **Dynamische Zuordnungen**: Über den Abschnitt "D-Star Client Mappings" im Admin-Dashboard oder über die Socket-API:
@@ -743,13 +745,10 @@ Beispiele der Textnachricht pro Protokoll:
 | SvxReflector | `Max SVX TG317424` |
 | YSF (Server) | `YSF DG28` |
 | NXDN | `NXDN RAN6` |
-| DCSClient | `DCS002 A` |
-| DExtraClient | `XRF757 A` |
-| DPlusClient | `REF001 C` |
 | YSFClient | `YSF DG15` |
 | M17, P25, USRP, DMR+ | `M17`, `P25` usw. |
 
-Die D-Star-Client-Protokolle entnehmen den Namen des fremden Reflektors dem Hostnamen (z.B. `dcs002.xreflector.net` → `DCS002`) und hängen den Modulbuchstaben an. YSFClient hängt die DG-ID an, wenn eine eingestellt ist (sonst nur `YSF`).
+YSFClient hängt die DG-ID an, wenn eine eingestellt ist (sonst nur `YSF`). D-Star-Quellen, auch die D-Star-Client-Anbindungen, werden nicht nach D-Star transcodiert: ihre eigenen Slow Data gehen unverändert durch.
 
 Die Textnachricht hat 20 Zeichen. Ist `<Name> <Quelle> TG<n>` länger, wandert die TG in einen zweiten Text, der sich etwa alle 5 Sekunden mit dem ersten abwechselt; ist es dann noch zu lang, wird der Name gekürzt, damit die Quelle ganz bleibt:
 
@@ -762,7 +761,7 @@ Bartholomae YSF DG15  <-> Bartholomaeus         (der Name gekürzt)
 Header und Textnachricht wechseln mit jedem Superframe (etwa 420 ms):
 
 ```
-[Header: N0CALL > URF999 S] → [Max DCS002 A] → [Header] → [Max DCS002 A] → ...
+[Header: N0CALL > URF999 S] → [Max DMR TG262] → [Header] → [Max DMR TG262] → ...
 ```
 
 Die Namenssuche funktioniert für alle Protokolle: Jedes Rufzeichen mit Eintrag in der DMR-ID-Datenbank erscheint mit Namen auf D-Star-Funkgeräten.
@@ -942,7 +941,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 
 ### Audio und Transcodierung
 - **NXDN-Modulwahl**: Modulwahl über die RAN (Radio Access Number): RAN 1-26 = Modul A-Z, mit getauschter RAN 1 und RAN des AutoLinkModule, sodass RAN 1 das AutoLinkModule erreicht; RAN 0 = AutoLinkModule. Alternativ Wahl über die Ziel-ID (`ModuleDstIdBase`, Ziel-ID base+1…base+26 = A-Z) für Clients ohne RAN, ausgewertet beim Verbindungs-Poll und bei jeder Aussendung, mit der Ziel-ID des Moduls in ausgehenden Frames. NXDN-ID-Auflösung über die NXDN-Datenbank mit DMR-Datenbank als Ersatz. FallbackNxdnId für unbekannte Anrufer (ohne Einstellung wird verworfen). Nicht initialisiertes `m_uiNXDNid` im Standardkonstruktor von CCallsign behoben.
-- **D-Star-Slow-Data**: Transcodierte Streams enthalten Rufzeichen des Anrufers, Protokoll-/TG-/RAN-/Modulangabe und den Betreibernamen aus der DMR- und NXDN-ID-Datenbank, im Wechsel alle etwa 5 Sekunden. Angezeigt wird die tatsächliche Quell-TG (nicht die primäre/statische), damit es bei mehreren TGs stimmt. Client-Protokolle zeigen Name und Modul des fremden Reflektors (z.B. `DCS002 A`), YSFClient die DG-ID
+- **D-Star-Slow-Data**: Transcodierte Streams enthalten Rufzeichen des Anrufers, Protokoll-/TG-/RAN-/Modulangabe und den Betreibernamen aus der DMR- und NXDN-ID-Datenbank, im Wechsel alle etwa 5 Sekunden. Angezeigt wird die tatsächliche Quell-TG (nicht die primäre/statische), damit es bei mehreren TGs stimmt. YSFClient zeigt die DG-ID
 - **Getrennte SVX- und USRP-Codecs**: Unabhängige Codec-Pfade (`ECodecType::svx` und `ECodecType::usrp`) mit Verstärkung pro Anbindung in urfd.ini (`RxGain`/`TxGain` für SvxReflector, SVXServer und USRP); in tcd laufen beide durch die AGC analog
 - **MMDVM Dual-Slot**: Jeder Timeslot (TS1/TS2) verbindet sich unabhängig mit seinem eigenen Reflektor-Modul, ein Hotspot kann also auf zwei Timeslots gleichzeitig zwei Module empfangen. Das Dashboard zeigt beide verbundenen Module pro Client.
 - **MMDVM bei NAT-Neuzuordnung**: Verbindet sich ein Hotspot mit neuem UDP-Quellport neu (NAT), wird der alte Eintrag anhand der exakten DMR-ID ersetzt. Die Modulverbindungen der Slots bleiben erhalten. Mehrere Clients mit verschiedenen DMR-IDs (auch Endungen) hinter derselben IP werden unterstützt.

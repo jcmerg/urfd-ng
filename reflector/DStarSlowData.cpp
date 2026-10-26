@@ -89,7 +89,6 @@ void CDStarSlowData::EncodeHeader(const CCallsign &my, const CCallsign &rpt1, co
 
 	for (int group = 0; group < 9; group++)
 	{
-		uint8_t typeByte = 0x50 + group;
 		uint8_t data[5];
 		memset(data, 0x66, 5);
 
@@ -97,6 +96,8 @@ void CDStarSlowData::EncodeHeader(const CCallsign &my, const CCallsign &rpt1, co
 		int remaining = 41 - offset;
 		if (remaining > 5) remaining = 5;
 		if (remaining > 0) memcpy(data, &header[offset], remaining);
+		// header type, the low nibble is the number of valid bytes: 0x55, the last 0x51
+		uint8_t typeByte = 0x50 | remaining;
 
 		// First frame of the group: type byte + first 2 data bytes
 		raw[group * 2][0] = typeByte;

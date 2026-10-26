@@ -24,12 +24,18 @@
 #include "MmdvmClientConfig.h"
 #include <sstream>
 #include <iostream>
+#include <poll.h>
+#include <unistd.h>
+#include <sys/eventfd.h>
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructor
 
 
-CProtocol::CProtocol() : keep_running(true) {}
+CProtocol::CProtocol() : keep_running(true)
+{
+	m_QueueFd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -44,6 +50,20 @@ CProtocol::~CProtocol()
 	while ( !m_Queue.IsEmpty() )
 	{
 		m_Queue.Pop();
+	}
+
+	if (m_QueueFd >= 0)
+		close(m_QueueFd);
+}
+
+void CProtocol::Push(std::unique_ptr<CPacket> p)
+{
+	m_Queue.Push(std::move(p));
+	// wake the receive wait, the packet goes out at once
+	if (m_QueueFd >= 0)
+	{
+		const uint64_t one = 1;
+		if (write(m_QueueFd, &one, sizeof(one)) < 0) {}
 	}
 }
 
@@ -222,6 +242,24 @@ bool CProtocol::IsSpace(char c) const
 	return (c == ' ');
 }
 
+CCallsign CProtocol::RemoteReflectorCallsign(const std::string &announced, const std::string &host, const CCallsign &own, char module)
+{
+	CCallsign cs;
+	if (! announced.empty())
+		cs.SetCallsign(announced, false);
+	else
+	{
+		std::string label(host.substr(0, host.find('.')));
+		for (auto &c : label)
+			c = toupper(c);
+		cs.SetCallsign(label, false);
+		if (label.size() < 3 || label.size() >= CALLSIGN_LEN || ! cs.IsValid())
+			cs = own;
+	}
+	cs.SetCSModule(module);
+	return cs;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // DestId to Module helper
 
@@ -238,51 +276,63 @@ uint32_t CProtocol::ModuleToDmrDestId(char m) const
 ////////////////////////////////////////////////////////////////////////////////////////
 // Receivers
 
+// Waits up to time_ms for a packet on the sockets (fd < 0: none), and returns
+// early, without a packet, when something was pushed into the queue: the Task
+// loops handle the queue after the receive, so a packet of the router does not
+// wait for the next incoming one (same-protocol listeners got them in pairs)
+bool CProtocol::Wait(int fd4, int fd6, int time_ms, bool &ready4, bool &ready6)
+{
+	ready4 = ready6 = false;
+	struct pollfd fds[3];
+	nfds_t n = 0;
+	int i4 = -1, i6 = -1, iq = -1;
+	if (fd4 >= 0) { fds[n] = { fd4, POLLIN, 0 }; i4 = n++; }
+	if (fd6 >= 0) { fds[n] = { fd6, POLLIN, 0 }; i6 = n++; }
+	if (0 == n)
+		return false;
+	if (m_QueueFd >= 0) { fds[n] = { m_QueueFd, POLLIN, 0 }; iq = n++; }
+
+	auto rval = poll(fds, n, time_ms);
+	if (rval <= 0)
+	{
+		if (rval < 0 && errno != EINTR)
+			std::cerr << "Receive poll error: " << strerror(errno) << std::endl;
+		return false;
+	}
+	if (iq >= 0 && (fds[iq].revents & POLLIN))
+	{
+		uint64_t count;
+		if (read(m_QueueFd, &count, sizeof(count)) < 0) {}
+	}
+	ready4 = (i4 >= 0 && (fds[i4].revents & POLLIN));
+	ready6 = (i6 >= 0 && (fds[i6].revents & POLLIN));
+	return ready4 || ready6;
+}
+
 bool CProtocol::Receive6(CBuffer &buf, CIp &ip, int time_ms)
 {
-	return m_Socket6.Receive(buf, ip, time_ms);
+	bool r4, r6;
+	if (Wait(-1, m_Socket6.GetSocket(), time_ms, r4, r6))
+		return m_Socket6.ReceiveFrom(buf, ip);
+	return false;
 }
 
 bool CProtocol::Receive4(CBuffer &buf, CIp &ip, int time_ms)
 {
-	return m_Socket4.Receive(buf, ip, time_ms);
+	bool r4, r6;
+	if (Wait(m_Socket4.GetSocket(), -1, time_ms, r4, r6))
+		return m_Socket4.ReceiveFrom(buf, ip);
+	return false;
 }
 
 bool CProtocol::ReceiveDS(CBuffer &buf, CIp &ip, int time_ms)
 {
-	auto fd4 = m_Socket4.GetSocket();
-	auto fd6 = m_Socket6.GetSocket();
-
-	if (fd4 < 0)
-	{
-		if (fd6 < 0)
-			return false;
-		return m_Socket6.Receive(buf, ip, time_ms);
-	}
-	else if (fd6 < 0)
-		return m_Socket4.Receive(buf, ip, time_ms);
-
-	fd_set fset;
-	FD_ZERO(&fset);
-	FD_SET(fd4, &fset);
-	FD_SET(fd6, &fset);
-	int max = (fd4 > fd6) ? fd4 : fd6;
-	struct timeval tv;
-	tv.tv_sec = time_ms / 1000;
-	tv.tv_usec = (time_ms % 1000) * 1000;
-
-	auto rval = select(max+1, &fset, 0, 0, &tv);
-	if (rval <= 0)
-	{
-		if (rval < 0)
-			std::cerr << "ReceiveDS select error: " << strerror(errno) << std::endl;
+	bool r4, r6;
+	if (! Wait(m_Socket4.GetSocket(), m_Socket6.GetSocket(), time_ms, r4, r6))
 		return false;
-	}
-
-	if (FD_ISSET(fd4, &fset))
+	if (r4)
 		return m_Socket4.ReceiveFrom(buf, ip);
-	else
-		return m_Socket6.ReceiveFrom(buf, ip);
+	return m_Socket6.ReceiveFrom(buf, ip);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////

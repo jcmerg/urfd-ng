@@ -413,11 +413,18 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 		return nullptr;
 	}
 
+	// a rejected stream is logged once: DCS repeats the header in every packet,
+	// and the callers retry with them (the clients are locked, one caller at a time)
+	static uint16_t lastRejectedId = 0;
+	const bool logReject = (DvHeader->GetStreamId() != lastRejectedId);
+
 	// check if no stream with same streamid already open
 	// to prevent loops
 	if ( IsStreamOpen(DvHeader) )
 	{
-		std::cerr << "Detected stream loop on module " << DvHeader->GetRpt2Module() << " for client " << client->GetCallsign() << " with sid " << DvHeader->GetStreamId() << std::endl;
+		if (logReject)
+			std::cerr << "Detected stream loop on module " << DvHeader->GetRpt2Module() << " for client " << client->GetCallsign() << " with sid " << DvHeader->GetStreamId() << std::endl;
+		lastRejectedId = DvHeader->GetStreamId();
 		return nullptr;
 	}
 
@@ -427,7 +434,9 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 	auto tcmods = g_Configure.GetString(g_Keys.tc.modules);
 	if (!g_Configure.GetBoolean(g_Keys.tc.automatic) && tcmods.find(module) != std::string::npos && g_TCServer.GetFD(module) < 0)
 	{
-		std::cout << "Module " << module << " waiting for transcoder, rejecting stream from " << client->GetCallsign() << std::endl;
+		if (logReject)
+			std::cout << "Module " << module << " waiting for transcoder, rejecting stream from " << client->GetCallsign() << std::endl;
+		lastRejectedId = DvHeader->GetStreamId();
 		return nullptr;
 	}
 

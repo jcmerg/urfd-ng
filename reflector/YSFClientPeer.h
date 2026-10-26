@@ -9,7 +9,7 @@ class CYSFClientPeer : public CClient
 {
 public:
 	CYSFClientPeer();
-	CYSFClientPeer(const CCallsign &, const CIp &, char = ' ');
+	CYSFClientPeer(const CCallsign &, const CIp &, char = ' ', uint8_t dgid = 0);
 	CYSFClientPeer(const CYSFClientPeer &);
 
 	virtual ~CYSFClientPeer() {};
@@ -21,4 +21,10 @@ public:
 
 	bool IsAlive(void) const;
 	void WriteXml(std::ofstream &) {}
+
+	// the DG-ID of its mapping (0 = none)
+	uint8_t GetDgId(void) const                 { return m_DgId; }
+
+protected:
+	uint8_t m_DgId = 0;
 };

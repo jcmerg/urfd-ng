@@ -757,6 +757,11 @@ void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t s
 		std::cout << m_Name << ": voice from " << my << " (ID " << srcId << ") TG" << dstId << " -> Module " << module << std::endl;
 
 	auto header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(srcId, CCallsign("CQCQCQ"), rpt1, rpt2, urfStreamId, 0, 0));
+	// a source without a callsign (an ID not in the DMR ID database, or none at all,
+	// e.g. from a mode without IDs on the master) comes from this connection: never
+	// an empty MY, which the other modes would show and send as such
+	if (!header->GetMyCallsign().IsValid())
+		header->SetMyCallsign(CCallsign(m_Callsign, srcId));
 
 	m_IncomingStreams[streamId] = urfStreamId;
 

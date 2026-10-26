@@ -31,10 +31,7 @@
 #include "MMDVMClientProtocol.h"
 #include "SvxReflectorProtocol.h"
 #include "NXDNProtocol.h"
-#include "DCSClientProtocol.h"
-#include "DExtraClientProtocol.h"
-#include "DPlusClientProtocol.h"
-#include "YSFClientProtocol.h"
+#include "YSFClientPeer.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructor
@@ -163,79 +160,15 @@ void CCodecStream::ResetStats(uint16_t streamid, ECodecType type)
 				if (ran != 0)
 					msg += " RAN" + std::to_string(ran);
 			}
-			else if (proto == EProtocol::dcsclient || proto == EProtocol::dextraclient || proto == EProtocol::dplusclient)
-			{
-				// the remote host and module, e.g. "DCS002 A"
-				auto &protocols = g_Reflector.GetProtocols();
-				protocols.Lock();
-				auto *p = protocols.FindByType(proto);
-				if (p)
-				{
-					if (proto == EProtocol::dcsclient)
-					{
-						auto *cp = static_cast<CDcsClientProtocol *>(p);
-						for (auto &m : cp->GetMappings())
-							if (m.localModule == m_CSModule)
-							{
-								// extract reflector name from host (e.g. "dcs002.xreflector.net" -> "DCS002")
-								std::string h = m.host;
-								auto dot = h.find('.');
-								if (dot != std::string::npos) h = h.substr(0, dot);
-								for (auto &c : h) c = toupper(c);
-								msg = h + " " + m.remoteModule;
-								break;
-							}
-					}
-					else if (proto == EProtocol::dextraclient)
-					{
-						auto *cp = static_cast<CDExtraClientProtocol *>(p);
-						for (auto &m : cp->GetMappings())
-							if (m.localModule == m_CSModule)
-							{
-								std::string h = m.host;
-								auto dot = h.find('.');
-								if (dot != std::string::npos) h = h.substr(0, dot);
-								for (auto &c : h) c = toupper(c);
-								msg = h + " " + m.remoteModule;
-								break;
-							}
-					}
-					else
-					{
-						auto *cp = static_cast<CDPlusClientProtocol *>(p);
-						for (auto &m : cp->GetMappings())
-							if (m.localModule == m_CSModule)
-							{
-								std::string h = m.host;
-								auto dot = h.find('.');
-								if (dot != std::string::npos) h = h.substr(0, dot);
-								for (auto &c : h) c = toupper(c);
-								msg = h + " " + m.remoteModule;
-								break;
-							}
-					}
-				}
-				protocols.Unlock();
-			}
 			else if (proto == EProtocol::ysfclient)
 			{
-				// the DG-ID if configured, e.g. "YSF DG15"
-				auto &protocols = g_Reflector.GetProtocols();
-				protocols.Lock();
-				auto *p = protocols.FindByType(EProtocol::ysfclient);
-				if (p)
-				{
-					auto *cp = static_cast<CYsfClientProtocol *>(p);
-					for (auto &m : cp->GetMappings())
-						if (m.localModule == m_CSModule && m.dgid > 0)
-						{
-							msg += " DG" + std::to_string(m.dgid);
-							break;
-						}
-				}
-				protocols.Unlock();
+				// the DG-ID if configured, e.g. "YSF DG15"; from the connector's client,
+				// not its mappings: the clients are locked here, and the connector locks
+				// its mappings before the clients
+				auto peer = std::dynamic_pointer_cast<CYSFClientPeer>(owner);
+				if (peer && peer->GetDgId() > 0)
+					msg += " DG" + std::to_string(peer->GetDgId());
 			}
-
 		}
 
 		// the operator's first name from the DMR or NXDN ID database, in front of
