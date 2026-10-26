@@ -2,7 +2,7 @@
 
 [English](README.md) | **Deutsch**
 
-**Version 0.13.0** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.13.1** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF/NXDN (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25 (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF/NXDN in Software ergänzen. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
