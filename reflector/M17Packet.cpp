@@ -25,19 +25,19 @@ CM17Packet::CM17Packet(const uint8_t *buf)
 {
 	memcpy(m17.magic, buf, sizeof(SM17Frame));
 
-	// @ALL is no callsign, the destination stays empty
-	if (! IsBroadcast())
+	// @ALL and # addresses (#PARROT) are no callsigns, the destination stays empty
+	if (! IsSpecialAddress())
 		destination.CodeIn(m17.lich.addr_dst);
 	source.CodeIn(m17.lich.addr_src);
 }
 
-// the destination @ALL (all ones), which some clients send to a reflector
-bool CM17Packet::IsBroadcast() const
+// @ALL, # addresses and the reserved range, everything above the base-40 callsigns
+bool CM17Packet::IsSpecialAddress() const
 {
+	uint64_t coded = 0;
 	for (auto b : m17.lich.addr_dst)
-		if (0xFFU != b)
-			return false;
-	return true;
+		coded = (coded << 8) | b;
+	return coded > 0xee6b27ffffffu;
 }
 
 const CCallsign &CM17Packet::GetDestCallsign() const

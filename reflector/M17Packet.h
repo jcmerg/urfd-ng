@@ -66,7 +66,7 @@ public:
 	const CCallsign &GetDestCallsign() const;
 	const CCallsign &GetSourceCallsign() const;
 	char GetDestModule() const;
-	bool IsBroadcast() const;
+	bool IsSpecialAddress() const;
 	uint16_t GetFrameNumber() const;
 	uint16_t GetFrameType() const;
 	ECodecType GetCodecType() const;
