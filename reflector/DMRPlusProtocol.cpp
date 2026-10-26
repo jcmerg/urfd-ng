@@ -390,8 +390,11 @@ bool CDmrplusProtocol::IsValidDisconnectPacket(const CBuffer &Buffer, CCallsign 
 		uint32_t dmrid = atoi(sz);
 		callsign->SetDmrid(dmrid, true);
 		callsign->SetCSModule(DMRPLUS_MODULE_ID);
-		*reflectormodule = Buffer.data()[11] - '0' + 'A';
-		valid = (callsign->IsValid() && std::isupper(*reflectormodule));
+		// the TG, 4001-4026, as in the connect packet
+		memcpy(sz, &Buffer.data()[8], 4);
+		sz[4] = 0;
+		*reflectormodule = DmrDstIdToModule(atoi(sz));
+		valid = (callsign->IsValid() && (std::isupper(*reflectormodule) || (*reflectormodule == ' ')));
 	}
 	return valid;
 }
