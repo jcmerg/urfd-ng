@@ -89,8 +89,14 @@ protected:
 	int32_t dstar_in_num = 256, dstar_out_num = 256;	// DStarGainIn/Out for a D-Star plugin
 	int32_t ambe_in_num, ambe_out_num, dmr_reencode_num;
 	int32_t outgain_dstar_num, outgain_dmr_num, outgain_usrp_num, outgain_imbe_num, outgain_m17_num;
-	imbe_vocoder p25vocoder;
-	CAGC m_agcDigital;  // D-Star, DMR/YSF, M17, P25/NXDN
+	// P25: IMBE quantises each frame against the one before, so every module has its
+	// own encoder and decoder (streams of two modules must not share one state)
+	std::unordered_map<char, std::unique_ptr<imbe_vocoder>> imbe_enc, imbe_dec;
+	// P25 to M17: a 300 Hz high-pass in front of the Codec2 encoder, per module
+	struct SHighPass { float z[2][2]; uint16_t streamid; };
+	std::unordered_map<char, SHighPass> c2_highpass;
+	void HighPass(char module, uint16_t streamid, int16_t *samples);
+	CAGC m_agcDigital;  // D-Star, DMR/YSF/NXDN, M17, P25
 	CAGC m_agcAnalog;   // SVX and USRP: FM audio, gate above its noise floor
 	CNoiseSuppress m_nsAnalog;  // SVX and USRP: FM noise removed before the AGC
 	CAmbeGain m_ambeGain;  // DmrGainMode = ambe: AGC and gains in the AMBE2+ bitstream

@@ -1,16 +1,24 @@
-// dvsitest -- encodes or decodes a file with a DVSI DV3003, set up as tcd sets
-// it up, to compare the codec plugins with the hardware
+// dvsitest -- encodes or decodes a file with a DVSI DV3003 or DV3000, set up as tcd
+// sets it up, to compare the codec plugins with the hardware
 //
 //   dvsitest <device node> enc <dstar|dmr> <in.raw> <out.frames>
 //   dvsitest <device node> dec <dstar|dmr> <in.frames> <out.raw>
+//   dvsitest <device node> info
 //
 // Raw PCM is 8 kHz s16le, frames are 9 bytes as tcd has them. Channel 0 only,
-// one frame at a time. tcd must not run (it holds the device).
+// one frame at a time. tcd must not run (it holds the device). Every mode prints
+// the product ID and version of the chip, "info" only that.
+//
+// A DV3003 (921600 baud) by default; DVSI_TYPE=3000 in the environment for a single
+// channel DV3000/ThumbDV (460800 baud, its packet format without the channel field,
+// as tcd's CDV3000 has it). Use the rate of the device: bytes at a wrong rate can
+// leave an AMBE3003 deaf until it is unplugged and plugged in again.
 //
 // Built with "make" here (or: g++ -O2 -std=c++17 -I.. dvsitest.cpp ../DeviceIO_posix.cpp -o dvsitest).
 
 #include <arpa/inet.h>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -21,6 +29,7 @@
 #include "DVSIPacket.h"
 
 static std::unique_ptr<IDeviceIO> dev;
+static bool dv3000 = false;
 
 static bool Get(SDV_Packet &p)
 {
@@ -67,13 +76,17 @@ static bool Setup(const std::string &node, bool dstar)
 	dev->SetFlowControl(1);
 	dev->SetRTS(true);
 	dev->SetDTR(false);
-	dev->SetBaudRate(921600);
+	if (!dev->SetBaudRate(dv3000 ? 460800 : 921600)) { fprintf(stderr, "cannot set the baud rate\n"); return false; }
 	dev->SetReadTimeout(10);
 
-	uint8_t zeros[350] = {};
-	dev->Write(zeros, sizeof(zeros));
-	dev->Purge();
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	if (!dv3000)
+	{
+		uint8_t zeros[350] = {};
+		dev->Write(zeros, sizeof(zeros));
+		dev->Drain(100);	// the zeros out first, then the input dropped
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		dev->PurgeInput();
+	}
 
 	SDV_Packet c, r;
 	c.start_byte = PKT_HEADER;
@@ -91,6 +104,15 @@ static bool Setup(const std::string &node, bool dstar)
 	c.payload.ctrl.data.paritymode[2] = 0x4U ^ PKT_PARITYMODE ^ PKT_PARITYBYTE;
 	if (dev->Write(&c, 8) != 8 || !Get(r) || r.field_id != PKT_PARITYMODE) { fprintf(stderr, "parity off failed\n"); return false; }
 
+	// product ID and version, as tcd's InitDevice asks for them
+	c.header.payload_length = htons(1);
+	for (uint8_t f : { uint8_t(PKT_PRODID), uint8_t(PKT_VERSTRING) })
+	{
+		c.field_id = f;
+		if (dev->Write(&c, 5) != 5 || !Get(r) || r.field_id != f) { fprintf(stderr, "product ID/version query failed\n"); return false; }
+		fprintf(stderr, "%s %s: %s\n", node.c_str(), f == PKT_PRODID ? "product ID" : "version", r.payload.ctrl.data.version);
+	}
+
 	// channel 0 as tcd's ConfigureVocoder sets it, gains 0
 	const uint8_t ecmode[] { PKT_ECMODE, 0x0, 0x0 };
 	const uint8_t dcmode[] { PKT_DCMODE, 0x0, 0x0 };
@@ -101,7 +123,7 @@ static bool Setup(const std::string &node, bool dstar)
 	const uint8_t   gain[] { PKT_GAIN, 0, 0 };
 	const uint8_t   init[] { PKT_INIT, 0x3U };
 	c.header.payload_length = htons(1 + sizeof(SDV_Packet::payload.codec));
-	c.field_id = PKT_CHANNEL0;
+	c.field_id = PKT_CHANNEL0;	// tcd sends it to a DV3000 too
 	memcpy(c.payload.codec.ecmode, ecmode, 3);
 	memcpy(c.payload.codec.dcmode, dcmode, 3);
 	memcpy(c.payload.codec.ratep, dstar ? rdstar : rdmr, 13);
@@ -112,19 +134,26 @@ static bool Setup(const std::string &node, bool dstar)
 	if (!Put(c) || !Get(r) || r.field_id != PKT_CHANNEL0) { fprintf(stderr, "channel config failed\n"); return false; }
 
 	// linear PCM, as tcd forces it on a DV3003
-	c.header.payload_length = htons(3);
-	c.payload.ctrl.data.paritymode[0] = PKT_COMPAND;
-	c.payload.ctrl.data.paritymode[1] = 0x0;
-	if (dev->Write(&c, 7) != 7 || !Get(r)) { fprintf(stderr, "compand off failed\n"); return false; }
+	if (!dv3000)
+	{
+		c.header.payload_length = htons(3);
+		c.payload.ctrl.data.paritymode[0] = PKT_COMPAND;
+		c.payload.ctrl.data.paritymode[1] = 0x0;
+		if (dev->Write(&c, 7) != 7 || !Get(r)) { fprintf(stderr, "compand off failed\n"); return false; }
+	}
 	fprintf(stderr, "%s channel 0: %s\n", node.c_str(), dstar ? "D-Star" : "DMR");
 	return true;
 }
 
 int main(int argc, char *argv[])
 {
-	if (argc != 6) { fprintf(stderr, "usage: %s <device> enc|dec dstar|dmr <in> <out>\n", argv[0]); return 1; }
-	const bool enc = !strcmp(argv[2], "enc"), dstar = !strcmp(argv[3], "dstar");
+	const bool info = argc == 3 && !strcmp(argv[2], "info");
+	if (argc != 6 && !info) { fprintf(stderr, "usage: %s <device> enc|dec dstar|dmr <in> <out>\n       %s <device> info\n       (DVSI_TYPE=3000 for a DV3000)\n", argv[0], argv[0]); return 1; }
+	const char *t = getenv("DVSI_TYPE");
+	dv3000 = t && !strcmp(t, "3000");
+	const bool enc = !strcmp(argv[2], "enc"), dstar = info || !strcmp(argv[3], "dstar");
 	if (!Setup(argv[1], dstar)) return 1;
+	if (info) { dev->Close(); return 0; }
 	FILE *in = fopen(argv[4], "rb"), *out = fopen(argv[5], "wb");
 	if (!in || !out) { perror("open"); return 1; }
 	int frames = 0;
@@ -138,26 +167,46 @@ int main(int argc, char *argv[])
 		{
 			int16_t pcm[160];
 			if (fread(pcm, sizeof(int16_t), 160, in) != 160) break;
-			p.header.payload_length = htons(1 + sizeof(p.payload.audio));
 			p.header.packet_type = PKT_SPEECH;
-			p.payload.audio.speechd = PKT_SPEECHD;
-			p.payload.audio.num_samples = 160;
-			for (int i = 0; i < 160; i++) p.payload.audio.samples[i] = htons(pcm[i]);
+			if (dv3000)
+			{
+				p.header.payload_length = htons(1 + sizeof(p.payload.audio3k));
+				p.field_id = PKT_SPEECHD;
+				p.payload.audio3k.num_samples = 160;
+				for (int i = 0; i < 160; i++) p.payload.audio3k.samples[i] = htons(pcm[i]);
+			}
+			else
+			{
+				p.header.payload_length = htons(1 + sizeof(p.payload.audio));
+				p.payload.audio.speechd = PKT_SPEECHD;
+				p.payload.audio.num_samples = 160;
+				for (int i = 0; i < 160; i++) p.payload.audio.samples[i] = htons(pcm[i]);
+			}
 			if (!Put(p) || !Get(r) || r.header.packet_type != PKT_CHANNEL) { fprintf(stderr, "frame %d: no AMBE back\n", frames); return 1; }
-			fwrite(r.payload.ambe.data, 1, 9, out);
+			fwrite(dv3000 ? r.payload.ambe3k.data : r.payload.ambe.data, 1, 9, out);
 		}
 		else
 		{
 			uint8_t f[9];
 			if (fread(f, 1, 9, in) != 9) break;
-			p.header.payload_length = htons(1 + sizeof(p.payload.ambe));
 			p.header.packet_type = PKT_CHANNEL;
-			p.payload.ambe.chand = PKT_CHAND;
-			p.payload.ambe.num_bits = 72;
-			memcpy(p.payload.ambe.data, f, 9);
+			if (dv3000)
+			{
+				p.header.payload_length = htons(1 + sizeof(p.payload.ambe3k));
+				p.field_id = PKT_CHAND;
+				p.payload.ambe3k.num_bits = 72;
+				memcpy(p.payload.ambe3k.data, f, 9);
+			}
+			else
+			{
+				p.header.payload_length = htons(1 + sizeof(p.payload.ambe));
+				p.payload.ambe.chand = PKT_CHAND;
+				p.payload.ambe.num_bits = 72;
+				memcpy(p.payload.ambe.data, f, 9);
+			}
 			if (!Put(p) || !Get(r) || r.header.packet_type != PKT_SPEECH) { fprintf(stderr, "frame %d: no speech back\n", frames); return 1; }
 			int16_t pcm[160];
-			for (int i = 0; i < 160; i++) pcm[i] = ntohs(r.payload.audio.samples[i]);
+			for (int i = 0; i < 160; i++) pcm[i] = ntohs(dv3000 ? r.payload.audio3k.samples[i] : r.payload.audio.samples[i]);
 			fwrite(pcm, sizeof(int16_t), 160, out);
 		}
 		frames++;

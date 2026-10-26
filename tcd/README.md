@@ -4,7 +4,7 @@
 
 **Version 0.12.4** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
-tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF (AMBE2+), and software vocoders for M17 (Codec2) and P25/NXDN (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF in software. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
+tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF/NXDN (AMBE2+), and software vocoders for M17 (Codec2) and P25 (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF/NXDN in software. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
 ## Contents
 
@@ -59,9 +59,25 @@ Codec2 (`codec2/`) and the P25 IMBE vocoder from OP25 (`imbe/`) are part of the 
 
 tcd builds against the urfd sources it shares with the reflector (`TCPacketDef.h`, `TCSocket.*`, ...) from `../reflector`, so both sides always speak the same protocol. `config/tcd.ini` is the commented template, `config/tcd.service` the systemd unit.
 
+### macOS
+
+tcd also builds and runs natively on macOS (Apple silicon or Intel), with the AMBE devices on USB; Docker Desktop cannot pass USB devices through. With the Xcode command line tools and [Homebrew](https://brew.sh):
+
+```bash
+brew install speexdsp libwebsockets
+cd urfd/tcd
+make -j$(sysctl -n hw.ncpu)
+./tcd --list-devices
+./tcd /path/to/tcd.ini        # Ctrl-C stops it
+```
+
+- macOS has no `/dev/serial/by-id`: tcd finds the USB serial ports (`/dev/cu.*`) through IOKit and names them as udev would (`usb-FTDI_DVstick-33_DKB7FXGE-if00-port0`), so the detection of the AMBE devices and `DeviceSerial` work as on Linux. Apple's own FTDI driver is used, no extra driver.
+- tcd sets the FTDI latency timer to 1 ms there too. 460800 and 921600 baud, which the macOS termios does not have, are set through IOKit.
+- `make install` and the systemd unit are for Linux; on macOS start tcd by hand (or with a launchd job). A codec plugin in `plugins/<name>/` builds the same way as on Linux.
+
 ### Requirements
 
-- Linux with systemd: Debian, Ubuntu or Raspberry Pi OS; x86_64, arm64 or armhf
+- Linux with systemd: Debian, Ubuntu or Raspberry Pi OS; x86_64, arm64 or armhf; or macOS with Homebrew (see [macOS](#macos))
 - DVSI AMBE USB devices (see [Hardware](#hardware)); they use the kernel's `ftdi_sio` driver, no extra driver needed
 - `libspeexdsp-dev` for the noise suppression of analog input and `libwebsockets-dev` for the web dashboard; `build.sh` installs them
 - Low latency to the AMBE devices: tcd sets their USB latency timer to 1 ms itself, natively and in Docker (see [tcd in Docker](#tcd-in-docker)). It can run on the reflector's machine or on another one, e.g. a Raspberry Pi next to the radio gear.
@@ -126,7 +142,7 @@ CodecDMR    = foo                         # the same for DMR/YSF
 
 No codec plugin is part of this repository: software implementations of AMBE and AMBE2+ may touch patents (AMBE2+ half rate, US 8,359,197, projected to run until 2028-05-20), so whether to build and use one is the operator's decision. A plugin for D-Star and DMR/YSF with [mbelib-neo](https://github.com/arancormonk/mbelib-neo) is [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin); read its patent notice first.
 
-`tools/` has test tools for plugins (`make` there): `codectest <plugin.so> dmr|dstar|p25 in.raw out.frames out.raw [option=value ...]` encodes and decodes 8 kHz s16le PCM, prints the time per frame and checks that two interleaved streams stay apart; `decode` decodes a frames file; `dvsitest <device> enc|dec dstar|dmr in out` does the same on a DV3003 (tcd stopped), to compare a plugin with the hardware.
+`tools/` has test tools for plugins (`make` there): `codectest <plugin.so> dmr|dstar|p25 in.raw out.frames out.raw [option=value ...]` encodes and decodes 8 kHz s16le PCM, prints the time per frame and checks that two interleaved streams stay apart; `decode` decodes a frames file; `dvsitest <device> enc|dec dstar|dmr in out` does the same on a DV3003, or with `DVSI_TYPE=3000` on a DV3000 (tcd stopped), to compare a plugin with the hardware; `dvsitest <device> info` prints the chip's product ID and version.
 
 ## tcd in Docker
 
@@ -167,7 +183,7 @@ The standby tcd sends the module letter in lower case; the reflector takes it on
 tcd --list-devices
 ```
 
-lists the USB serial devices from `/dev/serial/by-id` with their serial numbers and marks the ones that look like AMBE devices.
+lists the USB serial devices from `/dev/serial/by-id` (on macOS from IOKit, see [macOS](#macos)) with their serial numbers and marks the ones that look like AMBE devices.
 
 Without `DeviceSerial` in `tcd.ini`, tcd uses every device it recognises as AMBE by its name. With other USB serial devices on the machine (GPS, CAT cables, ...), list your AMBE devices explicitly. `DeviceSerial` must match exactly one of:
 
@@ -177,6 +193,10 @@ Without `DeviceSerial` in `tcd.ini`, tcd uses every device it recognises as AMBE
 - the device node (`/dev/ttyUSB0`)
 
 tcd opens the devices through the kernel's `ftdi_sio` driver and sets their USB latency timer to 1 ms (the driver default is 16 ms, too slow for the AMBE timing; the log shows the value). Devices that an older, libftd2xx based tcd left unbound from `ftdi_sio` are bound back at startup, so an upgrade needs no replugging.
+
+Whether a device is a DV3000 (one channel) or a DV3003 (three) tcd takes from the product ID its chip reports (`AMBE3000…`, `AMBE3003…`), not from the USB name, which clones often leave generic. The baud rate still follows the name: 460800 for the single channel sticks (ThumbDV, DVstick-30, USB-3000 and the generic `FT230X_Basic_UART`/`FT232R_USB_UART`), 921600 for the others. tcd never tries another rate: bytes at a wrong rate can leave an AMBE3003 deaf until it is unplugged and plugged in again.
+
+A device that cannot be opened or does not answer is left out with a warning, and tcd carries on with the others and the codec plugins, as long as they cover the modules (before, it stopped). Each device is opened for tcd alone: a second tcd or `dvsitest` gets `is in use by another process` instead of resetting the chip under the running tcd.
 
 ## Configuration (tcd.ini)
 
@@ -203,7 +223,7 @@ All gains are in dB, -40 to +40.
 | `OutputGainDMR` | `-18` | DMR/YSF output, after the AGC; every path to DMR/YSF, including DMR → DMR/YSF |
 | `OutputGainDMRBitstream` | `-6` | -24 to 0 dB (0 = all of it before the encoder): for D-Star, M17, P25, USRP and SVX sources this much of `OutputGainDMR` is applied through b2 in the AMBE2+ frame after the encoder, the rest as PCM before it, so the encoder gets more level; live in the monitor |
 | `OutputGainM17` | `0` | M17/Codec2 output, after the AGC |
-| `OutputGainIMBE` | `0` | P25/NXDN output, after the AGC |
+| `OutputGainIMBE` | `0` | P25 output, after the AGC |
 | `OutputGainUSRP` | `0` | USRP and SVX output, after the AGC (both get the same PCM from tcd) |
 | `DStarGainIn` / `DStarGainOut` | `0` | inside the DVSI chip, D-Star decode / encode |
 | `DmrGainIn` / `DmrGainOut` | `0` | inside the DVSI chip, DMR decode / encode |
@@ -244,7 +264,7 @@ How `ambe` works: the decoder computes γ = Δγ[b2] + 0.5·γ<sub>prev</sub>, a
 | `AGCRelease` | `500` | `500` | time constant in ms for falls of the speech level, applied only on clearly voiced speech well above the noise floor |
 | `AGCMaxGainDown` | `24` | `24` | most attenuation in dB |
 
-Gate and gain limit come in two profiles: **AGC digital** for D-Star, DMR/YSF, M17 and P25/NXDN input, **AGC analog** for SVX and USRP input.
+Gate and gain limit come in two profiles: **AGC digital** for D-Star, DMR/YSF/NXDN, M17 and P25 input, **AGC analog** for SVX and USRP input.
 
 | Key | Template | Code default | Meaning |
 |---|---|---|---|
@@ -365,6 +385,8 @@ journalctl -u tcd -f
 | `Could not find an AMBE device!` | `tcd --list-devices`; with `DeviceSerial` set, it must match exactly (see [above](#selecting-the-ambe-devices)) |
 | `No USB serial devices found` | no device is plugged in, or the `ftdi_sio` driver is missing (`lsmod \| grep ftdi_sio`) |
 | `USB latency timer is 16 ms` warning | tcd could not set the latency timer; natively it has to run as root (the systemd unit does); in Docker the kernel's `ftdi_sio` ignored the low latency request, set `/sys/bus/usb-serial/devices/<tty>/latency_timer` to 1 on the host |
+| `... does not answer at ... baud and is left out` | the device is left out, tcd runs with the others; unplug it and plug it in again, then restart tcd. A DV3003 with a generic USB name gets 460800 baud and cannot answer |
+| `... is in use by another process` | another tcd or `dvsitest` holds the device: stop it (`pgrep -a tcd`) |
 | `Lost the AMBE device ..., shutting down` | the device was unplugged or reset; systemd restarts tcd after 5 s and it finds the device again |
 | the reflector shows no transcoder | `ServerAddress` and `Port` in `tcd.ini`, the same `Modules` on both sides, and port 10100/tcp reachable from the tcd machine |
 
@@ -373,12 +395,14 @@ journalctl -u tcd -f
 ### Hardware and devices
 - **Serial access without libftd2xx**: through the kernel's `ftdi_sio` driver and `/dev/serial/by-id` (POSIX backend by Jason Kendall), RTS/CTS flow control, USB latency timer at 1 ms; devices left unbound by an older tcd are bound back; a lost device restarts tcd through systemd
 - **Device selection**: `--list-devices`, `DeviceSerial` with exact matching
+- **Device type from the chip**: DV3000 or DV3003 by the product ID, a device that does not answer is left out instead of stopping tcd, a second reset try, the serial flush zeros leave before the input is flushed, exclusive open
+- **macOS**: builds with clang and runs natively with the AMBE devices, see [macOS](#macos)
 - **Mixed mode DV3000 + DV3003**: two modules at once with per-channel codec setup
 - **DV3003 D-Star**: companding off, serial flush, per-channel encoding
 - **SVX codec path**: its own `ECodecType::svx` for SVX audio
 
 ### Audio
-- **Output gains per codec**: after the AGC, for D-Star, M17/Codec2, DMR/YSF, P25/NXDN and USRP, applied on copies (the shared buffer is never changed)
+- **Output gains per codec**: after the AGC, for D-Star, M17/Codec2, DMR/YSF/NXDN, P25 and USRP, applied on copies (the shared buffer is never changed)
 - **AMBE2+ bitstream gain**: `AmbeGainDb` adjusts the b2 parameter in the AMBE2+ frame, with Golay(24,12) FEC recomputed for the A partition and the B partition unscrambled and scrambled again with the new A data (0.2.3; before, the decoder lost the B partition); since 0.2.5 driven by the AGC and computed in the gamma domain, so the gain no longer depends on the level, also with a single device and a codec plugin
 - **AGC v3**: sliding RMS window, per-speaker tracking, gate with decay, fast release after the gate, asymmetric limits, noise gate, peak limiter that cuts the applied gain at once (0.2.3; before, loud onsets after quiet speech clipped), live changes from the dashboard; thread safe since 0.2.3, as every codec's decode thread uses it. Since 0.2.4 the gate holds 60 ms and fades out instead of switching (word endings are no longer chopped), noise just above it no longer pumps the gain up, and the gain ramps across each frame instead of stepping every 20 ms
 - **AGC digital and AGC analog** (0.3.0): SVX and USRP input have their own gate, gain limit and gain while the gate is closed (`AGCAnalogNoiseGate`, `AGCAnalogMaxGainUp`, `AGCAnalogGateFloor`), so the FM noise between words is lowered instead of raised by up to 30 dB; the other inputs use the same three keys as `AGCDigital…` (0.3.1 renamed `AGCNoiseGate` and `AGCMaxGainUp` to `AGCDigitalNoiseGate` and `AGCDigitalMaxGainUp`, added `AGCDigitalGateFloor`, and `agc-analyze` names the key of the stream's profile); since 0.3.2 the SVX and USRP gains per connection are only in `urfd.ini` (`UsrpGainIn`/`UsrpGainOut` are gone); without the monitor tcd keeps the ini settings (before, it fell back to the built-in defaults after a second)
@@ -387,6 +411,7 @@ journalctl -u tcd -f
 - **Version in the monitor** (0.7.0): the web page shows the running tcd version in its top bar, like the urfd dashboard, and tcdmon in its header; the stats JSON carries it as `version`, all from one constant in `Version.h`; `OutputGainDMRBitstream` became a split in dB
 - **DMR level in the bitstream for other codecs** (0.6.0, experimental until 0.7.1): `OutputGainDMRBitstream` applies `OutputGainDMR` to D-Star, M17, P25, USRP and SVX audio through b2 after the encoder instead of before it; 0.6.0 had a switch for all of it, which left artifacts on quiet syllables, since 0.7.0 it is the number of dB in b2 (-24 to 0), live in the monitor; default -6 since 0.7.2 (0 before)
 - **Noise suppression for analog input** (0.5.0): SVX and USRP go through the speexdsp preprocessor before the AGC analog (`AGCAnalogNoiseSuppress`, default -15 dB, live in the monitor; 0.5.1 lowered it to -10 dB and `AGCAnalogGateFloor` from -12 to 0, the noise suppression lowers the pauses), so the FM noise under the speech no longer turns into robotic AMBE artifacts on DMR; new build dependency `libspeexdsp-dev`
+- **P25 to M17**: a 300 Hz high-pass (4th order) in front of the Codec2 encoder for P25 audio; the IMBE decoder's extra energy below 120 Hz threw Codec2's pitch estimation off (PESQ about 1.6, now 2.5)
 - **DMR re-encode** (with a DMR codec plugin): `DmrGainMode = reencode` with AGC and `DmrReencodeGain` on DMR → DMR/YSF
 - **Codec plugins** (0.10.0): software vocoders for D-Star and DMR/YSF from shared objects with a plain C interface, a vocoder state per stream; replace the built-in MD380 support. The vocoder for new streams can be switched at run time between the devices and the plugins; since 0.12.0 (`TCD_CODEC_API 2`) a plugin learns where a transmission starts and stops, plugins built for API 1 have to be rebuilt
 - **Mixed mode output gains** (0.2.3): the DV3003's D-Star channel uses `OutputGainDStar`, not `OutputGainDMR`; M17 at 1600 bit/s no longer runs the second half of each packet through the AGC twice; since 0.2.11 a module missing from the module list is not sent to a DMR channel
@@ -402,7 +427,7 @@ journalctl -u tcd -f
 - **Monitor on loopback by default**: `MonitorBindAddress` (default `127.0.0.1`) for the web dashboard and stats socket; since 0.10.7 with `MonitorPassword` the page and remote `tcdmon` ask for a password
 - **No grey zone in the core** (0.10.0): the MD380 firmware is gone from tcd; without a codec plugin two AMBE devices are needed, and `ambe` covers DMR → DMR/YSF
 - **Performance**: blocking reads with a timeout instead of busy polling; built with `-O2` since 0.2.12, a transcoded stream (Codec2, IMBE and AGC in software) takes about 7 % of one core on a Raspberry Pi 4 and 3 % on a Pi 5, so a Pi 4 is plenty for two modules
-- **Thread safety**: lock around the IMBE vocoder, SIGPIPE ignored for clean reconnects
+- **Thread safety**: an IMBE encoder and decoder per module (one shared state garbled P25 while two modules transcoded at once), SIGPIPE ignored for clean reconnects
 - **Error handling**: retries towards the reflector with backoff, dropping on queue overflow, timeout recovery while reading
 - **Reconnect backoff**: 0.5 s growing to 5 s while the reflector is unreachable
 - **Standby modules** (0.11.0, urfd 4.26.0): `StandbyModules` makes a second tcd take over modules while their tcd is gone, see [Standby](#standby-a-second-tcd-for-the-same-modules)

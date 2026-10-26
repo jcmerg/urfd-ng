@@ -215,7 +215,7 @@ static void draw_vu(int y, int x, int width, const char *label, double rms, doub
 }
 
 // Draw signal flow line
-static void draw_flow(int y, int x, int width, const ModuleData &m, const std::string &cfg_json)
+static void draw_flow(int y, int x, int /*width*/, const ModuleData &m, const std::string &cfg_json)
 {
 	if (m.codec_in == "none" || m.idle > 2.0)
 	{
@@ -300,9 +300,9 @@ static void draw_flow(int y, int x, int width, const ModuleData &m, const std::s
 	attron(COLOR_PAIR(3) | A_BOLD);
 	std::string targets;
 	if (m.codec_in.find("Star") == std::string::npos) targets += "D-Star ";
-	if (m.codec_in.find("DMR") == std::string::npos) targets += "DMR/YSF ";
+	if (m.codec_in.find("DMR") == std::string::npos) targets += "DMR/YSF/NXDN ";
 	if (m.codec_in.find("Codec2") == std::string::npos) targets += "M17 ";
-	if (m.codec_in.find("P25") == std::string::npos) targets += "P25/NXDN ";
+	if (m.codec_in.find("P25") == std::string::npos) targets += "P25 ";
 	if (m.codec_in != "USRP") targets += "USRP ";
 	if (m.codec_in != "SVX") targets += "SVX";
 	mvprintw(y, col, "%s", targets.c_str());

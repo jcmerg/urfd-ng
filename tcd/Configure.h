@@ -53,7 +53,7 @@ public:
 	float GetAGCAttack(void) const     { return agc_attack; }
 	float GetAGCRelease(void) const    { return agc_release; }
 	float GetAGCMaxGainDown(void) const { return agc_maxgain_down; }
-	// AGC digital: D-Star, DMR/YSF, M17, P25/NXDN input
+	// AGC digital: D-Star, DMR/YSF/NXDN, M17, P25 input
 	float GetAGCDigitalNoiseGate(void) const { return agc_digital_noisegate; }
 	float GetAGCDigitalMaxGainUp(void) const { return agc_digital_maxgain_up; }
 	float GetAGCDigitalGateFloor(void) const { return agc_digital_gatefloor; }

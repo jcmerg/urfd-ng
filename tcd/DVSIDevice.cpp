@@ -90,12 +90,12 @@ bool CDVDevice::checkResponse(SDV_Packet &p, uint8_t response) const
 	return false;
 }
 
-// serialno is the device node found under /dev/serial/by-id, desc its by-id name
-bool CDVDevice::OpenDevice(const std::string &serialno, const std::string &desc, Edvtype dvtype, int8_t in_gain, int8_t out_gain)
+// the serial line of the device: 8N1, RTS/CTS, at baud
+bool CDVDevice::OpenLine(const std::string &node, const std::string &desc, Edvtype dvtype, unsigned long baud)
 {
 	device.reset(CreatePosixDevice());
 	std::string opened;
-	if (!device->Open(serialno, opened))
+	if (!device->Open(node, opened))
 		return true;
 
 	std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -142,8 +142,7 @@ bool CDVDevice::OpenDevice(const std::string &serialno, const std::string &desc,
 		}
 	}
 
-	unsigned long baudrate = (Edvtype::dv3000 == dvtype) ? 460800 : 921600;
-	if (!device->SetBaudRate(baudrate))
+	if (!device->SetBaudRate(baud))
 	{
 		FTDI_Error("SetBaudRate", errno);
 		return true;
@@ -151,11 +150,31 @@ bool CDVDevice::OpenDevice(const std::string &serialno, const std::string &desc,
 
 	description.assign(desc);
 	description.append(" ");
-	description.append(serialno);
+	description.append(node);
 
-	std::cout << "Opened " << description << " at " << baudrate << " baud" << std::endl;
+	if (!probing)
+		std::cout << "Opened " << description << " at " << baud << " baud" << std::endl;
 
 	devtype = dvtype;
+	return false;
+}
+
+bool CDVDevice::Probe(const std::string &node, const std::string &desc, Edvtype dvtype, unsigned long baud, bool &opened)
+{
+	probing = true;
+	opened = !OpenLine(node, desc, dvtype, baud);
+	const bool failed = !opened || InitDevice();
+	probing = false;
+	if (device)
+		device->Close();
+	device.reset();
+	return failed;
+}
+
+bool CDVDevice::OpenDevice(const std::string &node, const std::string &desc, Edvtype dvtype, unsigned long baud, int8_t in_gain, int8_t out_gain)
+{
+	if (OpenLine(node, desc, dvtype, baud))
+		return true;
 
 	if (InitDevice())
 		return true;
@@ -189,8 +208,12 @@ bool CDVDevice::InitDevice()
 		memset(zeros, 0, sizeof(zeros));
 		if (device->Write(zeros, sizeof(zeros)) < 0)
 			FTDI_Error("flushing the serial buffer", errno);
-		device->Purge();
+		// let the zeros go out before anything is flushed (a flush of the output
+		// would drop them), then drop what the device sent before the reset
+		if (!device->Drain(100))
+			std::cerr << "The flush zeros did not leave for " << description << " within 100 ms" << std::endl;
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		device->PurgeInput();
 	}
 
 	// ********** soft reset *************
@@ -200,22 +223,30 @@ bool CDVDevice::InitDevice()
     ctrlPacket.field_id = PKT_RESET;
 	ctrlPacket.payload.ctrl.data.paritymode[0] = PKT_PARITYBYTE;
 	ctrlPacket.payload.ctrl.data.paritymode[1] = 0x3U ^ PKT_RESET ^ PKT_PARITYBYTE;
-	auto written = device->Write(&ctrlPacket, 7);
-	if (written < 0)
+	// a second try when the first reset gets no answer, the same packet at the same rate
+	for (int attempt = 1; ; attempt++)
 	{
-		FTDI_Error("Error writing soft reset packet", errno);
-		return true;
-	}
-	else if (7 != written)
-	{
-		std::cerr << "Incomplete soft reset packet write" << std::endl;
-		return true;
-	}
+		auto written = device->Write(&ctrlPacket, 7);
+		if (written < 0)
+		{
+			FTDI_Error("Error writing soft reset packet", errno);
+			return true;
+		}
+		else if (7 != written)
+		{
+			std::cerr << "Incomplete soft reset packet write" << std::endl;
+			return true;
+		}
 
-	if (GetResponse(responsePacket))
-	{
-		std::cerr << "Error receiving response to reset" << std::endl;
-		return true;
+		if (! GetResponse(responsePacket))
+			break;
+		if (attempt == 2)
+		{
+			std::cerr << "Error receiving response to reset" << std::endl;
+			return true;
+		}
+		std::cerr << "No response to the reset of " << description << ", trying again" << std::endl;
+		device->PurgeInput();
 	}
 
 	if (checkResponse(responsePacket, PKT_READY))
@@ -224,7 +255,8 @@ bool CDVDevice::InitDevice()
 	   dump("Soft Reset Response Packet:", &responsePacket, packet_size(responsePacket));
 	   return true;
 	}
-	std::cout << "Successfully did a soft reset on " << description << std::endl;
+	if (!probing)
+		std::cout << "Successfully did a soft reset on " << description << std::endl;
 
 	// ********** turn off parity *********
 	ctrlPacket.start_byte = PKT_HEADER;
@@ -234,7 +266,7 @@ bool CDVDevice::InitDevice()
 	ctrlPacket.payload.ctrl.data.paritymode[0] = 0;
 	ctrlPacket.payload.ctrl.data.paritymode[1] = PKT_PARITYBYTE;
 	ctrlPacket.payload.ctrl.data.paritymode[2] = 0x4U ^ PKT_PARITYMODE ^ PKT_PARITYBYTE;
-	written = device->Write(&ctrlPacket, 8);
+	auto written = device->Write(&ctrlPacket, 8);
 	if (written < 0)
 	{
 		FTDI_Error("Error writing parity control packet", errno);
@@ -259,7 +291,8 @@ bool CDVDevice::InitDevice()
 		return true;
 	}
 
-	std::cout << "Successfully disabled parity on " << description << std::endl;
+	if (!probing)
+		std::cout << "Successfully disabled parity on " << description << std::endl;
 
 	// ********* Product ID and Version *************
 	ctrlPacket.start_byte = PKT_HEADER;
