@@ -416,7 +416,12 @@ bool CTCServer::Open(const std::string &address, const std::string &modules, uin
 	int flags = fcntl(m_ListenFd, F_GETFL, 0);
 	fcntl(m_ListenFd, F_SETFL, flags | O_NONBLOCK);
 
-	std::cout << "Waiting at " << m_Ip << " for transcoder connections for modules " << m_Modules << (m_Password.empty() ? "" : ", password required") << "..." << std::endl;
+	// the modules a tcd may connect for now, not every module that has a slot
+	std::string accepted;
+	for (char m : m_Modules)
+		if (!m_Accept || m_Accept(m))
+			accepted.push_back(m);
+	std::cout << "Waiting at " << m_Ip << " for transcoder connections for modules " << accepted << (m_Password.empty() ? "" : ", password required") << "..." << std::endl;
 
 	// Non-blocking: don't wait for TCD here, maintenance thread handles it
 	return false;

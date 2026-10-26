@@ -1351,25 +1351,35 @@ bool CConfigure::ReadData(const std::string &path)
 	}
 
 	// NXDN
-	if (isDefined(ErrorLevel::mild, JNXDN, JENABLE, g_Keys.nxdn.enable, rval))
+	// enabled unless Enable = false, as every protocol; a configuration without
+	// the section (no Port) leaves it off, as before
+	if (!data.contains(g_Keys.nxdn.enable))
 	{
-		if (GetBoolean(g_Keys.nxdn.enable))
-		{
-			isDefined(ErrorLevel::fatal, JNXDN, JPORT, g_Keys.nxdn.port, rval);
-			checkAutoLink(JNXDN, JAUTOLINKMODULE, g_Keys.nxdn.autolinkmod, rval);
-			isDefined(ErrorLevel::fatal, JNXDN, JREFLECTORID, g_Keys.nxdn.reflectorid, rval);
-		}
+		data[g_Keys.nxdn.enable] = data.contains(g_Keys.nxdn.port);
+		if (!data.contains(g_Keys.nxdn.port))
+			std::cout << "NOTE: no [" << JNXDN << "] Port, " << JNXDN << " is off" << std::endl;
+	}
+	if (GetBoolean(g_Keys.nxdn.enable))
+	{
+		isDefined(ErrorLevel::fatal, JNXDN, JPORT, g_Keys.nxdn.port, rval);
+		checkAutoLink(JNXDN, JAUTOLINKMODULE, g_Keys.nxdn.autolinkmod, rval);
+		isDefined(ErrorLevel::fatal, JNXDN, JREFLECTORID, g_Keys.nxdn.reflectorid, rval);
 	}
 
 	// P25
-	if (isDefined(ErrorLevel::mild, JP25, JENABLE, g_Keys.p25.enable, rval))
+	// enabled unless Enable = false, as every protocol; a configuration without
+	// the section (no Port) leaves it off, as before
+	if (!data.contains(g_Keys.p25.enable))
 	{
-		if (GetBoolean(g_Keys.p25.enable))
-		{
-			isDefined(ErrorLevel::fatal, JP25, JPORT, g_Keys.p25.port, rval);
-			checkAutoLink(JP25, JAUTOLINKMODULE, g_Keys.p25.autolinkmod, rval);
-			isDefined(ErrorLevel::fatal, JP25, JREFLECTORID, g_Keys.p25.reflectorid, rval);
-		}
+		data[g_Keys.p25.enable] = data.contains(g_Keys.p25.port);
+		if (!data.contains(g_Keys.p25.port))
+			std::cout << "NOTE: no [" << JP25 << "] Port, " << JP25 << " is off" << std::endl;
+	}
+	if (GetBoolean(g_Keys.p25.enable))
+	{
+		isDefined(ErrorLevel::fatal, JP25, JPORT, g_Keys.p25.port, rval);
+		checkAutoLink(JP25, JAUTOLINKMODULE, g_Keys.p25.autolinkmod, rval);
+		isDefined(ErrorLevel::fatal, JP25, JREFLECTORID, g_Keys.p25.reflectorid, rval);
 	}
 
 	// USRP
@@ -1789,11 +1799,21 @@ bool CConfigure::ReadData(const std::string &path)
 				isDefined(ErrorLevel::fatal, item.first, JURL,        item.second->url,        rval);
 				isDefined(ErrorLevel::fatal, item.first, JREFRESHMIN, item.second->refreshmin, rval);
 			}
+			else
+			{
+				// not used with a file, but read by the lookup: empty, no error
+				if (!data.contains(item.second->url))
+					data[item.second->url] = "";
+				if (!data.contains(item.second->refreshmin))
+					data[item.second->refreshmin] = 0u;
+			}
 			if (ERefreshType::http != GetRefreshType(item.second->mode))
 			{
 				if (isDefined(ErrorLevel::fatal, item.first, JFILEPATH,   item.second->filepath,   rval))
 					checkFile(item.first, JFILEPATH, data[item.second->filepath]);
 			}
+			else if (!data.contains(item.second->filepath))
+				data[item.second->filepath] = "";
 		}
 	}
 
