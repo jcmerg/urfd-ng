@@ -24,6 +24,7 @@
 #include "Protocol.h"
 #include "DVHeaderPacket.h"
 #include "DVFramePacket.h"
+#include <unordered_set>
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // class
@@ -53,12 +54,15 @@ protected:
 
 	// stream helpers
 	void OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &, const CIp &);
+	uint16_t GetStreamIdFromIp(const CIp &);
 
 	// packet decoding helpers
 	bool IsValidConnectPacket(const CBuffer &, CCallsign *);
 	bool IsValidDisconnectPacket(const CBuffer &, CCallsign *);
-	bool IsValidDvPacket(const CIp &, const CBuffer &, std::unique_ptr<CDvFramePacket> &);
-	bool IsValidDvHeaderPacket(const CIp &, const CBuffer &, std::unique_ptr<CDvHeaderPacket> &);
+	bool IsVoicePacket(const CBuffer &) const;
+	int  VoiceOffset(uint8_t) const;
+	bool IsValidDvPacket(const CBuffer &, uint16_t, std::unique_ptr<CDvFramePacket> &);
+	bool IsValidDvHeaderPacket(const CBuffer &, std::unique_ptr<CDvHeaderPacket> &);
 
 	// packet encoding helpers
 	void EncodeP25Packet(const CDvHeaderPacket &, const CDvFramePacket &, uint32_t, CBuffer &Buffer, bool) const;
@@ -68,7 +72,8 @@ protected:
 
 	// for queue header caches
 	std::unordered_map<char, CP25StreamCacheItem> m_StreamsCache;
-	uint32_t m_uiStreamId;
+	// streams whose TDU was pushed: anything after it until the stream closes is dropped
+	std::unordered_set<uint16_t> m_EndedStreams;
 
 	// config data
 	uint32_t m_ReflectorId;
