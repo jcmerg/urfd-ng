@@ -4,7 +4,7 @@
 
 **Version 0.12.4** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
 
-tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25/NXDN (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF in Software ergänzen. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
+tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF/NXDN (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25 (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF/NXDN in Software ergänzen. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
 ## Inhalt
 
@@ -203,7 +203,7 @@ Alle Werte in dB, -40 bis +40.
 | `OutputGainDMR` | `-18` | DMR/YSF-Ausgang, nach der AGC; jeder Weg nach DMR/YSF, auch DMR → DMR/YSF |
 | `OutputGainDMRBitstream` | `-6` | -24 bis 0 dB (0 = alles vor dem Encoder): Bei Quellen aus D-Star, M17, P25, USRP und SVX wird so viel von `OutputGainDMR` nach dem Encoder über b2 im AMBE2+-Frame angewendet, der Rest als PCM davor, der Encoder bekommt also mehr Pegel; live im Monitor |
 | `OutputGainM17` | `0` | M17/Codec2-Ausgang, nach der AGC |
-| `OutputGainIMBE` | `0` | P25/NXDN-Ausgang, nach der AGC |
+| `OutputGainIMBE` | `0` | P25-Ausgang, nach der AGC |
 | `OutputGainUSRP` | `0` | USRP- und SVX-Ausgang, nach der AGC (beide bekommen dasselbe PCM von tcd) |
 | `DStarGainIn` / `DStarGainOut` | `0` | im DVSI-Chip, D-Star dekodieren / kodieren |
 | `DmrGainIn` / `DmrGainOut` | `0` | im DVSI-Chip, DMR dekodieren / kodieren |
@@ -244,7 +244,7 @@ So arbeitet `ambe`: Der Decoder rechnet γ = Δγ[b2] + 0,5·γ<sub>alt</sub>, u
 | `AGCRelease` | `500` | `500` | Zeitkonstante in ms für das Sinken des Sprachpegels, nur auf deutlich stimmhafter Sprache weit über dem Rauschboden |
 | `AGCMaxGainDown` | `24` | `24` | höchste Absenkung in dB |
 
-Gate und Grenze für die Verstärkung gibt es in zwei Profilen: **AGC digital** für D-Star-, DMR/YSF-, M17- und P25/NXDN-Eingang, **AGC analog** für SVX- und USRP-Eingang.
+Gate und Grenze für die Verstärkung gibt es in zwei Profilen: **AGC digital** für D-Star-, DMR/YSF/NXDN-, M17- und P25-Eingang, **AGC analog** für SVX- und USRP-Eingang.
 
 | Schlüssel | Vorlage | Standard im Code | Bedeutung |
 |---|---|---|---|
@@ -378,7 +378,7 @@ journalctl -u tcd -f
 - **SVX-Codec-Pfad**: eigener `ECodecType::svx` für SVX-Audio
 
 ### Audio
-- **Ausgangsverstärkung pro Codec**: nach der AGC, für D-Star, M17/Codec2, DMR/YSF, P25/NXDN und USRP, angewendet auf Kopien (der gemeinsame Puffer wird nie verändert)
+- **Ausgangsverstärkung pro Codec**: nach der AGC, für D-Star, M17/Codec2, DMR/YSF/NXDN, P25 und USRP, angewendet auf Kopien (der gemeinsame Puffer wird nie verändert)
 - **AMBE2+-Bitstrom-Verstärkung**: `AmbeGainDb` ändert den Parameter b2 im AMBE2+-Frame, mit neu berechnetem Golay(24,12)-FEC für die A-Partition; die B-Partition wird entwürfelt und mit den neuen A-Daten wieder verwürfelt (0.2.3; vorher verlor der Decoder die B-Partition); seit 0.2.5 von der AGC gesteuert und im γ-Bereich gerechnet, die Verstärkung hängt also nicht mehr vom Pegel ab, auch mit nur einem Gerät und einem Codec-Plugin
 - **AGC v3**: gleitendes RMS-Fenster, Verfolgung pro Sprecher, Gate mit Rücklauf, schnelles Anheben nach dem Gate, ungleiche Grenzen, Noise-Gate, Begrenzer, der die angewendete Verstärkung sofort kappt (0.2.3; vorher clippten laute Einsätze nach leiser Sprache), Änderungen live aus dem Dashboard; seit 0.2.3 threadsicher, da die Dekodier-Threads aller Codecs sie nutzen. Seit 0.2.4 hält das Gate 60 ms nach und blendet aus statt umzuschalten (Wortenden werden nicht mehr abgehackt), Rauschen knapp darüber pumpt die Verstärkung nicht mehr hoch, und die Verstärkung läuft als Rampe durch jeden Frame statt alle 20 ms zu springen
 - **AGC digital und AGC analog** (0.3.0): SVX- und USRP-Eingang haben ein eigenes Gate, eine eigene Grenze für die Verstärkung und eine Verstärkung bei geschlossenem Gate (`AGCAnalogNoiseGate`, `AGCAnalogMaxGainUp`, `AGCAnalogGateFloor`), das FM-Rauschen zwischen den Worten wird also abgesenkt statt um bis zu 30 dB angehoben; die übrigen Eingänge nutzen dieselben drei Schlüssel als `AGCDigital…` (0.3.1 hat `AGCNoiseGate` und `AGCMaxGainUp` in `AGCDigitalNoiseGate` und `AGCDigitalMaxGainUp` umbenannt, `AGCDigitalGateFloor` ergänzt, und `agc-analyze` nennt den Schlüssel des Profils des Streams); seit 0.3.2 steht die Verstärkung von SVX und USRP pro Anbindung nur noch in der `urfd.ini` (`UsrpGainIn`/`UsrpGainOut` entfallen); ohne Monitor behält tcd die Werte aus der ini (vorher fiel er nach einer Sekunde auf die eingebauten Standardwerte zurück)

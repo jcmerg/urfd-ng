@@ -4,7 +4,7 @@
 
 **Version 0.12.4** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
-tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF (AMBE2+), and software vocoders for M17 (Codec2) and P25/NXDN (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF in software. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
+tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF/NXDN (AMBE2+), and software vocoders for M17 (Codec2) and P25 (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF/NXDN in software. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
 ## Contents
 
@@ -203,7 +203,7 @@ All gains are in dB, -40 to +40.
 | `OutputGainDMR` | `-18` | DMR/YSF output, after the AGC; every path to DMR/YSF, including DMR → DMR/YSF |
 | `OutputGainDMRBitstream` | `-6` | -24 to 0 dB (0 = all of it before the encoder): for D-Star, M17, P25, USRP and SVX sources this much of `OutputGainDMR` is applied through b2 in the AMBE2+ frame after the encoder, the rest as PCM before it, so the encoder gets more level; live in the monitor |
 | `OutputGainM17` | `0` | M17/Codec2 output, after the AGC |
-| `OutputGainIMBE` | `0` | P25/NXDN output, after the AGC |
+| `OutputGainIMBE` | `0` | P25 output, after the AGC |
 | `OutputGainUSRP` | `0` | USRP and SVX output, after the AGC (both get the same PCM from tcd) |
 | `DStarGainIn` / `DStarGainOut` | `0` | inside the DVSI chip, D-Star decode / encode |
 | `DmrGainIn` / `DmrGainOut` | `0` | inside the DVSI chip, DMR decode / encode |
@@ -244,7 +244,7 @@ How `ambe` works: the decoder computes γ = Δγ[b2] + 0.5·γ<sub>prev</sub>, a
 | `AGCRelease` | `500` | `500` | time constant in ms for falls of the speech level, applied only on clearly voiced speech well above the noise floor |
 | `AGCMaxGainDown` | `24` | `24` | most attenuation in dB |
 
-Gate and gain limit come in two profiles: **AGC digital** for D-Star, DMR/YSF, M17 and P25/NXDN input, **AGC analog** for SVX and USRP input.
+Gate and gain limit come in two profiles: **AGC digital** for D-Star, DMR/YSF/NXDN, M17 and P25 input, **AGC analog** for SVX and USRP input.
 
 | Key | Template | Code default | Meaning |
 |---|---|---|---|
@@ -378,7 +378,7 @@ journalctl -u tcd -f
 - **SVX codec path**: its own `ECodecType::svx` for SVX audio
 
 ### Audio
-- **Output gains per codec**: after the AGC, for D-Star, M17/Codec2, DMR/YSF, P25/NXDN and USRP, applied on copies (the shared buffer is never changed)
+- **Output gains per codec**: after the AGC, for D-Star, M17/Codec2, DMR/YSF/NXDN, P25 and USRP, applied on copies (the shared buffer is never changed)
 - **AMBE2+ bitstream gain**: `AmbeGainDb` adjusts the b2 parameter in the AMBE2+ frame, with Golay(24,12) FEC recomputed for the A partition and the B partition unscrambled and scrambled again with the new A data (0.2.3; before, the decoder lost the B partition); since 0.2.5 driven by the AGC and computed in the gamma domain, so the gain no longer depends on the level, also with a single device and a codec plugin
 - **AGC v3**: sliding RMS window, per-speaker tracking, gate with decay, fast release after the gate, asymmetric limits, noise gate, peak limiter that cuts the applied gain at once (0.2.3; before, loud onsets after quiet speech clipped), live changes from the dashboard; thread safe since 0.2.3, as every codec's decode thread uses it. Since 0.2.4 the gate holds 60 ms and fades out instead of switching (word endings are no longer chopped), noise just above it no longer pumps the gain up, and the gain ramps across each frame instead of stepping every 20 ms
 - **AGC digital and AGC analog** (0.3.0): SVX and USRP input have their own gate, gain limit and gain while the gate is closed (`AGCAnalogNoiseGate`, `AGCAnalogMaxGainUp`, `AGCAnalogGateFloor`), so the FM noise between words is lowered instead of raised by up to 30 dB; the other inputs use the same three keys as `AGCDigital…` (0.3.1 renamed `AGCNoiseGate` and `AGCMaxGainUp` to `AGCDigitalNoiseGate` and `AGCDigitalMaxGainUp`, added `AGCDigitalGateFloor`, and `agc-analyze` names the key of the stream's profile); since 0.3.2 the SVX and USRP gains per connection are only in `urfd.ini` (`UsrpGainIn`/`UsrpGainOut` are gone); without the monitor tcd keeps the ini settings (before, it fell back to the built-in defaults after a second)

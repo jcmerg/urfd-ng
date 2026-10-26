@@ -286,7 +286,7 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
           <div class="row"><label for="og_m17">M17</label><input type="range" min="-24" max="10" id="og_m17"><output id="v_og_m17" for="og_m17">0</output></div>
           <div class="row"><label for="og_dmr">DMR and YSF</label><input type="range" min="-24" max="10" id="og_dmr"><output id="v_og_dmr" for="og_dmr">0</output></div>
           <div class="row"><label for="og_dmr_bs">Of it in the bitstream (b2), other codecs</label><input type="range" min="-24" max="0" id="og_dmr_bs"><output id="v_og_dmr_bs" for="og_dmr_bs">-6</output></div>
-          <div class="row"><label for="og_imbe">P25 and NXDN</label><input type="range" min="-24" max="10" id="og_imbe"><output id="v_og_imbe" for="og_imbe">0</output></div>
+          <div class="row"><label for="og_imbe">P25</label><input type="range" min="-24" max="10" id="og_imbe"><output id="v_og_imbe" for="og_imbe">0</output></div>
           <div class="row"><label for="og_usrp">USRP and SVX</label><input type="range" min="-24" max="10" id="og_usrp"><output id="v_og_usrp" for="og_usrp">0</output></div>
         </div>
         <div class="group">
@@ -315,7 +315,7 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
         </div>
         <div class="group">
           <h3>AGC for digital sources</h3>
-          <p>D-Star, DMR and YSF, M17, P25 and NXDN</p>
+          <p>D-Star, DMR, YSF and NXDN, M17, P25</p>
           <div class="row"><label for="agc_digital_noisegate">Noise gate in dBFS</label><input type="range" min="-70" max="-20" id="agc_digital_noisegate"><output id="v_agc_digital_noisegate" for="agc_digital_noisegate">-55</output></div>
           <div class="row"><label for="agc_digital_maxgain_up">Max boost in dB</label><input type="range" min="0" max="40" id="agc_digital_maxgain_up"><output id="v_agc_digital_maxgain_up" for="agc_digital_maxgain_up">30</output></div>
           <div class="row"><label for="agc_digital_gatefloor">Gate floor in dB</label><input type="range" min="-40" max="0" id="agc_digital_gatefloor"><output id="v_agc_digital_gatefloor" for="agc_digital_gatefloor">0</output></div>
@@ -396,9 +396,9 @@ function pos(v) { return Math.max(0, Math.min(100, (v + 60) / 60 * 100)); }
 function targets(codec) {
   var c = codec.toLowerCase(), out = [];
   if (c.indexOf('star') < 0) out.push('D-Star');
-  if (c.indexOf('dmr') < 0) out.push('DMR/YSF');
+  if (c.indexOf('dmr') < 0) out.push('DMR/YSF/NXDN');
   if (c.indexOf('codec2') < 0) out.push('M17');
-  if (c.indexOf('p25') < 0) out.push('P25/NXDN');
+  if (c.indexOf('p25') < 0) out.push('P25');
   if (c !== 'usrp') out.push('USRP');
   if (c !== 'svx') out.push('SVX');
   return out;
