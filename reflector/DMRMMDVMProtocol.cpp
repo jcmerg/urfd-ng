@@ -264,14 +264,14 @@ void CDmrmmdvmProtocol::Task(void)
 			}
 
 		}
-		else if ( IsValidDisconnectPacket(Buffer, &Callsign) )
+		else if ( IsValidDisconnectPacket(Buffer, &Callsign, &rawDmrId) )
 		{
 			std::cout << "MMDVM: disconnect from " << Callsign << " at " << Ip << std::endl;
 
-			// find client & remove it
+			// find client & remove it, the one that logged in with this id
 			CClients *clients = g_Reflector.GetClients();
 			std::shared_ptr<CClient>client = clients->FindClient(Ip, EProtocol::dmrmmdvm);
-			if ( client != nullptr )
+			if ( (client != nullptr) && (static_cast<CDmrmmdvmClient *>(client.get())->GetRawDmrId() == rawDmrId) )
 			{
 				clients->RemoveClient(client);
 			}
@@ -733,14 +733,16 @@ bool CDmrmmdvmProtocol::IsValidAuthenticationPacket(const CBuffer &Buffer, CCall
 	return valid;
 }
 
-bool CDmrmmdvmProtocol::IsValidDisconnectPacket(const CBuffer &Buffer, CCallsign *callsign)
+bool CDmrmmdvmProtocol::IsValidDisconnectPacket(const CBuffer &Buffer, CCallsign *callsign, uint32_t *rawDmrId)
 {
 	uint8_t tag[] = { 'R','P','T','C','L' };
 
 	bool valid = false;
-	if ( (Buffer.size() == 13) && (Buffer.Compare(tag, sizeof(tag)) == 0) )
+	// MMDVMHost and DMRGateway send the tag and the id, 9 bytes
+	if ( (Buffer.size() >= 9) && (Buffer.size() <= 13) && (Buffer.Compare(tag, sizeof(tag)) == 0) )
 	{
-		uint32_t uiRptrId = MAKEDWORD(MAKEWORD(Buffer.data()[7],Buffer.data()[6]),MAKEWORD(Buffer.data()[5],Buffer.data()[4]));
+		uint32_t uiRptrId = MAKEDWORD(MAKEWORD(Buffer.data()[8],Buffer.data()[7]),MAKEWORD(Buffer.data()[6],Buffer.data()[5]));
+		*rawDmrId = uiRptrId;
 		callsign->SetDmrid(uiRptrId, true);
 
 		valid = callsign->IsValid();

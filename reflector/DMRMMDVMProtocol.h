@@ -126,7 +126,7 @@ protected:
 	// packet decoding helpers
 	bool IsValidConnectPacket(const CBuffer &, CCallsign *, const CIp &, uint32_t *rawDmrId);
 	bool IsValidAuthenticationPacket(const CBuffer &, CCallsign *, const CIp &, uint32_t *rawDmrId);
-	bool IsValidDisconnectPacket(const CBuffer &, CCallsign *);
+	bool IsValidDisconnectPacket(const CBuffer &, CCallsign *, uint32_t *rawDmrId);
 	bool IsValidConfigPacket(const CBuffer &, CCallsign *, const CIp &);
 	bool IsValidOptionPacket(const CBuffer &, CCallsign *);
 	bool IsValidKeepAlivePacket(const CBuffer &, CCallsign *);
