@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.29.4-dht** | tcd 0.12.4 | Dashboard v2.14.1
+**urfd 4.30.0-dht** | tcd 0.13.0 | Dashboard v2.14.1
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -914,6 +914,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **Protokoll-Korrekturen (4.30.0)**: Ein Stream endet mit seinem Endpaket statt 1,6 s später, ein abgelaufener Stream sendet in jedem Protokoll das normale Ende; das Echo spielt auch auf transcodierten Modulen ab; DMR TS1 und Dual-Slot funktionieren; DMR+ beschädigt eingehend nicht mehr jedes dritte AMBE-Frame und sendet ausgehend sein Endpaket; NXDN-Header und TX_REL realer Gateways werden erkannt, das Gesprächsende erreicht die Hörer und NXDN-Clients teilen sich keinen Stream mehr; P25 sendet seine TDU und Sprecher schneiden sich nicht mehr ab; das USRP-Unkey beendet den Stream und SET_INFO wird gelesen, wie chan_usrp es schreibt; die D-Star-Client-Anbindungen sprechen das zugeordnete entfernte Modul an und nehmen nur dessen Streams, Header-CRC und Slow-Data-Header stimmen; kein Deadlock beim ersten YSFClient-Stream auf ein transcodiertes Modul; P25 und NXDN sind wie die anderen Protokolle standardmäßig an; ein zweiter tcd für dieselben Module wird abgewiesen
 - **MMDVMClient**: Vollständiger MMDVM-Client für BrandMeister-/DMR+-Master: mehrere TGs pro Modul (primär TX/RX, sekundär nur RX), Timeslots, Ersatz-DMR-ID, Erzeugung des Options-Strings; bis zu neun Verbindungen gleichzeitig (4.21.0) mit Brücken-Regeln je Netz
 - **BrandMeister-API**: Optionale Anbindung an die REST API v2: Abgleich beim Start behält dynamische TGs (entfernt nur TGs, die weder in der Konfiguration noch in der Laufzeit-Zuordnung stehen), TGs per API statt per Kerchunk hinzufügen und entfernen, eingestellt über `BrandMeisterApiKey`
 - **SvxReflector**: TCP/UDP-Client für SvxLink-FM-Server: OPUS-Codec, Audio in beide Richtungen, einstellbare RX/TX-Verstärkung, eine gewählte TG, die übrigen überwacht und bei Aktivität gewählt, Trennung bei TCP-Sendefehler mit sofortiger Neuverbindung
@@ -991,6 +992,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.13.0**: ein IMBE-Encoder und -Decoder je Modul (zwei P25-Module gleichzeitig stören sich nicht mehr), ein 300-Hz-Hochpass vor Codec2 für P25-Audio, baut und läuft unter macOS, DV3000/DV3003 werden an der Produkt-ID des Chips erkannt, ein Gerät, das nicht antwortet, wird ausgelassen statt tcd zu beenden, exklusiver Zugriff auf die serielle Schnittstelle
 - **In diesem Repository**: tcd liegt mit seiner Historie in `tcd/`; es baut gegen die gemeinsamen urfd-Quellen (`TCPacketDef.h`, `TCSocket.*`) aus `../reflector`, beide Seiten sprechen also immer dasselbe Protokoll
 - **Serieller Zugriff ohne libftd2xx**: AMBE-Geräte über den Kernel-Treiber `ftdi_sio` und `/dev/serial/by-id` (POSIX-Anbindung von Jason Kendall), RTS/CTS-Flusskontrolle, USB-Latenz-Timer auf 1 ms; Geräte, die ein älterer libftd2xx-tcd vom Treiber gelöst hat, werden beim Start wieder gebunden; ein verlorenes Gerät startet tcd über systemd neu
 - **Geräteauswahl**: `DeviceSerial` muss exakt passen: USB-Seriennummer, libftd2xx-Form mit Port-Buchstabe, Name unter by-id oder Gerätedatei; `tcd --list-devices` zeigt sie an

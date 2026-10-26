@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.29.4-dht** | tcd 0.12.4 | Dashboard v2.14.1
+**urfd 4.30.0-dht** | tcd 0.13.0 | Dashboard v2.14.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -936,6 +936,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **Protocol fixes (4.30.0)**: a stream ends with its end packet instead of 1.6 s later, and a stream that times out sends every protocol's normal end; the echo plays back on transcoded modules; DMR TS1 and dual slot work; DMR+ in no longer corrupts every third AMBE frame and DMR+ out sends its end packet; NXDN headers and TX_REL of real gateways are recognised, the call end reaches the listeners and NXDN clients no longer share one stream; P25 sends its TDU and talkers no longer cut each other; the USRP unkey ends the stream and SET_INFO is read as chan_usrp writes it; the D-Star client connectors address the mapped remote module and take only its streams, header CRC and slow data header are right; no deadlock on the first YSFClient stream into a transcoded module; P25 and NXDN are on by default like the other protocols; a second tcd for the same modules is refused
 - **MMDVMClient**: Full MMDVM protocol client for BrandMeister/DMR+ masters — multi-TG per module (primary TX/RX + secondary RX-only), per-timeslot support, fallback DMR ID, options string generation; up to nine connections at once (4.21.0) with per-network bridging rules
 - **BrandMeister API**: Optional REST API v2 integration — startup sync preserves dynamic TGs (only removes TGs not in config or runtime map), API-based TG add/remove instead of kerchunk, configurable via `BrandMeisterApiKey`
 - **SvxReflector**: TCP/UDP client for SvxLink FM servers — OPUS codec, bidirectional audio bridging, configurable RX/TX gain, one selected TG with the others monitored and selected on activity, auto-disconnect on TCP send failure with immediate reconnect
@@ -1013,6 +1014,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.13.0**: an IMBE encoder and decoder per module (two P25 modules at once no longer garble each other), a 300 Hz high-pass in front of Codec2 for P25 audio, builds and runs on macOS, DV3000/DV3003 told apart by the chip's product id, a device that does not answer is left out instead of stopping tcd, exclusive serial access
 - **In this repository**: tcd moved into `tcd/` with its history; it builds against the urfd sources it shares (`TCPacketDef.h`, `TCSocket.*`) from `../reflector`, so both sides always speak the same protocol
 - **Serial access without libftd2xx**: AMBE devices through the kernel's `ftdi_sio` driver and `/dev/serial/by-id` (POSIX backend by Jason Kendall), RTS/CTS flow control, USB latency timer set to 1 ms; devices an older libftd2xx based tcd left unbound are bound back at startup; a lost device restarts tcd through systemd
 - **Device selection**: `DeviceSerial` matches the USB serial, the libftd2xx form with the port letter, the by-id name or the device node exactly; `tcd --list-devices` shows them
