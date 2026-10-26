@@ -75,16 +75,17 @@ protected:
 	bool IsValidDisconnectPacket(const CBuffer &);
 	bool IsValidDvHeaderPacket(const CIp &, const CBuffer &, std::unique_ptr<CDvHeaderPacket> &);
 	bool IsValidDvFramePacket(const CIp &, const CBuffer &, std::unique_ptr<CDvHeaderPacket> &, std::array<std::unique_ptr<CDvFramePacket>, 4> &);
-	bool IsValidDvLastFramePacket(const CIp &, const CBuffer &);
+	bool IsValidDvLastFramePacket(const CIp &, const CBuffer &, std::unique_ptr<CDvFramePacket> &);
+
+	// the open stream of a client (every NXDN client has its own), and a header for a new one
+	std::shared_ptr<CPacketStream> GetStreamByIp(const CIp &, uint16_t &);
+	bool MakeDvHeader(const CIp &, const CBuffer &, std::unique_ptr<CDvHeaderPacket> &);
 
 	// DV packet encoding helpers -- dstid is the destination the receiving client polls
 	// with, so every distinct dstid on a module needs its own encoded buffer
 	bool EncodeNXDNHeaderPacket(const CDvHeaderPacket &, uint16_t dstid, CBuffer &, bool islast = false);
 	bool EncodeNXDNPacket(const CDvHeaderPacket &, uint16_t dstid, uint32_t, const CDvFramePacket *, CBuffer &);
 	bool EncodeLastNXDNPacket(const CDvHeaderPacket &, CBuffer &) const;
-
-	// uiStreamId helpers
-	uint32_t IpToStreamId(const CIp &) const;
 
 	void encode(const unsigned char*, unsigned char*) const;
 	void decode(const unsigned char*, unsigned char*) const;
@@ -122,7 +123,6 @@ protected:
 	std::unordered_map<char, CNXDNStreamCacheItem> m_StreamsCache;
 
 	unsigned char m_seqNo;
-	uint32_t m_uiStreamId;
 	uint8_t m_lich;
 	uint8_t m_sacch[5];
 	uint8_t m_layer3[22];

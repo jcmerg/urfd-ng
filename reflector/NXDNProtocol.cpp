@@ -159,6 +159,7 @@ void CNXDNProtocol::Task(void)
 
 	std::unique_ptr<CDvHeaderPacket>               Header;
 	std::array<std::unique_ptr<CDvFramePacket>, 4> Frames;
+	std::unique_ptr<CDvFramePacket>                LastFrame;
 
 	// handle incoming packets
 #if NXDN_IPV6==true
@@ -182,15 +183,16 @@ void CNXDNProtocol::Task(void)
 		else if ( IsValidDvHeaderPacket(Ip, Buffer, Header) )
 		{
 			// node linked and callsign muted?
-			if ( g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::nxdn, Header->GetRpt2Module())  )
+			if ( Header && g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::nxdn, Header->GetRpt2Module())  )
 			{
 				// handle it
 				OnDvHeaderPacketIn(Header, Ip);
 			}
 		}
-		else if ( IsValidDvLastFramePacket(Ip, Buffer) )
+		else if ( IsValidDvLastFramePacket(Ip, Buffer, LastFrame) )
 		{
-			m_uiStreamId = 0;
+			if ( LastFrame )
+				OnDvFramePacketIn(LastFrame, &Ip);
 		}
 		else if ( IsValidConnectPacket(Buffer, &Callsign, &ConnectDstId) )
 		{
@@ -516,43 +518,99 @@ bool CNXDNProtocol::IsValidDisconnectPacket(const CBuffer &Buffer)
 	return false;
 }
 
+// The LICH tells the frames apart (MMDVMHost, NXDNGateway and urfd's own encoder): a header
+// and a TX_REL are RDCH/SACCH_NS with FACCH1 in both halves (LICH 0x81), the layer 3 message
+// type -- VCALL or TX_REL -- in the FACCH1. Voice is SACCH_SS, with FACCH1 stolen from none,
+// one or both halves. Some clients send the header and the end with a LICH of 0, which is a
+// SACCH_NS/FACCH1 LICH as well, but mark the end only in the flags byte.
+static bool IsNxdnDataPacket(const CBuffer &Buffer)
+{
+	return (Buffer.size() == 43) && !memcmp(Buffer.data(), "NXDND", 5);
+}
+
+static bool IsNxdnFacchPacket(const CBuffer &Buffer)
+{
+	const uint8_t lich = Buffer.data()[10];
+	return (((lich >> 4) & 0x03U) == NXDN_LICH_USC_SACCH_NS) && (((lich >> 2) & 0x03U) == NXDN_LICH_STEAL_FACCH);
+}
+
+static bool IsNxdnTxRel(const CBuffer &Buffer)
+{
+	return ((Buffer.data()[15] & 0x3FU) == NXDN_MESSAGE_TYPE_TX_REL) || (Buffer.data()[9] & 0x08U);
+}
+
+std::shared_ptr<CPacketStream> CNXDNProtocol::GetStreamByIp(const CIp &Ip, uint16_t &sid)
+{
+	for ( auto &it : m_Streams )
+	{
+		const CIp *owner = it.second->GetOwnerIp();
+		if ( owner && (*owner == Ip) )
+		{
+			sid = it.first;
+			return it.second;
+		}
+	}
+	return nullptr;
+}
+
+bool CNXDNProtocol::MakeDvHeader(const CIp &Ip, const CBuffer &Buffer, std::unique_ptr<CDvHeaderPacket> &header)
+{
+	uint16_t uiSrcId = ((Buffer.data()[5] << 8) & 0xff00) | (Buffer.data()[6] & 0xff);
+	// resolve NXDN ID to callsign (NXDN DB -> DMR DB fallback, see Callsign.cpp)
+	CCallsign csMY = CCallsign("", 0, uiSrcId);
+	if (!csMY.IsValid())
+	{
+		// every packet of the transmission ends up here, so once per hour and ID
+		const bool log = RejectLog("NXDN: unknown ID", std::string(Ip.GetAddress()) + " ID " + std::to_string(uiSrcId));
+		if (m_FallbackNxdnId != 0)
+		{
+			csMY = CCallsign("", 0, m_FallbackNxdnId);
+			csMY.SetNXDNid(uiSrcId, false);
+			if (log)
+				std::cout << "NXDN: using fallback for unknown ID " << uiSrcId << std::endl;
+		}
+		else
+		{
+			if (log)
+				std::cout << "NXDN: dropping voice from unknown ID " << uiSrcId << " (no fallback)" << std::endl;
+			return false;
+		}
+	}
+	// dstId (bytes 7/8) first -- it is the only selector clients without a
+	// RAN setting can reach -- then the RAN from SACCH byte 0 (lower 6 bits)
+	uint16_t uiDstId = ((Buffer.data()[7] << 8) & 0xff00) | (Buffer.data()[8] & 0xff);
+	char mod = DstIdToModule(uiDstId);
+	if (mod == ' ') mod = RANToModule(Buffer.data()[11] & 0x3F);
+	if (mod == ' ') mod = m_AutolinkModule;
+	// a stream id of its own for every client, so parallel talkers do not collide
+	uint16_t sid;
+	do
+		sid = static_cast<uint16_t>(::rand());
+	while ( (0 == sid) || (m_Streams.end() != m_Streams.find(sid)) );
+	CCallsign rpt1(csMY);
+	CCallsign rpt2 = m_ReflectorCallsign;
+	rpt1.SetCSModule(mod);
+	rpt2.SetCSModule(' ');
+	header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, sid, false));
+	return true;
+}
+
 bool CNXDNProtocol::IsValidDvHeaderPacket(const CIp &Ip, const CBuffer &Buffer, std::unique_ptr<CDvHeaderPacket> &header)
 {
-	if((Buffer.size() == 43) && !memcmp(Buffer.data(), "NXDND", 5) && (Buffer.data()[10] == NXDN_LICH_USC_SACCH_NS) && (Buffer.data()[9] == 1) )
+	if ( IsNxdnDataPacket(Buffer) && IsNxdnFacchPacket(Buffer) && !IsNxdnTxRel(Buffer) && ((Buffer.data()[15] & 0x3FU) == NXDN_MESSAGE_TYPE_VCALL) )
 	{
-		auto stream = GetStream(m_uiStreamId, &Ip);
-		if ( !stream )
+		uint16_t sid;
+		auto stream = GetStreamByIp(Ip, sid);
+		if ( stream )
 		{
-			uint16_t uiSrcId = ((Buffer.data()[5] << 8) & 0xff00) | (Buffer.data()[6] & 0xff);
-			// resolve NXDN ID to callsign (NXDN DB -> DMR DB fallback, see Callsign.cpp)
-			CCallsign csMY = CCallsign("", 0, uiSrcId);
-			if (!csMY.IsValid())
-			{
-				if (m_FallbackNxdnId != 0)
-				{
-					csMY = CCallsign("", 0, m_FallbackNxdnId);
-					csMY.SetNXDNid(uiSrcId, false);
-					std::cout << "NXDN: using fallback for unknown ID " << uiSrcId << std::endl;
-				}
-				else
-				{
-					std::cout << "NXDN: dropping voice from unknown ID " << uiSrcId << " (no fallback)" << std::endl;
-					return false;
-				}
-			}
-			// dstId (bytes 7/8) first -- it is the only selector clients without a
-			// RAN setting can reach -- then the RAN from SACCH byte 0 (lower 6 bits)
-			uint16_t uiDstId = ((Buffer.data()[7] << 8) & 0xff00) | (Buffer.data()[8] & 0xff);
-			char mod = DstIdToModule(uiDstId);
-			if (mod == ' ') mod = RANToModule(Buffer.data()[11] & 0x3F);
-			if (mod == ' ') mod = m_AutolinkModule;
-			m_uiStreamId = static_cast<uint32_t>(::rand());
-			CCallsign rpt1(csMY);
-			CCallsign rpt2 = m_ReflectorCallsign;
-			rpt1.SetCSModule(mod);
-			rpt2.SetCSModule(' ');
-			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, m_uiStreamId, false));
+			// a repeated header: the stream is open, keep it alive
+			stream->Tickle();
 		}
+		else
+		{
+			MakeDvHeader(Ip, Buffer, header);
+		}
+		// recognised in any case, a null header means nothing to open
 		return true;
 	}
 	return false;
@@ -560,87 +618,73 @@ bool CNXDNProtocol::IsValidDvHeaderPacket(const CIp &Ip, const CBuffer &Buffer, 
 
 bool CNXDNProtocol::IsValidDvFramePacket(const CIp &Ip, const CBuffer &Buffer, std::unique_ptr<CDvHeaderPacket> &header, std::array<std::unique_ptr<CDvFramePacket>, 4> &frames)
 {
-	if((Buffer.size() == 43) && !memcmp(Buffer.data(), "NXDND", 5) && (Buffer.data()[10] != NXDN_LICH_USC_SACCH_NS) )
+	if ( IsNxdnDataPacket(Buffer) && (((Buffer.data()[10] >> 4) & 0x03U) == NXDN_LICH_USC_SACCH_SS) )
 	{
-		auto stream = GetStream(m_uiStreamId, &Ip);
+		uint16_t sid;
+		auto stream = GetStreamByIp(Ip, sid);
 		if ( !stream )
 		{
-			uint16_t uiSrcId = ((Buffer.data()[5] << 8) & 0xff00) | (Buffer.data()[6] & 0xff);
-			// resolve NXDN ID to callsign (NXDN DB -> DMR DB fallback)
-			CCallsign csMY = CCallsign("", 0, uiSrcId);
-			if (!csMY.IsValid())
-			{
-				if (m_FallbackNxdnId != 0)
-				{
-					csMY = CCallsign("", 0, m_FallbackNxdnId);
-					csMY.SetNXDNid(uiSrcId, false);
-					std::cout << "NXDN: using fallback for unknown ID " << uiSrcId << std::endl;
-				}
-				else
-				{
-					std::cout << "NXDN: dropping voice from unknown ID " << uiSrcId << " (no fallback)" << std::endl;
-					return false;
-				}
-			}
-			// dstId (bytes 7/8) first -- it is the only selector clients without a
-			// RAN setting can reach -- then the RAN from SACCH byte 0 (lower 6 bits)
-			uint16_t uiDstId = ((Buffer.data()[7] << 8) & 0xff00) | (Buffer.data()[8] & 0xff);
-			char mod = DstIdToModule(uiDstId);
-			if (mod == ' ') mod = RANToModule(Buffer.data()[11] & 0x3F);
-			if (mod == ' ') mod = m_AutolinkModule;
-			m_uiStreamId = static_cast<uint32_t>(::rand());
-			CCallsign rpt1(csMY);
-			CCallsign rpt2 = m_ReflectorCallsign;
-			rpt1.SetCSModule(mod);
-			rpt2.SetCSModule(' ');
-			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, m_uiStreamId, false));
-
+			// late entry
+			if ( !MakeDvHeader(Ip, Buffer, header) )
+				return false;
+			sid = header->GetStreamId();
 			if ( g_GateKeeper.MayTransmit(header->GetMyCallsign(), Ip, EProtocol::nxdn, header->GetRpt2Module())  )
 			{
 				OnDvHeaderPacketIn(header, Ip);
 			}
+			// not allowed or the module is busy: nothing to push the frames to
+			if ( !GetStreamByIp(Ip, sid) )
+				return false;
 		}
 
-		// get DV frames
+		// get DV frames, two in each half; a half that carries a FACCH1 instead
+		// (option FACCH1_1 = the first, FACCH1_2 = the second, FACCH = both) is silence
+		const uint8_t option = (Buffer.data()[10] >> 2) & 0x03U;
+		const bool voice1 = (option == NXDN_LICH_STEAL_NONE) || (option == 2U);
+		const bool voice2 = (option == NXDN_LICH_STEAL_NONE) || (option == 1U);
+
 		uint8_t   ambe49[7];
-
-		uint8_t   ambe0[9];
-		uint8_t   ambe1[9];
-		uint8_t   ambe2[9];
-		uint8_t   ambe3[9];
-
-		memcpy(ambe49, Buffer.data() + 15, 7);
-		encode(ambe49, ambe0);
+		uint8_t   ambe[4][9];
+		for ( int i = 0; i < 4; i++ )
+			memcpy(ambe[i], AMBE72_SILENCE, 9);
 
 		uint8_t t[7];
-		const uint8_t *d = &(Buffer.data()[21]);
-		for(int i = 0; i < 6; ++i){
-			t[i] = d[i] << 1;
-			t[i] |= (1 & (d[i+1] >> 7));
+		const uint8_t *d;
+		if ( voice1 )
+		{
+			memcpy(ambe49, Buffer.data() + 15, 7);
+			encode(ambe49, ambe[0]);
+
+			d = &(Buffer.data()[21]);
+			for(int i = 0; i < 6; ++i){
+				t[i] = d[i] << 1;
+				t[i] |= (1 & (d[i+1] >> 7));
+			}
+			t[6] = d[6] << 1;
+
+			memcpy(ambe49, t, 7);
+			encode(ambe49, ambe[1]);
 		}
-		t[6] = d[6] << 1;
 
-		memcpy(ambe49, t, 7);
-		encode(ambe49, ambe1);
+		if ( voice2 )
+		{
+			memcpy(ambe49, Buffer.data() + 29, 7);
+			encode(ambe49, ambe[2]);
 
-		memcpy(ambe49, Buffer.data() + 29, 7);
-		encode(ambe49, ambe2);
+			d = &(Buffer.data()[35]);
+			for(int i = 0; i < 6; ++i){
+				t[i] = d[i] << 1;
+				t[i] |= (1 & (d[i+1] >> 7));
+			}
+			t[6] = d[6] << 1;
 
-		d = &(Buffer.data()[35]);
-		for(int i = 0; i < 6; ++i){
-			t[i] = d[i] << 1;
-			t[i] |= (1 & (d[i+1] >> 7));
+			memcpy(ambe49, t, 7);
+			encode(ambe49, ambe[3]);
 		}
-		t[6] = d[6] << 1;
-
-		memcpy(ambe49, t, 7);
-		encode(ambe49, ambe3);
 
 		// get DV frames
-		frames[0] = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(ambe0, m_uiStreamId, 0, false));
-		frames[1] = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(ambe1, m_uiStreamId, 1, false));
-		frames[2] = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(ambe2, m_uiStreamId, 2, false));
-		frames[3] = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(ambe3, m_uiStreamId, 3, false));
+		for ( int i = 0; i < 4; i++ )
+			frames[i] = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(ambe[i], sid, i, false));
 
 		// check validity of packets
 		if ( frames[0] && frames[0]->IsValid() && frames[1] && frames[1]->IsValid() && frames[2] && frames[2]->IsValid() && frames[3] && frames[3]->IsValid() )
@@ -649,11 +693,16 @@ bool CNXDNProtocol::IsValidDvFramePacket(const CIp &Ip, const CBuffer &Buffer, s
 	return false;
 }
 
-bool CNXDNProtocol::IsValidDvLastFramePacket(const CIp &Ip, const CBuffer &Buffer)
+bool CNXDNProtocol::IsValidDvLastFramePacket(const CIp &Ip, const CBuffer &Buffer, std::unique_ptr<CDvFramePacket> &frame)
 {
-	if((Buffer.size() == 43) && !memcmp(Buffer.data(), "NXDND", 5) && (Buffer.data()[10] == NXDN_LICH_USC_SACCH_NS) && ((Buffer.data()[9U] & 0x08) == 0x08) )
+	if ( IsNxdnDataPacket(Buffer) && IsNxdnFacchPacket(Buffer) && IsNxdnTxRel(Buffer) )
 	{
-			return true;
+		// the end of the client's stream goes to the listeners as a last packet
+		uint16_t sid;
+		if ( GetStreamByIp(Ip, sid) )
+			frame = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(AMBE72_SILENCE, sid, 0, true));
+		// recognised in any case, a null frame means no stream to end
+		return true;
 	}
 	return false;
 }
