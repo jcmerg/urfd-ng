@@ -31,11 +31,12 @@
 class CNXDNStreamCacheItem
 {
 public:
-	CNXDNStreamCacheItem() : m_iSeqCounter(0) {}
+	CNXDNStreamCacheItem() : m_iSeqCounter(0), m_bDropped(false) {}
 
 	CDvHeaderPacket m_dvHeader;
 	CDvFramePacket  m_dvFrames[4];
 	uint32_t        m_iSeqCounter;
+	bool            m_bDropped;		// no NXDN ID for the stream, nothing of it goes out
 };
 
 class CNXDNProtocol : public CProtocol
@@ -108,6 +109,7 @@ protected:
 	uint8_t get_lich();
 	void get_sacch(uint8_t *);
 	void encode_crc6(uint8_t *, uint8_t);
+	void encode_crc12(uint8_t *, uint8_t);
 
 	// debug
 	bool DebugTestDecodePacket(const CBuffer &);

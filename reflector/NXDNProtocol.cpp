@@ -376,7 +376,8 @@ void CNXDNProtocol::HandleQueue(void)
 				static std::set<char> warned;
 				if (warned.insert(mod).second)
 					std::cout << "NXDN: dropping outbound stream from " << hdr.GetMyCallsign() << " on module " << mod << " - no NXDN ID" << std::endl;
-				m_StreamsCache.erase(mod);
+				// its frames and its end as well, up to the next header
+				m_StreamsCache[mod].m_bDropped = true;
 				continue;
 			}
 
@@ -384,8 +385,14 @@ void CNXDNProtocol::HandleQueue(void)
 			// this relies on queue feeder setting valid module id
 			m_StreamsCache[mod].m_dvHeader = hdr;
 			m_StreamsCache[mod].m_iSeqCounter = 0;
+			m_StreamsCache[mod].m_bDropped = false;
 
 			encode = EEncode::header;
+		}
+		// a stream without an NXDN ID
+		else if ( m_StreamsCache[mod].m_bDropped )
+		{
+			continue;
 		}
 		// check if it's a last frame
 		else if ( packet->IsLastPacket() )
@@ -437,7 +444,8 @@ void CNXDNProtocol::HandleQueue(void)
 							EncodeNXDNHeaderPacket((CDvHeaderPacket &)*packet.get(), dstid, buffer);
 							break;
 						case EEncode::last:
-							EncodeNXDNHeaderPacket((CDvHeaderPacket &)*packet.get(), dstid, buffer, true);
+							// the last packet is a frame, the TX_REL is built from the stream's header
+							EncodeNXDNHeaderPacket(m_StreamsCache[mod].m_dvHeader, dstid, buffer, true);
 							break;
 						case EEncode::frames:
 							EncodeNXDNPacket(m_StreamsCache[mod].m_dvHeader, dstid, seqNo, m_StreamsCache[mod].m_dvFrames, buffer);
@@ -751,8 +759,13 @@ bool CNXDNProtocol::EncodeNXDNHeaderPacket(const CDvHeaderPacket &Header, uint16
 	set_layer3_dstid(dstId);
 	set_layer3_grp(true);
 	set_layer3_blks(0U);
-	memcpy(&Buffer.data()[15U], m_layer3, 14U);
-	memcpy(&Buffer.data()[29U], m_layer3, 14U);
+	// FACCH1: 80 bits layer 3, CRC-12, 4 tail bits, the same in both halves
+	uint8_t facch1[14U];
+	memset(facch1, 0, sizeof(facch1));
+	memcpy(facch1, m_layer3, 10U);
+	encode_crc12(facch1, 80U);
+	memcpy(&Buffer.data()[15U], facch1, 14U);
+	memcpy(&Buffer.data()[29U], facch1, 14U);
 
 	if (Buffer.data()[10U] == 0x81U || Buffer.data()[10U] == 0x83U) {
 		Buffer.data()[9U] |= Buffer.data()[15U] == 0x01U ? 0x04U : 0x00U;
@@ -1078,6 +1091,26 @@ void CNXDNProtocol::encode_crc6(uint8_t *d, uint8_t len)
 	uint8_t n = len;
 	for (uint8_t i = 2U; i < 8U; i++, n++) {
 		bool b = READ_BIT((&crc), i);
+		WRITE_BIT(d, n, b);
+	}
+}
+
+void CNXDNProtocol::encode_crc12(uint8_t *d, uint8_t len)
+{
+	uint16_t crc = 0x0FFFU;
+
+	for (uint32_t i = 0U; i < len; i++) {
+		bool bit1 = READ_BIT(d, i) != 0x00U;
+		bool bit2 = (crc & 0x0800U) == 0x0800U;
+		crc <<= 1;
+
+		if (bit1 ^ bit2)
+			crc ^= 0x080FU;
+	}
+	crc &= 0x0FFFU;
+	uint8_t n = len;
+	for (uint8_t i = 0U; i < 12U; i++, n++) {
+		bool b = (crc >> (11U - i)) & 0x01U;
 		WRITE_BIT(d, n, b);
 	}
 }
