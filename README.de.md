@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.30.0-dht** | tcd 0.13.0 | Dashboard v2.14.1
+**urfd 4.30.1-dht** | tcd 0.13.1 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -673,7 +673,7 @@ Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Das
 
 Der JSON-Report enthält außerdem ein Array `DynamicTGs` mit Protokoll, TG, Modul und Restlaufzeit aller aktiven dynamischen Zuordnungen.
 
-### Dashboard v2.14.1
+### Dashboard v2.14.2
 In v2.9.0 neu gestaltet als Frontplatte eines Funkgeräts: Ein bernsteinfarbenes LCD zeigt, wer gerade sendet, die Module sind ein Tastenfeld, der Rest sind schlichte Tabellen. Davor: dunkles Design (v2.6.0), robust gegen Ausfälle des Verzeichnisses (v2.6.1), M17-Positionen in der Last-Heard-Liste (v2.7.0), Eintrag ins Verzeichnis an den Reflektor abgegeben (v2.8.0), Sicherheitskorrekturen (v2.8.1, v2.8.2), Korrekturen an Statusdatei und Admin-Socket (v2.8.3). Seit v2.10.0 steht der Vorname neben dem Rufzeichen, aus den ID-Datenbanken, die urfd lädt (ab urfd 4.12.0).
 
 **Seiten:**
@@ -914,6 +914,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **MMDVMClient-Frequenzen (4.30.1)**: Der Hotspot ist duplex (beide Zeitschlitze brauchen das), und BrandMeister lehnt einen Duplex-Hotspot mit RX = TX gleich nach seiner Konfiguration ab; die Vorgaben ohne `RxFreq`/`TxFreq` (beide 439,000 MHz) kamen nie hinein. Sie haben jetzt eine Ablage, urfd und inicheck warnen bei `RxFreq = TxFreq`, und eine abgelehnte Konfiguration wird als solche gemeldet
 - **Protokoll-Korrekturen (4.30.0)**: Ein Stream endet mit seinem Endpaket statt 1,6 s später, ein abgelaufener Stream sendet in jedem Protokoll das normale Ende; das Echo spielt auch auf transcodierten Modulen ab; DMR TS1 und Dual-Slot funktionieren; DMR+ beschädigt eingehend nicht mehr jedes dritte AMBE-Frame und sendet ausgehend sein Endpaket; NXDN-Header und TX_REL realer Gateways werden erkannt, das Gesprächsende erreicht die Hörer und NXDN-Clients teilen sich keinen Stream mehr; P25 sendet seine TDU und Sprecher schneiden sich nicht mehr ab; das USRP-Unkey beendet den Stream und SET_INFO wird gelesen, wie chan_usrp es schreibt; die D-Star-Client-Anbindungen sprechen das zugeordnete entfernte Modul an und nehmen nur dessen Streams, Header-CRC und Slow-Data-Header stimmen; kein Deadlock beim ersten YSFClient-Stream auf ein transcodiertes Modul; P25 und NXDN sind wie die anderen Protokolle standardmäßig an; ein zweiter tcd für dieselben Module wird abgewiesen
 - **MMDVMClient**: Vollständiger MMDVM-Client für BrandMeister-/DMR+-Master: mehrere TGs pro Modul (primär TX/RX, sekundär nur RX), Timeslots, Ersatz-DMR-ID, Erzeugung des Options-Strings; bis zu neun Verbindungen gleichzeitig (4.21.0) mit Brücken-Regeln je Netz
 - **BrandMeister-API**: Optionale Anbindung an die REST API v2: Abgleich beim Start behält dynamische TGs (entfernt nur TGs, die weder in der Konfiguration noch in der Laufzeit-Zuordnung stehen), TGs per API statt per Kerchunk hinzufügen und entfernen, eingestellt über `BrandMeisterApiKey`
@@ -956,6 +957,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v2.14.2**: die Version im Kopf ohne `-dht`, damit der Status in der Kopfzeile bleibt
 - **Dashboard v2.14.1**: die Seite Links zeigt ein Band nur bei D-Star-Links, wo der Suffix der Port-Buchstabe des Repeaters ist; sonst ist er das Modul, und ein Knoten auf Modul D erschien als Dongle
 - **Dashboard v2.14.0**: Admin-Seite: die Abschnitte geladener Plugins, gezeichnet aus der Beschreibung, die jedes Plugin in `status` liefert (ab urfd 4.24.0); die Protokoll-Liste zeigt die Beschreibung eines Plugins. Seit urfd 4.26.0 verteilen sich mehr als 8 Module gleichmäßig auf höchstens 5 Spalten (9 = 5 + 4, 12 = 4 x 3), jede Taste mit dem Namen ihres Moduls, und die Plugin-Abschnitte haben denselben Abstand zueinander wie die übrigen
 - **Dashboard v2.13.0**: Admin-Seite: mehrere MMDVMClient-Verbindungen, jede beim Hinzufügen einer TG wählbar, Name und Netz in der TG-Tabelle, ein Reconnect-Button pro Verbindung (ab urfd 4.21.0); die Protokoll-Liste lässt MMDVMClient2 bis 9 wie die erste weg
@@ -992,6 +994,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.13.1**: ein verlorenes AMBE-Gerät beendet tcd wieder (seit 0.12.4 meldete er "Lost the AMBE device" und lief ohne es weiter), und ein Gerät, das 3 s lang nichts beantwortet, gilt als verloren: der Dienst startet tcd ohne es neu, und ein Codec-Plugin oder ein Standby-tcd übernimmt; `OutputGainDMR = -14` in der Vorlage, der Pegel der Sprache bei BrandMeister (-18 ließ DMR/YSF rund 4 dB darunter)
 - **tcd 0.13.0**: ein IMBE-Encoder und -Decoder je Modul (zwei P25-Module gleichzeitig stören sich nicht mehr), ein 300-Hz-Hochpass vor Codec2 für P25-Audio, baut und läuft unter macOS, DV3000/DV3003 werden an der Produkt-ID des Chips erkannt, ein Gerät, das nicht antwortet, wird ausgelassen statt tcd zu beenden, exklusiver Zugriff auf die serielle Schnittstelle
 - **In diesem Repository**: tcd liegt mit seiner Historie in `tcd/`; es baut gegen die gemeinsamen urfd-Quellen (`TCPacketDef.h`, `TCSocket.*`) aus `../reflector`, beide Seiten sprechen also immer dasselbe Protokoll
 - **Serieller Zugriff ohne libftd2xx**: AMBE-Geräte über den Kernel-Treiber `ftdi_sio` und `/dev/serial/by-id` (POSIX-Anbindung von Jason Kendall), RTS/CTS-Flusskontrolle, USB-Latenz-Timer auf 1 ms; Geräte, die ein älterer libftd2xx-tcd vom Treiber gelöst hat, werden beim Start wieder gebunden; ein verlorenes Gerät startet tcd über systemd neu
