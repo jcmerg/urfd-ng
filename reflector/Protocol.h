@@ -113,6 +113,7 @@ protected:
 	// stream handle helpers
 	std::shared_ptr<CPacketStream> GetStream(uint16_t, const CIp * = nullptr);
 	void CheckStreamsTimeout(void);
+	void CloseStreamsOf(const CIp &);
 
 	// queue helper
 	virtual void HandleQueue(void) = 0;
