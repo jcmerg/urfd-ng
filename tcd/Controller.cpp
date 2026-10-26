@@ -393,6 +393,8 @@ bool CController::InitVocoders()
 		}
 		c2_16[c] = std::unique_ptr<CCodec2>(new CCodec2(false));
 		c2_32[c] = std::unique_ptr<CCodec2>(new CCodec2(true));
+		imbe_enc[c] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
+		imbe_dec[c] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
 	}
 
 	// the software vocoders of the codec plugins: CodecDStar / CodecDMR in tcd.ini
@@ -906,7 +908,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 		memcpy(imbe_buf, packet->GetAudioSamples(), sizeof(imbe_buf));
 		ApplyGain(imbe_buf, 160, outgain_imbe_num);
 		std::lock_guard<std::mutex> lock(p25vocoder_mux);
-		p25vocoder.encode_4400(imbe_buf, imbe);
+		imbe_enc[packet->GetModule()]->encode_4400(imbe_buf, imbe);
 	}
 	packet->SetP25Data(imbe);
 
@@ -1163,7 +1165,7 @@ void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
 
 	{
 		std::lock_guard<std::mutex> lock(p25vocoder_mux);
-		p25vocoder.encode_4400(gained, imbe);
+		imbe_enc[packet->GetModule()]->encode_4400(gained, imbe);
 	}
 	packet->SetP25Data(imbe);
 	// we might be all done...
@@ -1177,7 +1179,7 @@ void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	int16_t tmp[160] = { 0 };
 	{
 		std::lock_guard<std::mutex> lock(p25vocoder_mux);
-		p25vocoder.decode_4400(tmp, (uint8_t*)packet->GetP25Data());
+		imbe_dec[packet->GetModule()]->decode_4400(tmp, (uint8_t*)packet->GetP25Data());
 	}
 	g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 	{
