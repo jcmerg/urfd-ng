@@ -54,8 +54,8 @@ public:
 
 	CDvHeaderPacket m_dvHeader;
 	CDvFramePacket  m_dvFrames[5];
-
-	//uint8_t  m_uiSeqId;
+	uint8_t         m_uiPending = 0;	// frames of the current group of 5 not sent yet
+	uint8_t         m_uiFrameId = 0;	// network frame counter of the last group sent
 };
 
 class CYsfProtocol : public CProtocol
@@ -87,7 +87,7 @@ protected:
 	bool IsValidDvPacket(const CBuffer &, CYSFFICH *);
 	bool IsValidDvHeaderPacket(const CIp &, const CYSFFICH &, const CBuffer &, std::unique_ptr<CDvHeaderPacket> &, std::array<std::unique_ptr<CDvFramePacket>, 5> &);
 	bool IsValidDvFramePacket(const CIp &, const CYSFFICH &, const CBuffer &, std::unique_ptr<CDvHeaderPacket> &, std::array<std::unique_ptr<CDvFramePacket>, 5> &);
-	bool IsValidDvLastFramePacket(const CIp &, const CYSFFICH &, const CBuffer &, std::unique_ptr<CDvFramePacket> &, std::unique_ptr<CDvFramePacket> &);
+	bool IsValidDvLastFramePacket(const CIp &, const CYSFFICH &, const CBuffer &, std::unique_ptr<CDvFramePacket> &);
 
 	// DV packet encoding helpers
 	void EncodeConnectAckPacket(CBuffer *) const;
@@ -95,7 +95,8 @@ protected:
 	//void EncodeDisconnectPacket(CBuffer *, std::shared_ptr<CClient>);
 	bool EncodeYSFHeaderPacket(const CDvHeaderPacket &, CBuffer *) const;
 	bool EncodeYSFPacket(const CDvHeaderPacket &, const CDvFramePacket *, CBuffer *) const;
-	bool EncodeLastYSFPacket(const CDvHeaderPacket &, CBuffer *) const;
+	bool EncodeLastYSFPacket(const CDvHeaderPacket &, uint8_t, CBuffer *) const;
+	uint8_t ModuleToDGID(char) const;
 
 	// Wires-X packet decoding helpers
 	bool IsValidwirexPacket(const CBuffer &, CYSFFICH *, CCallsign *, int *, int*);

@@ -87,7 +87,6 @@ void CYsfProtocol::Task(void)
 
 	std::unique_ptr<CDvHeaderPacket>               Header;
 	std::array<std::unique_ptr<CDvFramePacket>, 5> Frames;
-	std::unique_ptr<CDvFramePacket>                OneFrame;
 	std::unique_ptr<CDvFramePacket>                LastFrame;
 
 	// handle outgoing packets
@@ -143,9 +142,8 @@ void CYsfProtocol::Task(void)
 					//OnDvFramePacketIn(Frames[1], &Ip);
 				}
 			}
-			else if ( IsValidDvLastFramePacket(Ip, Fich, Buffer, OneFrame, LastFrame) )
+			else if ( IsValidDvLastFramePacket(Ip, Fich, Buffer, LastFrame) )
 			{
-				OnDvFramePacketIn(OneFrame, &Ip);
 				OnDvFramePacketIn(LastFrame, &Ip);
 			}
 		}
@@ -321,25 +319,41 @@ void CYsfProtocol::HandleQueue(void)
 
 		// get our sender's id
 		const auto mod = packet->GetPacketModule();
+		auto &cache = m_StreamsCache[mod];
 
-		// encode
-		CBuffer buffer;
+		// encode, the end of a stream can take two packets
+		std::vector<CBuffer> buffers;
 
 		// check if it's header
 		if ( packet->IsDvHeader() )
 		{
 			// update local stream cache
 			// this relies on queue feeder setting valid module id
-			m_StreamsCache[mod].m_dvHeader = CDvHeaderPacket((CDvHeaderPacket &)*packet.get());
+			cache.m_dvHeader = CDvHeaderPacket((CDvHeaderPacket &)*packet.get());
+			cache.m_uiPending = 0;
+			cache.m_uiFrameId = 0;
 
 			// encode it
-			EncodeYSFHeaderPacket((CDvHeaderPacket &)*packet.get(), &buffer);
+			buffers.emplace_back();
+			EncodeYSFHeaderPacket((CDvHeaderPacket &)*packet.get(), &buffers.back());
 		}
 		// check if it's a last frame
 		else if ( packet->IsLastPacket() )
 		{
+			// a group of 5 that is not complete (sources that are not YSF) goes out filled
+			// with silence, or the listeners lose its frames
+			if ( cache.m_uiPending > 0 )
+			{
+				for ( uint8_t i = cache.m_uiPending; i < 5; i++ )
+					cache.m_dvFrames[i] = CDvFramePacket(AMBE72_SILENCE, 0, 0, false);
+				buffers.emplace_back();
+				EncodeYSFPacket(cache.m_dvHeader, cache.m_dvFrames, &buffers.back());
+				cache.m_uiFrameId = cache.m_dvFrames[0].GetYsfPacketFrameId();
+				cache.m_uiPending = 0;
+			}
 			// encode it
-			EncodeLastYSFPacket(m_StreamsCache[mod].m_dvHeader, &buffer);
+			buffers.emplace_back();
+			EncodeLastYSFPacket(cache.m_dvHeader, cache.m_uiFrameId, &buffers.back());
 		}
 		// otherwise, just a regular DV frame
 		else
@@ -348,18 +362,20 @@ void CYsfProtocol::HandleQueue(void)
 			uint8_t sid = packet->GetYsfPacketSubId();
 			if (sid <= 4)
 			{
-				//std::cout << (int)sid;
-				m_StreamsCache[mod].m_dvFrames[sid] = CDvFramePacket((CDvFramePacket &)*packet.get());
+				cache.m_dvFrames[sid] = CDvFramePacket((CDvFramePacket &)*packet.get());
+				cache.m_uiPending = sid + 1;
 				if ( sid == 4 )
 				{
-
-					EncodeYSFPacket(m_StreamsCache[mod].m_dvHeader, m_StreamsCache[mod].m_dvFrames, &buffer);
+					buffers.emplace_back();
+					EncodeYSFPacket(cache.m_dvHeader, cache.m_dvFrames, &buffers.back());
+					cache.m_uiFrameId = cache.m_dvFrames[0].GetYsfPacketFrameId();
+					cache.m_uiPending = 0;
 				}
 			}
 		}
 
 		// send it
-		if ( buffer.size() > 0 )
+		if ( ! buffers.empty() )
 		{
 			// and push it to all our clients linked to the module and who are not streaming in
 			CClients *clients = g_Reflector.GetClients();
@@ -370,9 +386,9 @@ void CYsfProtocol::HandleQueue(void)
 				// is this client busy ?
 				if ( !client->IsAMaster() && (client->GetReflectorModule() == packet->GetPacketModule()) )
 				{
-					// no, send the packet
-					Send(buffer, client->GetIp());
-
+					// no, send the packets
+					for ( const auto &buffer : buffers )
+						Send(buffer, client->GetIp());
 				}
 			}
 			g_Reflector.ReleaseClients();
@@ -587,7 +603,7 @@ bool CYsfProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fich, con
 	return false;
 }
 
-bool CYsfProtocol::IsValidDvLastFramePacket(const CIp &Ip, const CYSFFICH &Fich, const CBuffer &Buffer, std::unique_ptr<CDvFramePacket> &oneframe, std::unique_ptr<CDvFramePacket> &lastframe)
+bool CYsfProtocol::IsValidDvLastFramePacket(const CIp &Ip, const CYSFFICH &Fich, const CBuffer &Buffer, std::unique_ptr<CDvFramePacket> &lastframe)
 {
 	// DV header ?
 	if ( Fich.getFI() == YSF_FI_TERMINATOR )
@@ -595,11 +611,8 @@ bool CYsfProtocol::IsValidDvLastFramePacket(const CIp &Ip, const CYSFFICH &Fich,
 		// get stream id
 		uint32_t uiStreamId = IpToStreamId(Ip);
 
-		// get DV frames
+		// get DV frame: the terminator carries no voice, the last packet is silence
 		{
-			uint8_t  uiAmbe[9];
-			memset(uiAmbe, 0x00, sizeof(uiAmbe));
-
 			char sz[YSF_CALLSIGN_LENGTH+1];
 			::memcpy(sz, &(Buffer.data()[14]), YSF_CALLSIGN_LENGTH);
 			sz[YSF_CALLSIGN_LENGTH] = 0;
@@ -612,12 +625,11 @@ bool CYsfProtocol::IsValidDvLastFramePacket(const CIp &Ip, const CYSFFICH &Fich,
 
 			CCallsign csMY = CCallsign((const char *)sz);
 
-			oneframe  = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(uiAmbe, uiStreamId, Fich.getFN(), 0, 0, csMY, false));
-			lastframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(uiAmbe, uiStreamId, Fich.getFN(), 1, 0, csMY, true));
+			lastframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(AMBE72_SILENCE, uiStreamId, Fich.getFN(), 0, 0, csMY, true));
 		}
 
 		// check validity of packets
-		if ( (oneframe && oneframe->IsValid()) && lastframe && lastframe->IsValid() )
+		if ( lastframe && lastframe->IsValid() )
 			return true;
 	}
 	return false;
@@ -669,7 +681,7 @@ bool CYsfProtocol::EncodeYSFHeaderPacket(const CDvHeaderPacket &Header, CBuffer 
 	fich.setMR(YSF_MR_BUSY);
 	fich.setDT(YSF_DT_VD_MODE2);
 	fich.setSQL(0U);
-	fich.setSQ(0U);
+	fich.setSQ(ModuleToDGID(Header.GetPacketModule()));
 	fich.encode(fichd);
 	Buffer->Append(fichd, YSF_FICH_LENGTH_BYTES);
 	// payload
@@ -719,12 +731,14 @@ bool CYsfProtocol::EncodeYSFPacket(const CDvHeaderPacket &Header, const CDvFrame
 	fich.setFI(YSF_FI_COMMUNICATIONS);
 	fich.setCS(2U);
 	fich.setFN(DvFrames[0].GetYsfPacketId());
-	fich.setFT(6U);
+	// FN runs 0..7 through the VD mode 2 DCH cycle (dest, src, down, up, rem1/2,
+	// rem3/4, DT1, DT2), so the frame total is 7
+	fich.setFT(7U);
 	fich.setDev(0U);
 	fich.setMR(YSF_MR_BUSY);
 	fich.setDT(YSF_DT_VD_MODE2);
 	fich.setSQL(0U);
-	fich.setSQ(0U);
+	fich.setSQ(ModuleToDGID(Header.GetPacketModule()));
 	fich.encode(fichd);
 	Buffer->Append(fichd, YSF_FICH_LENGTH_BYTES);
 	// payload
@@ -780,7 +794,7 @@ bool CYsfProtocol::EncodeYSFPacket(const CDvHeaderPacket &Header, const CDvFrame
 	return true;
 }
 
-bool CYsfProtocol::EncodeLastYSFPacket(const CDvHeaderPacket &Header, CBuffer *Buffer) const
+bool CYsfProtocol::EncodeLastYSFPacket(const CDvHeaderPacket &Header, uint8_t lastfid, CBuffer *Buffer) const
 {
 	uint8_t tag[]  = { 'Y','S','F','D' };
 	uint8_t dest[] = { 'A','L','L',' ',' ',' ',' ',' ',' ',' ' };
@@ -801,8 +815,9 @@ bool CYsfProtocol::EncodeLastYSFPacket(const CDvHeaderPacket &Header, CBuffer *B
 	Buffer->Append((uint8_t *)sz, YSF_CALLSIGN_LENGTH);
 	// dest
 	Buffer->Append(dest, 10);
-	// net frame counter
-	Buffer->Append((uint8_t)0x00);
+	// net frame counter, one on from the last voice packet, and bit 0 marks the end
+	// of the transmission (YSFGateway and MMDVMHost look at it, not at the FICH)
+	Buffer->Append((uint8_t)(((lastfid + 2U) & 0xFEU) | 0x01U));
 	// FS
 	Buffer->Append((uint8_t *)YSF_SYNC_BYTES, YSF_SYNC_LENGTH_BYTES);
 	// FICH
@@ -816,7 +831,7 @@ bool CYsfProtocol::EncodeLastYSFPacket(const CDvHeaderPacket &Header, CBuffer *B
 	fich.setMR(YSF_MR_BUSY);
 	fich.setDT(YSF_DT_VD_MODE2);
 	fich.setSQL(0U);
-	fich.setSQ(0U);
+	fich.setSQ(ModuleToDGID(Header.GetPacketModule()));
 	fich.encode(fichd);
 	Buffer->Append(fichd, YSF_FICH_LENGTH_BYTES);
 	// payload
@@ -1056,6 +1071,15 @@ uint32_t CYsfProtocol::CalcHash(const uint8_t *buffer, int len) const
 ////////////////////////////////////////////////////////////////////////////////////////
 // uiStreamId helpers
 
+
+// DG-ID of a module, the inverse of the DG-ID routing in OnDvHeaderPacketIn: radios
+// that select the module by DG-ID only open their squelch for that DG-ID
+uint8_t CYsfProtocol::ModuleToDGID(char module) const
+{
+	if ( m_EnableDGID && (module >= 'A') && (module <= 'Z') )
+		return 10U + (module - 'A');
+	return 0U;
+}
 
 // uiStreamId helpers
 uint32_t CYsfProtocol::IpToStreamId(const CIp &ip) const
