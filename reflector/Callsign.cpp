@@ -28,10 +28,13 @@
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructors
 
+// what the default constructor leaves in m_Callsign: a lookup that found nothing
+#define BLANK_CALLSIGN 0x2020202020202020ul
+
 CCallsign::CCallsign()
 {
 	// blank all
-	m_Callsign.l = 0x2020202020202020ul;
+	m_Callsign.l = BLANK_CALLSIGN;
 	m_Suffix.u = 0x20202020u;
 	m_Module = ' ';
 	m_uiDmrid = 0;
@@ -77,7 +80,7 @@ CCallsign::CCallsign(const std::string &cs, uint32_t dmrid, uint16_t nxdnid) : C
 			m_Callsign = *pItem;
 		g_LDid.Unlock();
 
-		if (m_Callsign.l && 0 == nxdnid)
+		if (BLANK_CALLSIGN != m_Callsign.l && 0 == nxdnid)
 		{
 			g_LNid.Lock();
 			m_uiNXDNid = g_LNid.FindNXDNid(GetKey());
@@ -93,7 +96,7 @@ CCallsign::CCallsign(const std::string &cs, uint32_t dmrid, uint16_t nxdnid) : C
 		g_LNid.Unlock();
 
 		// Fallback: try NXDN ID as DMR ID in DMR database
-		if (!m_Callsign.l)
+		if (BLANK_CALLSIGN == m_Callsign.l)
 		{
 			g_LDid.Lock();
 			auto pDmr = g_LDid.FindCallsign((uint32_t)nxdnid);
@@ -105,7 +108,7 @@ CCallsign::CCallsign(const std::string &cs, uint32_t dmrid, uint16_t nxdnid) : C
 			g_LDid.Unlock();
 		}
 
-		if (m_Callsign.l && 0 == dmrid)
+		if (BLANK_CALLSIGN != m_Callsign.l && 0 == dmrid)
 		{
 			g_LDid.Lock();
 			m_uiDmrid = g_LDid.FindDmrid(GetKey());
