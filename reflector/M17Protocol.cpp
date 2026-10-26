@@ -713,15 +713,12 @@ void CM17Protocol::OnPacketModePacketIn(const CBuffer &Buffer, const CIp &Ip, ch
 	else if ( sender != nullptr )
 	{
 		const char module = sender->GetReflectorModule();
-		// the raw address, @ALL would not decode as a callsign
-		auto dstBase = M17Address(Buffer.data() + 4);
-		dstBase.erase(std::min(dstBase.find(' '), dstBase.size()));
 		if ( !g_GateKeeper.MayTransmit(src, Ip, EProtocol::m17, module) )
 		{
 			// muted
 		}
 		// PARROT (or ECHO) gets the packet straight back, to @ALL, as on mrefd
-		else if ( (' ' == peerModule) && ((0 == dstBase.compare("PARROT")) || (0 == dstBase.compare("ECHO"))) )
+		else if ( (' ' == peerModule) && IsParrotAddress(Buffer.data() + 4) )
 		{
 			CBuffer reply(Buffer);
 			memset(reply.data() + 4, 0xFF, 6);
@@ -888,6 +885,24 @@ std::string CM17Protocol::M17Address(const uint8_t *in)
 	return s;
 }
 
+// PARROT or ECHO, also as # address (#PARROT), the echo test
+bool CM17Protocol::IsParrotAddress(const uint8_t *in)
+{
+	uint64_t coded = 0;
+	for (int i = 0; i < 6; i++)
+		coded = (coded << 8) | in[i];
+	if (coded == 0xffffffffffffu)
+		return false;	// @ALL
+	if (coded > 0xee6b27ffffffu)
+		coded -= 0xee6b28000000u;	// # address
+	const std::string alphabet(" ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/.");
+	std::string s;
+	for ( ; coded; coded /= 40 )
+		s += alphabet[coded % 40];
+	s.erase(std::min(s.find(' '), s.size()));
+	return (0 == s.compare("PARROT")) || (0 == s.compare("ECHO"));
+}
+
 bool CM17Protocol::IsM17ClientCallsign(const uint8_t *in) const
 {
 	return std::regex_match(M17Address(in), m_ClientRegEx);
@@ -995,8 +1010,7 @@ bool CM17Protocol::IsValidDvPacket(const CBuffer &Buffer, const CIp &Ip, char pe
 
 			// except a test to PARROT (as on mrefd) or ECHO, that goes to the echo module
 			const char echo = g_Reflector.GetEchoModule();
-			const auto dst = m17.IsBroadcast() ? std::string() : header->GetRpt2Callsign().GetBase();
-			if ( (' ' != echo) && ((0 == dst.compare("PARROT")) || (0 == dst.compare("ECHO"))) )
+			if ( (' ' != echo) && IsParrotAddress(Buffer.data() + 6) )
 				module = echo;
 
 			CCallsign rpt(g_Reflector.GetCallsign());

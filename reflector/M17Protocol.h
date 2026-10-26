@@ -90,6 +90,7 @@ protected:
 	// the callsign checks of mrefd, on the raw M17 address
 	static std::string M17Address(const uint8_t *);
 	bool IsM17ClientCallsign(const uint8_t *) const;
+	static bool IsParrotAddress(const uint8_t *);
 
 	// packet decoding helpers
 	bool IsValidConnectPacket(const CBuffer &, CCallsign &, char &);
