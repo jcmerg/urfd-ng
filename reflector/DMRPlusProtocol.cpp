@@ -233,17 +233,21 @@ void CDmrplusProtocol::HandleQueue(void)
 
 		// encode
 		CBuffer buffer;
+		auto &cache = m_StreamsCache[mod];
 
 		// check if it's header
 		if ( packet->IsDvHeader() )
 		{
 			// update local stream cache
 			// this relies on queue feeder setting valid module id
-			m_StreamsCache[mod].m_dvHeader = CDvHeaderPacket((const CDvHeaderPacket &)*packet.get());
-			m_StreamsCache[mod].m_uiSeqId = 4;
+			cache.m_dvHeader = CDvHeaderPacket((const CDvHeaderPacket &)*packet.get());
+			cache.m_uiSeqId = 4;
+			// a packet held from a stream that ended without its last one is stale
+			cache.m_Held.clear();
 
 			// encode it
 			EncodeDMRPlusHeaderPacket((const CDvHeaderPacket &)*packet.get(), &buffer);
+			SendBufferToClients(buffer, mod);
 		}
 		else
 		{
@@ -251,41 +255,32 @@ void CDmrplusProtocol::HandleQueue(void)
 			switch ( packet->GetDmrPacketSubid() )
 			{
 			case 1:
-				m_StreamsCache[mod].m_dvFrame0 = CDvFramePacket((const CDvFramePacket &)*packet.get());
+				cache.m_dvFrame0 = CDvFramePacket((const CDvFramePacket &)*packet.get());
 				break;
 			case 2:
-				m_StreamsCache[mod].m_dvFrame1 = CDvFramePacket((const CDvFramePacket &)*packet.get());
+				cache.m_dvFrame1 = CDvFramePacket((const CDvFramePacket &)*packet.get());
 				break;
 			case 3:
-				EncodeDMRPlusPacket(m_StreamsCache[mod].m_dvHeader, m_StreamsCache[mod].m_dvFrame0, m_StreamsCache[mod].m_dvFrame1, (const CDvFramePacket &)*packet.get(), m_StreamsCache[mod].m_uiSeqId, &buffer);
-				m_StreamsCache[mod].m_uiSeqId = GetNextSeqId(m_StreamsCache[mod].m_uiSeqId);
+				EncodeDMRPlusPacket(cache.m_dvHeader, cache.m_dvFrame0, cache.m_dvFrame1, (const CDvFramePacket &)*packet.get(), cache.m_uiSeqId, &buffer);
+				cache.m_uiSeqId = GetNextSeqId(cache.m_uiSeqId);
 				break;
 			default:
 				break;
 			}
 
-		}
-
-		// send it
-		if ( buffer.size() > 0 )
-		{
-			// and push it to all our clients linked to the module and who are not streaming in
-			CClients *clients = g_Reflector.GetClients();
-			auto it = clients->begin();
-			std::shared_ptr<CClient>client = nullptr;
-			while ( (client = clients->FindNextClient(EProtocol::dmrplus, it)) != nullptr )
+			// a voice packet waits for the next one, so the stream's last one
+			// (a DMR terminator brings no voice) can go out as packet type 3
+			if ( buffer.size() > 0 )
 			{
-				// is this client busy ?
-				if ( !client->IsAMaster() && (client->GetReflectorModule() == packet->GetPacketModule()) )
-				{
-					// no, send the packet
-					Send(buffer, client->GetIp());
-				}
+				SendBufferToClients(cache.m_Held, mod);
+				cache.m_Held = buffer;
 			}
-			g_Reflector.ReleaseClients();
-
-			// debug
-			//buffer.DebugDump(g_Reflector.m_DebugFile);
+			if ( packet->IsLastPacket() && (cache.m_Held.size() > 0) )
+			{
+				cache.m_Held.ReplaceAt(8, (uint8_t)3);
+				SendBufferToClients(cache.m_Held, mod);
+				cache.m_Held.clear();
+			}
 		}
 	}
 }

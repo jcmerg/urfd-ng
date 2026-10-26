@@ -499,7 +499,6 @@ void CDmrmmdvmProtocol::HandleQueue(void)
 		// voice frames are built once and patched per-client (only DMRD header bytes)
 		bool isHeader = packet->IsDvHeader();
 		bool isTerminator = !isHeader && packet->IsLastPacket();
-		bool isVoice = !isHeader && !isTerminator;
 
 		if ( isHeader )
 		{
@@ -516,13 +515,11 @@ void CDmrmmdvmProtocol::HandleQueue(void)
 			cache.m_uiSourceTAMask = 0;
 			cache.m_bSourceTA = false;
 		}
-		else if ( isTerminator )
-		{
-			// seqId will be incremented after per-client send
-		}
 		else
 		{
-			// voice frame — update local stream cache or encode triplet
+			// voice frame — update local stream cache or encode triplet; also
+			// the last one, DMR+ sends voice with it (a DMR terminator has
+			// none, sub id 0): its burst goes out before the terminator
 			switch ( packet->GetDmrPacketSubid() )
 			{
 			case 1:
