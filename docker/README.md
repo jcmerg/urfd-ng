@@ -9,14 +9,17 @@ The tcd transcoder (in [`../tcd`](../tcd/)) runs here too, with AMBE sticks or i
 The easiest way is [`setup.sh`](../setup.sh) in the repository root, see [docs/INSTALL.md](../docs/INSTALL.md). It creates the configuration and runs the steps below; the configuration by hand is in [docs/INSTALL-ADVANCED.md](../docs/INSTALL-ADVANCED.md#reflector-in-docker).
 
 ```bash
-# Build and start
+# Build and start what this machine has a configuration for
 docker/build.sh start
 
-# Or manually
+# Or manually, naming the service
 cd docker
-docker compose build
-docker compose up -d
+docker compose build urfd && docker compose up -d urfd                                      # urfd only
+docker compose --profile tcd build tcd && docker compose --profile tcd up -d tcd            # tcd only (software)
+docker compose -f docker-compose.yml -f docker-compose.tcd-sticks.yml --profile tcd up -d tcd   # tcd with AMBE sticks
 ```
+
+`build.sh` decides by the files in `$URFD_DATA`: `config/urfd.ini` builds urfd, `tcd/tcd.ini` builds tcd, both build both; on a transcoder machine it builds tcd alone. Which build script does what (`docker/build.sh`, `reflector/build.sh`, `tcd/build.sh`) and why each part runs one way only: [docs/INSTALL-ADVANCED.md](../docs/INSTALL-ADVANCED.md#what-gets-built).
 
 ## Configuration
 

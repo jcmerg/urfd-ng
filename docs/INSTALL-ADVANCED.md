@@ -7,6 +7,7 @@ This guide is for people who know their way around Linux and want to set things 
 ## Contents
 
 - [Overview](#overview)
+- [What gets built](#what-gets-built)
 - [Reflector in Docker](#reflector-in-docker)
 - [Reflector without Docker](#reflector-without-docker)
 - [Dashboard without Docker](#dashboard-without-docker)
@@ -26,6 +27,40 @@ This guide is for people who know their way around Linux and want to set things 
 Requirements: Debian 12, Ubuntu 22.04 or newer, or Raspberry Pi OS; x86_64, arm64 or armhf. The ports to open are listed in [INSTALL.md](INSTALL.md#ports).
 
 The templates in [`config/`](../config/) explain every key. Before starting, check `urfd.ini` with `inicheck -q urfd.ini`: it prints warnings and errors and fails on errors.
+
+## What gets built
+
+Not sure what you need? Use [`setup.sh`](../setup.sh), see [INSTALL.md](INSTALL.md): it asks what runs on this machine and builds exactly that. The rest of this section is for setting it up yourself.
+
+There are three build scripts, one per way of running things:
+
+| Script | Builds | Runs as | Configuration |
+|---|---|---|---|
+| `docker/build.sh` | urfd (with the dashboard and the plugins in `plugins/`) and/or tcd (with the codec plugins in `tcd/plugins/`) as images | containers `urfd` and `tcd` | `$URFD_DATA` (default `/opt/urfd`) |
+| `reflector/build.sh` | urfd, `inicheck`, `dbutil` | systemd unit `urfd` | `/usr/local/etc/urfd/` |
+| `tcd/build.sh` | tcd, `tcdmon`, the codec plugins | systemd unit `tcd` | `/usr/local/etc/tcd.ini` |
+
+`docker/build.sh` has no switches: it builds what this machine has a configuration for.
+
+| In `$URFD_DATA` | `docker/build.sh` builds and starts |
+|---|---|
+| `config/urfd.ini` | urfd |
+| `tcd/tcd.ini` | tcd; with a `DeviceSerial` or without a `CodecPlugin` it adds `docker-compose.tcd-sticks.yml`, so the container gets the AMBE sticks |
+| both | both |
+
+So a reflector machine gets `config/urfd.ini` ([Reflector in Docker](#reflector-in-docker)), a transcoder machine only `tcd/tcd.ini` ([tcd in Docker](../tcd/README.md#tcd-in-docker)), and `docker/build.sh start` builds the right thing on each. Another data directory: `URFD_DATA=/srv/urfd docker/build.sh start`.
+
+The same with `docker compose`, naming the service yourself (in `docker/`):
+
+```bash
+sudo docker compose build urfd && sudo docker compose up -d urfd                     # urfd only
+sudo docker compose --profile tcd build tcd && sudo docker compose --profile tcd up -d tcd   # tcd in software
+sudo docker compose -f docker-compose.yml -f docker-compose.tcd-sticks.yml --profile tcd up -d tcd   # tcd with sticks
+```
+
+tcd sits behind the profile `tcd`, and the sticks file has to be named by hand. Next to tcd, give the urfd container `TCD_MONITOR_PORT=<MonitorHttpPort of tcd.ini>` for the dashboard's `/tcd/` (default 8080; `docker/build.sh` reads it from `tcd.ini`).
+
+Run each part one way only: tcd either as a container or with `tcd/build.sh`, urfd either as a container or with `reflector/build.sh`. `tcd/build.sh` enables its systemd unit, so on a machine with the tcd container it would start a second tcd at the next boot; undo it with `sudo systemctl disable --now tcd`. Updating keeps to the way it was installed, see [Updates](#updates).
 
 ## Reflector in Docker
 
