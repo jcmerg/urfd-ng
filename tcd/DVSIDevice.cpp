@@ -37,6 +37,15 @@
 #include "Configure.h"
 #include "TcdStats.h"
 
+// a device with packets waiting that answers nothing for this long is taken as lost,
+// like an unplugged one: tcd stops and its service restarts it without the device
+#define DEVICE_SILENCE_MS 3000
+
+static int64_t SteadyMs()
+{
+	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 extern CConfigure g_Conf;
 
 CDVDevice::CDVDevice(Encoding t) : type(t), devtype(Edvtype::dv3000), buffer_depth(0), keep_running(true)
@@ -359,6 +368,7 @@ bool CDVDevice::InitDevice()
 
 void CDVDevice::Start()
 {
+	m_lastAnswer.store(SteadyMs());
 	feedFuture = std::async(std::launch::async, &CDVDevice::FeedDevice, this);
 	readFuture = std::async(std::launch::async, &CDVDevice::ReadDevice, this);
 }
@@ -629,6 +639,7 @@ void CDVDevice::FeedDevice()
 							SendAudio(index, packet->GetAudioSamples());
 					}
 					buffer_depth++;
+					m_lastSent.store(SteadyMs());
 				}
 			}
 		}
@@ -663,6 +674,16 @@ void CDVDevice::ReadDevice()
 				buffer_depth = 0;
 				buffer_cv.notify_one();
 			}
+
+			// a device that is still there but answers nothing (a hung chip) would hold
+			// the modules forever: give up as for a lost one, so tcd restarts without it
+			// and a codec plugin or a standby tcd takes over
+			if (0 == RxBytes && m_lastSent.load() - m_lastAnswer.load() > DEVICE_SILENCE_MS)
+			{
+				std::cerr << "The AMBE device " << description << " has not answered for " << DEVICE_SILENCE_MS / 1000 << " s, shutting down" << std::endl;
+				raise(SIGINT);
+				return;
+			}
 		}
 
 		if (RxBytes < 0)
@@ -676,6 +697,7 @@ void CDVDevice::ReadDevice()
 		SDV_Packet p;
 		if (! GetResponse(p))
 		{
+			m_lastAnswer.store(SteadyMs());
 			ProcessPacket(p);
 		}
 	}

@@ -64,6 +64,9 @@ protected:
 	std::mutex buffer_mutex;
 	std::condition_variable buffer_cv;
 	std::atomic<bool> keep_running;
+	// steady clock ms of the last packet sent and the last answer: a device that gets
+	// packets for DEVICE_SILENCE_MS without answering one is taken as lost
+	std::atomic<int64_t> m_lastSent{0}, m_lastAnswer{0};
 	CPacketQueue input_queue;
 	std::future<void> feedFuture, readFuture;
 	std::string description, productid;
