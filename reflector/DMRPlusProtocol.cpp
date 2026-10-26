@@ -452,16 +452,15 @@ bool CDmrplusProtocol::IsValidDvFramePacket(const CIp &Ip, const CBuffer &Buffer
 			// more frames details
 			//uint8_t uiSeqId = Buffer.data()[4];
 			uint8_t uiVoiceSeq = (Buffer.data()[18] & 0x0F) - 7; // aka slot type
-			//uint32_t uiDstId = *(uint32_t *)(&Buffer.data()[64]) & 0x00FFFFFF;
-			//uint32_t uiSrcId = *(uint32_t *)(&Buffer.data()[68]) & 0x00FFFFFF;
 
 			// crack payload
-			uint8_t dmrframe[33];
+			uint8_t dmrframe[34];
 			uint8_t dmr3ambe[27];
 			uint8_t dmrambe[9];
 			uint8_t dmrsync[7];
-			// get the 33 bytes ambe
-			memcpy(dmrframe, &(Buffer.data()[26]), 33);
+			// get the 33 bytes ambe, in 16 bit words of swapped bytes: the
+			// last one's second byte comes from packet byte 59
+			memcpy(dmrframe, &(Buffer.data()[26]), 34);
 			// handle endianness
 			SwapEndianess(dmrframe, sizeof(dmrframe));
 			// extract the 3 ambe frames
