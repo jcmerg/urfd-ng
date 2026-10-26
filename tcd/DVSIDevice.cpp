@@ -681,7 +681,7 @@ void CDVDevice::ReadDevice()
 			if (0 == RxBytes && m_lastSent.load() - m_lastAnswer.load() > DEVICE_SILENCE_MS)
 			{
 				std::cerr << "The AMBE device " << description << " has not answered for " << DEVICE_SILENCE_MS / 1000 << " s, shutting down" << std::endl;
-				raise(SIGINT);
+				kill(getpid(), SIGINT);
 				return;
 			}
 		}
@@ -690,7 +690,7 @@ void CDVDevice::ReadDevice()
 		{
 			// unplugged or reset: give up, systemd restarts tcd and it finds the device again
 			std::cerr << "Lost the AMBE device " << description << ", shutting down" << std::endl;
-			raise(SIGINT);
+			kill(getpid(), SIGINT);
 			return;
 		}
 

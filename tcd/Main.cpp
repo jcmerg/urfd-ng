@@ -35,10 +35,12 @@ CController    g_Cont;
 CTcdStats      g_Stats;
 CMonitorServer g_Monitor;
 
-// SIGTERM and SIGINT only end pause() in main, which then stops tcd. Without a
-// handler SIGTERM ended tcd at once, without stopping the devices, and in a
-// container, where tcd is PID 1, not at all: the kernel ignores it there, and
-// docker killed tcd after 10 s
+// SIGTERM and SIGINT stop tcd through sigwait() in main. Without that SIGTERM
+// ended tcd at once, without stopping the devices, and in a container, where tcd
+// is PID 1, not at all: the kernel ignores it there, and docker killed tcd after
+// 10 s. Both are blocked before any thread starts, so every thread inherits the
+// mask and the signal waits for main; a thread that has to stop tcd (a lost AMBE
+// device) sends it to the process with kill(), raise() would only reach itself.
 static void OnSignal(int) {}
 
 int main(int argc, char *argv[])
@@ -46,6 +48,11 @@ int main(int argc, char *argv[])
 	// Ignore SIGPIPE so send() on a broken connection returns EPIPE
 	// instead of killing the process. Needed for clean reconnection.
 	signal(SIGPIPE, SIG_IGN);
+	sigset_t stopSignals;
+	sigemptyset(&stopSignals);
+	sigaddset(&stopSignals, SIGTERM);
+	sigaddset(&stopSignals, SIGINT);
+	pthread_sigmask(SIG_BLOCK, &stopSignals, nullptr);
 	if (argc == 2 && 0 == strcmp(argv[1], "--list-devices"))
 	{
 		g_Cont.ListDevices();
@@ -127,7 +134,8 @@ int main(int argc, char *argv[])
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGTERM, &sa, nullptr);
 	sigaction(SIGINT, &sa, nullptr);
-	pause();
+	int sig;
+	sigwait(&stopSignals, &sig);
 
 	// a stop that hangs still ends (a thread: as PID 1 in a container tcd would
 	// ignore SIGALRM's default action as well)
