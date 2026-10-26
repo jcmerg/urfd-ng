@@ -1673,6 +1673,19 @@ bool CConfigure::ReadData(const std::string &path)
 			isDefined(ErrorLevel::fatal, name, "DmrId", ck.dmrid, rval);
 			isDefined(ErrorLevel::fatal, name, "Password", ck.password, rval);
 			isDefined(ErrorLevel::fatal, name, "Callsign", ck.callsign, rval);
+			// the hotspot says duplex (both timeslots need it): BrandMeister closes a
+			// duplex hotspot with RX = TX right after its config (MSTCL)
+			{
+				const auto base = MmdvmClientKeys(1);
+				auto freq = [&](const std::string &own, const std::string &shared) -> unsigned {
+					if (data.contains(own))
+						return GetUnsigned(own);
+					return (n > 1 && data.contains(shared)) ? GetUnsigned(shared) : 0U;
+				};
+				const unsigned rx = freq(ck.rxfreq, base.rxfreq), tx = freq(ck.txfreq, base.txfreq);
+				if (rx && rx == tx)
+					std::cerr << "WARNING: [" << name << "] RxFreq = TxFreq: the connection is a duplex hotspot (two timeslots), and BrandMeister refuses one with the same frequency for both; give it a repeater split, e.g. RxFreq = 430412500 and TxFreq = 439812500" << std::endl;
+			}
 			const std::string network = MmdvmClientNetwork(data.contains(ck.network) ? GetString(ck.network) : "",
 				data.contains(ck.address) ? GetString(ck.address) : "");
 			// one network gets a hotspot ID and a TG from one connection only
