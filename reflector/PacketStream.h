@@ -40,8 +40,11 @@ public:
 	bool InitCodecStream();
 
 	// open / close
-	bool OpenPacketStream(const CDvHeaderPacket &, std::shared_ptr<CClient>);
+	// echo: the playback of a recording, which already carries every codec
+	bool OpenPacketStream(const CDvHeaderPacket &, std::shared_ptr<CClient>, bool echo = false);
 	void ClosePacketStream(void);
+	// a silent last frame, for a stream that ends without one (timeout)
+	void PushEndPacket(void);
 
 	// push & pop
 	void ReturnPacket(std::unique_ptr<CPacket> p) { m_Queue.Push(std::move(p)); }
@@ -52,8 +55,15 @@ public:
 	std::shared_ptr<CClient> GetOwnerClient(void)   { return m_OwnerClient; }
 	const CIp       *GetOwnerIp(void);
 	bool             IsExpired(void) const          { return (m_LastPacketTime.time() > STREAM_TIMEOUT); }
+	// its last packet has been pushed / has been routed to the protocols
+	bool             IsLastPushed(void) const       { return m_bLastPushed; }
+	bool             IsEnded(void) const            { return m_bLastRouted; }
+	void             SetLastRouted(uint16_t sid)    { if (m_bOpen && sid == m_uiStreamId) m_bLastRouted = true; }
+	// the echo module plays a recording back
+	bool             IsEchoPlayback(void) const     { return m_bEcho; }
 	bool             IsOpen(void) const             { return m_bOpen; }
 	uint16_t         GetStreamId(void) const        { return m_uiStreamId; }
+	char             GetModule(void) const          { return m_PSModule; }
 	const CCallsign &GetUserCallsign(void) const    { return m_DvHeader.GetMyCallsign(); }
 	char             GetRpt2Module(void) const      { return m_DvHeader.GetRpt2Module(); }
 	CCodecStream    *GetCodecStream(void) const     { return m_CodecStream.get(); }
@@ -77,14 +87,17 @@ protected:
 	// data
 	CSafePacketQueue<std::unique_ptr<CPacket>> m_Queue;
 	const char          m_PSModule;
-	bool                m_bOpen;
-	uint16_t            m_uiStreamId;
+	std::atomic<bool>   m_bOpen;
+	std::atomic<uint16_t> m_uiStreamId;
 	uint32_t            m_uiPacketCntr;
 	CTimer              m_LastPacketTime;
 	CDvHeaderPacket     m_DvHeader;
 	std::shared_ptr<CClient> m_OwnerClient;
 	std::unique_ptr<CCodecStream> m_CodecStream;
 	std::atomic<bool> m_Transcode { false };	// this stream goes through the transcoder (decided when it opens)
+	std::atomic<bool> m_bLastPushed { false };
+	std::atomic<bool> m_bLastRouted { false };
+	std::atomic<bool> m_bEcho { false };
 	uint32_t            m_uiSourceTG;
 	CDStarDprs          m_Dprs;
 };

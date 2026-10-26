@@ -43,6 +43,9 @@ public:
 	CDvFramePacket  m_dvFrame1;
 
 	uint8_t   m_uiSeqId;
+	// the last voice packet encoded, sent when the next one comes: the
+	// stream's last goes out as packet type 3
+	CBuffer   m_Held;
 };
 
 

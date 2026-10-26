@@ -16,6 +16,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <unistd.h>
+#include <algorithm>
 #include <climits>
 #include <cstdlib>
 #include <libgen.h>
@@ -36,10 +37,100 @@
 #include "TcdStats.h"
 #include "StatsLogger.h"
 #include "AmbeGain.h"
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/IOKitLib.h>
+#include <IOKit/serial/IOSerialKeys.h>
+#endif
 
 extern CTcdStats g_Stats;
 
 extern CConfigure g_Conf;
+
+struct SSerialDevice
+{
+	std::string devnode;	// /dev/ttyUSB0
+	std::string desc;		// its name in /dev/serial/by-id
+	std::string serial;		// USB serial number, empty if the device has none
+	char port;				// port letter as libftd2xx named the ports of multi-port chips, A for the first
+};
+
+#ifdef __APPLE__
+// macOS has neither /dev/serial/by-id nor sysfs: the serial ports come from IOKit,
+// with the USB vendor, product and serial of the device above each, and get a name
+// built like udev's by-id name (usb-FTDI_DVstick-33_DKB7FXGE-if00-port0), so the
+// AMBE device names and DeviceSerial work as on Linux
+static std::string IORegString(io_object_t o, const char *key)
+{
+	std::string out;
+	CFStringRef k = CFStringCreateWithCString(kCFAllocatorDefault, key, kCFStringEncodingUTF8);
+	CFTypeRef v = IORegistryEntrySearchCFProperty(o, kIOServicePlane, k, kCFAllocatorDefault, kIORegistryIterateRecursively | kIORegistryIterateParents);
+	CFRelease(k);
+	if (v)
+	{
+		char buf[256];
+		if (CFGetTypeID(v) == CFStringGetTypeID() && CFStringGetCString((CFStringRef)v, buf, sizeof(buf), kCFStringEncodingUTF8))
+			out = buf;
+		else if (CFGetTypeID(v) == CFNumberGetTypeID())
+		{
+			long n = 0;
+			CFNumberGetValue((CFNumberRef)v, kCFNumberLongType, &n);
+			out = std::to_string(n);
+		}
+		CFRelease(v);
+	}
+	return out;
+}
+
+// the USB serial ports (/dev/cu.*), false if IOKit cannot list them
+static bool ListSerialDevices(std::vector<SSerialDevice> &devices)
+{
+	CFMutableDictionaryRef match = IOServiceMatching(kIOSerialBSDServiceValue);
+	if (nullptr == match)
+		return false;
+	CFDictionarySetValue(match, CFSTR(kIOSerialBSDTypeKey), CFSTR(kIOSerialBSDAllTypes));
+	io_iterator_t it;
+	if (KERN_SUCCESS != IOServiceGetMatchingServices(MACH_PORT_NULL, match, &it))
+		return false;
+	io_object_t o;
+	while ((o = IOIteratorNext(it)))
+	{
+		const std::string node = IORegString(o, kIOCalloutDeviceKey);
+		const std::string product = IORegString(o, "USB Product Name");
+		if (!node.empty() && !product.empty())	// USB serial ports only
+		{
+			SSerialDevice dev;
+			dev.devnode = node;
+			dev.serial = IORegString(o, "USB Serial Number");
+			const std::string intf = IORegString(o, "bInterfaceNumber");
+			const int n = intf.empty() ? 0 : std::atoi(intf.c_str());
+			std::string name = "usb-" + IORegString(o, "USB Vendor Name") + "_" + product + (dev.serial.empty() ? "" : "_" + dev.serial);
+			for (auto &c : name)
+				if (c == ' ')
+					c = '_';
+			char suffix[32];
+			snprintf(suffix, sizeof(suffix), "-if%02d-port0", n);
+			dev.desc = name + suffix;
+			dev.port = char('A' + n);
+			devices.push_back(dev);
+		}
+		IOObjectRelease(o);
+	}
+	IOObjectRelease(it);
+	return true;
+}
+
+static std::string GetUsbSerialForDevnode(const std::string &devnode)
+{
+	std::vector<SSerialDevice> devices;
+	ListSerialDevices(devices);
+	for (const auto &d : devices)
+		if (d.devnode == devnode)
+			return d.serial;
+	return std::string();
+}
+
+#else // Linux
 
 static std::string ReadFirstLine(const std::string &path)
 {
@@ -74,14 +165,6 @@ static std::string GetUsbSerialForDevnode(const std::string &devnode)
 	return dir.empty() ? std::string() : ReadFirstLine(dir + "/serial");
 }
 
-struct SSerialDevice
-{
-	std::string devnode;	// /dev/ttyUSB0
-	std::string desc;		// its name in /dev/serial/by-id
-	std::string serial;		// USB serial number, empty if the device has none
-	char port;				// port letter as libftd2xx named the ports of multi-port chips, A for the first
-};
-
 // the USB serial devices udev lists in /dev/serial/by-id, false if there is no such directory
 static bool ListSerialDevices(std::vector<SSerialDevice> &devices)
 {
@@ -113,6 +196,7 @@ static bool ListSerialDevices(std::vector<SSerialDevice> &devices)
 	closedir(dir);
 	return true;
 }
+#endif // __APPLE__
 
 // DeviceSerial = matches the USB serial, the libftd2xx style serial with the port
 // letter (DA1234A), the by-id name or the device node, exactly
@@ -126,6 +210,9 @@ static bool IsWhitelisted(const SSerialDevice &dev, const std::vector<std::strin
 	return false;
 }
 
+#ifdef __APPLE__
+static void BindFtdiSio(const std::vector<std::string> &) {}	// nothing to bind on macOS
+#else
 // libftd2xx builds of tcd unbound the AMBE devices from ftdi_sio, and they stay
 // unbound until replugged or rebooted. Bind the FTDI interfaces without a driver
 // back, so an upgraded tcd finds them.
@@ -170,6 +257,7 @@ static void BindFtdiSio(const std::vector<std::string> &whitelist)
 	if (bound)
 		std::this_thread::sleep_for(std::chrono::seconds(2));
 }
+#endif // __APPLE__
 
 // a single channel AMBE3000 device, by its /dev/serial/by-id name
 static bool IsDV3000(const std::string &desc)
@@ -178,6 +266,53 @@ static bool IsDV3000(const std::string &desc)
 		if (std::string::npos != desc.find(name))
 			return true;
 	return false;
+}
+
+// an AMBE device, as its chip told its type
+struct SAmbeDevice
+{
+	std::string node;	// device node
+	std::string desc;	// by-id name
+	Edvtype type;
+	unsigned long baud;
+};
+
+// The type of each device comes from its chip's product ID (AMBE3000, AMBE3003),
+// not from the USB name, which clones often leave generic. The rate is the one the
+// name suggests (460800 for the single channel sticks, 921600 for the others) and
+// never another one: bytes at a wrong rate can leave an AMBE3003 deaf until it is
+// replugged. A device that does not answer is left out, the others carry on.
+static void IdentifyDevices(const std::list<std::pair<std::string, std::string>> &found, std::list<SAmbeDevice> &devices)
+{
+	for (const auto &[node, desc] : found)
+	{
+		const Edvtype named = IsDV3000(desc) ? Edvtype::dv3000 : Edvtype::dv3003;
+		const unsigned long baud = (Edvtype::dv3000 == named) ? 460800 : 921600;
+		CDV3000 probe(Encoding::dstar);	// only control packets, the same for both types
+		bool opened;
+		if (probe.Probe(node, desc, named, baud, opened))
+		{
+			if (opened)
+			{
+				std::cerr << "WARNING: " << desc << " (" << node << ") does not answer at " << baud << " baud and is left out." << std::endl;
+				std::cerr << "         An AMBE device that answers nothing at all needs to be unplugged and plugged in again." << std::endl;
+			}
+			else
+				std::cerr << "WARNING: " << desc << " (" << node << ") cannot be used and is left out." << std::endl;
+			continue;
+		}
+		const std::string id = probe.GetProductID();
+		Edvtype type = named;
+		if (0 == id.compare(0, 8, "AMBE3000"))
+			type = Edvtype::dv3000;
+		else if (0 == id.compare(0, 8, "AMBE3003"))
+			type = Edvtype::dv3003;
+		else
+			std::cerr << "WARNING: unknown product ID '" << id << "' of " << desc << ", taken as " << (Edvtype::dv3000 == named ? "DV3000" : "DV3003") << " by its name" << std::endl;
+		if (type != named)
+			std::cout << desc << " is named like a " << (Edvtype::dv3000 == named ? "DV3000" : "DV3003") << ", its chip is a " << id << ": used as a " << (Edvtype::dv3000 == type ? "DV3000" : "DV3003") << " at " << baud << " baud" << std::endl;
+		devices.push_back(SAmbeDevice{ node, desc, type, baud });
+	}
 }
 
 int32_t CController::calcNumerator(int32_t db) const
@@ -316,7 +451,7 @@ void CController::ListDevices()
 	std::vector<SSerialDevice> devices;
 	if (!ListSerialDevices(devices) || devices.empty())
 	{
-		std::cout << "No USB serial devices found (no /dev/serial/by-id), is the AMBE device plugged in?" << std::endl;
+		std::cout << "No USB serial devices found, is the AMBE device plugged in?" << std::endl;
 		return;
 	}
 
@@ -360,7 +495,7 @@ bool CController::DiscoverFtdiDevices(std::list<std::pair<std::string, std::stri
 	std::vector<SSerialDevice> devices;
 	if (!ListSerialDevices(devices))
 	{
-		std::cerr << "No USB serial devices found (no /dev/serial/by-id), is the AMBE device plugged in?" << std::endl;
+		std::cerr << "No USB serial devices found, is the AMBE device plugged in?" << std::endl;
 		return false;
 	}
 
@@ -393,6 +528,9 @@ bool CController::InitVocoders()
 		}
 		c2_16[c] = std::unique_ptr<CCodec2>(new CCodec2(false));
 		c2_32[c] = std::unique_ptr<CCodec2>(new CCodec2(true));
+		imbe_enc[c] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
+		imbe_dec[c] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
+		c2_highpass[c] = SHighPass{ {{0.0f, 0.0f}, {0.0f, 0.0f}}, 0 };
 	}
 
 	// the software vocoders of the codec plugins: CodecDStar / CodecDMR in tcd.ini
@@ -411,10 +549,12 @@ bool CController::InitVocoders()
 		return true;
 	}
 
-	// the 3000 or 3003 devices
-	std::list<std::pair<std::string, std::string>> deviceset;
-	if (DiscoverFtdiDevices(deviceset))
+	// the 3000 or 3003 devices that answer
+	std::list<std::pair<std::string, std::string>> found;
+	if (DiscoverFtdiDevices(found))
 		return true;
+	std::list<SAmbeDevice> deviceset;
+	IdentifyDevices(found, deviceset);
 
 	// the devices in use, for the monitor: device node, description, role
 	std::vector<std::tuple<std::string, std::string, CDVDevice *, const char *>> used;
@@ -444,7 +584,7 @@ bool CController::InitVocoders()
 			return true;
 		}
 		const auto &dev = deviceset.front();
-		const Edvtype dvtype = IsDV3000(dev.second) ? Edvtype::dv3000 : Edvtype::dv3003;
+		const Edvtype dvtype = dev.type;
 		const Encoding enc = device_does_dmr ? Encoding::dmrsf : Encoding::dstar;
 		auto &device = device_does_dmr ? dmrsf_device : dstar_device;
 		if (Edvtype::dv3000 == dvtype)
@@ -453,7 +593,7 @@ bool CController::InitVocoders()
 			device = std::unique_ptr<CDVDevice>(new CDV3003(enc));
 		if (device_does_dmr)
 		{
-			if (device->OpenDevice(dev.first, dev.second, dvtype, int8_t(g_Conf.GetGain(EGainType::dmrin)), int8_t(g_Conf.GetGain(EGainType::dmrout))))
+			if (device->OpenDevice(dev.node, dev.desc, dvtype, dev.baud, int8_t(g_Conf.GetGain(EGainType::dmrin)), int8_t(g_Conf.GetGain(EGainType::dmrout))))
 				return true;
 		}
 		else
@@ -461,34 +601,34 @@ bool CController::InitVocoders()
 			// the DMR plugin gets DmrGainIn/Out in software
 			ambe_in_num = calcNumerator(g_Conf.GetGain(EGainType::dmrin));
 			ambe_out_num = calcNumerator(g_Conf.GetGain(EGainType::dmrout));
-			if (device->OpenDevice(dev.first, dev.second, dvtype, int8_t(g_Conf.GetGain(EGainType::dstarin)), int8_t(g_Conf.GetGain(EGainType::dstarout))))
+			if (device->OpenDevice(dev.node, dev.desc, dvtype, dev.baud, int8_t(g_Conf.GetGain(EGainType::dstarin)), int8_t(g_Conf.GetGain(EGainType::dstarout))))
 				return true;
 		}
-		used.emplace_back(dev.first, dev.second, device.get(), device_does_dmr ? "dmr" : "dstar");
+		used.emplace_back(dev.node, dev.desc, device.get(), device_does_dmr ? "dmr" : "dstar");
 		(device_does_dmr ? dmr_hw_modules : dstar_hw_modules) = modules.substr(0, Edvtype::dv3000 == dvtype ? 1 : 3);
-		std::cout << "Using " << dev.second << " for " << (device_does_dmr ? "DMR" : "D-Star") << std::endl;
+		std::cout << "Using " << dev.desc << " for " << (device_does_dmr ? "DMR" : "D-Star") << std::endl;
 	}
 	else if (deviceset.size() >= 2)
 	{
 		// Classify each device by type
-		std::pair<std::string,std::string> dv3000_dev, dv3003_dev;
+		SAmbeDevice dv3000_dev{}, dv3003_dev{};
 		for (const auto &dev : deviceset)
 		{
-			if (IsDV3000(dev.second))
+			if (Edvtype::dv3000 == dev.type)
 				dv3000_dev = dev;
 			else
 				dv3003_dev = dev;
 		}
 
 		// Mixed mode: DV3000 (D-Star) + DV3003 (1x D-Star + 2x DMR) = 2 modules
-		if (!dv3000_dev.first.empty() && !dv3003_dev.first.empty())
+		if (!dv3000_dev.node.empty() && !dv3003_dev.node.empty())
 		{
-			std::cout << "Mixed mode: " << dv3000_dev.second << " (" << dv3000_dev.first << ") + "
-			          << dv3003_dev.second << " (" << dv3003_dev.first << ")" << std::endl;
+			std::cout << "Mixed mode: " << dv3000_dev.desc << " (" << dv3000_dev.node << ") + "
+			          << dv3003_dev.desc << " (" << dv3003_dev.node << ")" << std::endl;
 
 			// DV3000: D-Star vocoder for module A (first module)
 			dstar_device = std::unique_ptr<CDVDevice>(new CDV3000(Encoding::dstar));
-			if (dstar_device->OpenDevice(dv3000_dev.first, dv3000_dev.second, Edvtype::dv3000,
+			if (dstar_device->OpenDevice(dv3000_dev.node, dv3000_dev.desc, Edvtype::dv3000, dv3000_dev.baud,
 					int8_t(g_Conf.GetGain(EGainType::dstarin)), int8_t(g_Conf.GetGain(EGainType::dstarout))))
 				return true;
 
@@ -502,7 +642,7 @@ bool CController::InitVocoders()
 			dv3003->SetChannelEncoding(2, Encoding::dmrsf);
 
 			// Open with DMR gains (ConfigureVocoder will use per-channel encoding)
-			if (dmrsf_device->OpenDevice(dv3003_dev.first, dv3003_dev.second, Edvtype::dv3003,
+			if (dmrsf_device->OpenDevice(dv3003_dev.node, dv3003_dev.desc, Edvtype::dv3003, dv3003_dev.baud,
 					int8_t(g_Conf.GetGain(EGainType::dmrin)), int8_t(g_Conf.GetGain(EGainType::dmrout))))
 				return true;
 
@@ -519,8 +659,8 @@ bool CController::InitVocoders()
 				std::cout << "  Module " << modA << ": D-Star(DV3000) + DMR(DV3003 ch1)" << std::endl;
 				std::cout << "  Module " << modB << ": D-Star(DV3003 ch0) + DMR(DV3003 ch2)" << std::endl;
 			}
-			used.emplace_back(dv3000_dev.first, dv3000_dev.second, dstar_device.get(), "dstar");
-			used.emplace_back(dv3003_dev.first, dv3003_dev.second, dmrsf_device.get(), mixed_mode ? "mixed" : "dmr");
+			used.emplace_back(dv3000_dev.node, dv3000_dev.desc, dstar_device.get(), "dstar");
+			used.emplace_back(dv3003_dev.node, dv3003_dev.desc, dmrsf_device.get(), mixed_mode ? "mixed" : "dmr");
 			dstar_hw_modules = dmr_hw_modules = modules.substr(0, 2);
 		}
 		// Two same-type devices
@@ -529,7 +669,7 @@ bool CController::InitVocoders()
 			const auto dev1 = deviceset.front();
 			deviceset.pop_front();
 			const auto dev2 = deviceset.front();
-			const Edvtype dvtype = IsDV3000(dev1.second) ? Edvtype::dv3000 : Edvtype::dv3003;
+			const Edvtype dvtype = dev1.type;
 
 			if (Edvtype::dv3000 == dvtype) {
 				dstar_device = std::unique_ptr<CDVDevice>(new CDV3000(Encoding::dstar));
@@ -539,14 +679,14 @@ bool CController::InitVocoders()
 				dmrsf_device = std::unique_ptr<CDVDevice>(new CDV3003(Encoding::dmrsf));
 			}
 
-			if (dstar_device->OpenDevice(dev1.first, dev1.second, dvtype,
+			if (dstar_device->OpenDevice(dev1.node, dev1.desc, dvtype, dev1.baud,
 					int8_t(g_Conf.GetGain(EGainType::dstarin)), int8_t(g_Conf.GetGain(EGainType::dstarout))))
 				return true;
-			if (dmrsf_device->OpenDevice(dev2.first, dev2.second, dvtype,
+			if (dmrsf_device->OpenDevice(dev2.node, dev2.desc, dvtype, dev2.baud,
 					int8_t(g_Conf.GetGain(EGainType::dmrin)), int8_t(g_Conf.GetGain(EGainType::dmrout))))
 				return true;
-			used.emplace_back(dev1.first, dev1.second, dstar_device.get(), "dstar");
-			used.emplace_back(dev2.first, dev2.second, dmrsf_device.get(), "dmr");
+			used.emplace_back(dev1.node, dev1.desc, dstar_device.get(), "dstar");
+			used.emplace_back(dev2.node, dev2.desc, dmrsf_device.get(), "dmr");
 			dstar_hw_modules = dmr_hw_modules = modules.substr(0, Edvtype::dv3000 == dvtype ? 1 : 3);
 		}
 	}
@@ -639,7 +779,7 @@ bool CController::InitVocoders()
 			// node is the device node, show the USB serial number
 			const std::string usb = GetUsbSerialForDevnode(node);
 			g_Stats.devices[di].serial = usb.empty() ? node : usb;
-			g_Stats.devices[di].type = IsDV3000(desc) ? "DV3000" : "DV3003";
+			g_Stats.devices[di].type = Edvtype::dv3000 == device->GetType() ? "DV3000" : "DV3003";
 			g_Stats.devices[di].role = role;
 			g_Stats.devices[di].online.store(true);
 			device->SetStatsIndex(di);
@@ -803,14 +943,46 @@ void CController::ReadReflectorThread()
 	}
 }
 
-// This is only called when codec_in was dstar or dmr. Obviously, the incoming
-// ambe packet was already decoded to audio.
+// 4th order Butterworth high-pass, 300 Hz at 8 kHz, two biquads (direct form II
+// transposed). The IMBE decoder puts 4-5 dB more energy below 120 Hz than the
+// original had, which throws Codec2's pitch and voicing estimation off: P25 to
+// M17 drops to PESQ 1.3-1.7, with this filter 2.3-3.1. Other sources do not gain
+// from it consistently, so only P25 goes through it.
+void CController::HighPass(char module, uint16_t streamid, int16_t *samples)
+{
+	static const float sos[2][5] = {	// b0 b1 b2 a1 a2
+		{ 0.734407998f, -1.468815996f, 0.734407998f, -1.5997196711f, 0.6451760153f },
+		{ 1.0f, -2.0f, 1.0f, -1.7852530573f, 0.8359813686f }
+	};
+	auto &hp = c2_highpass[module];
+	if (hp.streamid != streamid)
+	{
+		hp = SHighPass{ {{0.0f, 0.0f}, {0.0f, 0.0f}}, streamid };
+	}
+	for (int i = 0; i < 160; i++)
+	{
+		float x = samples[i];
+		for (int k = 0; k < 2; k++)
+		{
+			const float y = sos[k][0] * x + hp.z[k][0];
+			hp.z[k][0] = sos[k][1] * x - sos[k][3] * y + hp.z[k][1];
+			hp.z[k][1] = sos[k][2] * x - sos[k][4] * y;
+			x = y;
+		}
+		samples[i] = int16_t(std::max(-32768.0f, std::min(32767.0f, roundf(x))));
+	}
+}
+
+// This is only called when codec_in was not M17. Obviously, the incoming
+// packet was already decoded to audio.
 // This might complete the packet. If so, send it back to the reflector
 void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t gained[160];
 	memcpy(gained, packet->GetAudioSamples(), sizeof(gained));
 	ApplyGain(gained, 160, outgain_m17_num);
+	if (ECodecType::p25 == packet->GetCodecIn())
+		HighPass(packet->GetModule(), packet->GetStreamId(), gained);
 
 	uint8_t m17data[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x01, 0x43, 0x09, 0xe4, 0x9c, 0x08, 0x21 };
 	const auto m = packet->GetModule();
@@ -906,7 +1078,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 		memcpy(imbe_buf, packet->GetAudioSamples(), sizeof(imbe_buf));
 		ApplyGain(imbe_buf, 160, outgain_imbe_num);
 		std::lock_guard<std::mutex> lock(p25vocoder_mux);
-		p25vocoder.encode_4400(imbe_buf, imbe);
+		imbe_enc[packet->GetModule()]->encode_4400(imbe_buf, imbe);
 	}
 	packet->SetP25Data(imbe);
 
@@ -948,6 +1120,9 @@ void CController::ProcessC2Thread()
 			case ECodecType::svx:
 				// codec_in was AMBE, so we need to calculate the the M17 data
 				AudiotoCodec2(packet);
+				break;
+
+			default:	// none, ping: ReadReflectorThread queues neither
 				break;
 		}
 	}
@@ -1042,6 +1217,9 @@ void CController::ProcessSWAMBE2Thread()
 
 			case ECodecType::dmr:
 				SWAMBE2toAudio(packet);
+				break;
+
+			default:	// none, ping: ReadReflectorThread queues neither
 				break;
 		}
 	}
@@ -1163,7 +1341,7 @@ void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
 
 	{
 		std::lock_guard<std::mutex> lock(p25vocoder_mux);
-		p25vocoder.encode_4400(gained, imbe);
+		imbe_enc[packet->GetModule()]->encode_4400(gained, imbe);
 	}
 	packet->SetP25Data(imbe);
 	// we might be all done...
@@ -1177,7 +1355,7 @@ void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	int16_t tmp[160] = { 0 };
 	{
 		std::lock_guard<std::mutex> lock(p25vocoder_mux);
-		p25vocoder.decode_4400(tmp, (uint8_t*)packet->GetP25Data());
+		imbe_dec[packet->GetModule()]->decode_4400(tmp, (uint8_t*)packet->GetP25Data());
 	}
 	g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 	{
@@ -1225,6 +1403,9 @@ void CController::ProcessIMBEThread()
 
 			case ECodecType::p25:
 				IMBEtoAudio(packet);
+				break;
+
+			default:	// none, ping: ReadReflectorThread queues neither
 				break;
 		}
 	}
@@ -1298,6 +1479,9 @@ void CController::ProcessUSRPThread()
 
 			case ECodecType::svx:
 				SvxToAudio(packet);
+				break;
+
+			default:	// none, ping: ReadReflectorThread queues neither
 				break;
 		}
 	}

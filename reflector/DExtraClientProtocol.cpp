@@ -166,17 +166,31 @@ void CDExtraClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 
 	if (IsValidDvHeaderPacket(Buffer, Header))
 	{
-		std::lock_guard<std::mutex> lock(m_MappingMutex);
-		SDExtraClientMapping *mapping = FindMappingByIp(Ip);
-		if (mapping && mapping->connected)
+		// the mapping lock is never held while calling into the reflector:
+		// opening a stream reads the mappings back
+		char localModule = ' ';
+		{
+			std::lock_guard<std::mutex> lock(m_MappingMutex);
+			SDExtraClientMapping *mapping = FindMappingByRemote(Ip, Header->GetRpt2Module());
+			if (mapping)
+			{
+				// RPT2 is the reflector and its module, "XRF001 C": its name for what we send
+				mapping->reflector = Header->GetRpt2Callsign().GetBase();
+			}
+			else
+				mapping = FindMappingByIp(Ip);
+			if (mapping && mapping->connected)
+				localModule = mapping->localModule;
+		}
+		if (localModule != ' ')
 		{
 			// remap header
 			CCallsign rpt1(m_ClientCallsign);
-			rpt1.SetCSModule(mapping->localModule);
+			rpt1.SetCSModule(localModule);
 			Header->SetRpt1Callsign(rpt1);
-			Header->SetRpt2Module(mapping->localModule);
+			Header->SetRpt2Module(localModule);
 
-			if (g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::dextraclient, mapping->localModule))
+			if (g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::dextraclient, localModule))
 				OnDvHeaderPacketIn(Header, Ip);
 		}
 	}
@@ -296,14 +310,14 @@ void CDExtraClientProtocol::HandleQueue(void)
 
 		if (packet->IsDvHeader())
 		{
-			// rewrite RPT1/RPT2
+			// rewrite RPT1/RPT2 as a gateway linked to the reflector does: RPT1 us
+			// and our module, RPT2 the reflector and its module ("XRF001 C"),
+			// DExtra reflectors (urfd, xlxd) route by the RPT2 module
 			auto &header = (CDvHeaderPacket &)*packet;
 			CCallsign rpt1(m_ClientCallsign);
-			rpt1.SetCSModule(mapping->remoteModule);
+			rpt1.SetCSModule(mapping->localModule);
 			header.SetRpt1Callsign(rpt1);
-			CCallsign rpt2(m_ClientCallsign);
-			rpt2.SetCSModule('G');
-			header.SetRpt2Callsign(rpt2);
+			header.SetRpt2Callsign(RemoteReflectorCallsign(mapping->reflector, mapping->host, m_ClientCallsign, mapping->remoteModule));
 
 			encoded = EncodeDvHeaderPacket(header, buffer);
 		}
@@ -385,6 +399,14 @@ SDExtraClientMapping *CDExtraClientProtocol::FindMappingByLocal(char localMod)
 {
 	for (auto &m : m_Mappings)
 		if (m.localModule == localMod) return &m;
+	return nullptr;
+}
+
+SDExtraClientMapping *CDExtraClientProtocol::FindMappingByRemote(const CIp &ip, char remoteMod)
+{
+	for (auto &m : m_Mappings)
+		if (m.ip == ip && m.remoteModule == remoteMod)
+			return &m;
 	return nullptr;
 }
 
@@ -483,7 +505,7 @@ bool CDExtraClientProtocol::IsValidDvHeaderPacket(const CBuffer &Buffer, std::un
 	{
 		header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(
 			(struct dstar_header *)&(Buffer.data()[15]),
-			*((uint16_t *)&(Buffer.data()[12])), 0x80));
+			ReadU16(Buffer.data() + 12), 0x80));
 		if (header && header->IsValid())
 			return true;
 	}
@@ -497,7 +519,7 @@ bool CDExtraClientProtocol::IsValidDvFramePacket(const CBuffer &Buffer, std::uni
 	{
 		dvframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(
 			(SDStarFrame *)&(Buffer.data()[15]),
-			*((uint16_t *)&(Buffer.data()[12])), Buffer.data()[14]));
+			ReadU16(Buffer.data() + 12), Buffer.data()[14]));
 		if (dvframe && dvframe->IsValid())
 			return true;
 	}

@@ -23,6 +23,7 @@
 #include "DVHeaderPacket.h"
 #include "DVFramePacket.h"
 #include <set>
+#include <cstring>
 #include <shared_mutex>
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -82,7 +83,7 @@ public:
 	virtual void Task(void) = 0;
 
 	// pass-through
-	void Push(std::unique_ptr<CPacket> p) { m_Queue.Push(std::move(p)); }
+	void Push(std::unique_ptr<CPacket> p);
 
 	// protocol blocking (bidirectional, thread-safe for runtime changes)
 	bool IsSourceBlocked(EProtocol src) const { std::shared_lock lk(m_BlockMutex); return m_BlockedSources.count(src) > 0; }
@@ -113,6 +114,7 @@ protected:
 	// stream handle helpers
 	std::shared_ptr<CPacketStream> GetStream(uint16_t, const CIp * = nullptr);
 	void CheckStreamsTimeout(void);
+	void CloseStreamsOf(const CIp &);
 
 	// queue helper
 	virtual void HandleQueue(void) = 0;
@@ -125,10 +127,20 @@ protected:
 	bool IsLetter(char) const;
 	bool IsSpace(char) const;
 
+	// a 16 bit value of a packet as it is stored there (e.g. a D-Star stream id),
+	// at any offset: no unaligned load
+	static uint16_t ReadU16(const uint8_t *p) { uint16_t v; memcpy(&v, p, sizeof(v)); return v; }
+
+	// D-Star connectors: the remote reflector with a module for RPT2 of what is sent
+	// to it ("XRF001 C"), as a gateway does: the callsign it announced, else the
+	// first label of its host name when that is a callsign, else our own
+	static CCallsign RemoteReflectorCallsign(const std::string &announced, const std::string &host, const CCallsign &own, char module);
+
 	// dmr DstId to Module helper
 	virtual char DmrDstIdToModule(uint32_t) const;
 	virtual uint32_t ModuleToDmrDestId(char) const;
 
+	bool Wait(int fd4, int fd6, int time_ms, bool &ready4, bool &ready6);
 	bool Receive6(CBuffer &buf, CIp &Ip, int time_ms);
 	bool Receive4(CBuffer &buf, CIp &Ip, int time_ms);
 	bool ReceiveDS(CBuffer &buf, CIp &Ip, int time_ms);
@@ -149,8 +161,9 @@ protected:
 	// streams
 	std::unordered_map<uint16_t, std::shared_ptr<CPacketStream>> m_Streams;
 
-	// queue
+	// queue, and an eventfd that wakes the receive wait when it got a packet
 	CSafePacketQueue<std::unique_ptr<CPacket>> m_Queue;
+	int m_QueueFd = -1;
 
 	// thread
 	std::atomic<bool> keep_running;

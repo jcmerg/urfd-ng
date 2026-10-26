@@ -199,16 +199,32 @@ void CDPlusClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 
 	if (IsValidDvHeaderPacket(Buffer, Header))
 	{
-		std::lock_guard<std::mutex> lock(m_MappingMutex);
-		SDPlusClientMapping *mapping = FindMappingByIp(Ip);
-		if (mapping && mapping->connected)
+		// a DPlus reflector sends the streams of all its modules to every client,
+		// the client takes the one of its module (RPT2 "REF001 C"), as a gateway
+		// does; the frames of the others find no stream and are dropped.
+		// The mapping lock is never held while calling into the reflector:
+		// opening a stream reads the mappings back
+		char localModule = ' ';
+		{
+			std::lock_guard<std::mutex> lock(m_MappingMutex);
+			SDPlusClientMapping *mapping = FindMappingByRemote(Ip, Header->GetRpt2Module());
+			if (mapping && mapping->connected)
+			{
+				// its name for what we send; not the XRF copy for dongles
+				const auto name = Header->GetRpt2Callsign().GetBase();
+				if (name.compare(0, 3, "XRF"))
+					mapping->reflector = name;
+				localModule = mapping->localModule;
+			}
+		}
+		if (localModule != ' ')
 		{
 			CCallsign rpt1(m_ClientCallsign);
-			rpt1.SetCSModule(mapping->localModule);
+			rpt1.SetCSModule(localModule);
 			Header->SetRpt1Callsign(rpt1);
-			Header->SetRpt2Module(mapping->localModule);
+			Header->SetRpt2Module(localModule);
 
-			if (g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::dplusclient, mapping->localModule))
+			if (g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::dplusclient, localModule))
 				OnDvHeaderPacketIn(Header, Ip);
 		}
 	}
@@ -364,13 +380,14 @@ void CDPlusClientProtocol::HandleQueue(void)
 
 		if (packet->IsDvHeader())
 		{
+			// as a gateway linked to the reflector: RPT1 us and our module (the
+			// reflector learns our module from it), RPT2 the reflector and the
+			// module to talk on ("REF001 C"), DPlus reflectors route by it
 			auto &header = (CDvHeaderPacket &)*packet;
 			CCallsign rpt1(m_ClientCallsign);
-			rpt1.SetCSModule(mapping->remoteModule);
+			rpt1.SetCSModule(mapping->localModule);
 			header.SetRpt1Callsign(rpt1);
-			CCallsign rpt2(m_ClientCallsign);
-			rpt2.SetCSModule('G');
-			header.SetRpt2Callsign(rpt2);
+			header.SetRpt2Callsign(RemoteReflectorCallsign(mapping->reflector, mapping->host, m_ClientCallsign, mapping->remoteModule));
 
 			encoded = EncodeDvHeaderPacket(header, buffer);
 		}
@@ -457,6 +474,13 @@ SDPlusClientMapping *CDPlusClientProtocol::FindMappingByLocal(char localMod)
 	return nullptr;
 }
 
+SDPlusClientMapping *CDPlusClientProtocol::FindMappingByRemote(const CIp &ip, char remoteMod)
+{
+	for (auto &m : m_Mappings)
+		if (m.ip == ip && m.remoteModule == remoteMod) return &m;
+	return nullptr;
+}
+
 SDPlusClientMapping *CDPlusClientProtocol::FindMappingByIp(const CIp &ip)
 {
 	for (auto &m : m_Mappings)
@@ -510,7 +534,7 @@ bool CDPlusClientProtocol::IsValidDvHeaderPacket(const CBuffer &Buffer, std::uni
 	{
 		header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(
 			(struct dstar_header *)&(Buffer.data()[17]),
-			*((uint16_t *)&(Buffer.data()[14])), 0x80u));
+			ReadU16(Buffer.data() + 14), 0x80u));
 		return (header && header->IsValid());
 	}
 	return false;
@@ -526,14 +550,14 @@ bool CDPlusClientProtocol::IsValidDvFramePacket(const CBuffer &Buffer, std::uniq
 		{
 			dvframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(
 				(SDStarFrame *)&(Buffer.data()[17]),
-				*((uint16_t *)&(Buffer.data()[14])), Buffer.data()[16]));
+				ReadU16(Buffer.data() + 14), Buffer.data()[16]));
 			return true;
 		}
 		else if (32 == Buffer.size() && 0x20u == Buffer.data()[0])
 		{
 			dvframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(
 				(SDStarFrame *)&(Buffer.data()[17]),
-				*((uint16_t *)&(Buffer.data()[14])), 0x40u | Buffer.data()[16]));
+				ReadU16(Buffer.data() + 14), 0x40u | Buffer.data()[16]));
 			return true;
 		}
 	}
@@ -594,9 +618,9 @@ bool CDPlusClientProtocol::EncodeDvFramePacket(const CDvFramePacket &Packet, CBu
 {
 	if (Packet.IsLastPacket())
 	{
-		// last frame: 32 bytes (tag byte 0x20)
+		// last frame: 32 bytes (tag byte 0x20), silence and the end pattern
 		uint8_t tag[] = { 0x20,0x80,0x44,0x53,0x56,0x54,0x20,0x00,0x00,0x00,0x20,0x00,0x01,0x02 };
-		uint8_t endtag[] = { 0x55,0xC8,0x7A,0x55,0x55,0x55,0x55,0x55,0x55,0x55,0x55,0x55,0x25,0x1A,0xC6 };
+		uint8_t endtag[] = { 0x9E,0x8D,0x32,0x88,0x26,0x1A,0x3F,0x61,0xE8,0x55,0x55,0x55,0x55,0xC8,0x7A };
 		Buffer.Set(tag, sizeof(tag));
 		Buffer.Append(Packet.GetStreamId());
 		Buffer.Append((uint8_t)((Packet.GetPacketId() % 21) | 0x40));

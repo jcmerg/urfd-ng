@@ -25,6 +25,7 @@ struct SDcsClientMapping
 	CIp         ip;
 	char        remoteModule;   // module on the remote DCS reflector
 	char        localModule;    // module on our reflector
+	std::string reflector;      // the remote reflector's callsign, from its streams
 	bool        connected;
 	CTimer      keepaliveTimer;
 	CTimer      reconnectTimer;

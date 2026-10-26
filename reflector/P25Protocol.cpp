@@ -43,6 +43,8 @@ const uint8_t REC70[] = {0x70U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
 const uint8_t REC71[] = {0x71U, 0xACU, 0xB8U, 0xA4U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x02U};
 const uint8_t REC72[] = {0x72U, 0x9BU, 0xDCU, 0x75U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x02U};
 const uint8_t REC73[] = {0x73U, 0x00U, 0x00U, 0x02U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
+// IMBE silence, as MMDVMHost and P25Gateway fill a lost frame with
+const uint8_t IMBE_SILENCE[] = {0x04U, 0x0CU, 0xFDU, 0x7BU, 0xFBU, 0x7DU, 0xF2U, 0x7BU, 0x3DU, 0x9EU, 0x45U};
 const uint8_t REC80[] = {0x80U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -55,7 +57,6 @@ bool CP25Protocol::Initialize(const char *type, const EProtocol ptype, const uin
 	m_DefaultId   = g_Configure.Contains(g_Keys.mmdvm.fallbackdmrid) ? g_Configure.GetUnsigned(g_Keys.mmdvm.fallbackdmrid) : 0;
 	m_AutolinkModule = g_Configure.GetAutolinkModule(g_Keys.p25.autolinkmod);
 
-	m_uiStreamId = 0;
 	// base class
 	if (! CProtocol::Initialize(type, ptype, port, has_ipv4, has_ipv6))
 		return false;
@@ -92,18 +93,28 @@ void CP25Protocol::Task(void)
 #endif
 	{
 		// crack the packet
-		if ( IsValidDvPacket(Ip, Buffer, Frame) )
+		if ( IsVoicePacket(Buffer) )
 		{
-			if( !m_uiStreamId && IsValidDvHeaderPacket(Ip, Buffer, Header) )
+			// the sender's open stream; a 0x66 (source id) opens one, so the
+			// records 0x62..0x65 before it can't be forwarded
+			auto sid = GetStreamIdFromIp(Ip);
+			if ( !sid && IsValidDvHeaderPacket(Buffer, Header) )
 			{
 				// callsign muted?
 				if ( g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::p25) )
 				{
 					OnDvHeaderPacketIn(Header, Ip);
+					sid = GetStreamIdFromIp(Ip);
 				}
 			}
-			// push the packet
-			OnDvFramePacketIn(Frame, &Ip);
+			// nothing after the TDU (a repeated one) goes into the ending stream
+			if ( sid && !m_EndedStreams.count(sid) && IsValidDvPacket(Buffer, sid, Frame) )
+			{
+				if ( Frame->IsLastPacket() )
+					m_EndedStreams.insert(sid);
+				// push the packet
+				OnDvFramePacketIn(Frame, &Ip);
+			}
 		}
 		else if ( IsValidConnectPacket(Buffer, &Callsign) )
 		{
@@ -169,6 +180,8 @@ void CP25Protocol::Task(void)
 
 	// handle end of streaming timeout
 	CheckStreamsTimeout();
+	for ( auto it=m_EndedStreams.begin(); it!=m_EndedStreams.end(); )
+		it = m_Streams.count(*it) ? std::next(it) : m_EndedStreams.erase(it);
 
 	// handle queue from reflector
 	HandleQueue();
@@ -227,6 +240,19 @@ void CP25Protocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, 
 		g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "P25");
 		g_Reflector.ReleaseUsers();
 	}
+}
+
+// the stream the sender at Ip has open, 0 if none: every P25 client has its own,
+// so a blocked or ending talker can't touch another one's stream
+uint16_t CP25Protocol::GetStreamIdFromIp(const CIp &Ip)
+{
+	for ( auto &it : m_Streams )
+	{
+		auto owner = it.second->GetOwnerIp();
+		if ( (owner != nullptr) && (*owner == Ip) )
+			return it.first;
+	}
+	return 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -308,87 +334,83 @@ bool CP25Protocol::IsValidDisconnectPacket(const CBuffer &Buffer, CCallsign *cal
 	return valid;
 }
 
-bool CP25Protocol::IsValidDvPacket(const CIp &Ip, const CBuffer &Buffer, std::unique_ptr<CDvFramePacket> &frame)
+bool CP25Protocol::IsVoicePacket(const CBuffer &Buffer) const
 {
-	if ( (Buffer.size() >= 14) )
-	{
-		int offset = 0;
-		bool last = false;
-
-		switch (Buffer.data()[0U]) {
-		case 0x62U:
-			offset = 10U;
-			break;
-		case 0x63U:
-			offset = 1U;
-			break;
-		case 0x64U:
-			offset = 5U;
-			break;
-		case 0x65U:
-			offset = 5U;
-			break;
-		case 0x66U:
-			offset = 5U;
-			break;
-		case 0x67U:
-		case 0x68U:
-		case 0x69U:
-			offset = 5U;
-			break;
-		case 0x6AU:
-			offset = 4U;
-			break;
-		case 0x6BU:
-			offset = 10U;
-			break;
-		case 0x6CU:
-			offset = 1U;
-			break;
-		case 0x6DU:
-		case 0x6EU:
-		case 0x6FU:
-		case 0x70U:
-		case 0x71U:
-		case 0x72U:
-			offset = 5U;
-			break;
-		case 0x73U:
-			offset = 4U;
-			break;
-		case 0x80U:
-			last = true;
-			m_uiStreamId = 0;
-			break;
-		default:
-			break;
-		}
-
-		// the IMBE frame (11 bytes) has to be inside the packet
-		if ( Buffer.size() < size_t(offset) + 11U )
-			return false;
-
-		frame = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(&(Buffer.data()[offset]), m_uiStreamId, last));
-		return true;
-	}
-	return false;
+	// the records 0x62..0x73 with an IMBE frame and the TDU 0x80
+	return ( (Buffer.size() > 0) && (VoiceOffset(Buffer.data()[0]) >= 0) );
 }
 
-bool CP25Protocol::IsValidDvHeaderPacket(const CIp &Ip, const CBuffer &Buffer, std::unique_ptr<CDvHeaderPacket> &header)
+int CP25Protocol::VoiceOffset(uint8_t type) const
 {
-	if(Buffer.data()[0] == 0x66){
-		auto stream = GetStream(m_uiStreamId, &Ip);
-		if ( !stream )
-		{
-			uint32_t uiSrcId = ((Buffer.data()[1] << 16) | ((Buffer.data()[2] << 8) & 0xff00) | (Buffer.data()[3] & 0xff));
-			m_uiStreamId = static_cast<uint32_t>(::rand());
-			CCallsign csMY = CCallsign("", uiSrcId);
-			CCallsign rpt1 = CCallsign("", uiSrcId);
-			CCallsign rpt2 = m_ReflectorCallsign;
-			rpt1.SetCSModule(m_AutolinkModule);
-			rpt2.SetCSModule(' ');
-			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, m_uiStreamId, false));
-		}
+	switch (type)
+	{
+	case 0x62U:
+	case 0x6BU:
+		return 10;
+	case 0x63U:
+	case 0x6CU:
+		return 1;
+	case 0x64U:
+	case 0x65U:
+	case 0x66U:
+	case 0x67U:
+	case 0x68U:
+	case 0x69U:
+	case 0x6DU:
+	case 0x6EU:
+	case 0x6FU:
+	case 0x70U:
+	case 0x71U:
+	case 0x72U:
+		return 5;
+	case 0x6AU:
+	case 0x73U:
+		return 4;
+	case 0x80U:
+		return 0;	// TDU, no voice
+	default:
+		return -1;
+	}
+}
+
+bool CP25Protocol::IsValidDvPacket(const CBuffer &Buffer, uint16_t sid, std::unique_ptr<CDvFramePacket> &frame)
+{
+	if ( Buffer.size() == 0 )
+		return false;
+
+	// the TDU ends the stream: it has no voice, the last frame is a silent one
+	if ( Buffer.data()[0] == 0x80U )
+	{
+		frame = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(IMBE_SILENCE, sid, true));
+		return true;
+	}
+
+	// the IMBE frame (11 bytes) has to be inside the packet
+	int offset = VoiceOffset(Buffer.data()[0]);
+	if ( (offset <= 0) || (Buffer.size() < 14) || (Buffer.size() < size_t(offset) + 11U) )
+		return false;
+
+	frame = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(&(Buffer.data()[offset]), sid, false));
+	return true;
+}
+
+bool CP25Protocol::IsValidDvHeaderPacket(const CBuffer &Buffer, std::unique_ptr<CDvHeaderPacket> &header)
+{
+	if ( (Buffer.size() >= 16) && (Buffer.data()[0] == 0x66) )
+	{
+		// a new stream id for every transmission, never 0
+		uint16_t sid;
+		do {
+			sid = static_cast<uint16_t>(::rand());
+		} while ( 0 == sid );
+
+		uint32_t uiSrcId = ((Buffer.data()[1] << 16) | ((Buffer.data()[2] << 8) & 0xff00) | (Buffer.data()[3] & 0xff));
+		CCallsign csMY = CCallsign("", uiSrcId);
+		CCallsign rpt1 = CCallsign("", uiSrcId);
+		CCallsign rpt2 = m_ReflectorCallsign;
+		rpt1.SetCSModule(m_AutolinkModule);
+		rpt2.SetCSModule(' ');
+		header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, sid, false));
 		return true;
 	}
 	return false;

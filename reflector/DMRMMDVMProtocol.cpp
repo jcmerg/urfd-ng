@@ -138,6 +138,7 @@ void CDmrmmdvmProtocol::Task(void)
 	int       iRssi;
 	uint8_t     Cmd;
 	uint8_t     CallType;
+	uint8_t     Slot;
 	uint32_t  rawDmrId = 0;
 	std::unique_ptr<CDvHeaderPacket>  Header;
 	std::unique_ptr<CDvFramePacket>   LastFrame;
@@ -163,14 +164,14 @@ void CDmrmmdvmProtocol::Task(void)
 				OnDvFramePacketIn(Frames.at(i), &Ip);
 			}
 		}
-		else if ( IsValidDvHeaderPacket(Buffer, Header, &Cmd, &CallType) )
+		else if ( IsValidDvHeaderPacket(Buffer, Header, &Cmd, &CallType, &Slot) )
 		{
 			// callsign muted?
 			if ( g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::dmrmmdvm) )
 			{
 				// extract source TG from DMRD packet
 				uint32_t srcTG = MAKEDWORD(MAKEWORD(Buffer.data()[10],Buffer.data()[9]),MAKEWORD(Buffer.data()[8],0));
-				OnDvHeaderPacketIn(Header, Ip, Cmd, CallType, srcTG);
+				OnDvHeaderPacketIn(Header, Ip, Cmd, CallType, Slot, srcTG);
 			}
 		}
 		else if ( IsValidDvLastFramePacket(Buffer, LastFrame) )
@@ -197,6 +198,14 @@ void CDmrmmdvmProtocol::Task(void)
 				Send(Buffer, Ip);
 			}
 
+		}
+		else if ( IsConnectPacket(Buffer) )
+		{
+			// a login with an id not in the DMR ID database: refuse it, or
+			// MMDVMHost retries forever without telling why (the NAK is
+			// shorter than the request, nothing to amplify)
+			EncodeNackPacket(&Buffer, Callsign);
+			Send(Buffer, Ip);
 		}
 		else if ( IsValidAuthenticationPacket(Buffer, &Callsign, Ip, &rawDmrId) )
 		{
@@ -263,14 +272,14 @@ void CDmrmmdvmProtocol::Task(void)
 			}
 
 		}
-		else if ( IsValidDisconnectPacket(Buffer, &Callsign) )
+		else if ( IsValidDisconnectPacket(Buffer, &Callsign, &rawDmrId) )
 		{
 			std::cout << "MMDVM: disconnect from " << Callsign << " at " << Ip << std::endl;
 
-			// find client & remove it
+			// find client & remove it, the one that logged in with this id
 			CClients *clients = g_Reflector.GetClients();
 			std::shared_ptr<CClient>client = clients->FindClient(Ip, EProtocol::dmrmmdvm);
-			if ( client != nullptr )
+			if ( (client != nullptr) && (static_cast<CDmrmmdvmClient *>(client.get())->GetRawDmrId() == rawDmrId) )
 			{
 				clients->RemoveClient(client);
 			}
@@ -351,7 +360,7 @@ void CDmrmmdvmProtocol::Task(void)
 ////////////////////////////////////////////////////////////////////////////////////////
 // streams helpers
 
-void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, const CIp &Ip, uint8_t cmd, uint8_t CallType, uint32_t sourceTG)
+void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, const CIp &Ip, uint8_t cmd, uint8_t CallType, uint8_t slot, uint32_t sourceTG)
 {
 	bool lastheard = false;
 
@@ -368,8 +377,6 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 		CCallsign my(Header->GetMyCallsign());
 		CCallsign rpt1(Header->GetRpt1Callsign());
 		CCallsign rpt2(Header->GetRpt2Callsign());
-		// extract timeslot from streamId high byte
-		uint8_t slot = (Header->GetStreamId() >> 24) & 0xFF;
 		if (slot < DMR_SLOT1 || slot > DMR_SLOT2) slot = DMR_SLOT2;
 		// the TG this slot answers on, TG9 for XLX style links
 		const uint32_t slotTG = SlotTGForLink(sourceTG, CallType);
@@ -492,7 +499,6 @@ void CDmrmmdvmProtocol::HandleQueue(void)
 		// voice frames are built once and patched per-client (only DMRD header bytes)
 		bool isHeader = packet->IsDvHeader();
 		bool isTerminator = !isHeader && packet->IsLastPacket();
-		bool isVoice = !isHeader && !isTerminator;
 
 		if ( isHeader )
 		{
@@ -509,13 +515,11 @@ void CDmrmmdvmProtocol::HandleQueue(void)
 			cache.m_uiSourceTAMask = 0;
 			cache.m_bSourceTA = false;
 		}
-		else if ( isTerminator )
-		{
-			// seqId will be incremented after per-client send
-		}
 		else
 		{
-			// voice frame — update local stream cache or encode triplet
+			// voice frame — update local stream cache or encode triplet; also
+			// the last one, DMR+ sends voice with it (a DMR terminator has
+			// none, sub id 0): its burst goes out before the terminator
 			switch ( packet->GetDmrPacketSubid() )
 			{
 			case 1:
@@ -538,7 +542,7 @@ void CDmrmmdvmProtocol::HandleQueue(void)
 				std::shared_ptr<CClient>client = nullptr;
 				while ( (client = clients->FindNextClient(EProtocol::dmrmmdvm, it)) != nullptr )
 				{
-					if ( !client->IsAMaster() && client->IsLinkedTo(mod) )
+					if ( (client->GetModuleMastered() != mod) && client->IsLinkedTo(mod) )
 					{
 						auto *mmdvm = static_cast<CDmrmmdvmClient*>(client.get());
 						uint32_t clientTG = GetClientTGForModule(mmdvm, mod);
@@ -571,7 +575,7 @@ void CDmrmmdvmProtocol::HandleQueue(void)
 			std::shared_ptr<CClient>client = nullptr;
 			while ( (client = clients->FindNextClient(EProtocol::dmrmmdvm, it)) != nullptr )
 			{
-				if ( !client->IsAMaster() && client->IsLinkedTo(mod) )
+				if ( (client->GetModuleMastered() != mod) && client->IsLinkedTo(mod) )
 				{
 					auto *mmdvm = static_cast<CDmrmmdvmClient*>(client.get());
 					uint32_t clientTG = GetClientTGForModule(mmdvm, mod);
@@ -675,12 +679,17 @@ bool CDmrmmdvmProtocol::IsValidKeepAlivePacket(const CBuffer &Buffer, CCallsign 
 	return valid;
 }
 
-bool CDmrmmdvmProtocol::IsValidConnectPacket(const CBuffer &Buffer, CCallsign *callsign, const CIp &Ip, uint32_t *rawDmrId)
+bool CDmrmmdvmProtocol::IsConnectPacket(const CBuffer &Buffer)
 {
 	uint8_t tag[] = { 'R','P','T','L' };
 
+	return (Buffer.size() == 8) && (Buffer.Compare(tag, sizeof(tag)) == 0);
+}
+
+bool CDmrmmdvmProtocol::IsValidConnectPacket(const CBuffer &Buffer, CCallsign *callsign, const CIp &Ip, uint32_t *rawDmrId)
+{
 	bool valid = false;
-	if ( (Buffer.size() == 8) && (Buffer.Compare(tag, sizeof(tag)) == 0) )
+	if ( IsConnectPacket(Buffer) )
 	{
 		uint32_t uiRptrId = MAKEDWORD(MAKEWORD(Buffer.data()[7],Buffer.data()[6]),MAKEWORD(Buffer.data()[5],Buffer.data()[4]));
 		*rawDmrId = uiRptrId;
@@ -734,14 +743,16 @@ bool CDmrmmdvmProtocol::IsValidAuthenticationPacket(const CBuffer &Buffer, CCall
 	return valid;
 }
 
-bool CDmrmmdvmProtocol::IsValidDisconnectPacket(const CBuffer &Buffer, CCallsign *callsign)
+bool CDmrmmdvmProtocol::IsValidDisconnectPacket(const CBuffer &Buffer, CCallsign *callsign, uint32_t *rawDmrId)
 {
 	uint8_t tag[] = { 'R','P','T','C','L' };
 
 	bool valid = false;
-	if ( (Buffer.size() == 13) && (Buffer.Compare(tag, sizeof(tag)) == 0) )
+	// MMDVMHost and DMRGateway send the tag and the id, 9 bytes
+	if ( (Buffer.size() >= 9) && (Buffer.size() <= 13) && (Buffer.Compare(tag, sizeof(tag)) == 0) )
 	{
-		uint32_t uiRptrId = MAKEDWORD(MAKEWORD(Buffer.data()[7],Buffer.data()[6]),MAKEWORD(Buffer.data()[5],Buffer.data()[4]));
+		uint32_t uiRptrId = MAKEDWORD(MAKEWORD(Buffer.data()[8],Buffer.data()[7]),MAKEWORD(Buffer.data()[6],Buffer.data()[5]));
+		*rawDmrId = uiRptrId;
 		callsign->SetDmrid(uiRptrId, true);
 
 		valid = callsign->IsValid();
@@ -818,7 +829,7 @@ bool CDmrmmdvmProtocol::IsValidRssiPacket(const CBuffer &Buffer, CCallsign *call
 	return valid;
 }
 
-bool CDmrmmdvmProtocol::IsValidDvHeaderPacket(const CBuffer &Buffer, std::unique_ptr<CDvHeaderPacket> &header, uint8_t *cmd, uint8_t *CallType)
+bool CDmrmmdvmProtocol::IsValidDvHeaderPacket(const CBuffer &Buffer, std::unique_ptr<CDvHeaderPacket> &header, uint8_t *cmd, uint8_t *CallType, uint8_t *slot)
 {
 	uint8_t tag[] = { 'D','M','R','D' };
 
@@ -855,13 +866,11 @@ bool CDmrmmdvmProtocol::IsValidDvHeaderPacket(const CBuffer &Buffer, std::unique
 				uint32_t uiDstId = MAKEDWORD(MAKEWORD(Buffer.data()[10],Buffer.data()[9]),MAKEWORD(Buffer.data()[8],0));
 				uint32_t uiRptrId = MAKEDWORD(MAKEWORD(Buffer.data()[14],Buffer.data()[13]),MAKEWORD(Buffer.data()[12],Buffer.data()[11]));
 				//uint8_t uiVoiceSeq = (Buffer.data()[15] & 0x0F);
-				uint32_t uiStreamId;
-				memcpy(&uiStreamId, &Buffer.data()[16], sizeof(uiStreamId));
-				// encode slot into streamId high byte
-				uiStreamId = (uiStreamId & 0x00FFFFFF) | ((uint32_t)uiSlot << 24);
+				uint16_t uiStreamId = DmrdStreamId(Buffer, uiSlot);
 
-				// call type
+				// call type and slot
 				*CallType = uiCallType;
+				*slot = uiSlot;
 
 				// link/unlink command ?
 				if ( uiDstId == 4000 )
@@ -917,20 +926,17 @@ bool CDmrmmdvmProtocol::IsValidDvFramePacket(const CIp &Ip, const CBuffer &Buffe
 			uint32_t uiDstId = MAKEDWORD(MAKEWORD(Buffer.data()[10],Buffer.data()[9]),MAKEWORD(Buffer.data()[8],0));
 			uint32_t uiRptrId = MAKEDWORD(MAKEWORD(Buffer.data()[14],Buffer.data()[13]),MAKEWORD(Buffer.data()[12],Buffer.data()[11]));
 			uint8_t uiVoiceSeq = (Buffer.data()[15] & 0x0F);
-			uint32_t uiStreamId;
-			memcpy(&uiStreamId, &Buffer.data()[16], sizeof(uiStreamId));
-			// encode slot into streamId high byte
-			uiStreamId = (uiStreamId & 0x00FFFFFF) | ((uint32_t)uiSlot << 24);
+			uint16_t uiStreamId = DmrdStreamId(Buffer, uiSlot);
 
 			auto stream = GetStream(uiStreamId, &Ip);
 			if ( !stream )
 			{
 				// rate-limit: only log once per stream ID
-				static uint32_t lastLateEntryId = 0;
+				static uint16_t lastLateEntryId = 0;
 				if (uiStreamId != lastLateEntryId)
 				{
 					lastLateEntryId = uiStreamId;
-					std::cout << "MMDVM: late entry voice frame, stream " << std::hex << ntohl(uiStreamId) << std::dec << " from " << Ip << std::endl;
+					std::cout << "MMDVM: late entry voice frame, stream " << std::hex << uiStreamId << std::dec << " on TS" << (int)uiSlot << " from " << Ip << std::endl;
 				}
 				uint8_t cmd;
 
@@ -963,7 +969,7 @@ bool CDmrmmdvmProtocol::IsValidDvFramePacket(const CIp &Ip, const CBuffer &Buffe
 				if ( g_GateKeeper.MayTransmit(header->GetMyCallsign(), Ip, EProtocol::dmrmmdvm) )
 				{
 					// handle it
-					OnDvHeaderPacketIn(header, Ip, cmd, uiCallType, uiDstId);
+					OnDvHeaderPacketIn(header, Ip, cmd, uiCallType, uiSlot, uiDstId);
 				}
 			}
 
@@ -1046,10 +1052,7 @@ bool CDmrmmdvmProtocol::IsValidDvLastFramePacket(const CBuffer &Buffer, std::uni
 				//uint32_t uiDstId = MAKEDWORD(MAKEWORD(Buffer.data()[10],Buffer.data()[9]),MAKEWORD(Buffer.data()[8],0));
 				//uint32_t uiRptrId = MAKEDWORD(MAKEWORD(Buffer.data()[14],Buffer.data()[13]),MAKEWORD(Buffer.data()[12],Buffer.data()[11]));
 				//uint8_t uiVoiceSeq = (Buffer.data()[15] & 0x0F);
-				uint32_t uiStreamId;
-				memcpy(&uiStreamId, &Buffer.data()[16], sizeof(uiStreamId));
-				// encode slot into streamId high byte
-				uiStreamId = (uiStreamId & 0x00FFFFFF) | ((uint32_t)uiSlot << 24);
+				uint16_t uiStreamId = DmrdStreamId(Buffer, uiSlot);
 
 				// dummy ambe
 				uint8_t ambe[9];
@@ -1066,6 +1069,18 @@ bool CDmrmmdvmProtocol::IsValidDvLastFramePacket(const CBuffer &Buffer, std::uni
 	return false;
 }
 
+// The DMRD stream id has 32 bits, urfd's have 16: fold it, with the slot, so
+// the calls on the two slots of a dual slot hotspot get streams of their own
+uint16_t CDmrmmdvmProtocol::DmrdStreamId(const CBuffer &Buffer, uint8_t slot)
+{
+	const uint8_t *sid = Buffer.data() + 16;
+	uint16_t id = (uint16_t)(((sid[0] ^ sid[2]) << 8) | (sid[1] ^ sid[3]));
+	if ( slot == DMR_SLOT2 )
+		id ^= 0x8000;
+	// OpenStream refuses a stream id of 0
+	return (id != 0) ? id : 1;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // packet encoding helpers
 
@@ -1074,8 +1089,10 @@ void CDmrmmdvmProtocol::EncodeKeepAlivePacket(CBuffer *Buffer, std::shared_ptr<C
 	uint8_t tag[] = { 'M','S','T','P','O','N','G' };
 
 	Buffer->Set(tag, sizeof(tag));
-	uint32_t uiDmrId = Client->GetCallsign().GetDmrid();
-	Buffer->Append((uint8_t *)&uiDmrId, 4);
+	// the id the hotspot logged in with, big endian as in all its packets
+	const uint32_t uiRptrId = static_cast<CDmrmmdvmClient *>(Client.get())->GetRawDmrId();
+	const uint8_t id[4] = { (uint8_t)(uiRptrId >> 24), (uint8_t)(uiRptrId >> 16), (uint8_t)(uiRptrId >> 8), (uint8_t)uiRptrId };
+	Buffer->Append(id, 4);
 }
 
 void CDmrmmdvmProtocol::EncodeAckPacket(CBuffer *Buffer, const CCallsign &Callsign)

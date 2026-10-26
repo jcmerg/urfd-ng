@@ -24,6 +24,7 @@ struct SDExtraClientMapping
 	CIp         ip;
 	char        remoteModule;
 	char        localModule;
+	std::string reflector;      // the remote reflector's callsign, from its streams
 	bool        connected;
 	CTimer      keepaliveTimer;
 	CTimer      timeoutTimer;
@@ -70,6 +71,7 @@ protected:
 	bool EncodeDvFramePacket(const CDvFramePacket &, CBuffer &) const;
 
 	SDExtraClientMapping *FindMappingByLocal(char localMod);
+	SDExtraClientMapping *FindMappingByRemote(const CIp &ip, char remoteMod);
 	SDExtraClientMapping *FindMappingByIp(const CIp &ip);
 
 private:

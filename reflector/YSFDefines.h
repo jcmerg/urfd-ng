@@ -45,6 +45,9 @@ const unsigned char YSF_CM_INDIVIDUAL = 0x03U;
 const unsigned char YSF_MR_NOT_BUSY = 0x01U;
 const unsigned char YSF_MR_BUSY     = 0x02U;
 
+// AMBE+2 silence in the 72-bit DMR layout the YSF and NXDN frames are kept in
+const unsigned char AMBE72_SILENCE[] = {0xB9U, 0xE8U, 0x81U, 0x52U, 0x61U, 0x73U, 0x00U, 0x2AU, 0x6BU};
+
 const unsigned int PRNG_TABLE[] =
 {
 	0x42CC47U, 0x19D6FEU, 0x304729U, 0x6B2CD0U, 0x60BF47U, 0x39650EU, 0x7354F1U, 0xEACF60U, 0x819C9FU, 0xDE25CEU,

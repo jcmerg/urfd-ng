@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.29.4-dht** | tcd 0.12.4 | Dashboard v2.14.1
+**urfd 4.30.0-dht** | tcd 0.13.0 | Dashboard v2.14.1
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -266,6 +266,8 @@ Module = A                     # Must be a transcoded module
 
 **RxGain / TxGain**: wie bei SVX pro Anbindung in der `urfd.ini`; Werte über Vollaussteuerung werden begrenzt. tcd schickt AllStar-Audio durch seine AGC analog, die beiden bleiben daher normalerweise 0.
 
+**Sprecher**: Ein TEXT-Paket mit SET_INFO-TLV vor dem Ton, wie es DVSwitch Analog_Bridge schickt, nennt den Sprecher (Rufzeichen und DMR-ID); urfd schickt dasselbe Paket vor jedem Stream, den es zum Knoten spielt. Ohne eines läuft der Stream unter `Callsign`, mit der DMR-ID dieses Rufzeichens aus der DMR-Datenbank, sonst zeigen DMR und P25 `[MMDVM] FallbackDmrId`. Das Unkey beendet den Stream.
+
 ### MMDVM-Server
 Nimmt Verbindungen von MMDVM-Hotspots und -Repeatern direkt an (ohne BrandMeister). Implementiert das HomeBrew-DMR-Protokoll (Handshake RPTL→RPTK→RPTC→RPTO). Für reinen DMR-zu-DMR-Betrieb ohne Transcoder nutzbar, transcodierte Module sind nur für die Verbindung zwischen Betriebsarten nötig. Die TG-Zuordnung funktioniert wie beim MMDVMClient, mit Timeslots. **Dual-Slot**: Jeder Timeslot (TS1/TS2) verbindet sich unabhängig mit seinem eigenen Modul, ein Hotspot kann also gleichzeitig auf zwei Modulen sein.
 
@@ -347,6 +349,8 @@ Map1 = ref001.dstargateway.org,20001,C,A # REF001 module C -> local module A
 ```
 
 **Format der Zuordnung**: `host,port,remote_module,local_module`. Jede Zuordnung baut eine Verbindung zum angegebenen Modul des fremden Reflektors auf und leitet das Audio auf das lokale Modul.
+
+**Routing**: Die Anbindung spricht den Reflektor an wie ein mit ihm verbundenes Gateway: RPT1 ist `<Callsign> <lokales Modul>`, RPT2 der Reflektor mit dem fremden Modul (`DCS002 A`), und der Reflektor leitet nach diesem Modul. Das Rufzeichen des Reflektors kommt aus den Streams, die er schickt, bis dahin aus dem ersten Teil des Hostnamens (`dcs002.xreflector.net` -> `DCS002`); bei einer IP-Adresse und noch ohne Stream steht das eigene Rufzeichen der Anbindung dort, was urfd und xlxd annehmen (sie werten nur das Modul aus). Ein DPlus-Reflektor schickt die Streams aller Module an jeden Client: nur die des zugeordneten fremden Moduls kommen auf das lokale Modul.
 
 **Rufzeichen**: DPlus-Reflektoren verlangen eine Registrierung bei [dstargateway.org](https://regist.dstargateway.org/). DExtra- und DCS-Reflektoren sind meist offen.
 
@@ -743,13 +747,10 @@ Beispiele der Textnachricht pro Protokoll:
 | SvxReflector | `Max SVX TG317424` |
 | YSF (Server) | `YSF DG28` |
 | NXDN | `NXDN RAN6` |
-| DCSClient | `DCS002 A` |
-| DExtraClient | `XRF757 A` |
-| DPlusClient | `REF001 C` |
 | YSFClient | `YSF DG15` |
 | M17, P25, USRP, DMR+ | `M17`, `P25` usw. |
 
-Die D-Star-Client-Protokolle entnehmen den Namen des fremden Reflektors dem Hostnamen (z.B. `dcs002.xreflector.net` → `DCS002`) und hängen den Modulbuchstaben an. YSFClient hängt die DG-ID an, wenn eine eingestellt ist (sonst nur `YSF`).
+YSFClient hängt die DG-ID an, wenn eine eingestellt ist (sonst nur `YSF`). D-Star-Quellen, auch die D-Star-Client-Anbindungen, werden nicht nach D-Star transcodiert: ihre eigenen Slow Data gehen unverändert durch.
 
 Die Textnachricht hat 20 Zeichen. Ist `<Name> <Quelle> TG<n>` länger, wandert die TG in einen zweiten Text, der sich etwa alle 5 Sekunden mit dem ersten abwechselt; ist es dann noch zu lang, wird der Name gekürzt, damit die Quelle ganz bleibt:
 
@@ -762,7 +763,7 @@ Bartholomae YSF DG15  <-> Bartholomaeus         (der Name gekürzt)
 Header und Textnachricht wechseln mit jedem Superframe (etwa 420 ms):
 
 ```
-[Header: N0CALL > URF999 S] → [Max DCS002 A] → [Header] → [Max DCS002 A] → ...
+[Header: N0CALL > URF999 S] → [Max DMR TG262] → [Header] → [Max DMR TG262] → ...
 ```
 
 Die Namenssuche funktioniert für alle Protokolle: Jedes Rufzeichen mit Eintrag in der DMR-ID-Datenbank erscheint mit Namen auf D-Star-Funkgeräten.
@@ -908,11 +909,12 @@ Nur ausgehend, nichts zu öffnen: SvxReflector (zum Port des SvxLink-Servers, me
 
 ## YSF
 
-URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). YSF-Nutzer verbinden sich über Hotspot-Software (Pi-Star/WPSD), die URF-Reflektoren über die XLX-API findet. Eine Registrierung bei ysfreflector.de ist nicht nötig. Mit `EnableDGID = true` können Nutzer das Modul über DG-ID-Werte wechseln (10=A, 11=B, ... 35=Z).
+URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). YSF-Nutzer verbinden sich über Hotspot-Software (Pi-Star/WPSD), die URF-Reflektoren über die XLX-API findet. Eine Registrierung bei ysfreflector.de ist nicht nötig. Mit `EnableDGID = true` können Nutzer das Modul über DG-ID-Werte wechseln (10=A, 11=B, ... 35=Z), und der Reflektor sendet jedes Modul mit seiner DG-ID, sodass Funkgeräte, die danach filtern, das Modul hören.
 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **Protokoll-Korrekturen (4.30.0)**: Ein Stream endet mit seinem Endpaket statt 1,6 s später, ein abgelaufener Stream sendet in jedem Protokoll das normale Ende; das Echo spielt auch auf transcodierten Modulen ab; DMR TS1 und Dual-Slot funktionieren; DMR+ beschädigt eingehend nicht mehr jedes dritte AMBE-Frame und sendet ausgehend sein Endpaket; NXDN-Header und TX_REL realer Gateways werden erkannt, das Gesprächsende erreicht die Hörer und NXDN-Clients teilen sich keinen Stream mehr; P25 sendet seine TDU und Sprecher schneiden sich nicht mehr ab; das USRP-Unkey beendet den Stream und SET_INFO wird gelesen, wie chan_usrp es schreibt; die D-Star-Client-Anbindungen sprechen das zugeordnete entfernte Modul an und nehmen nur dessen Streams, Header-CRC und Slow-Data-Header stimmen; kein Deadlock beim ersten YSFClient-Stream auf ein transcodiertes Modul; P25 und NXDN sind wie die anderen Protokolle standardmäßig an; ein zweiter tcd für dieselben Module wird abgewiesen
 - **MMDVMClient**: Vollständiger MMDVM-Client für BrandMeister-/DMR+-Master: mehrere TGs pro Modul (primär TX/RX, sekundär nur RX), Timeslots, Ersatz-DMR-ID, Erzeugung des Options-Strings; bis zu neun Verbindungen gleichzeitig (4.21.0) mit Brücken-Regeln je Netz
 - **BrandMeister-API**: Optionale Anbindung an die REST API v2: Abgleich beim Start behält dynamische TGs (entfernt nur TGs, die weder in der Konfiguration noch in der Laufzeit-Zuordnung stehen), TGs per API statt per Kerchunk hinzufügen und entfernen, eingestellt über `BrandMeisterApiKey`
 - **SvxReflector**: TCP/UDP-Client für SvxLink-FM-Server: OPUS-Codec, Audio in beide Richtungen, einstellbare RX/TX-Verstärkung, eine gewählte TG, die übrigen überwacht und bei Aktivität gewählt, Trennung bei TCP-Sendefehler mit sofortiger Neuverbindung
@@ -942,7 +944,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 
 ### Audio und Transcodierung
 - **NXDN-Modulwahl**: Modulwahl über die RAN (Radio Access Number): RAN 1-26 = Modul A-Z, mit getauschter RAN 1 und RAN des AutoLinkModule, sodass RAN 1 das AutoLinkModule erreicht; RAN 0 = AutoLinkModule. Alternativ Wahl über die Ziel-ID (`ModuleDstIdBase`, Ziel-ID base+1…base+26 = A-Z) für Clients ohne RAN, ausgewertet beim Verbindungs-Poll und bei jeder Aussendung, mit der Ziel-ID des Moduls in ausgehenden Frames. NXDN-ID-Auflösung über die NXDN-Datenbank mit DMR-Datenbank als Ersatz. FallbackNxdnId für unbekannte Anrufer (ohne Einstellung wird verworfen). Nicht initialisiertes `m_uiNXDNid` im Standardkonstruktor von CCallsign behoben.
-- **D-Star-Slow-Data**: Transcodierte Streams enthalten Rufzeichen des Anrufers, Protokoll-/TG-/RAN-/Modulangabe und den Betreibernamen aus der DMR- und NXDN-ID-Datenbank, im Wechsel alle etwa 5 Sekunden. Angezeigt wird die tatsächliche Quell-TG (nicht die primäre/statische), damit es bei mehreren TGs stimmt. Client-Protokolle zeigen Name und Modul des fremden Reflektors (z.B. `DCS002 A`), YSFClient die DG-ID
+- **D-Star-Slow-Data**: Transcodierte Streams enthalten Rufzeichen des Anrufers, Protokoll-/TG-/RAN-/Modulangabe und den Betreibernamen aus der DMR- und NXDN-ID-Datenbank, im Wechsel alle etwa 5 Sekunden. Angezeigt wird die tatsächliche Quell-TG (nicht die primäre/statische), damit es bei mehreren TGs stimmt. YSFClient zeigt die DG-ID
 - **Getrennte SVX- und USRP-Codecs**: Unabhängige Codec-Pfade (`ECodecType::svx` und `ECodecType::usrp`) mit Verstärkung pro Anbindung in urfd.ini (`RxGain`/`TxGain` für SvxReflector, SVXServer und USRP); in tcd laufen beide durch die AGC analog
 - **MMDVM Dual-Slot**: Jeder Timeslot (TS1/TS2) verbindet sich unabhängig mit seinem eigenen Reflektor-Modul, ein Hotspot kann also auf zwei Timeslots gleichzeitig zwei Module empfangen. Das Dashboard zeigt beide verbundenen Module pro Client.
 - **MMDVM bei NAT-Neuzuordnung**: Verbindet sich ein Hotspot mit neuem UDP-Quellport neu (NAT), wird der alte Eintrag anhand der exakten DMR-ID ersetzt. Die Modulverbindungen der Slots bleiben erhalten. Mehrere Clients mit verschiedenen DMR-IDs (auch Endungen) hinter derselben IP werden unterstützt.
@@ -990,6 +992,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.13.0**: ein IMBE-Encoder und -Decoder je Modul (zwei P25-Module gleichzeitig stören sich nicht mehr), ein 300-Hz-Hochpass vor Codec2 für P25-Audio, baut und läuft unter macOS, DV3000/DV3003 werden an der Produkt-ID des Chips erkannt, ein Gerät, das nicht antwortet, wird ausgelassen statt tcd zu beenden, exklusiver Zugriff auf die serielle Schnittstelle
 - **In diesem Repository**: tcd liegt mit seiner Historie in `tcd/`; es baut gegen die gemeinsamen urfd-Quellen (`TCPacketDef.h`, `TCSocket.*`) aus `../reflector`, beide Seiten sprechen also immer dasselbe Protokoll
 - **Serieller Zugriff ohne libftd2xx**: AMBE-Geräte über den Kernel-Treiber `ftdi_sio` und `/dev/serial/by-id` (POSIX-Anbindung von Jason Kendall), RTS/CTS-Flusskontrolle, USB-Latenz-Timer auf 1 ms; Geräte, die ein älterer libftd2xx-tcd vom Treiber gelöst hat, werden beim Start wieder gebunden; ein verlorenes Gerät startet tcd über systemd neu
 - **Geräteauswahl**: `DeviceSerial` muss exakt passen: USB-Seriennummer, libftd2xx-Form mit Port-Buchstabe, Name unter by-id oder Gerätedatei; `tcd --list-devices` zeigt sie an

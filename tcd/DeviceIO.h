@@ -14,6 +14,10 @@ public:
     virtual ssize_t Write(const void *buf, size_t len) = 0;
     virtual ssize_t Read(void *buf, size_t len) = 0;
     virtual bool Purge() = 0;
+    // drop received bytes not read yet, the output stays
+    virtual bool PurgeInput() = 0;
+    // wait up to ms milliseconds for the written bytes to leave: true when they have
+    virtual bool Drain(int ms) = 0;
     // control lines
     virtual bool SetRTS(bool on) = 0;
     virtual bool SetDTR(bool on) = 0;

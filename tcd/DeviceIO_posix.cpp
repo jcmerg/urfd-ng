@@ -7,8 +7,15 @@
 #include <poll.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <errno.h>
+#ifdef __linux__
 #include <linux/serial.h>
+#endif
+#ifdef __APPLE__
+#include <IOKit/serial/ioss.h>	// IOSSIOSPEED, IOSSDATALAT
+#endif
+#include <chrono>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
@@ -27,9 +34,24 @@ public:
         // that wires it; blocking mode comes back once CLOCAL is set below.
         fd_ = ::open(id.c_str(), O_RDWR | O_NOCTTY | O_SYNC | O_NONBLOCK);
         if (fd_ < 0) {
-            std::cerr << "PosixDevice: open(" << id << ") failed: " << strerror(errno) << std::endl;
+            if (EBUSY == errno)
+                std::cerr << "PosixDevice: " << id << " is in use by another process (another tcd or dvsitest?)" << std::endl;
+            else
+                std::cerr << "PosixDevice: open(" << id << ") failed: " << strerror(errno) << std::endl;
             return false;
         }
+
+        // the device is ours alone: a second process that opened it would reset the
+        // chip under the running one. TIOCEXCL makes later opens fail (EBUSY), except
+        // for root on Linux; the lock catches that one, as every tcd and dvsitest takes it.
+        if (flock(fd_, LOCK_EX | LOCK_NB) != 0 && EWOULDBLOCK == errno) {
+            std::cerr << "PosixDevice: " << id << " is in use by another process (another tcd or dvsitest?)" << std::endl;
+            ::close(fd_);
+            fd_ = -1;
+            return false;
+        }
+        if (ioctl(fd_, TIOCEXCL) != 0)
+            std::cerr << "PosixDevice: exclusive use of " << id << " failed: " << strerror(errno) << std::endl;
 
         // configure basic 8N1
         struct termios tty;
@@ -122,6 +144,29 @@ public:
         return (tcflush(fd_, TCIOFLUSH) == 0);
     }
 
+    bool PurgeInput() override
+    {
+        if (fd_ < 0) return false;
+        return (tcflush(fd_, TCIFLUSH) == 0);
+    }
+
+    // not tcdrain(): a chip that holds CTS would block it for ever
+    bool Drain(int ms) override
+    {
+        if (fd_ < 0) return false;
+        const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        for (;;) {
+            int n = 0;
+            if (ioctl(fd_, TIOCOUTQ, &n) != 0)
+                return false;
+            if (n <= 0)
+                return true;
+            if (std::chrono::steady_clock::now() >= end)
+                return false;
+            usleep(1000);
+        }
+    }
+
     bool SetRTS(bool on) override
     {
         if (fd_ < 0) return false;
@@ -162,6 +207,17 @@ public:
             case 115200: sp = B115200; break;
             case 57600: sp = B57600; break;
             case 38400: sp = B38400; break;
+#ifdef __APPLE__
+            // the macOS termios has no B460800/B921600: IOSSIOSPEED sets any rate. It
+            // has to come after the last tcsetattr(), which would reset it, as it does
+            // in CDVDevice::OpenDevice().
+            case 460800:
+            case 921600:
+            {
+                speed_t speed = baud;
+                return (ioctl(fd_, IOSSIOSPEED, &speed) == 0);
+            }
+#endif
             default: return false;
         }
         cfsetospeed(&tty, sp);
@@ -242,6 +298,15 @@ private:
     // low latency (ftdi_sio then uses 1 ms), and set the timer through sysfs too.
     void SetLowLatency(const std::string &id)
     {
+#ifdef __APPLE__
+        // IOSSDATALAT is documented in microseconds, but Apple's FTDI driver
+        // (com.apple.DriverKit-AppleUSBFTDI) writes the value as it is into the FTDI
+        // latency timer, in ms and cut to a byte: 1000 gives 1000 & 0xff = 232 ms per
+        // answer. 1 gives the 1 ms the Linux code below sets.
+        unsigned long latency = 1;
+        if (ioctl(fd_, IOSSDATALAT, &latency) != 0)
+            std::cerr << "PosixDevice: IOSSDATALAT for " << id << " failed: " << strerror(errno) << std::endl;
+#elif defined(__linux__)
         struct serial_struct ser;
         if (ioctl(fd_, TIOCGSERIAL, &ser) == 0) {
             ser.flags |= ASYNC_LOW_LATENCY;
@@ -268,6 +333,9 @@ private:
             else
                 std::cout << tty << " USB latency timer: " << ms << " ms" << std::endl;
         }
+#else
+        (void)id;
+#endif
     }
 
     int fd_;

@@ -34,6 +34,7 @@ struct SDPlusClientMapping
 	CIp         ip;
 	char        remoteModule;   // not used in connect (DPlus discovers module from header)
 	char        localModule;
+	std::string reflector;      // the remote reflector's callsign, from its streams
 	bool        connected;
 	EDPlusState state;
 	CTimer      stateTimer;
@@ -81,6 +82,7 @@ protected:
 	bool EncodeDvFramePacket(const CDvFramePacket &, CBuffer &) const;
 
 	SDPlusClientMapping *FindMappingByLocal(char localMod);
+	SDPlusClientMapping *FindMappingByRemote(const CIp &ip, char remoteMod);
 	SDPlusClientMapping *FindMappingByIp(const CIp &ip);
 
 private:

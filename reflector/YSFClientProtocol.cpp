@@ -191,29 +191,42 @@ void CYsfClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 	// poll response = connection confirmed
 	if (IsValidPollPacket(Buffer, &Callsign))
 	{
-		std::lock_guard<std::mutex> lock(m_MappingMutex);
-		SYsfClientMapping *mapping = FindMappingByIp(Ip);
-		if (mapping)
+		// the mapping lock is never held while calling into the reflector:
+		// opening a stream reads the mappings back (CCodecStream::ResetStats)
+		bool known, connect = false;
+		char localModule = ' ';
+		uint8_t dgid = 0;
 		{
-			mapping->timeoutTimer.start();
-
-			if (!mapping->connected)
+			std::lock_guard<std::mutex> lock(m_MappingMutex);
+			SYsfClientMapping *mapping = FindMappingByIp(Ip);
+			known = (mapping != nullptr);
+			if (mapping)
 			{
-				mapping->connected = true;
-				mapping->pollTimer.start();
-				std::cout << "YSFClient: connected to " << mapping->host
-				          << " (local module " << mapping->localModule << ")" << std::endl;
-
+				mapping->timeoutTimer.start();
+				if (!mapping->connected)
+				{
+					mapping->connected = true;
+					mapping->pollTimer.start();
+					connect = true;
+					std::cout << "YSFClient: connected to " << mapping->host
+					          << " (local module " << mapping->localModule << ")" << std::endl;
+				}
+				localModule = mapping->localModule;
+				dgid = mapping->dgid;
+			}
+		}
+		if (known)
+		{
+			CClients *clients = g_Reflector.GetClients();
+			if (connect)
+			{
 				// create virtual client
 				CCallsign cs(m_ClientCallsign);
-				cs.SetCSModule(mapping->localModule);
-				g_Reflector.GetClients()->AddClient(
-					std::make_shared<CYSFClientPeer>(cs, Ip, mapping->localModule));
-				g_Reflector.ReleaseClients();
+				cs.SetCSModule(localModule);
+				clients->AddClient(std::make_shared<CYSFClientPeer>(cs, Ip, localModule, dgid));
 			}
 
 			// keep virtual client alive
-			CClients *clients = g_Reflector.GetClients();
 			auto it = clients->begin();
 			std::shared_ptr<CClient> client = nullptr;
 			while ((client = clients->FindNextClient(EProtocol::ysfclient, it)) != nullptr)
@@ -226,20 +239,24 @@ void CYsfClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 	}
 	else if (IsValidDvPacket(Buffer, &Fich))
 	{
-		std::lock_guard<std::mutex> lock(m_MappingMutex);
-		SYsfClientMapping *mapping = FindMappingByIp(Ip);
-		if (!mapping || !mapping->connected)
-			return;
+		char localModule;
+		{
+			std::lock_guard<std::mutex> lock(m_MappingMutex);
+			SYsfClientMapping *mapping = FindMappingByIp(Ip);
+			if (!mapping || !mapping->connected)
+				return;
+			localModule = mapping->localModule;
+		}
 
 		if (IsValidDvHeaderPacket(Ip, Fich, Buffer, Header, Frames))
 		{
 			// remap to local module
-			Header->SetRpt2Module(mapping->localModule);
+			Header->SetRpt2Module(localModule);
 			CCallsign rpt1(m_ClientCallsign);
-			rpt1.SetCSModule(mapping->localModule);
+			rpt1.SetCSModule(localModule);
 			Header->SetRpt1Callsign(rpt1);
 
-			if (g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::ysfclient, mapping->localModule))
+			if (g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::ysfclient, localModule))
 			{
 				OnDvHeaderPacketIn(Header, Ip);
 			}
@@ -256,12 +273,12 @@ void CYsfClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 			// late entry header?
 			if (Header)
 			{
-				Header->SetRpt2Module(mapping->localModule);
+				Header->SetRpt2Module(localModule);
 				CCallsign rpt1(m_ClientCallsign);
-				rpt1.SetCSModule(mapping->localModule);
+				rpt1.SetCSModule(localModule);
 				Header->SetRpt1Callsign(rpt1);
 
-				if (g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::ysfclient, mapping->localModule))
+				if (g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::ysfclient, localModule))
 				{
 					OnDvHeaderPacketIn(Header, Ip);
 				}

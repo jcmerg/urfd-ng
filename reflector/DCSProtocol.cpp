@@ -191,6 +191,16 @@ void CDcsProtocol::Task(void)
 			// valid but ignore packet
 			//std::cout << "DCS ignored packet from " << Ip << std::endl;
 		}
+		else if ( (Buffer.size() == 519) && IsLetter(Buffer.data()[9]) )
+		{
+			// a link request with an invalid callsign: refused, so the gateway does not retry forever
+			if (RejectLog("DCS: invalid callsigns", Ip.GetAddress()))
+				std::cout << "DCS connect packet with an invalid callsign from " << Ip << std::endl;
+			Callsign.SetCallsign(Buffer.data(), 8);
+			Callsign.SetCSModule(Buffer.data()[8]);
+			EncodeConnectNackPacket(Callsign, Buffer.data()[9], &Buffer);
+			Send(Buffer, Ip);
+		}
 		else
 		{
 #ifdef DEBUG
@@ -528,10 +538,10 @@ bool CDcsProtocol::IsValidDvPacket(const CBuffer &Buffer, std::unique_ptr<CDvHea
 	if ( (Buffer.size() >= 100) && (Buffer.Compare(tag, sizeof(tag)) == 0) )
 	{
 		// get the header
-		header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket((struct dstar_header *)&(Buffer.data()[4]), *((uint16_t *)&(Buffer.data()[43])), 0x80));
+		header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket((struct dstar_header *)&(Buffer.data()[4]), ReadU16(Buffer.data() + 43), 0x80));
 
 		// get the frame
-		frame = std::unique_ptr<CDvFramePacket>(new CDvFramePacket((SDStarFrame *)&(Buffer.data()[46]), *((uint16_t *)&(Buffer.data()[43])), Buffer.data()[45]));
+		frame = std::unique_ptr<CDvFramePacket>(new CDvFramePacket((SDStarFrame *)&(Buffer.data()[46]), ReadU16(Buffer.data() + 43), Buffer.data()[45]));
 
 		// check validity of packets
 		if ( header && header->IsValid() && frame && frame->IsValid() )
