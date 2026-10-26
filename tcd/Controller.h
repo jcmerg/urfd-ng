@@ -92,6 +92,10 @@ protected:
 	// P25: IMBE quantises each frame against the one before, so every module has its
 	// own encoder and decoder (streams of two modules must not share one state)
 	std::unordered_map<char, std::unique_ptr<imbe_vocoder>> imbe_enc, imbe_dec;
+	// P25 to M17: a 300 Hz high-pass in front of the Codec2 encoder, per module
+	struct SHighPass { float z[2][2]; uint16_t streamid; };
+	std::unordered_map<char, SHighPass> c2_highpass;
+	void HighPass(char module, uint16_t streamid, int16_t *samples);
 	CAGC m_agcDigital;  // D-Star, DMR/YSF, M17, P25/NXDN
 	CAGC m_agcAnalog;   // SVX and USRP: FM audio, gate above its noise floor
 	CNoiseSuppress m_nsAnalog;  // SVX and USRP: FM noise removed before the AGC

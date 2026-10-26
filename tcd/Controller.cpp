@@ -16,6 +16,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <unistd.h>
+#include <algorithm>
 #include <climits>
 #include <cstdlib>
 #include <libgen.h>
@@ -395,6 +396,7 @@ bool CController::InitVocoders()
 		c2_32[c] = std::unique_ptr<CCodec2>(new CCodec2(true));
 		imbe_enc[c] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
 		imbe_dec[c] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
+		c2_highpass[c] = SHighPass{ {{0.0f, 0.0f}, {0.0f, 0.0f}}, 0 };
 	}
 
 	// the software vocoders of the codec plugins: CodecDStar / CodecDMR in tcd.ini
@@ -805,14 +807,46 @@ void CController::ReadReflectorThread()
 	}
 }
 
-// This is only called when codec_in was dstar or dmr. Obviously, the incoming
-// ambe packet was already decoded to audio.
+// 4th order Butterworth high-pass, 300 Hz at 8 kHz, two biquads (direct form II
+// transposed). The IMBE decoder puts 4-5 dB more energy below 120 Hz than the
+// original had, which throws Codec2's pitch and voicing estimation off: P25 to
+// M17 drops to PESQ 1.3-1.7, with this filter 2.3-3.1. Other sources do not gain
+// from it consistently, so only P25 goes through it.
+void CController::HighPass(char module, uint16_t streamid, int16_t *samples)
+{
+	static const float sos[2][5] = {	// b0 b1 b2 a1 a2
+		{ 0.734407998f, -1.468815996f, 0.734407998f, -1.5997196711f, 0.6451760153f },
+		{ 1.0f, -2.0f, 1.0f, -1.7852530573f, 0.8359813686f }
+	};
+	auto &hp = c2_highpass[module];
+	if (hp.streamid != streamid)
+	{
+		hp = SHighPass{ {{0.0f, 0.0f}, {0.0f, 0.0f}}, streamid };
+	}
+	for (int i = 0; i < 160; i++)
+	{
+		float x = samples[i];
+		for (int k = 0; k < 2; k++)
+		{
+			const float y = sos[k][0] * x + hp.z[k][0];
+			hp.z[k][0] = sos[k][1] * x - sos[k][3] * y + hp.z[k][1];
+			hp.z[k][1] = sos[k][2] * x - sos[k][4] * y;
+			x = y;
+		}
+		samples[i] = int16_t(std::max(-32768.0f, std::min(32767.0f, roundf(x))));
+	}
+}
+
+// This is only called when codec_in was not M17. Obviously, the incoming
+// packet was already decoded to audio.
 // This might complete the packet. If so, send it back to the reflector
 void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t gained[160];
 	memcpy(gained, packet->GetAudioSamples(), sizeof(gained));
 	ApplyGain(gained, 160, outgain_m17_num);
+	if (ECodecType::p25 == packet->GetCodecIn())
+		HighPass(packet->GetModule(), packet->GetStreamId(), gained);
 
 	uint8_t m17data[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x01, 0x43, 0x09, 0xe4, 0x9c, 0x08, 0x21 };
 	const auto m = packet->GetModule();
