@@ -23,6 +23,7 @@
 #include "DVFramePacket.h"
 #include "Timer.h"
 #include "Clients.h"
+#include <unordered_set>
 
 // class
 
@@ -51,10 +52,12 @@ protected:
 
 	// stream helpers
 	void OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &, const CIp &);
+	uint16_t GetStreamIdFromIp(const CIp &);
+	uint16_t OpenStream(const CCallsign &, const CIp &);
 
 	// packet decoding helpers
-	bool IsValidDvPacket(const CIp &, const CBuffer &, std::unique_ptr<CDvHeaderPacket> &, std::unique_ptr<CDvFramePacket> &);
-	bool IsValidDvHeaderPacket(const CIp &, const CBuffer &, std::unique_ptr<CDvHeaderPacket> &);
+	bool IsValidDvPacket(const CBuffer &, uint16_t, std::unique_ptr<CDvFramePacket> &);
+	bool IsValidDvHeaderPacket(const CBuffer &, CCallsign &);
 	bool IsValidDvLastPacket(const CBuffer &);
 
 	// packet encoding helpers
@@ -66,7 +69,11 @@ protected:
 
 	// for queue header caches
 	std::unordered_map<char, CUSRPStreamCacheItem> m_StreamsCache;
-	uint32_t m_uiStreamId;
+	// streams whose unkey was pushed: voice after it until the stream closes is dropped
+	std::unordered_set<uint16_t> m_EndedStreams;
+	// the talker a TEXT/SET_INFO packet announced, until the unkey
+	CCallsign m_Talker;
+	bool m_HasTalker = false;
 
 private:
 	// CConfigure data

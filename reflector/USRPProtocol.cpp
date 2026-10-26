@@ -24,14 +24,36 @@
 
 #include "Global.h"
 #include "Utils.h"
+#include "RejectLog.h"
 
-const uint8_t USRP_TYPE_VOICE = 0;
-const uint8_t USRP_TYPE_TEXT  = 2;
+// chan_usrp's struct _chan_usrp_bufhdr (32 bytes): "USRP", then seq, memory,
+// keyup, talkgroup, type, mpxid and reserved, each a network order u32; a voice
+// packet adds 160 samples s16 little endian (20 ms at 8 kHz)
+const uint32_t USRP_TYPE_VOICE = 0;
+const uint32_t USRP_TYPE_TEXT  = 2;
 
-const uint8_t USRP_KEYUP_FALSE  = 0;
-const uint8_t USRP_KEYUP_TRUE   = 1;
+const uint32_t USRP_KEYUP_FALSE  = 0;
+const uint32_t USRP_KEYUP_TRUE   = 1;
 
 const uint8_t TLV_TAG_SET_INFO = 8;
+
+static uint32_t GetU32BE(const uint8_t *p)
+{
+	return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | uint32_t(p[3]);
+}
+
+static void PutU32BE(uint8_t *p, uint32_t v)
+{
+	p[0] = (v >> 24) & 0xFFU;
+	p[1] = (v >> 16) & 0xFFU;
+	p[2] = (v >> 8) & 0xFFU;
+	p[3] = v & 0xFFU;
+}
+
+static bool IsUSRP(const CBuffer &Buffer)
+{
+	return ( (Buffer.size() >= 32) && !memcmp(Buffer.data(), "USRP", 4) );
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // operation
@@ -39,7 +61,6 @@ const uint8_t TLV_TAG_SET_INFO = 8;
 bool CUSRPProtocol::Initialize(const char *type, const EProtocol ptype, const uint16_t port, const bool has_ipv4, const bool has_ipv6)
 {
 	CBuffer buffer;
-	m_uiStreamId = 0;
 	std::ifstream file;
 	std::streampos size;
 
@@ -140,8 +161,6 @@ void CUSRPProtocol::Task(void)
 	CBuffer   Buffer;
 	CIp       Ip;
 	CCallsign Callsign;
-	char      ToLinkModule;
-	std::unique_ptr<CDvHeaderPacket> Header;
 	std::unique_ptr<CDvFramePacket>  Frame;
 
 	// handle incoming packets
@@ -156,35 +175,71 @@ void CUSRPProtocol::Task(void)
 #endif
 	{
 		// crack the packet
-		if ( IsValidDvPacket(Ip, Buffer, Header, Frame) )
+		if ( IsValidDvPacket(Buffer, 0, Frame) )
 		{
-			// push the packet
-			OnDvFramePacketIn(Frame, &Ip);
-		}
-		else if( IsValidDvHeaderPacket(Ip, Buffer, Header) )
-		{
-			// callsign muted?
-			if ( g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::usrp) )
+			// the voice opens a stream if the TEXT packet didn't
+			auto sid = GetStreamIdFromIp(Ip);
+			if ( !sid )
 			{
-				OnDvHeaderPacketIn(Header, Ip);
+				// the talker SET_INFO announced, else the node itself
+				CCallsign my(m_HasTalker ? m_Talker : m_Callsign);
+				if ( 0 == my.GetDmrid() )
+				{
+					g_LDid.Lock();
+					auto id = g_LDid.FindDmrid(my.GetKey());
+					g_LDid.Unlock();
+					my.SetDmrid(id, false);
+				}
+				sid = OpenStream(my, Ip);
+			}
+			// nothing after the unkey goes into the ending stream
+			if ( sid && !m_EndedStreams.count(sid) )
+			{
+				// push the packet
+				Frame->SetStreamId(sid);
+				OnDvFramePacketIn(Frame, &Ip);
+			}
+		}
+		else if ( IsValidDvHeaderPacket(Buffer, Callsign) )
+		{
+			// DVSwitch announces the talker before the voice
+			m_HasTalker = Callsign.IsValid();
+			if ( m_HasTalker )
+			{
+				m_Talker = Callsign;
+				if ( !GetStreamIdFromIp(Ip) )
+					OpenStream(m_Talker, Ip);
 			}
 		}
 		else if ( IsValidDvLastPacket(Buffer) )
 		{
-			// do nothing
-			std::cout << "USRP_KEYUP_FALSE received" << std::endl; // DEBUG
+			// the unkey ends the stream with a silent last frame
+			m_HasTalker = false;
+			auto sid = GetStreamIdFromIp(Ip);
+			if ( sid && !m_EndedStreams.count(sid) )
+			{
+				int16_t silence[160] = {};
+				Frame = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(silence, sid, true));
+				m_EndedStreams.insert(sid);
+				OnDvFramePacketIn(Frame, &Ip);
+			}
 		}
 		else
 		{
-			// invalid packet
-			std::string title("Unknown USRP packet from ");
-			title += Ip.GetAddress();
-			Buffer.Dump(title);
+			// invalid packet: the first of an address each hour
+			if (RejectLog("USRP: unknown packets", Ip.GetAddress()))
+			{
+				std::string title("Unknown USRP packet from ");
+				title += Ip.GetAddress();
+				Buffer.Dump(title);
+			}
 		}
 	}
 
 	// handle end of streaming timeout
 	CheckStreamsTimeout();
+	for ( auto it=m_EndedStreams.begin(); it!=m_EndedStreams.end(); )
+		it = m_Streams.count(*it) ? std::next(it) : m_EndedStreams.erase(it);
 
 	// handle queue from reflector
 	HandleQueue();
@@ -245,6 +300,40 @@ void CUSRPProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header,
 	}
 }
 
+// the stream the sender at Ip has open, 0 if none
+uint16_t CUSRPProtocol::GetStreamIdFromIp(const CIp &Ip)
+{
+	for ( auto &it : m_Streams )
+	{
+		auto owner = it.second->GetOwnerIp();
+		if ( (owner != nullptr) && (*owner == Ip) )
+			return it.first;
+	}
+	return 0;
+}
+
+// opens a stream for the talker my, if the gatekeeper lets it; returns its id or 0
+uint16_t CUSRPProtocol::OpenStream(const CCallsign &my, const CIp &Ip)
+{
+	// callsign muted?
+	if ( !g_GateKeeper.MayTransmit(my, Ip, EProtocol::usrp) )
+		return 0;
+
+	// a new stream id for every transmission, never 0
+	uint16_t sid;
+	do {
+		sid = static_cast<uint16_t>(::rand());
+	} while ( 0 == sid );
+
+	CCallsign rpt1 = m_Callsign;
+	CCallsign rpt2 = m_ReflectorCallsign;
+	rpt1.SetCSModule(m_Module);
+	rpt2.SetCSModule(' ');
+	auto header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(my, CCallsign("CQCQCQ"), rpt1, rpt2, sid, true));
+	OnDvHeaderPacketIn(header, Ip);
+	return GetStreamIdFromIp(Ip);
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // queue helper
 
@@ -298,76 +387,68 @@ void CUSRPProtocol::HandleQueue(void)
 ////////////////////////////////////////////////////////////////////////////////////////
 // packet decoding helpers
 
-bool CUSRPProtocol::IsValidDvPacket(const CIp &Ip, const CBuffer &Buffer, std::unique_ptr<CDvHeaderPacket> &header, std::unique_ptr<CDvFramePacket> &frame)
+bool CUSRPProtocol::IsValidDvPacket(const CBuffer &Buffer, uint16_t sid, std::unique_ptr<CDvFramePacket> &frame)
 {
-	if((Buffer.size() == 352) && !memcmp(Buffer.data(), "USRP", 4) && (Buffer.data()[20] == USRP_TYPE_VOICE) && (Buffer.data()[15] == USRP_KEYUP_TRUE) )
+	if ( (Buffer.size() == 352) && IsUSRP(Buffer) && (GetU32BE(Buffer.data()+20) == USRP_TYPE_VOICE) && (GetU32BE(Buffer.data()+12) != USRP_KEYUP_FALSE) )
 	{
-		auto stream = GetStream(m_uiStreamId, &Ip);
-		if ( !stream )
-		{
-			m_uiStreamId = static_cast<uint32_t>(::rand());
-			CCallsign csMY = m_Callsign;
-			CCallsign rpt1 = m_Callsign;
-			CCallsign rpt2 = m_ReflectorCallsign;
-			rpt1.SetCSModule(m_Module);
-			rpt2.SetCSModule(' ');
-			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, m_uiStreamId, true));
-			OnDvHeaderPacketIn(header, Ip);
-		}
-
 		int16_t pcm[160];
 		for(int i = 0; i < 160; ++i){
-			pcm[i] = (Buffer.data()[32+(i*2)+1] << 8) | Buffer.data()[32+(i*2)];
+			pcm[i] = int16_t((Buffer.data()[32+(i*2)+1] << 8) | Buffer.data()[32+(i*2)]);
 		}
 		CUtils::ApplyGain(pcm, 160, m_RxGainNum);
 
-		frame = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(pcm, m_uiStreamId, false));
+		frame = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(pcm, sid, false));
 		return true;
 	}
 	return false;
 }
 
-bool CUSRPProtocol::IsValidDvHeaderPacket(const CIp &Ip, const CBuffer &Buffer, std::unique_ptr<CDvHeaderPacket> &header)
+// TEXT with a TLV SET_INFO as DVSwitch Analog_Bridge sends it: tag, length, then
+// dmr id (3), repeater id (4), tg (3), ts (1), cc (1) and the callsign, 0 terminated
+bool CUSRPProtocol::IsValidDvHeaderPacket(const CBuffer &Buffer, CCallsign &talker)
 {
-	if((Buffer.size() == 352) && !memcmp(Buffer.data(), "USRP", 4) && (Buffer.data()[20] == USRP_TYPE_TEXT) && (Buffer.data()[32] == TLV_TAG_SET_INFO) ){
-		auto stream = GetStream(m_uiStreamId, &Ip);
-		if ( !stream )
+	if ( (Buffer.size() == 352) && IsUSRP(Buffer) && (GetU32BE(Buffer.data()+20) == USRP_TYPE_TEXT) && (Buffer.data()[32] == TLV_TAG_SET_INFO) )
+	{
+		const uint8_t *value = Buffer.data() + 34;
+		uint32_t len = Buffer.data()[33];
+		uint32_t uiSrcId = (uint32_t(value[0]) << 16) | (uint32_t(value[1]) << 8) | uint32_t(value[2]);
+		std::string cs;
+		for ( uint32_t i = 12; (i < len) && (34 + i < Buffer.size()) && value[i] && (cs.size() < CALLSIGN_LEN); i++ )
 		{
-			uint32_t uiSrcId = ((Buffer.data()[1] << 16) | ((Buffer.data()[2] << 8) & 0xff00) | (Buffer.data()[3] & 0xff));
-			m_uiStreamId = static_cast<uint32_t>(::rand());
-			CCallsign csMY = CCallsign("", uiSrcId);
-			CCallsign rpt1 = CCallsign("", uiSrcId);
-			CCallsign rpt2 = m_ReflectorCallsign;
-			rpt1.SetCSModule(m_Module);
-			rpt2.SetCSModule(' ');
-			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, m_uiStreamId, true));
+			if ( value[i] != ' ' )
+				cs.push_back(char(value[i]));
 		}
+		// the callsign, with its dmr id, else the callsign of the dmr id; invalid without both
+		talker = CCallsign(cs, uiSrcId);
+		if ( !talker.IsValid() )
+			talker = CCallsign("", uiSrcId);
 		return true;
 	}
 	return false;
 }
 
+// the unkey: a bare header (or a voice packet) with keyup 0
 bool CUSRPProtocol::IsValidDvLastPacket(const CBuffer &Buffer)
 {
-	if((Buffer.size() == 32) && !memcmp(Buffer.data(), "USRP", 4) && (Buffer.data()[15] == USRP_KEYUP_FALSE) )
-	{
-		return true;
-	}
-	return false;
+	return ( ((Buffer.size() == 32) || (Buffer.size() == 352)) && IsUSRP(Buffer) && (GetU32BE(Buffer.data()+20) == USRP_TYPE_VOICE) && (GetU32BE(Buffer.data()+12) == USRP_KEYUP_FALSE) );
 }
 
 void CUSRPProtocol::EncodeUSRPHeaderPacket(const CDvHeaderPacket &Header, uint32_t iSeq, CBuffer &Buffer) const
 {
 	std::string cs = Header.GetMyCallsign().GetCS();
-	const uint32_t cnt = htonl(iSeq);
+	cs.erase(cs.find_last_not_of(' ') + 1);
+	const uint32_t id = Header.GetMyCallsign().GetDmrid();
 	Buffer.resize(352);
 	memset(Buffer.data(), 0, 352);
 	memcpy(Buffer.data(), "USRP", 4);
-	memcpy(Buffer.data() + 4, &cnt, 4);
-	Buffer.data()[15] = USRP_KEYUP_FALSE;
-	Buffer.data()[20] = USRP_TYPE_TEXT;
+	PutU32BE(Buffer.data() + 4, iSeq);
+	PutU32BE(Buffer.data() + 12, USRP_KEYUP_FALSE);
+	PutU32BE(Buffer.data() + 20, USRP_TYPE_TEXT);
 	Buffer.data()[32] = TLV_TAG_SET_INFO;
 	Buffer.data()[33] = 13 + cs.size();
+	Buffer.data()[34] = (id >> 16) & 0xFFU;
+	Buffer.data()[35] = (id >> 8) & 0xFFU;
+	Buffer.data()[36] = id & 0xFFU;
 	memcpy(Buffer.data()+46, cs.c_str(), cs.size());
 }
 
@@ -375,27 +456,28 @@ void CUSRPProtocol::EncodeUSRPPacket(const CDvHeaderPacket &Header, const CDvFra
 {
 	if(islast)
 	{
-		const uint32_t cnt = htonl(iSeq);
 		Buffer.resize(32);
 		memset(Buffer.data(), 0, 32);
 		memcpy(Buffer.data(), "USRP", 4);
-		memcpy(Buffer.data() + 4, &cnt, 4);
-		Buffer.data()[15] = USRP_KEYUP_FALSE;
-
+		PutU32BE(Buffer.data() + 4, iSeq);
+		PutU32BE(Buffer.data() + 12, USRP_KEYUP_FALSE);
 	}
 	else
 	{
-		std::string cs = Header.GetMyCallsign().GetCS();
-		const uint32_t cnt = htonl(iSeq);
 		Buffer.resize(352);
 		memset(Buffer.data(), 0, 352);
 		memcpy(Buffer.data(), "USRP", 4);
-		memcpy(Buffer.data() + 4, &cnt, 4);
-		Buffer.data()[15] = USRP_KEYUP_TRUE;
+		PutU32BE(Buffer.data() + 4, iSeq);
+		PutU32BE(Buffer.data() + 12, USRP_KEYUP_TRUE);
 		int16_t pcm[160];
 		memcpy(pcm, DvFrame.GetCodecData(ECodecType::usrp), sizeof(pcm));
 		CUtils::ApplyGain(pcm, 160, m_TxGainNum);
-		memcpy(Buffer.data() + 32, pcm, 320);
+		// the samples little endian, whatever the host is
+		for (int i = 0; i < 160; i++)
+		{
+			Buffer.data()[32 + 2*i]     = uint16_t(pcm[i]) & 0xFFU;
+			Buffer.data()[32 + 2*i + 1] = (uint16_t(pcm[i]) >> 8) & 0xFFU;
+		}
 	}
 }
 

@@ -266,6 +266,8 @@ Module = A                     # Must be a transcoded module
 
 **RxGain / TxGain**: like the SVX ones, per connection in `urfd.ini`; samples past full scale are clipped. tcd runs AllStar audio through its AGC analog, so they normally stay 0.
 
+**Talker**: a TEXT packet with a SET_INFO TLV before the voice, as DVSwitch Analog_Bridge sends it, names the talker (callsign and DMR id); urfd sends the same packet ahead of every stream it plays to the node. Without one the stream runs under `Callsign`, with that callsign's DMR id from the DMR database, else DMR and P25 show `[MMDVM] FallbackDmrId`. The unkey ends the stream.
+
 ### MMDVM Server
 Accept incoming connections from MMDVM hotspots and repeaters directly (no BrandMeister needed). Implements the HomeBrew DMR protocol (RPTL→RPTK→RPTC→RPTO handshake). Works without transcoder for pure DMR-to-DMR operation; transcoded modules needed only for cross-mode bridging. TG mapping works like MMDVMClient — TGs map to modules with timeslot support. **Dual-slot**: Each timeslot (TS1/TS2) independently links to its own module, so a hotspot can be on two modules simultaneously.
 

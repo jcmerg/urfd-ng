@@ -266,6 +266,8 @@ Module = A                     # Must be a transcoded module
 
 **RxGain / TxGain**: wie bei SVX pro Anbindung in der `urfd.ini`; Werte über Vollaussteuerung werden begrenzt. tcd schickt AllStar-Audio durch seine AGC analog, die beiden bleiben daher normalerweise 0.
 
+**Sprecher**: Ein TEXT-Paket mit SET_INFO-TLV vor dem Ton, wie es DVSwitch Analog_Bridge schickt, nennt den Sprecher (Rufzeichen und DMR-ID); urfd schickt dasselbe Paket vor jedem Stream, den es zum Knoten spielt. Ohne eines läuft der Stream unter `Callsign`, mit der DMR-ID dieses Rufzeichens aus der DMR-Datenbank, sonst zeigen DMR und P25 `[MMDVM] FallbackDmrId`. Das Unkey beendet den Stream.
+
 ### MMDVM-Server
 Nimmt Verbindungen von MMDVM-Hotspots und -Repeatern direkt an (ohne BrandMeister). Implementiert das HomeBrew-DMR-Protokoll (Handshake RPTL→RPTK→RPTC→RPTO). Für reinen DMR-zu-DMR-Betrieb ohne Transcoder nutzbar, transcodierte Module sind nur für die Verbindung zwischen Betriebsarten nötig. Die TG-Zuordnung funktioniert wie beim MMDVMClient, mit Timeslots. **Dual-Slot**: Jeder Timeslot (TS1/TS2) verbindet sich unabhängig mit seinem eigenen Modul, ein Hotspot kann also gleichzeitig auf zwei Modulen sein.
 
