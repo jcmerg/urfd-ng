@@ -23,6 +23,7 @@
 #include "DVHeaderPacket.h"
 #include "DVFramePacket.h"
 #include <set>
+#include <cstring>
 #include <shared_mutex>
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -124,6 +125,15 @@ protected:
 	bool IsNumber(char) const;
 	bool IsLetter(char) const;
 	bool IsSpace(char) const;
+
+	// a 16 bit value of a packet as it is stored there (e.g. a D-Star stream id),
+	// at any offset: no unaligned load
+	static uint16_t ReadU16(const uint8_t *p) { uint16_t v; memcpy(&v, p, sizeof(v)); return v; }
+
+	// D-Star connectors: the remote reflector with a module for RPT2 of what is sent
+	// to it ("XRF001 C"), as a gateway does: the callsign it announced, else the
+	// first label of its host name when that is a callsign, else our own
+	static CCallsign RemoteReflectorCallsign(const std::string &announced, const std::string &host, const CCallsign &own, char module);
 
 	// dmr DstId to Module helper
 	virtual char DmrDstIdToModule(uint32_t) const;

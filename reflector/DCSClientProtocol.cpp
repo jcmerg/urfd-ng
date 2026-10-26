@@ -186,20 +186,33 @@ void CDcsClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 
 	if (IsValidDvPacket(Buffer, Header, Frame))
 	{
-		// find which mapping this belongs to
-		std::lock_guard<std::mutex> lock(m_MappingMutex);
-		SDcsClientMapping *mapping = FindMappingByIp(Ip);
-		if (mapping && mapping->connected)
+		// find which mapping this belongs to: the mapping lock is never held while
+		// calling into the reflector, opening a stream reads the mappings back
+		char localModule = ' ';
+		{
+			std::lock_guard<std::mutex> lock(m_MappingMutex);
+			SDcsClientMapping *mapping = FindMappingByRemote(Ip, Header->GetRpt2Module());
+			if (mapping)
+			{
+				// RPT2 is the reflector and its module, "DCS001 C": its name for what we send
+				mapping->reflector = Header->GetRpt2Callsign().GetBase();
+			}
+			else
+				mapping = FindMappingByIp(Ip);
+			if (mapping && mapping->connected)
+				localModule = mapping->localModule;
+		}
+		if (localModule != ' ')
 		{
 			// remap header for local reflector routing:
 			// RPT2 module = our local module (determines which reflector module receives it)
 			// RPT1 = our client callsign (identifies the source "repeater")
 			CCallsign rpt1(m_ClientCallsign);
-			rpt1.SetCSModule(mapping->localModule);
+			rpt1.SetCSModule(localModule);
 			Header->SetRpt1Callsign(rpt1);
-			Header->SetRpt2Module(mapping->localModule);
+			Header->SetRpt2Module(localModule);
 
-			if (g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::dcsclient, mapping->localModule))
+			if (g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::dcsclient, localModule))
 			{
 				OnDvHeaderPacketIn(Header, Ip);
 				OnDvFramePacketIn(Frame, &Ip);
@@ -330,22 +343,18 @@ void CDcsClientProtocol::HandleQueue(void)
 		if (packet->IsDvHeader())
 		{
 			// cache the header and rewrite RPT1/RPT2 for the remote DCS reflector
-			// D-Star routing convention:
-			//   RPT1 = origin repeater (us) + module
-			//   RPT2 = gateway callsign with 'G' suffix (signals "please route")
+			// as a gateway linked to it does (ircDDBGateway):
+			//   RPT1 = origin repeater (us) + our module
+			//   RPT2 = the reflector + its module ("DCS001 C"), DCS reflectors
+			//          (urfd, xlxd) route by the RPT2 module
 			// MY callsign (the actual caller) is preserved as-is
 			m_StreamsCache[module].header = CDvHeaderPacket((const CDvHeaderPacket &)*packet.get());
 			m_StreamsCache[module].seqCounter = 0;
 
-			// RPT1 = our callsign + remote module letter
 			CCallsign rpt1(m_ClientCallsign);
-			rpt1.SetCSModule(mapping->remoteModule);
+			rpt1.SetCSModule(mapping->localModule);
 			m_StreamsCache[module].header.SetRpt1Callsign(rpt1);
-
-			// RPT2 = our callsign + 'G' (gateway routing flag)
-			CCallsign rpt2(m_ClientCallsign);
-			rpt2.SetCSModule('G');
-			m_StreamsCache[module].header.SetRpt2Callsign(rpt2);
+			m_StreamsCache[module].header.SetRpt2Callsign(RemoteReflectorCallsign(mapping->reflector, mapping->host, m_ClientCallsign, mapping->remoteModule));
 		}
 		else
 		{
@@ -499,8 +508,9 @@ bool CDcsClientProtocol::IsValidDvPacket(const CBuffer &Buffer, std::unique_ptr<
 
 	if ((Buffer.size() >= 100) && (Buffer.Compare(tag, sizeof(tag)) == 0))
 	{
-		header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket((struct dstar_header *)&(Buffer.data()[4]), *((uint16_t *)&(Buffer.data()[43])), 0x80));
-		frame = std::unique_ptr<CDvFramePacket>(new CDvFramePacket((SDStarFrame *)&(Buffer.data()[46]), *((uint16_t *)&(Buffer.data()[43])), Buffer.data()[45]));
+		const uint16_t sid = ReadU16(Buffer.data() + 43);
+		header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket((struct dstar_header *)&(Buffer.data()[4]), sid, 0x80));
+		frame = std::unique_ptr<CDvFramePacket>(new CDvFramePacket((SDStarFrame *)&(Buffer.data()[46]), sid, Buffer.data()[45]));
 
 		if (header && header->IsValid() && frame && frame->IsValid())
 			return true;

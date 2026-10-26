@@ -222,6 +222,24 @@ bool CProtocol::IsSpace(char c) const
 	return (c == ' ');
 }
 
+CCallsign CProtocol::RemoteReflectorCallsign(const std::string &announced, const std::string &host, const CCallsign &own, char module)
+{
+	CCallsign cs;
+	if (! announced.empty())
+		cs.SetCallsign(announced, false);
+	else
+	{
+		std::string label(host.substr(0, host.find('.')));
+		for (auto &c : label)
+			c = toupper(c);
+		cs.SetCallsign(label, false);
+		if (label.size() < 3 || label.size() >= CALLSIGN_LEN || ! cs.IsValid())
+			cs = own;
+	}
+	cs.SetCSModule(module);
+	return cs;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // DestId to Module helper
 
