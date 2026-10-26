@@ -158,8 +158,9 @@ void CProtocol::OnDvFramePacketIn(std::unique_ptr<CDvFramePacket> &Frame, const 
 	auto stream = GetStream(Frame->GetStreamId(), Ip);
 	if ( stream )
 	{
-		// set the packet module, the transcoder needs this
-		Frame->SetPacketModule(stream->GetOwnerClient()->GetReflectorModule());
+		// set the packet module, the transcoder needs this; the stream's, as a
+		// client may be linked to more than one (a DMR hotspot, one per slot)
+		Frame->SetPacketModule(stream->GetModule());
 		// D-Star positions (DPRS) in the slow data go to the last heard list
 		double lat, lon;
 		if ( (ECodecType::dstar == Frame->GetCodecIn()) && stream->DprsIn(*Frame, lat, lon) )
