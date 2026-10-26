@@ -196,7 +196,7 @@ tcd opens the devices through the kernel's `ftdi_sio` driver and sets their USB 
 
 Whether a device is a DV3000 (one channel) or a DV3003 (three) tcd takes from the product ID its chip reports (`AMBE3000…`, `AMBE3003…`), not from the USB name, which clones often leave generic. The baud rate still follows the name: 460800 for the single channel sticks (ThumbDV, DVstick-30, USB-3000 and the generic `FT230X_Basic_UART`/`FT232R_USB_UART`), 921600 for the others. tcd never tries another rate: bytes at a wrong rate can leave an AMBE3003 deaf until it is unplugged and plugged in again.
 
-A device that cannot be opened or does not answer is left out with a warning, and tcd carries on with the others and the codec plugins, as long as they cover the modules (before, it stopped). Each device is opened for tcd alone: a second tcd or `dvsitest` gets `is in use by another process` instead of resetting the chip under the running tcd.
+A device that cannot be opened or does not answer is left out with a warning, and tcd carries on with the others and the codec plugins, as long as they cover the modules (before, it stopped). A device lost while tcd runs (unplugged, or one that gets packets for 3 s without answering any, such as a hung chip) stops tcd; its service starts it again, the device is left out, and the codec plugins take over its codec, or, without one, tcd does not start and a [standby tcd](#standby-a-second-tcd-for-the-same-modules) takes the modules. Each device is opened for tcd alone: a second tcd or `dvsitest` gets `is in use by another process` instead of resetting the chip under the running tcd.
 
 ## Configuration (tcd.ini)
 
