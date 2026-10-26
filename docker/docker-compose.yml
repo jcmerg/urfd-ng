@@ -22,6 +22,8 @@ services:
       dockerfile: docker/Dockerfile
       additional_contexts:
         optfiles: .
+      args:
+        DHT: ${URFD_DHT:-true}
     image: urfd:latest
     container_name: urfd
     # built here, not pulled: watchtower and the like must leave it alone

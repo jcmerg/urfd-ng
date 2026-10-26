@@ -24,8 +24,10 @@ COPY reflector/ ./reflector/
 COPY config/urfd.mk ./reflector/urfd.mk
 COPY plugins/ ./plugins/
 
+# DHT=false builds urfd without OpenDHT (URFD_DHT=false for docker compose)
+ARG DHT=true
 WORKDIR /build/reflector
-RUN make clean 2>/dev/null; make -j$(nproc)
+RUN make clean 2>/dev/null; make -j$(nproc) DHT=$DHT
 
 # the plugins in plugins/<name>/, each with a Makefile taking URFD= (see Plugins
 # in the README)

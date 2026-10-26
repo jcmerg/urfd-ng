@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.30.2-dht** | tcd 0.13.1 | Dashboard v2.14.2
+**urfd 4.30.3** | tcd 0.13.1 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -914,6 +914,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **Version ohne `-dht` (4.30.3)**: Die Version heißt `4.30.3` im Log, im XML, im XLX-Verzeichnis und im DHT, mit oder ohne OpenDHT gebaut; beim Start steht im Log, ob DHT eingebaut ist. `URFD_DHT=false` baut das Docker-Image ohne, wie `DHT = false` in `urfd.mk`
 - **MMDVMClient-Frequenzen (4.30.1)**: Der Hotspot ist duplex (beide Zeitschlitze brauchen das), und BrandMeister lehnt einen Duplex-Hotspot mit RX = TX gleich nach seiner Konfiguration ab; die Vorgaben ohne `RxFreq`/`TxFreq` (beide 439,000 MHz) kamen nie hinein. Sie haben jetzt eine Ablage, urfd und inicheck warnen bei `RxFreq = TxFreq`, und eine abgelehnte Konfiguration wird als solche gemeldet
 - **Protokoll-Korrekturen (4.30.0)**: Ein Stream endet mit seinem Endpaket statt 1,6 s später, ein abgelaufener Stream sendet in jedem Protokoll das normale Ende; das Echo spielt auch auf transcodierten Modulen ab; DMR TS1 und Dual-Slot funktionieren; DMR+ beschädigt eingehend nicht mehr jedes dritte AMBE-Frame und sendet ausgehend sein Endpaket; NXDN-Header und TX_REL realer Gateways werden erkannt, das Gesprächsende erreicht die Hörer und NXDN-Clients teilen sich keinen Stream mehr; P25 sendet seine TDU und Sprecher schneiden sich nicht mehr ab; das USRP-Unkey beendet den Stream und SET_INFO wird gelesen, wie chan_usrp es schreibt; die D-Star-Client-Anbindungen sprechen das zugeordnete entfernte Modul an und nehmen nur dessen Streams, Header-CRC und Slow-Data-Header stimmen; kein Deadlock beim ersten YSFClient-Stream auf ein transcodiertes Modul; P25 und NXDN sind wie die anderen Protokolle standardmäßig an; ein zweiter tcd für dieselben Module wird abgewiesen
 - **MMDVMClient**: Vollständiger MMDVM-Client für BrandMeister-/DMR+-Master: mehrere TGs pro Modul (primär TX/RX, sekundär nur RX), Timeslots, Ersatz-DMR-ID, Erzeugung des Options-Strings; bis zu neun Verbindungen gleichzeitig (4.21.0) mit Brücken-Regeln je Netz
