@@ -268,6 +268,53 @@ static bool IsDV3000(const std::string &desc)
 	return false;
 }
 
+// an AMBE device, as its chip told its type
+struct SAmbeDevice
+{
+	std::string node;	// device node
+	std::string desc;	// by-id name
+	Edvtype type;
+	unsigned long baud;
+};
+
+// The type of each device comes from its chip's product ID (AMBE3000, AMBE3003),
+// not from the USB name, which clones often leave generic. The rate is the one the
+// name suggests (460800 for the single channel sticks, 921600 for the others) and
+// never another one: bytes at a wrong rate can leave an AMBE3003 deaf until it is
+// replugged. A device that does not answer is left out, the others carry on.
+static void IdentifyDevices(const std::list<std::pair<std::string, std::string>> &found, std::list<SAmbeDevice> &devices)
+{
+	for (const auto &[node, desc] : found)
+	{
+		const Edvtype named = IsDV3000(desc) ? Edvtype::dv3000 : Edvtype::dv3003;
+		const unsigned long baud = (Edvtype::dv3000 == named) ? 460800 : 921600;
+		CDV3000 probe(Encoding::dstar);	// only control packets, the same for both types
+		bool opened;
+		if (probe.Probe(node, desc, named, baud, opened))
+		{
+			if (opened)
+			{
+				std::cerr << "WARNING: " << desc << " (" << node << ") does not answer at " << baud << " baud and is left out." << std::endl;
+				std::cerr << "         An AMBE device that answers nothing at all needs to be unplugged and plugged in again." << std::endl;
+			}
+			else
+				std::cerr << "WARNING: " << desc << " (" << node << ") cannot be used and is left out." << std::endl;
+			continue;
+		}
+		const std::string id = probe.GetProductID();
+		Edvtype type = named;
+		if (0 == id.compare(0, 8, "AMBE3000"))
+			type = Edvtype::dv3000;
+		else if (0 == id.compare(0, 8, "AMBE3003"))
+			type = Edvtype::dv3003;
+		else
+			std::cerr << "WARNING: unknown product ID '" << id << "' of " << desc << ", taken as " << (Edvtype::dv3000 == named ? "DV3000" : "DV3003") << " by its name" << std::endl;
+		if (type != named)
+			std::cout << desc << " is named like a " << (Edvtype::dv3000 == named ? "DV3000" : "DV3003") << ", its chip is a " << id << ": used as a " << (Edvtype::dv3000 == type ? "DV3000" : "DV3003") << " at " << baud << " baud" << std::endl;
+		devices.push_back(SAmbeDevice{ node, desc, type, baud });
+	}
+}
+
 int32_t CController::calcNumerator(int32_t db) const
 {
 	float num = 256.0f * powf(10.0f, (float(db)/20.0f));
@@ -502,10 +549,12 @@ bool CController::InitVocoders()
 		return true;
 	}
 
-	// the 3000 or 3003 devices
-	std::list<std::pair<std::string, std::string>> deviceset;
-	if (DiscoverFtdiDevices(deviceset))
+	// the 3000 or 3003 devices that answer
+	std::list<std::pair<std::string, std::string>> found;
+	if (DiscoverFtdiDevices(found))
 		return true;
+	std::list<SAmbeDevice> deviceset;
+	IdentifyDevices(found, deviceset);
 
 	// the devices in use, for the monitor: device node, description, role
 	std::vector<std::tuple<std::string, std::string, CDVDevice *, const char *>> used;
@@ -535,7 +584,7 @@ bool CController::InitVocoders()
 			return true;
 		}
 		const auto &dev = deviceset.front();
-		const Edvtype dvtype = IsDV3000(dev.second) ? Edvtype::dv3000 : Edvtype::dv3003;
+		const Edvtype dvtype = dev.type;
 		const Encoding enc = device_does_dmr ? Encoding::dmrsf : Encoding::dstar;
 		auto &device = device_does_dmr ? dmrsf_device : dstar_device;
 		if (Edvtype::dv3000 == dvtype)
@@ -544,7 +593,7 @@ bool CController::InitVocoders()
 			device = std::unique_ptr<CDVDevice>(new CDV3003(enc));
 		if (device_does_dmr)
 		{
-			if (device->OpenDevice(dev.first, dev.second, dvtype, int8_t(g_Conf.GetGain(EGainType::dmrin)), int8_t(g_Conf.GetGain(EGainType::dmrout))))
+			if (device->OpenDevice(dev.node, dev.desc, dvtype, dev.baud, int8_t(g_Conf.GetGain(EGainType::dmrin)), int8_t(g_Conf.GetGain(EGainType::dmrout))))
 				return true;
 		}
 		else
@@ -552,34 +601,34 @@ bool CController::InitVocoders()
 			// the DMR plugin gets DmrGainIn/Out in software
 			ambe_in_num = calcNumerator(g_Conf.GetGain(EGainType::dmrin));
 			ambe_out_num = calcNumerator(g_Conf.GetGain(EGainType::dmrout));
-			if (device->OpenDevice(dev.first, dev.second, dvtype, int8_t(g_Conf.GetGain(EGainType::dstarin)), int8_t(g_Conf.GetGain(EGainType::dstarout))))
+			if (device->OpenDevice(dev.node, dev.desc, dvtype, dev.baud, int8_t(g_Conf.GetGain(EGainType::dstarin)), int8_t(g_Conf.GetGain(EGainType::dstarout))))
 				return true;
 		}
-		used.emplace_back(dev.first, dev.second, device.get(), device_does_dmr ? "dmr" : "dstar");
+		used.emplace_back(dev.node, dev.desc, device.get(), device_does_dmr ? "dmr" : "dstar");
 		(device_does_dmr ? dmr_hw_modules : dstar_hw_modules) = modules.substr(0, Edvtype::dv3000 == dvtype ? 1 : 3);
-		std::cout << "Using " << dev.second << " for " << (device_does_dmr ? "DMR" : "D-Star") << std::endl;
+		std::cout << "Using " << dev.desc << " for " << (device_does_dmr ? "DMR" : "D-Star") << std::endl;
 	}
 	else if (deviceset.size() >= 2)
 	{
 		// Classify each device by type
-		std::pair<std::string,std::string> dv3000_dev, dv3003_dev;
+		SAmbeDevice dv3000_dev{}, dv3003_dev{};
 		for (const auto &dev : deviceset)
 		{
-			if (IsDV3000(dev.second))
+			if (Edvtype::dv3000 == dev.type)
 				dv3000_dev = dev;
 			else
 				dv3003_dev = dev;
 		}
 
 		// Mixed mode: DV3000 (D-Star) + DV3003 (1x D-Star + 2x DMR) = 2 modules
-		if (!dv3000_dev.first.empty() && !dv3003_dev.first.empty())
+		if (!dv3000_dev.node.empty() && !dv3003_dev.node.empty())
 		{
-			std::cout << "Mixed mode: " << dv3000_dev.second << " (" << dv3000_dev.first << ") + "
-			          << dv3003_dev.second << " (" << dv3003_dev.first << ")" << std::endl;
+			std::cout << "Mixed mode: " << dv3000_dev.desc << " (" << dv3000_dev.node << ") + "
+			          << dv3003_dev.desc << " (" << dv3003_dev.node << ")" << std::endl;
 
 			// DV3000: D-Star vocoder for module A (first module)
 			dstar_device = std::unique_ptr<CDVDevice>(new CDV3000(Encoding::dstar));
-			if (dstar_device->OpenDevice(dv3000_dev.first, dv3000_dev.second, Edvtype::dv3000,
+			if (dstar_device->OpenDevice(dv3000_dev.node, dv3000_dev.desc, Edvtype::dv3000, dv3000_dev.baud,
 					int8_t(g_Conf.GetGain(EGainType::dstarin)), int8_t(g_Conf.GetGain(EGainType::dstarout))))
 				return true;
 
@@ -593,7 +642,7 @@ bool CController::InitVocoders()
 			dv3003->SetChannelEncoding(2, Encoding::dmrsf);
 
 			// Open with DMR gains (ConfigureVocoder will use per-channel encoding)
-			if (dmrsf_device->OpenDevice(dv3003_dev.first, dv3003_dev.second, Edvtype::dv3003,
+			if (dmrsf_device->OpenDevice(dv3003_dev.node, dv3003_dev.desc, Edvtype::dv3003, dv3003_dev.baud,
 					int8_t(g_Conf.GetGain(EGainType::dmrin)), int8_t(g_Conf.GetGain(EGainType::dmrout))))
 				return true;
 
@@ -610,8 +659,8 @@ bool CController::InitVocoders()
 				std::cout << "  Module " << modA << ": D-Star(DV3000) + DMR(DV3003 ch1)" << std::endl;
 				std::cout << "  Module " << modB << ": D-Star(DV3003 ch0) + DMR(DV3003 ch2)" << std::endl;
 			}
-			used.emplace_back(dv3000_dev.first, dv3000_dev.second, dstar_device.get(), "dstar");
-			used.emplace_back(dv3003_dev.first, dv3003_dev.second, dmrsf_device.get(), mixed_mode ? "mixed" : "dmr");
+			used.emplace_back(dv3000_dev.node, dv3000_dev.desc, dstar_device.get(), "dstar");
+			used.emplace_back(dv3003_dev.node, dv3003_dev.desc, dmrsf_device.get(), mixed_mode ? "mixed" : "dmr");
 			dstar_hw_modules = dmr_hw_modules = modules.substr(0, 2);
 		}
 		// Two same-type devices
@@ -620,7 +669,7 @@ bool CController::InitVocoders()
 			const auto dev1 = deviceset.front();
 			deviceset.pop_front();
 			const auto dev2 = deviceset.front();
-			const Edvtype dvtype = IsDV3000(dev1.second) ? Edvtype::dv3000 : Edvtype::dv3003;
+			const Edvtype dvtype = dev1.type;
 
 			if (Edvtype::dv3000 == dvtype) {
 				dstar_device = std::unique_ptr<CDVDevice>(new CDV3000(Encoding::dstar));
@@ -630,14 +679,14 @@ bool CController::InitVocoders()
 				dmrsf_device = std::unique_ptr<CDVDevice>(new CDV3003(Encoding::dmrsf));
 			}
 
-			if (dstar_device->OpenDevice(dev1.first, dev1.second, dvtype,
+			if (dstar_device->OpenDevice(dev1.node, dev1.desc, dvtype, dev1.baud,
 					int8_t(g_Conf.GetGain(EGainType::dstarin)), int8_t(g_Conf.GetGain(EGainType::dstarout))))
 				return true;
-			if (dmrsf_device->OpenDevice(dev2.first, dev2.second, dvtype,
+			if (dmrsf_device->OpenDevice(dev2.node, dev2.desc, dvtype, dev2.baud,
 					int8_t(g_Conf.GetGain(EGainType::dmrin)), int8_t(g_Conf.GetGain(EGainType::dmrout))))
 				return true;
-			used.emplace_back(dev1.first, dev1.second, dstar_device.get(), "dstar");
-			used.emplace_back(dev2.first, dev2.second, dmrsf_device.get(), "dmr");
+			used.emplace_back(dev1.node, dev1.desc, dstar_device.get(), "dstar");
+			used.emplace_back(dev2.node, dev2.desc, dmrsf_device.get(), "dmr");
 			dstar_hw_modules = dmr_hw_modules = modules.substr(0, Edvtype::dv3000 == dvtype ? 1 : 3);
 		}
 	}
@@ -730,7 +779,7 @@ bool CController::InitVocoders()
 			// node is the device node, show the USB serial number
 			const std::string usb = GetUsbSerialForDevnode(node);
 			g_Stats.devices[di].serial = usb.empty() ? node : usb;
-			g_Stats.devices[di].type = IsDV3000(desc) ? "DV3000" : "DV3003";
+			g_Stats.devices[di].type = Edvtype::dv3000 == device->GetType() ? "DV3000" : "DV3003";
 			g_Stats.devices[di].role = role;
 			g_Stats.devices[di].online.store(true);
 			device->SetStatsIndex(di);

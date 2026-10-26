@@ -194,6 +194,10 @@ Ohne `DeviceSerial` in `tcd.ini` verwendet tcd jedes Gerät, das er am Namen als
 
 tcd öffnet die Geräte über den Kernel-Treiber `ftdi_sio` und setzt ihren USB-Latenz-Timer auf 1 ms (der Standard des Treibers ist 16 ms, zu langsam für das AMBE-Timing; das Log zeigt den Wert). Geräte, die ein älterer, auf libftd2xx basierender tcd vom `ftdi_sio`-Treiber gelöst hat, werden beim Start wieder gebunden; ein Umstieg braucht also kein erneutes Einstecken.
 
+Ob ein Gerät ein DV3000 (ein Kanal) oder ein DV3003 (drei) ist, entnimmt tcd der Produkt-ID, die sein Chip meldet (`AMBE3000…`, `AMBE3003…`), nicht dem USB-Namen, den Nachbauten oft generisch lassen. Die Baudrate richtet sich weiter nach dem Namen: 460800 für die einkanaligen Sticks (ThumbDV, DVstick-30, USB-3000 und die generischen `FT230X_Basic_UART`/`FT232R_USB_UART`), 921600 für die anderen. tcd probiert nie eine andere Rate: Bytes mit falscher Rate können einen AMBE3003 taub machen, bis er ab- und wieder eingesteckt wird.
+
+Ein Gerät, das sich nicht öffnen lässt oder nicht antwortet, wird mit einer Warnung weggelassen, und tcd arbeitet mit den übrigen und den Codec-Plugins weiter, solange sie die Module abdecken (vorher beendete er sich). Jedes Gerät öffnet tcd für sich allein: ein zweiter tcd oder `dvsitest` bekommt `is in use by another process`, statt den Chip unter dem laufenden tcd zurückzusetzen.
+
 ## Konfiguration (tcd.ini)
 
 `/usr/local/etc/tcd.ini`; die Vorlage in [`config/tcd.ini`](config/tcd.ini) erklärt jeden Schlüssel. Nach Änderungen tcd neu starten (`sudo systemctl restart tcd`), oder die Audio-Einstellungen live im [Web-Dashboard](#web-dashboard) ändern.
@@ -381,6 +385,8 @@ journalctl -u tcd -f
 | `Could not find an AMBE device!` | `tcd --list-devices`; ist `DeviceSerial` gesetzt, muss es exakt passen (siehe [oben](#ambe-geräte-auswählen)) |
 | `No USB serial devices found` | kein Gerät eingesteckt, oder der Treiber `ftdi_sio` fehlt (`lsmod \| grep ftdi_sio`) |
 | Warnung `USB latency timer is 16 ms` | tcd konnte den Latenz-Timer nicht setzen; nativ muss er als root laufen (die systemd-Unit tut das); in Docker hat der Kernel-Treiber `ftdi_sio` die Low-Latency-Anforderung ignoriert, dann auf dem Host `/sys/bus/usb-serial/devices/<tty>/latency_timer` auf 1 setzen |
+| `... does not answer at ... baud and is left out` | das Gerät wird weggelassen, tcd läuft mit den übrigen; ab- und wieder einstecken, dann tcd neu starten. Ein DV3003 mit generischem USB-Namen bekommt 460800 Baud und kann nicht antworten |
+| `... is in use by another process` | ein anderer tcd oder `dvsitest` hält das Gerät: ihn beenden (`pgrep -a tcd`) |
 | `Lost the AMBE device ..., shutting down` | das Gerät wurde abgezogen oder zurückgesetzt; systemd startet tcd nach 5 s neu, und er findet das Gerät wieder |
 | der Reflektor zeigt keinen Transcoder | `ServerAddress` und `Port` in `tcd.ini`, auf beiden Seiten dieselben `Modules`, und Port 10100/tcp vom tcd-Rechner aus erreichbar |
 
@@ -389,6 +395,7 @@ journalctl -u tcd -f
 ### Hardware und Geräte
 - **Serieller Zugriff ohne libftd2xx**: über den Kernel-Treiber `ftdi_sio` und `/dev/serial/by-id` (POSIX-Anbindung von Jason Kendall), RTS/CTS-Flusskontrolle, USB-Latenz-Timer auf 1 ms; von einem älteren tcd gelöste Geräte werden wieder gebunden; ein verlorenes Gerät startet tcd über systemd neu
 - **Geräteauswahl**: `--list-devices`, `DeviceSerial` mit exaktem Vergleich
+- **Gerätetyp vom Chip**: DV3000 oder DV3003 nach der Produkt-ID, ein Gerät ohne Antwort wird weggelassen, statt tcd zu beenden, ein zweiter Reset-Versuch, die Null-Bytes zum Leeren gehen hinaus, bevor die Eingabe verworfen wird, exklusives Öffnen
 - **macOS**: baut mit clang und läuft nativ mit den AMBE-Geräten, siehe [macOS](#macos)
 - **Mischbetrieb DV3000 + DV3003**: zwei Module gleichzeitig mit Codec-Einstellung pro Kanal
 - **D-Star auf dem DV3003**: Companding aus, seriellen Puffer leeren, Kodierung pro Kanal

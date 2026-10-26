@@ -33,13 +33,20 @@ public:
 	CDVDevice(Encoding t);
 	virtual ~CDVDevice();
 
-	bool OpenDevice(const std::string &serialno, const std::string &desc, Edvtype dvtype, int8_t in_gain, int8_t out_gain);
+	// node is the device node, desc its name (/dev/serial/by-id); baud as Probe found it
+	bool OpenDevice(const std::string &node, const std::string &desc, Edvtype dvtype, unsigned long baud, int8_t in_gain, int8_t out_gain);
+	// opens the device at baud, resets it, asks for its product ID (GetProductID)
+	// and closes it again: true when it cannot be opened (opened false) or does not
+	// answer. The control packets are the same for both types, so any device object
+	// can probe a device of either type.
+	bool Probe(const std::string &node, const std::string &desc, Edvtype dvtype, unsigned long baud, bool &opened);
 	// Configure a single channel (call after OpenDevice for mixed-mode)
 	bool ConfigureChannel(uint8_t pkt_ch, Encoding enc, int8_t in_gain, int8_t out_gain);
 	void Start();
 	void CloseDevice();
 	void AddPacket(const std::shared_ptr<CTranscoderPacket> packet);
 	std::string GetProductID() { return productid; }
+	Edvtype GetType() const { return devtype; }
 	unsigned int GetBufferDepth() const { return buffer_depth.load(std::memory_order_relaxed); }
 	// output gain per encoding: a DV3003 in mixed mode encodes D-Star and DMR
 	void SetOutputGains(int32_t dstar_num, int32_t dmr_num) { m_outputGainDStar.store(dstar_num, std::memory_order_relaxed); m_outputGainDmr.store(dmr_num, std::memory_order_relaxed); }
@@ -62,10 +69,12 @@ protected:
 	std::string description, productid;
 	std::atomic<int32_t> m_outputGainDStar{256}, m_outputGainDmr{256};
 	int m_statsIndex = -1;
+	bool probing = false;	// Probe: fewer messages
 
 	bool ConfigureVocoder(uint8_t pkt_ch, Encoding type, int8_t in_gain, int8_t out_gain);
 	bool checkResponse(SDV_Packet &responsePacket, uint8_t response) const;
 	bool GetResponse(SDV_Packet &packet);
+	bool OpenLine(const std::string &node, const std::string &desc, Edvtype dvtype, unsigned long baud);
 	bool InitDevice();
 	void FeedDevice();
 	void ReadDevice();
