@@ -80,6 +80,11 @@ int main(int argc, char *argv[])
 
 	// splash
 	std::cout << "Starting " << callsign << " " << g_Version << std::endl;
+#ifdef NO_DHT
+	std::cout << "DHT: not built in (DHT = false in urfd.mk), interlinks need an IP in the interlink file" << std::endl;
+#else
+	std::cout << "DHT: built in, bootstrap " << g_Configure.GetString(g_Keys.names.bootstrap) << std::endl;
+#endif
 
 	// and let it run
 	if (g_Reflector.Start())

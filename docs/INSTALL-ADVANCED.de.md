@@ -109,7 +109,7 @@ sudo bash reflector/build.sh --no-dht   # wo es libopendht-dev nicht gibt
 
 `build.sh` installiert die Pakete zum Bauen (`build-essential`, `nlohmann-json3-dev`, `libcurl4-gnutls-dev`, `libopus-dev`, `libssl-dev`, `libwebsockets-dev`, `libopendht-dev`, dazu `pkg-config`, `libsqlite3-dev`, `libmariadb-dev`, `libpq-dev` für die Zugangsdaten-Datenbank), baut als Besitzer des Checkouts und installiert `urfd`, `inicheck` und `dbutil` nach `/usr/local/bin` sowie die systemd-Unit `urfd` mit Echtzeit-Scheduling. Der erste Lauf legt die Vorlagen in `/usr/local/etc/urfd/` ab, mit Pfaden dorthin und `urfd.ini` nur für root lesbar; spätere Läufe behalten die Konfiguration.
 
-Die Build-Optionen stehen in `reflector/urfd.mk`, beim ersten Bauen aus [`config/urfd.mk`](../config/urfd.mk) kopiert und danach behalten: `BINDIR`, `debug`, `DHT`.
+Die Build-Optionen stehen in `reflector/urfd.mk`, beim ersten Bauen aus [`config/urfd.mk`](../config/urfd.mk) kopiert und danach behalten: `BINDIR`, `debug`, `DHT`. Mit `DHT = false` wird urfd ohne OpenDHT gebaut; es meldet dann beim Start `DHT: not built in`, und Interlinks brauchen eine IP in der Interlink-Datei. Das Docker-Image nimmt es aus `URFD_DHT=false` (`URFD_DHT=false docker/build.sh start`).
 
 ```bash
 sudo nano /usr/local/etc/urfd/urfd.ini
