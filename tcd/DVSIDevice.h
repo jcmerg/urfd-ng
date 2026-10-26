@@ -46,7 +46,7 @@ public:
 	void SetStatsIndex(int idx) { m_statsIndex = idx; }
 
 	// Virtual hooks for mixed-mode support
-	virtual Encoding GetChannelEncoding(uint8_t channel) const { return type; }
+	virtual Encoding GetChannelEncoding(uint8_t /*channel*/) const { return type; }
 	virtual uint8_t MapPacketToChannel(const std::shared_ptr<CTranscoderPacket> &packet) const;
 
 protected:

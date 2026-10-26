@@ -7,8 +7,15 @@
 #include <poll.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <errno.h>
+#ifdef __linux__
 #include <linux/serial.h>
+#endif
+#ifdef __APPLE__
+#include <IOKit/serial/ioss.h>	// IOSSIOSPEED, IOSSDATALAT
+#endif
+#include <chrono>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
@@ -162,6 +169,17 @@ public:
             case 115200: sp = B115200; break;
             case 57600: sp = B57600; break;
             case 38400: sp = B38400; break;
+#ifdef __APPLE__
+            // the macOS termios has no B460800/B921600: IOSSIOSPEED sets any rate. It
+            // has to come after the last tcsetattr(), which would reset it, as it does
+            // in CDVDevice::OpenDevice().
+            case 460800:
+            case 921600:
+            {
+                speed_t speed = baud;
+                return (ioctl(fd_, IOSSIOSPEED, &speed) == 0);
+            }
+#endif
             default: return false;
         }
         cfsetospeed(&tty, sp);
@@ -242,6 +260,15 @@ private:
     // low latency (ftdi_sio then uses 1 ms), and set the timer through sysfs too.
     void SetLowLatency(const std::string &id)
     {
+#ifdef __APPLE__
+        // IOSSDATALAT is documented in microseconds, but Apple's FTDI driver
+        // (com.apple.DriverKit-AppleUSBFTDI) writes the value as it is into the FTDI
+        // latency timer, in ms and cut to a byte: 1000 gives 1000 & 0xff = 232 ms per
+        // answer. 1 gives the 1 ms the Linux code below sets.
+        unsigned long latency = 1;
+        if (ioctl(fd_, IOSSDATALAT, &latency) != 0)
+            std::cerr << "PosixDevice: IOSSDATALAT for " << id << " failed: " << strerror(errno) << std::endl;
+#elif defined(__linux__)
         struct serial_struct ser;
         if (ioctl(fd_, TIOCGSERIAL, &ser) == 0) {
             ser.flags |= ASYNC_LOW_LATENCY;
@@ -268,6 +295,9 @@ private:
             else
                 std::cout << tty << " USB latency timer: " << ms << " ms" << std::endl;
         }
+#else
+        (void)id;
+#endif
     }
 
     int fd_;

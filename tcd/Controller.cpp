@@ -37,10 +37,100 @@
 #include "TcdStats.h"
 #include "StatsLogger.h"
 #include "AmbeGain.h"
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/IOKitLib.h>
+#include <IOKit/serial/IOSerialKeys.h>
+#endif
 
 extern CTcdStats g_Stats;
 
 extern CConfigure g_Conf;
+
+struct SSerialDevice
+{
+	std::string devnode;	// /dev/ttyUSB0
+	std::string desc;		// its name in /dev/serial/by-id
+	std::string serial;		// USB serial number, empty if the device has none
+	char port;				// port letter as libftd2xx named the ports of multi-port chips, A for the first
+};
+
+#ifdef __APPLE__
+// macOS has neither /dev/serial/by-id nor sysfs: the serial ports come from IOKit,
+// with the USB vendor, product and serial of the device above each, and get a name
+// built like udev's by-id name (usb-FTDI_DVstick-33_DKB7FXGE-if00-port0), so the
+// AMBE device names and DeviceSerial work as on Linux
+static std::string IORegString(io_object_t o, const char *key)
+{
+	std::string out;
+	CFStringRef k = CFStringCreateWithCString(kCFAllocatorDefault, key, kCFStringEncodingUTF8);
+	CFTypeRef v = IORegistryEntrySearchCFProperty(o, kIOServicePlane, k, kCFAllocatorDefault, kIORegistryIterateRecursively | kIORegistryIterateParents);
+	CFRelease(k);
+	if (v)
+	{
+		char buf[256];
+		if (CFGetTypeID(v) == CFStringGetTypeID() && CFStringGetCString((CFStringRef)v, buf, sizeof(buf), kCFStringEncodingUTF8))
+			out = buf;
+		else if (CFGetTypeID(v) == CFNumberGetTypeID())
+		{
+			long n = 0;
+			CFNumberGetValue((CFNumberRef)v, kCFNumberLongType, &n);
+			out = std::to_string(n);
+		}
+		CFRelease(v);
+	}
+	return out;
+}
+
+// the USB serial ports (/dev/cu.*), false if IOKit cannot list them
+static bool ListSerialDevices(std::vector<SSerialDevice> &devices)
+{
+	CFMutableDictionaryRef match = IOServiceMatching(kIOSerialBSDServiceValue);
+	if (nullptr == match)
+		return false;
+	CFDictionarySetValue(match, CFSTR(kIOSerialBSDTypeKey), CFSTR(kIOSerialBSDAllTypes));
+	io_iterator_t it;
+	if (KERN_SUCCESS != IOServiceGetMatchingServices(MACH_PORT_NULL, match, &it))
+		return false;
+	io_object_t o;
+	while ((o = IOIteratorNext(it)))
+	{
+		const std::string node = IORegString(o, kIOCalloutDeviceKey);
+		const std::string product = IORegString(o, "USB Product Name");
+		if (!node.empty() && !product.empty())	// USB serial ports only
+		{
+			SSerialDevice dev;
+			dev.devnode = node;
+			dev.serial = IORegString(o, "USB Serial Number");
+			const std::string intf = IORegString(o, "bInterfaceNumber");
+			const int n = intf.empty() ? 0 : std::atoi(intf.c_str());
+			std::string name = "usb-" + IORegString(o, "USB Vendor Name") + "_" + product + (dev.serial.empty() ? "" : "_" + dev.serial);
+			for (auto &c : name)
+				if (c == ' ')
+					c = '_';
+			char suffix[32];
+			snprintf(suffix, sizeof(suffix), "-if%02d-port0", n);
+			dev.desc = name + suffix;
+			dev.port = char('A' + n);
+			devices.push_back(dev);
+		}
+		IOObjectRelease(o);
+	}
+	IOObjectRelease(it);
+	return true;
+}
+
+static std::string GetUsbSerialForDevnode(const std::string &devnode)
+{
+	std::vector<SSerialDevice> devices;
+	ListSerialDevices(devices);
+	for (const auto &d : devices)
+		if (d.devnode == devnode)
+			return d.serial;
+	return std::string();
+}
+
+#else // Linux
 
 static std::string ReadFirstLine(const std::string &path)
 {
@@ -75,14 +165,6 @@ static std::string GetUsbSerialForDevnode(const std::string &devnode)
 	return dir.empty() ? std::string() : ReadFirstLine(dir + "/serial");
 }
 
-struct SSerialDevice
-{
-	std::string devnode;	// /dev/ttyUSB0
-	std::string desc;		// its name in /dev/serial/by-id
-	std::string serial;		// USB serial number, empty if the device has none
-	char port;				// port letter as libftd2xx named the ports of multi-port chips, A for the first
-};
-
 // the USB serial devices udev lists in /dev/serial/by-id, false if there is no such directory
 static bool ListSerialDevices(std::vector<SSerialDevice> &devices)
 {
@@ -114,6 +196,7 @@ static bool ListSerialDevices(std::vector<SSerialDevice> &devices)
 	closedir(dir);
 	return true;
 }
+#endif // __APPLE__
 
 // DeviceSerial = matches the USB serial, the libftd2xx style serial with the port
 // letter (DA1234A), the by-id name or the device node, exactly
@@ -127,6 +210,9 @@ static bool IsWhitelisted(const SSerialDevice &dev, const std::vector<std::strin
 	return false;
 }
 
+#ifdef __APPLE__
+static void BindFtdiSio(const std::vector<std::string> &) {}	// nothing to bind on macOS
+#else
 // libftd2xx builds of tcd unbound the AMBE devices from ftdi_sio, and they stay
 // unbound until replugged or rebooted. Bind the FTDI interfaces without a driver
 // back, so an upgraded tcd finds them.
@@ -171,6 +257,7 @@ static void BindFtdiSio(const std::vector<std::string> &whitelist)
 	if (bound)
 		std::this_thread::sleep_for(std::chrono::seconds(2));
 }
+#endif // __APPLE__
 
 // a single channel AMBE3000 device, by its /dev/serial/by-id name
 static bool IsDV3000(const std::string &desc)
@@ -317,7 +404,7 @@ void CController::ListDevices()
 	std::vector<SSerialDevice> devices;
 	if (!ListSerialDevices(devices) || devices.empty())
 	{
-		std::cout << "No USB serial devices found (no /dev/serial/by-id), is the AMBE device plugged in?" << std::endl;
+		std::cout << "No USB serial devices found, is the AMBE device plugged in?" << std::endl;
 		return;
 	}
 
@@ -361,7 +448,7 @@ bool CController::DiscoverFtdiDevices(std::list<std::pair<std::string, std::stri
 	std::vector<SSerialDevice> devices;
 	if (!ListSerialDevices(devices))
 	{
-		std::cerr << "No USB serial devices found (no /dev/serial/by-id), is the AMBE device plugged in?" << std::endl;
+		std::cerr << "No USB serial devices found, is the AMBE device plugged in?" << std::endl;
 		return false;
 	}
 
@@ -985,6 +1072,9 @@ void CController::ProcessC2Thread()
 				// codec_in was AMBE, so we need to calculate the the M17 data
 				AudiotoCodec2(packet);
 				break;
+
+			default:	// none, ping: ReadReflectorThread queues neither
+				break;
 		}
 	}
 }
@@ -1078,6 +1168,9 @@ void CController::ProcessSWAMBE2Thread()
 
 			case ECodecType::dmr:
 				SWAMBE2toAudio(packet);
+				break;
+
+			default:	// none, ping: ReadReflectorThread queues neither
 				break;
 		}
 	}
@@ -1262,6 +1355,9 @@ void CController::ProcessIMBEThread()
 			case ECodecType::p25:
 				IMBEtoAudio(packet);
 				break;
+
+			default:	// none, ping: ReadReflectorThread queues neither
+				break;
 		}
 	}
 }
@@ -1334,6 +1430,9 @@ void CController::ProcessUSRPThread()
 
 			case ECodecType::svx:
 				SvxToAudio(packet);
+				break;
+
+			default:	// none, ping: ReadReflectorThread queues neither
 				break;
 		}
 	}

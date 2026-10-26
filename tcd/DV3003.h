@@ -36,11 +36,11 @@ public:
 	void AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> packet, uint8_t channel);
 
 protected:
-	void PushWaitingPacket(unsigned int channel, std::shared_ptr<CTranscoderPacket> packet);
-	std::shared_ptr<CTranscoderPacket> PopWaitingPacket(unsigned int channel);
-	void ProcessPacket(const SDV_Packet &p);
-	bool SendAudio(const uint8_t channel, const int16_t *audio) const;
-	bool SendData(const uint8_t channel, const uint8_t *data) const;
+	void PushWaitingPacket(unsigned int channel, std::shared_ptr<CTranscoderPacket> packet) override;
+	std::shared_ptr<CTranscoderPacket> PopWaitingPacket(unsigned int channel) override;
+	void ProcessPacket(const SDV_Packet &p) override;
+	bool SendAudio(const uint8_t channel, const int16_t *audio) const override;
+	bool SendData(const uint8_t channel, const uint8_t *data) const override;
 
 	// Override: use per-channel encoding and module mapping
 	Encoding GetChannelEncoding(uint8_t channel) const override;

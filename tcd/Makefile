@@ -9,15 +9,24 @@ URFD_DIR ?= ../reflector
 URFD_FILES = IP.cpp IP.h TCPacketDef.h TCSocket.cpp TCSocket.h Timer.h Golay24128.cpp Golay24128.h YSFDefines.h SHA256.cpp SHA256.h RejectLog.cpp RejectLog.h
 
 ifeq ($(debug), true)
-CFLAGS = -ggdb3 -W -Werror -Icodec2 -MMD -MD -std=c++17
+CFLAGS = -ggdb3 -W -Werror -Icodec2 -MMD -std=c++17
 else
-CFLAGS = -O2 -W -Werror -Icodec2 -MMD -MD -std=c++17
+CFLAGS = -O2 -W -Werror -Icodec2 -MMD -std=c++17
 endif
 
 CFLAGS += -Iimbe
 
 # a single DVSI device needs a codec plugin for DMR (CodecPlugin.h), loaded with dlopen
 LDFLAGS = -lspeexdsp -lwebsockets -pthread -latomic -ldl
+
+# macOS (clang, the libraries from Homebrew): no libatomic (it is in libSystem),
+# the serial ports are found through IOKit; libm has exp10f only as __exp10f,
+# TCP_KEEPIDLE is called TCP_KEEPALIVE, and clang flags the VLAs in codec2
+ifeq ($(shell uname -s),Darwin)
+BREW ?= $(shell brew --prefix 2>/dev/null || echo /opt/homebrew)
+CFLAGS += -I$(BREW)/include -Dexp10f=__exp10f -DTCP_KEEPIDLE=TCP_KEEPALIVE -Wno-vla-extension
+LDFLAGS = -L$(BREW)/lib -lspeexdsp -lwebsockets -pthread -ldl -framework IOKit -framework CoreFoundation
+endif
 
 # Explicit source list (includes urfd shared files)
 SRCS = CodecPlugins.cpp Configure.cpp Controller.cpp DV3000.cpp DV3003.cpp DVSIDevice.cpp \
@@ -55,7 +64,7 @@ monitor_html.cpp : monitor.html embed_html.sh $(wildcard ../dashboard/fonts/sair
 
 # its own code, built as it comes, without -W -Werror
 imbe/%.o : imbe/%.cc
-	$(GCC) -O2 -MMD -MD -std=c++17 -c $< -o $@
+	$(GCC) -O2 -MMD -std=c++17 -c $< -o $@
 
 urfd-files :
 	@for f in $(URFD_FILES); do \

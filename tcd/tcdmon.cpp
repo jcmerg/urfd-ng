@@ -215,7 +215,7 @@ static void draw_vu(int y, int x, int width, const char *label, double rms, doub
 }
 
 // Draw signal flow line
-static void draw_flow(int y, int x, int width, const ModuleData &m, const std::string &cfg_json)
+static void draw_flow(int y, int x, int /*width*/, const ModuleData &m, const std::string &cfg_json)
 {
 	if (m.codec_in == "none" || m.idle > 2.0)
 	{

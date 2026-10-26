@@ -59,9 +59,25 @@ Codec2 (`codec2/`) and the P25 IMBE vocoder from OP25 (`imbe/`) are part of the 
 
 tcd builds against the urfd sources it shares with the reflector (`TCPacketDef.h`, `TCSocket.*`, ...) from `../reflector`, so both sides always speak the same protocol. `config/tcd.ini` is the commented template, `config/tcd.service` the systemd unit.
 
+### macOS
+
+tcd also builds and runs natively on macOS (Apple silicon or Intel), with the AMBE devices on USB; Docker Desktop cannot pass USB devices through. With the Xcode command line tools and [Homebrew](https://brew.sh):
+
+```bash
+brew install speexdsp libwebsockets
+cd urfd/tcd
+make -j$(sysctl -n hw.ncpu)
+./tcd --list-devices
+./tcd /path/to/tcd.ini        # Ctrl-C stops it
+```
+
+- macOS has no `/dev/serial/by-id`: tcd finds the USB serial ports (`/dev/cu.*`) through IOKit and names them as udev would (`usb-FTDI_DVstick-33_DKB7FXGE-if00-port0`), so the detection of the AMBE devices and `DeviceSerial` work as on Linux. Apple's own FTDI driver is used, no extra driver.
+- tcd sets the FTDI latency timer to 1 ms there too. 460800 and 921600 baud, which the macOS termios does not have, are set through IOKit.
+- `make install` and the systemd unit are for Linux; on macOS start tcd by hand (or with a launchd job). A codec plugin in `plugins/<name>/` builds the same way as on Linux.
+
 ### Requirements
 
-- Linux with systemd: Debian, Ubuntu or Raspberry Pi OS; x86_64, arm64 or armhf
+- Linux with systemd: Debian, Ubuntu or Raspberry Pi OS; x86_64, arm64 or armhf; or macOS with Homebrew (see [macOS](#macos))
 - DVSI AMBE USB devices (see [Hardware](#hardware)); they use the kernel's `ftdi_sio` driver, no extra driver needed
 - `libspeexdsp-dev` for the noise suppression of analog input and `libwebsockets-dev` for the web dashboard; `build.sh` installs them
 - Low latency to the AMBE devices: tcd sets their USB latency timer to 1 ms itself, natively and in Docker (see [tcd in Docker](#tcd-in-docker)). It can run on the reflector's machine or on another one, e.g. a Raspberry Pi next to the radio gear.
@@ -167,7 +183,7 @@ The standby tcd sends the module letter in lower case; the reflector takes it on
 tcd --list-devices
 ```
 
-lists the USB serial devices from `/dev/serial/by-id` with their serial numbers and marks the ones that look like AMBE devices.
+lists the USB serial devices from `/dev/serial/by-id` (on macOS from IOKit, see [macOS](#macos)) with their serial numbers and marks the ones that look like AMBE devices.
 
 Without `DeviceSerial` in `tcd.ini`, tcd uses every device it recognises as AMBE by its name. With other USB serial devices on the machine (GPS, CAT cables, ...), list your AMBE devices explicitly. `DeviceSerial` must match exactly one of:
 
@@ -373,6 +389,7 @@ journalctl -u tcd -f
 ### Hardware and devices
 - **Serial access without libftd2xx**: through the kernel's `ftdi_sio` driver and `/dev/serial/by-id` (POSIX backend by Jason Kendall), RTS/CTS flow control, USB latency timer at 1 ms; devices left unbound by an older tcd are bound back; a lost device restarts tcd through systemd
 - **Device selection**: `--list-devices`, `DeviceSerial` with exact matching
+- **macOS**: builds with clang and runs natively with the AMBE devices, see [macOS](#macos)
 - **Mixed mode DV3000 + DV3003**: two modules at once with per-channel codec setup
 - **DV3003 D-Star**: companding off, serial flush, per-channel encoding
 - **SVX codec path**: its own `ECodecType::svx` for SVX audio

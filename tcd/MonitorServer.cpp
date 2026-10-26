@@ -207,7 +207,7 @@ std::string CMonitorServer::BuildStatsJson()
 }
 
 // Simple JSON value parser (no library dependency)
-static bool json_get_int(const char *json, size_t len, const char *key, int &val)
+static bool json_get_int(const char *json, size_t /*len*/, const char *key, int &val)
 {
 	char search[64];
 	snprintf(search, sizeof(search), "\"%s\":", key);
@@ -219,7 +219,7 @@ static bool json_get_int(const char *json, size_t len, const char *key, int &val
 	return true;
 }
 
-static bool json_get_float(const char *json, size_t len, const char *key, float &val)
+static bool json_get_float(const char *json, size_t /*len*/, const char *key, float &val)
 {
 	char search[64];
 	snprintf(search, sizeof(search), "\"%s\":", key);
@@ -231,7 +231,7 @@ static bool json_get_float(const char *json, size_t len, const char *key, float 
 	return true;
 }
 
-static bool json_get_bool(const char *json, size_t len, const char *key, bool &val)
+static bool json_get_bool(const char *json, size_t /*len*/, const char *key, bool &val)
 {
 	char search[64];
 	snprintf(search, sizeof(search), "\"%s\":", key);
