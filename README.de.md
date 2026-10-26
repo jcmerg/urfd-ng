@@ -907,7 +907,7 @@ Nur ausgehend, nichts zu öffnen: SvxReflector (zum Port des SvxLink-Servers, me
 
 ## YSF
 
-URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). YSF-Nutzer verbinden sich über Hotspot-Software (Pi-Star/WPSD), die URF-Reflektoren über die XLX-API findet. Eine Registrierung bei ysfreflector.de ist nicht nötig. Mit `EnableDGID = true` können Nutzer das Modul über DG-ID-Werte wechseln (10=A, 11=B, ... 35=Z).
+URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). YSF-Nutzer verbinden sich über Hotspot-Software (Pi-Star/WPSD), die URF-Reflektoren über die XLX-API findet. Eine Registrierung bei ysfreflector.de ist nicht nötig. Mit `EnableDGID = true` können Nutzer das Modul über DG-ID-Werte wechseln (10=A, 11=B, ... 35=Z), und der Reflektor sendet jedes Modul mit seiner DG-ID, sodass Funkgeräte, die danach filtern, das Modul hören.
 
 ## Änderungen gegenüber dem Original
 
