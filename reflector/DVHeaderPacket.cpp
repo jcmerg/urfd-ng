@@ -22,6 +22,7 @@
 
 #include "Defines.h"
 #include "DVHeaderPacket.h"
+#include "CRC.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructor
@@ -197,7 +198,9 @@ void CDvHeaderPacket::ConvertToDstarStruct(struct dstar_header *buffer) const
 	m_csRPT2.GetCallsign(buffer->RPT2);
 	m_csMY.GetCallsign(buffer->MY);
 	m_csMY.GetSuffix(buffer->SUFFIX);
-	buffer->Crc = m_uiCrc;
+	// the CRC of what is sent: the callsigns may have been rewritten (RPT2 by the
+	// router), and headers from DCS or other modes have none
+	CCRC::addCCITT161((unsigned char *)buffer, sizeof(struct dstar_header));
 }
 
 
