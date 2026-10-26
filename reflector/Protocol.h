@@ -83,7 +83,7 @@ public:
 	virtual void Task(void) = 0;
 
 	// pass-through
-	void Push(std::unique_ptr<CPacket> p) { m_Queue.Push(std::move(p)); }
+	void Push(std::unique_ptr<CPacket> p);
 
 	// protocol blocking (bidirectional, thread-safe for runtime changes)
 	bool IsSourceBlocked(EProtocol src) const { std::shared_lock lk(m_BlockMutex); return m_BlockedSources.count(src) > 0; }
@@ -139,6 +139,7 @@ protected:
 	virtual char DmrDstIdToModule(uint32_t) const;
 	virtual uint32_t ModuleToDmrDestId(char) const;
 
+	bool Wait(int fd4, int fd6, int time_ms, bool &ready4, bool &ready6);
 	bool Receive6(CBuffer &buf, CIp &Ip, int time_ms);
 	bool Receive4(CBuffer &buf, CIp &Ip, int time_ms);
 	bool ReceiveDS(CBuffer &buf, CIp &Ip, int time_ms);
@@ -159,8 +160,9 @@ protected:
 	// streams
 	std::unordered_map<uint16_t, std::shared_ptr<CPacketStream>> m_Streams;
 
-	// queue
+	// queue, and an eventfd that wakes the receive wait when it got a packet
 	CSafePacketQueue<std::unique_ptr<CPacket>> m_Queue;
+	int m_QueueFd = -1;
 
 	// thread
 	std::atomic<bool> keep_running;
