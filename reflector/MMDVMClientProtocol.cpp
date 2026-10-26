@@ -426,7 +426,10 @@ void CMMDVMClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 	// MSTCL
 	else if (Buffer.size() >= 5 && 0 == Buffer.Compare((uint8_t *)"MSTCL", 5))
 	{
-		std::cout << m_Name << ": master closed connection" << std::endl;
+		if (m_State == EHBState::WAITING_CONFIG)
+			std::cout << m_Name << ": the master refused the configuration and closed the connection (BrandMeister does so for a duplex hotspot with RxFreq = TxFreq)" << std::endl;
+		else
+			std::cout << m_Name << ": master closed connection" << std::endl;
 		m_State = EHBState::DISCONNECTED;
 		m_RetryTimer.start();
 	}
@@ -489,7 +492,9 @@ void CMMDVMClientProtocol::SendConfig(void)
 		return (m_Instance > 1 && g_Configure.Contains(fallback)) ? &fallback : nullptr;
 	};
 	double lat = 0.0, lon = 0.0;
-	unsigned rxfreq = 439000000, txfreq = 439000000;
+	// a split by default: the hotspot is duplex, and BrandMeister refuses a duplex
+	// hotspot with RX = TX
+	unsigned rxfreq = 430412500, txfreq = 439812500;
 	std::string location, description, url;
 
 	if (const auto *k = pick(m_Keys.latitude, first.latitude))

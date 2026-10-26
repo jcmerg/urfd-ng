@@ -78,7 +78,7 @@ Longitude = 0.0
 Location = My City
 Description = My URF Reflector
 URL = https://example.com
-RxFreq = 430412500
+RxFreq = 430412500             # anders als TxFreq: der Hotspot ist duplex (zwei Zeitschlitze), BrandMeister lehnt RX = TX ab
 TxFreq = 439812500
 # FallbackDmrId = 1234567           # DMR ID for unknown callers (0 or omit = drop)
 # BlockProtocols = SvxReflector,YSF # Block protocols bidirectionally
