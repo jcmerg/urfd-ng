@@ -220,7 +220,7 @@ All gains are in dB, -40 to +40.
 | Key | Template | Applied to |
 |---|---|---|
 | `OutputGainDStar` | `0` | D-Star output, after the AGC |
-| `OutputGainDMR` | `-18` | DMR/YSF output, after the AGC; every path to DMR/YSF, including DMR → DMR/YSF |
+| `OutputGainDMR` | `-14` | DMR/YSF output, after the AGC; every path to DMR/YSF, including DMR → DMR/YSF |
 | `OutputGainDMRBitstream` | `-6` | -24 to 0 dB (0 = all of it before the encoder): for D-Star, M17, P25, USRP and SVX sources this much of `OutputGainDMR` is applied through b2 in the AMBE2+ frame after the encoder, the rest as PCM before it, so the encoder gets more level; live in the monitor |
 | `OutputGainM17` | `0` | M17/Codec2 output, after the AGC |
 | `OutputGainIMBE` | `0` | P25 output, after the AGC |
@@ -246,7 +246,7 @@ DMR to DMR/YSF audio normally passes through as AMBE2+ without being decoded, so
 | `AmbeGainDb` | `0` | `0` |
 | `DmrReencodeGain` | `0` | — |
 
-DMR radios expect a lower level than the AGC target (`AGCTarget`, -16 dBFS). `OutputGainDMR = -18` brings every path to DMR/YSF down to it: the DVSI encoder for D-Star, M17, P25 and USRP sources, and b2 or the re-encode for DMR sources. `AmbeGainDb` and `DmrReencodeGain` only move DMR → DMR/YSF against the other paths and normally stay 0. (tcd 0.2.6 put the -18 into `AmbeGainDb`/`DmrReencodeGain`, which left D-Star → DMR 18 dB too loud.)
+DMR radios expect a lower level than the AGC target (`AGCTarget`, -16 dBFS). `OutputGainDMR = -14` brings every path to DMR/YSF down to it, to about -30 dBFS, the level of speech on BrandMeister (measured on TG91: median -29 dBFS, -39 to -23 between the talkers; -18 before 0.13.1 left DMR/YSF about 4 dB below it): the DVSI encoder for D-Star, M17, P25 and USRP sources, and b2 or the re-encode for DMR sources. `AmbeGainDb` and `DmrReencodeGain` only move DMR → DMR/YSF against the other paths and normally stay 0. (tcd 0.2.6 put the -18 into `AmbeGainDb`/`DmrReencodeGain`, which left D-Star → DMR 18 dB too loud.)
 
 With the PCM gain the encoder gets the other codecs' audio at about -34 dBFS, far below the level it is made for. `OutputGainDMRBitstream` moves part of it behind the encoder: that many dB go through b2 in the frame afterwards, level independent like `DmrGainMode = ambe`, the rest stays a PCM gain before the encoder. All of it in b2 (0.6.0 had only that, as a switch) sounded a little better over an SvxLink node to DMR (2026-10-15) but with artifacts here and there: b2 moves quiet frames in coarse steps of 3-16 dB, so a large shift cannot be met on quiet syllables and the error is made up in the next frames. Since 0.7.0 it is a split, e.g. -9 gives the encoder -25 instead of -34 dBFS and b2 only half the shift. 0 is the plain PCM gain; it can be moved in the monitor during a QSO. Even -6 crackled: between two coarse b2 steps the tracker made up the rounding error in the next frame, so the gain of quiet frames alternated by 3-6 dB every 20 ms. Since 0.7.1 the gain of this path moves by at most 1.2 dB per frame; in a simulation with speech-like b2 sequences at -4 dB no jump above 3 dB is left (68 before) and loud frames still meet the target. Larger shifts stay limited by the format itself, the coarse bottom of the b2 table: keep the split small: with 0.7.1, -4 and -6 sounded the same and clean over SvxLink to DMR (2026-10-15), URF363 runs -6. DMR → DMR keeps the unlimited tracker, it was clean in tests. Since 0.7.1 the option is no longer experimental, since 0.7.2 -6 is the default (before: 0).
 
@@ -314,7 +314,7 @@ DMR -> DMR/YSF with DmrGainMode = ambe:
   AMBE2+ --[b2: AGC gain + AmbeGainDb + OutputGainDMR]--> AMBE2+
 ```
 
-**With the AGC**, the static gains can usually all stay at 0, except `OutputGainDMR = -18` for the level DMR radios expect: it evens out different microphones, radios and codecs per transmission. Without it, every route needs its own static gain.
+**With the AGC**, the static gains can usually all stay at 0, except `OutputGainDMR = -14` for the level DMR radios expect: it evens out different microphones, radios and codecs per transmission. Without it, every route needs its own static gain.
 
 Where the AGC acts: it always measures the decoded PCM of the incoming stream. Between different codecs it is applied to that PCM before encoding. DMR → DMR/YSF gets it in the AMBE2+ bitstream through b2 (`DmrGainMode = ambe`) or by re-encoding (`reencode`). D-Star → D-Star, M17 → M17 and P25 → P25 pass through unchanged.
 

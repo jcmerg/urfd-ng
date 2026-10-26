@@ -119,7 +119,7 @@ function OnAirStrip($Reflector, $OnAir, $Modules) {
         </nav>
         <div class="status">
             <?php if ($Reflector->GetServiceUptime() !== null) { ?><span class="up">Up <?php echo FormatSpan($Reflector->GetServiceUptime()); ?></span><?php } ?>
-            <span class="ver">urfd <?php echo h($Reflector->GetVersion()); ?>, dashboard <?php echo h($PageOptions['DashboardVersion']); ?></span>
+            <span class="ver">urfd <?php echo h(preg_replace('/-dht$/', '', $Reflector->GetVersion())); ?>, dashboard <?php echo h($PageOptions['DashboardVersion']); ?></span>
             <button class="theme-btn" id="theme-btn" type="button" aria-label="Theme: system" title="Theme: system. Click to switch">System</button>
         </div>
     </div>
