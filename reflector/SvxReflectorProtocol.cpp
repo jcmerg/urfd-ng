@@ -653,6 +653,11 @@ void CSvxReflectorProtocol::Task(void)
 				CIp ip;
 				if (Receive4(buffer, ip, 20))
 				{
+					// the reflector sends the talker start over TCP before the first
+					// audio over UDP: what arrived over TCP goes first, or the audio
+					// opened a stream of its own under the connector's callsign
+					if (!TcpReceive())
+						break;
 					do {
 						// only the reflector's own packets, from its address
 						CIp from(ip);
@@ -852,6 +857,8 @@ void CSvxReflectorProtocol::CloseInStream(void)
 	m_InStream.tg = 0;
 	m_InStream.module = ' ';
 	m_InStream.talkerCallsign.clear();
+	m_InStream.held.clear();
+	m_InStream.heldPackets = 0;
 }
 
 void CSvxReflectorProtocol::OnTalkerStart(const std::vector<uint8_t> &payload)
@@ -894,11 +901,19 @@ void CSvxReflectorProtocol::OnTalkerStart(const std::vector<uint8_t> &payload)
 	// someone else gets a stream of their own, under their callsign
 	if (m_InStream.open && (m_InStream.tg != tg || m_InStream.talkerCallsign != talkerCs))
 		CloseInStream();
+	if (m_InStream.tg != tg)
+	{
+		m_InStream.held.clear();
+		m_InStream.heldPackets = 0;
+	}
 	m_InStream.tg = tg;
 	m_InStream.module = module;
 	m_InStream.talkerCallsign = talkerCs;
 
 	std::cout << "SvxReflector: talker start on TG" << tg << " -> Module " << module << " by " << talkerCs << std::endl;
+
+	// audio that came first opens the stream now, under the talker
+	PushHeldFrames();
 }
 
 void CSvxReflectorProtocol::OnTalkerStop(const std::vector<uint8_t> &payload)
@@ -975,14 +990,39 @@ void CSvxReflectorProtocol::OnUdpAudio(const CBuffer &buffer)
 		std::cerr << "SvxReflector: opus_decode failed" << std::endl;
 		return;
 	}
+	// what waited for a talker start that never came, of a talk long gone
+	if (m_InStream.heldPackets > 0 && m_InStream.audioTimer.time() > 1)
+	{
+		m_InStream.held.clear();
+		m_InStream.heldPackets = 0;
+	}
 	m_InStream.audioTimer.start();
 	m_TGActivityTimer.start();
 
 	for (auto &f : frames)
-	{
 		CUtils::ApplyGain(f.data(), 160, m_RxGainNum);
-		PushInFrame(f.data(), false);
+
+	// without a talker yet, the audio waits a moment for the talker start, so the
+	// stream opens under the talker's callsign; after that it goes out without one
+	if (!m_InStream.open && m_InStream.talkerCallsign.empty() && m_InStream.heldPackets < SVX_HOLD_PACKETS)
+	{
+		m_InStream.held.insert(m_InStream.held.end(), frames.begin(), frames.end());
+		m_InStream.heldPackets++;
+		return;
 	}
+	PushHeldFrames();
+	for (auto &f : frames)
+		PushInFrame(f.data(), false);
+}
+
+// the audio that waited for the talker start
+void CSvxReflectorProtocol::PushHeldFrames(void)
+{
+	auto held = std::move(m_InStream.held);
+	m_InStream.held.clear();
+	m_InStream.heldPackets = 0;
+	for (auto &f : held)
+		PushInFrame(f.data(), false);
 }
 
 // opens the stream on the first frame of a talker, and again when urfd closed it
