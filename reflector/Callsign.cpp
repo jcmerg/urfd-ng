@@ -464,7 +464,8 @@ bool CCallsign::operator ==(const CCallsign &cs) const
 
 CCallsign::operator const char *() const
 {
-	static char sz[CALLSIGN_LEN+CALLSUFFIX_LEN+5];
+	// one buffer per thread: the protocols format callsigns concurrently
+	static thread_local char sz[CALLSIGN_LEN+CALLSUFFIX_LEN+5];
 
 	// empty
 	memset(sz, 0, sizeof(sz));
