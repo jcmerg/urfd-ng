@@ -617,16 +617,26 @@ void CTCServer::establish(SPending &p)
 		std::cout << "Standby transcoder from " << p.peer << " takes over module '" << p.module << "'" << std::endl;
 	}
 
+	// A second tcd for a module that has a live one: refused, or the two would
+	// replace each other's connection without end. TryAccept() has probed the
+	// connection just now, so it is alive as far as we can tell: a tcd that
+	// stopped or restarted has closed it, one that vanished (network) is found by
+	// the TCP keepalive within half a minute, and its reconnect gets through then.
+	if (m_Pfd[pos].fd >= 0 && !m_Standby[pos] && !p.standby)
+	{
+		if (RejectLog("Transcoder: second connections", p.peer.GetAddress()))
+			std::cerr << "Transcoder connection for module '" << p.module << "' from " << p.peer << " refused: module '" << p.module << "' has a live transcoder connection (a second tcd for the same modules?)" << std::endl;
+		close(p.fd);
+		return;
+	}
+
 	// blocking again for normal operation
 	fcntl(p.fd, F_SETFL, fcntl(p.fd, F_GETFL, 0) & ~O_NONBLOCK);
 
-	// Close old stale connection if present
+	// a normal connection replaces a standby one
 	if (m_Pfd[pos].fd >= 0)
 	{
-		if (m_Standby[pos])
-			std::cout << "Transcoder for module '" << p.module << "' is back, the standby one gives it up" << std::endl;
-		else
-			std::cerr << "Replacing stale connection on module '" << p.module << "'" << std::endl;
+		std::cout << "Transcoder for module '" << p.module << "' is back, the standby one gives it up" << std::endl;
 		shutdown(m_Pfd[pos].fd, SHUT_RDWR);
 		close(m_Pfd[pos].fd);
 	}
@@ -941,19 +951,15 @@ void CTCClient::ReConnect() // and sometimes ping
 			}
 			last_attempt = steady_now;
 
-			// Check if still disconnected → increase backoff (max 5s)
-			bool still_down = false;
-			for (char m : m_Modules)
-				if (!IsStandby(m) && 0 > GetFD(m)) { still_down = true; break; }
-
-			if (still_down)
-				backoff_secs = (backoff_secs < 0.5) ? 0.5 : std::min(backoff_secs * 2.0, 5.0);
-			else
-				backoff_secs = 0.0;
+			// the next attempt waits longer (max 5s), also after one that connected: a
+			// reflector that drops the connection at once (another tcd has the module)
+			// must not get a reconnect in a tight loop
+			backoff_secs = (backoff_secs < 0.5) ? 0.5 : std::min(backoff_secs * 2.0, 5.0);
 		}
 	}
-	else
+	else if (std::chrono::steady_clock::now() - last_attempt > std::chrono::seconds(10))
 	{
+		// connected for a while: the next loss is retried at once
 		backoff_secs = 0.0;
 	}
 
