@@ -54,6 +54,7 @@ public:
 	bool             IsExpired(void) const          { return (m_LastPacketTime.time() > STREAM_TIMEOUT); }
 	bool             IsOpen(void) const             { return m_bOpen; }
 	uint16_t         GetStreamId(void) const        { return m_uiStreamId; }
+	char             GetModule(void) const          { return m_PSModule; }
 	const CCallsign &GetUserCallsign(void) const    { return m_DvHeader.GetMyCallsign(); }
 	char             GetRpt2Module(void) const      { return m_DvHeader.GetRpt2Module(); }
 	CCodecStream    *GetCodecStream(void) const     { return m_CodecStream.get(); }

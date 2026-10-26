@@ -121,7 +121,7 @@ protected:
 	void HandleKeepalives(void);
 
 	// stream helpers
-	void OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &, const CIp &, uint8_t, uint8_t, uint32_t sourceTG = 0);
+	void OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &, const CIp &, uint8_t cmd, uint8_t callType, uint8_t slot, uint32_t sourceTG = 0);
 
 	// packet decoding helpers
 	bool IsValidConnectPacket(const CBuffer &, CCallsign *, const CIp &, uint32_t *rawDmrId);
@@ -131,7 +131,8 @@ protected:
 	bool IsValidOptionPacket(const CBuffer &, CCallsign *);
 	bool IsValidKeepAlivePacket(const CBuffer &, CCallsign *);
 	bool IsValidRssiPacket(const CBuffer &, CCallsign *, int *);
-	bool IsValidDvHeaderPacket(const CBuffer &, std::unique_ptr<CDvHeaderPacket> &, uint8_t *, uint8_t *);
+	bool IsValidDvHeaderPacket(const CBuffer &, std::unique_ptr<CDvHeaderPacket> &, uint8_t *, uint8_t *, uint8_t *slot);
+	static uint16_t DmrdStreamId(const CBuffer &, uint8_t slot);
 	bool IsValidDvFramePacket(const CIp &, const CBuffer &, std::unique_ptr<CDvHeaderPacket> &, std::array<std::unique_ptr<CDvFramePacket>, 3> &);
 	bool IsValidDvLastFramePacket(const CBuffer &, std::unique_ptr<CDvFramePacket> &);
 
