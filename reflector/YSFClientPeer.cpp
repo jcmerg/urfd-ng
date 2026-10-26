@@ -7,13 +7,13 @@ CYSFClientPeer::CYSFClientPeer()
 {
 }
 
-CYSFClientPeer::CYSFClientPeer(const CCallsign &callsign, const CIp &ip, char reflectorModule)
-	: CClient(callsign, ip, reflectorModule)
+CYSFClientPeer::CYSFClientPeer(const CCallsign &callsign, const CIp &ip, char reflectorModule, uint8_t dgid)
+	: CClient(callsign, ip, reflectorModule), m_DgId(dgid)
 {
 }
 
 CYSFClientPeer::CYSFClientPeer(const CYSFClientPeer &client)
-	: CClient(client)
+	: CClient(client), m_DgId(client.m_DgId)
 {
 }
 
