@@ -151,7 +151,7 @@ The transcoded modules are listed in `tcd.ini` (`Modules`); `urfd.ini` says `[Tr
 
 ## Setting it up by hand
 
-Without the setup script, or without Docker: [INSTALL-ADVANCED.md](INSTALL-ADVANCED.md).
+Without the setup script, or without Docker: [INSTALL-ADVANCED.md](INSTALL-ADVANCED.md); which build script builds what: [What gets built](INSTALL-ADVANCED.md#what-gets-built).
 
 ## Removing everything
 

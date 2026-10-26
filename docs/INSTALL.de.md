@@ -151,7 +151,7 @@ Die transcodierten Module stehen in der `tcd.ini` (`Modules`); in der `urfd.ini`
 
 ## Von Hand einrichten
 
-Ohne Setup-Script oder ohne Docker: [INSTALL-ADVANCED.de.md](INSTALL-ADVANCED.de.md).
+Ohne Setup-Script oder ohne Docker: [INSTALL-ADVANCED.de.md](INSTALL-ADVANCED.de.md); welches Build-Script was baut: [Was gebaut wird](INSTALL-ADVANCED.de.md#was-gebaut-wird).
 
 ## Alles entfernen
 
