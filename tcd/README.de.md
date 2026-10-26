@@ -220,7 +220,7 @@ Alle Werte in dB, -40 bis +40.
 | Schlüssel | Vorlage | Wirkt auf |
 |---|---|---|
 | `OutputGainDStar` | `0` | D-Star-Ausgang, nach der AGC |
-| `OutputGainDMR` | `-18` | DMR/YSF-Ausgang, nach der AGC; jeder Weg nach DMR/YSF, auch DMR → DMR/YSF |
+| `OutputGainDMR` | `-14` | DMR/YSF-Ausgang, nach der AGC; jeder Weg nach DMR/YSF, auch DMR → DMR/YSF |
 | `OutputGainDMRBitstream` | `-6` | -24 bis 0 dB (0 = alles vor dem Encoder): Bei Quellen aus D-Star, M17, P25, USRP und SVX wird so viel von `OutputGainDMR` nach dem Encoder über b2 im AMBE2+-Frame angewendet, der Rest als PCM davor, der Encoder bekommt also mehr Pegel; live im Monitor |
 | `OutputGainM17` | `0` | M17/Codec2-Ausgang, nach der AGC |
 | `OutputGainIMBE` | `0` | P25-Ausgang, nach der AGC |
@@ -246,7 +246,7 @@ Audio von DMR nach DMR/YSF läuft normalerweise als AMBE2+ durch, ohne dekodiert
 | `AmbeGainDb` | `0` | `0` |
 | `DmrReencodeGain` | `0` | — |
 
-DMR-Funkgeräte erwarten einen niedrigeren Pegel als das AGC-Ziel (`AGCTarget`, -16 dBFS). `OutputGainDMR = -18` senkt jeden Weg nach DMR/YSF darauf ab: den DVSI-Encoder für Quellen aus D-Star, M17, P25 und USRP sowie b2 oder das Neukodieren für DMR-Quellen. `AmbeGainDb` und `DmrReencodeGain` verschieben nur DMR → DMR/YSF gegenüber den anderen Wegen und bleiben normalerweise 0. (tcd 0.2.6 legte die -18 in `AmbeGainDb`/`DmrReencodeGain`, D-Star → DMR war dadurch 18 dB zu laut.)
+DMR-Funkgeräte erwarten einen niedrigeren Pegel als das AGC-Ziel (`AGCTarget`, -16 dBFS). `OutputGainDMR = -14` senkt jeden Weg nach DMR/YSF darauf ab, auf etwa -30 dBFS, den Pegel der Sprache bei BrandMeister (gemessen auf TG91: Median -29 dBFS, zwischen den Sprechern -39 bis -23; die -18 vor 0.13.1 ließen DMR/YSF rund 4 dB darunter): den DVSI-Encoder für Quellen aus D-Star, M17, P25 und USRP sowie b2 oder das Neukodieren für DMR-Quellen. `AmbeGainDb` und `DmrReencodeGain` verschieben nur DMR → DMR/YSF gegenüber den anderen Wegen und bleiben normalerweise 0. (tcd 0.2.6 legte die -18 in `AmbeGainDb`/`DmrReencodeGain`, D-Star → DMR war dadurch 18 dB zu laut.)
 
 Mit der PCM-Absenkung bekommt der Encoder den Ton der anderen Codecs mit etwa -34 dBFS, weit unter dem Pegel, für den er gemacht ist. `OutputGainDMRBitstream` verlegt einen Teil davon hinter den Encoder: So viele dB gehen danach über b2 im Frame, pegelunabhängig wie `DmrGainMode = ambe`, der Rest bleibt eine PCM-Absenkung vor dem Encoder. Alles über b2 (0.6.0 hatte nur das, als Schalter) klang über einen SvxLink-Knoten nach DMR (15.10.2026) etwas besser, aber stellenweise mit Artefakten: b2 verschiebt leise Frames in groben Stufen von 3-16 dB, eine große Verschiebung lässt sich auf leisen Silben nicht treffen, und der Fehler wird in den nächsten Frames aufgeholt. Seit 0.7.0 ist es eine Aufteilung, z.B. gibt -9 dem Encoder -25 statt -34 dBFS und b2 nur die halbe Verschiebung. 0 ist die reine PCM-Absenkung; im Monitor lässt es sich während eines QSOs verschieben. Selbst -6 knackte: Zwischen zwei groben b2-Stufen holte die Nachführung den Rundungsfehler im nächsten Frame auf, die Verstärkung leiser Frames sprang also alle 20 ms um 3-6 dB hin und her. Seit 0.7.1 ändert sich die Verstärkung auf diesem Weg um höchstens 1,2 dB pro Frame; in einer Simulation mit sprachähnlichen b2-Folgen bei -4 dB bleibt kein Sprung über 3 dB übrig (vorher 68), und laute Frames treffen das Ziel weiter. Größere Verschiebungen begrenzt das Format selbst, das grobe untere Ende der b2-Tabelle: die Aufteilung klein halten: Mit 0.7.1 klangen -4 und -6 über SvxLink nach DMR gleich und sauber (15.10.2026), URF363 läuft mit -6. DMR → DMR behält die unbegrenzte Nachführung, sie war im Test sauber. Seit 0.7.1 ist die Option nicht mehr experimentell, seit 0.7.2 ist -6 der Standard (vorher 0).
 
@@ -314,7 +314,7 @@ DMR -> DMR/YSF with DmrGainMode = ambe:
   AMBE2+ --[b2: AGC gain + AmbeGainDb + OutputGainDMR]--> AMBE2+
 ```
 
-**Mit AGC** können die festen Verstärkungen meist alle auf 0 bleiben, bis auf `OutputGainDMR = -18` für den Pegel, den DMR-Funkgeräte erwarten: Sie gleicht unterschiedliche Mikrofone, Funkgeräte und Codecs pro Aussendung aus. Ohne sie braucht jeder Weg seine eigene feste Verstärkung.
+**Mit AGC** können die festen Verstärkungen meist alle auf 0 bleiben, bis auf `OutputGainDMR = -14` für den Pegel, den DMR-Funkgeräte erwarten: Sie gleicht unterschiedliche Mikrofone, Funkgeräte und Codecs pro Aussendung aus. Ohne sie braucht jeder Weg seine eigene feste Verstärkung.
 
 Wo die AGC wirkt: Sie misst immer am dekodierten PCM des eingehenden Streams. Zwischen verschiedenen Codecs wird sie auf dieses PCM angewendet, bevor kodiert wird. DMR → DMR/YSF bekommt sie im AMBE2+-Bitstrom über b2 (`DmrGainMode = ambe`) oder durch Neukodieren (`reencode`). D-Star → D-Star, M17 → M17 und P25 → P25 laufen unverändert durch.
 
