@@ -70,10 +70,7 @@ public:
 	CDmrEmbeddedLC  m_Embedded;
 	// a talker alias the DMR source sends (BrandMeister, the radio) replaces
 	// ours, its text in our format
-	CDmrEmbeddedLC  m_SourceLC;
-	std::array<std::array<uint8_t, 9>, 4> m_SourceTA {};
-	uint8_t         m_uiSourceTAMask = 0;	// bit n: LC n of the source's alias arrived
-	bool            m_bSourceTA = false;
+	CDmrTalkerAliasIn m_SourceTA;
 };
 
 

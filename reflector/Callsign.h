@@ -26,6 +26,8 @@
 // define
 
 #define CALLSIGN_LEN        8
+// MY of a source without a callsign, e.g. a DMR ID the database does not know yet
+#define UNKNOWN_CALLSIGN    "N0CALL"
 #define CALLSUFFIX_LEN      4
 
 union UCallsign

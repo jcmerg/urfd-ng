@@ -7,6 +7,7 @@
 // Copyright (C) 2026 Jens-Christian Merg (DL4JC)
 // Licensed under the GNU General Public License v3 or later
 
+#include <algorithm>
 #include <cstring>
 
 #include "DMREmbeddedLC.h"
@@ -279,4 +280,39 @@ std::string CDmrEmbeddedLC::TalkerAliasText(const std::vector<std::array<uint8_t
 			break;
 	}
 	return utf8;
+}
+
+bool CDmrTalkerAliasIn::Collect(unsigned burst, const uint8_t *sync, std::string &utf8)
+{
+	if (m_bDone || burst < 1U || burst > 4U)
+		return false;
+
+	uint8_t lc[9];
+	if (!m_LC.Collect(sync, lc))
+		return false;
+	const uint8_t flco = lc[0] & 0x3FU;
+	if (flco < FLCO_TALKER_ALIAS_HEADER || flco > FLCO_TALKER_ALIAS_HEADER + 3U)
+		return false;	// voice LC, GPS, ...
+	std::copy(lc, lc + 9, m_TA[flco - FLCO_TALKER_ALIAS_HEADER].begin());
+	m_uiMask |= 1U << (flco - FLCO_TALKER_ALIAS_HEADER);
+	if (0 == (m_uiMask & 0x01U))
+		return false;
+
+	// the header says how long it is: 49 bits in the header (7 bit characters
+	// use all of them, the others only whole bytes, 48), 56 per block
+	const uint8_t *header = m_TA[0].data();
+	static const unsigned bitsPerChar[4] = { 7, 8, 8, 16 };
+	const unsigned format = (header[2] >> 6) & 0x03U;
+	const unsigned bits = ((header[2] >> 1) & 0x1FU) * bitsPerChar[format];
+	const unsigned inHeader = (0U == format) ? 49U : 48U;
+	unsigned count = 1 + ((bits > inHeader) ? (bits - inHeader + 55) / 56 : 0);
+	if (count > 4)
+		count = 4;
+	const uint8_t all = (1U << count) - 1U;
+	if ((m_uiMask & all) != all)
+		return false;
+
+	m_bDone = true;
+	utf8 = CDmrEmbeddedLC::TalkerAliasText(std::vector<std::array<uint8_t, 9>>(m_TA.begin(), m_TA.begin() + count));
+	return true;
 }

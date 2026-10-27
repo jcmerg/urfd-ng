@@ -762,11 +762,21 @@ void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t s
 		std::cout << m_Name << ": voice from " << my << " (ID " << srcId << ") TG" << dstId << " -> Module " << module << std::endl;
 
 	auto header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(srcId, CCallsign("CQCQCQ"), rpt1, rpt2, urfStreamId, 0, 0));
-	// a source without a callsign (an ID not in the DMR ID database, or none at all,
-	// e.g. from a mode without IDs on the master) comes from this connection: never
-	// an empty MY, which the other modes would show and send as such
+	// a source without a callsign (an ID not in the DMR ID database yet, or none
+	// at all, e.g. from a mode without IDs on the master) gets a neutral MY with
+	// its ID: never an empty one, which the other modes would show and send as
+	// such, and not ours, which would look like we were talking
 	if (!header->GetMyCallsign().IsValid())
-		header->SetMyCallsign(CCallsign(m_Callsign, srcId));
+	{
+		header->SetMyCallsign(CCallsign(UNKNOWN_CALLSIGN, srcId));
+		// its talker alias names it for its next call
+		if (srcId != 0 && !m_UnknownTA.count(streamId))
+		{
+			if (m_UnknownTA.size() >= 16)
+				m_UnknownTA.clear();	// streams that ended without a terminator
+			m_UnknownTA[streamId].first = srcId;
+		}
+	}
 
 	m_IncomingStreams[streamId] = urfStreamId;
 
@@ -782,6 +792,16 @@ void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t s
 
 void CMMDVMClientProtocol::OnDMRDVoiceFrameIn(const CBuffer &Buffer, uint32_t srcId, uint32_t dstId, uint32_t streamId)
 {
+	if (m_UnknownTA.count(streamId) && !(Buffer.data()[15] & MMDVMCLI_FLAG_VOICE_SYNC))
+	{
+		const uint8_t *frame = Buffer.data() + 20;
+		uint8_t sync[7];
+		sync[0] = frame[13] & 0x0F;
+		::memcpy(sync + 1, frame + 14, 5);
+		sync[6] = frame[19] & 0xF0;
+		LearnTalkerAlias(streamId, Buffer.data()[15] & 0x0F, sync);
+	}
+
 	auto it = m_IncomingStreams.find(streamId);
 	if (it == m_IncomingStreams.end())
 	{
@@ -836,6 +856,7 @@ void CMMDVMClientProtocol::OnDMRDVoiceFrameIn(const CBuffer &Buffer, uint32_t sr
 
 void CMMDVMClientProtocol::OnDMRDTerminatorIn(const CBuffer &Buffer, uint32_t srcId, uint32_t dstId, uint32_t streamId)
 {
+	m_UnknownTA.erase(streamId);
 	auto it = m_IncomingStreams.find(streamId);
 	if (it == m_IncomingStreams.end())
 		return;
@@ -1326,10 +1347,42 @@ uint32_t CMMDVMClientProtocol::CallsignToDmrId(const CCallsign &cs) const
 
 CCallsign CMMDVMClientProtocol::DmrIdToCallsign(uint32_t id) const
 {
+	CCallsign cs;
+	g_LDid.Lock();
 	const UCallsign *ucs = g_LDid.FindCallsign(id);
 	if (ucs)
-		return CCallsign(*ucs);
-	return CCallsign();
+		cs = CCallsign(*ucs);
+	g_LDid.Unlock();
+	return cs;
+}
+
+void CMMDVMClientProtocol::LearnTalkerAlias(uint32_t streamId, unsigned burst, const uint8_t *sync)
+{
+	auto &entry = m_UnknownTA[streamId];
+	std::string text;
+	if (!entry.second.Collect(burst, sync, text))
+		return;
+	const uint32_t srcId = entry.first;
+	m_UnknownTA.erase(streamId);
+
+	// "CALLSIGN Firstname", as BrandMeister sets it, or what the radio has
+	std::istringstream words(text);
+	std::string base, name;
+	words >> base;
+	std::getline(words >> std::ws, name);
+	std::transform(base.begin(), base.end(), base.begin(), ::toupper);
+	CCallsign cs;
+	if (base.size() < CALLSIGN_LEN)
+		cs.SetCallsign(base, false);
+	if (!cs.IsValid() || cs.GetBase().find_first_of("0123456789") == std::string::npos)
+	{
+		std::cout << m_Name << ": talker alias of unknown ID " << srcId << " has no callsign: \"" << text << "\"" << std::endl;
+		return;
+	}
+	g_LDid.Lock();
+	g_LDid.Learn(srcId, cs.GetKey(), name);
+	g_LDid.Unlock();
+	std::cout << m_Name << ": ID " << srcId << " is " << cs << " by its talker alias, until the DMR ID database has it" << std::endl;
 }
 
 void CMMDVMClientProtocol::AppendDmrIdToBuffer(CBuffer *buffer, uint32_t id) const

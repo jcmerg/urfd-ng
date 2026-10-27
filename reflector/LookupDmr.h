@@ -27,6 +27,9 @@ public:
 	uint32_t FindDmrid(const UCallsign &ucs) const;
 	const UCallsign *FindCallsign(uint32_t dmrid) const;
 	std::string FindName(uint32_t dmrid) const;
+	// an ID the database does not know yet, from the talker alias of a call:
+	// used until the database has it, kept across its reloads
+	void Learn(uint32_t dmrid, const UCallsign &ucs, const std::string &name);
 
 protected:
 	void ClearContents();
@@ -37,4 +40,6 @@ private:
 	std::unordered_map<uint32_t, UCallsign> m_CallsignMap;
 	std::unordered_map<UCallsign, uint32_t, CCallsignHash, CCallsignEqual> m_DmridMap;
 	std::unordered_map<uint32_t, std::string> m_NameMap;
+	std::unordered_map<uint32_t, UCallsign> m_LearnedCallsign;
+	std::unordered_map<uint32_t, std::string> m_LearnedName;
 };

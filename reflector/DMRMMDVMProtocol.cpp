@@ -511,9 +511,7 @@ void CDmrmmdvmProtocol::HandleQueue(void)
 			cache.m_uiSuperframe = 0;
 			cache.m_uiTAIndex = 0;
 			cache.m_bEmbeddedReady = false;
-			cache.m_SourceLC = CDmrEmbeddedLC();
-			cache.m_uiSourceTAMask = 0;
-			cache.m_bSourceTA = false;
+			cache.m_SourceTA = CDmrTalkerAliasIn();
 		}
 		else
 		{
@@ -1485,38 +1483,13 @@ void CDmrmmdvmProtocol::AddTalkerAlias(CDmrmmdvmStreamCacheItem &cache, uint8_t 
 void CDmrmmdvmProtocol::TakeSourceTalkerAlias(CDmrmmdvmStreamCacheItem &cache) const
 {
 	const auto &frame = cache.m_dvFrame0;
-	const uint8_t burst = frame.GetDmrPacketId();
-	if ( cache.m_bSourceTA || (ECodecType::dmr != frame.GetCodecIn()) || (burst < 1) || (burst > 4) )
+	if ( ECodecType::dmr != frame.GetCodecIn() )
 		return;
 
-	uint8_t lc[9];
-	if ( !cache.m_SourceLC.Collect(frame.GetDvSync(), lc) )
+	std::string text;
+	if ( !cache.m_SourceTA.Collect(frame.GetDmrPacketId(), frame.GetDvSync(), text) )
 		return;
-	const uint8_t flco = lc[0] & 0x3FU;
-	if ( (flco < 0x04U) || (flco > 0x07U) )
-		return;	// voice LC, GPS, ...
-	std::copy(lc, lc + 9, cache.m_SourceTA[flco - 0x04U].begin());
-	cache.m_uiSourceTAMask |= 1U << (flco - 0x04U);
-	if ( 0 == (cache.m_uiSourceTAMask & 0x01U) )
-		return;
-
-	// the header says how long it is: 49 bits in the header (7 bit characters
-	// use all of them, the others only whole bytes, 48), 56 per block
-	const uint8_t *header = cache.m_SourceTA[0].data();
-	static const unsigned bitsPerChar[4] = { 7, 8, 8, 16 };
-	const unsigned format = (header[2] >> 6) & 0x03U;
-	const unsigned bits = ((header[2] >> 1) & 0x1FU) * bitsPerChar[format];
-	const unsigned inHeader = (0U == format) ? 49U : 48U;
-	unsigned count = 1 + ((bits > inHeader) ? (bits - inHeader + 55) / 56 : 0);
-	if ( count > 4 )
-		count = 4;
-	const uint8_t all = (1U << count) - 1U;
-	if ( (cache.m_uiSourceTAMask & all) != all )
-		return;
-
-	cache.m_bSourceTA = true;
-	const std::vector<std::array<uint8_t, 9>> source(cache.m_SourceTA.begin(), cache.m_SourceTA.begin() + count);
-	auto alias = CDmrEmbeddedLC::TalkerAlias(CDmrEmbeddedLC::TalkerAliasText(source));
+	auto alias = CDmrEmbeddedLC::TalkerAlias(text);
 	if ( alias.empty() || alias == cache.m_TalkerAlias )
 		return;
 	// start over with the header, so no block of ours is taken for one of it
@@ -1530,11 +1503,15 @@ std::string CDmrmmdvmProtocol::TalkerAliasText(const CCallsign &my)
 	std::string text = my.GetBase();
 	while ( !text.empty() && ' ' == text.back() )
 		text.pop_back();
-	if ( text.empty() )
-		return text;
+	// no alias for a source without a callsign: its ID says more
+	if ( text.empty() || text == UNKNOWN_CALLSIGN )
+		return {};
 
 	g_LDid.Lock();
-	const uint32_t dmrid = g_LDid.FindDmrid(my.GetKey());
+	// an ID only known from its talker alias is not in the database yet
+	uint32_t dmrid = g_LDid.FindDmrid(my.GetKey());
+	if ( 0 == dmrid )
+		dmrid = my.GetDmrid();
 	const std::string name = dmrid ? g_LDid.FindName(dmrid) : std::string();
 	g_LDid.Unlock();
 	const auto first = name.find_first_not_of(' ');

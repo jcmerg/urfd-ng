@@ -39,3 +39,20 @@ private:
 	bool m_In[128] = {};
 	unsigned m_InCount = 0;	// fragments collected, 0 = waiting for a first one
 };
+
+// the talker alias a DMR source sends (BrandMeister, the radio), gathered from
+// the embedded LCs of its voice bursts
+class CDmrTalkerAliasIn
+{
+public:
+	// feed the 7 EMB and embedded bytes of burst n (1-4 for B-E); true once,
+	// when the whole alias arrived, its text is then in utf8
+	bool Collect(unsigned burst, const uint8_t *sync, std::string &utf8);
+	bool Done(void) const { return m_bDone; }
+
+private:
+	CDmrEmbeddedLC m_LC;
+	std::array<std::array<uint8_t, 9>, 4> m_TA {};
+	uint8_t m_uiMask = 0;	// bit n: LC n of the alias arrived
+	bool m_bDone = false;
+};
