@@ -63,7 +63,10 @@ bool CPacketStream::OpenPacketStream(const CDvHeaderPacket &DvHeader, std::share
 		m_bOpen = true;
 		m_uiPacketCntr = 0;
 		m_uiSourceTG = 0;
-		m_DvHeader = DvHeader;
+		{
+			std::lock_guard<std::mutex> lock(m_UserMutex);
+			m_DvHeader = DvHeader;
+		}
 		m_OwnerClient = client;
 		m_Dprs.Reset();
 		m_LastPacketTime.start();

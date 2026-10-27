@@ -42,6 +42,9 @@ public:
 	std::time_t GetLastHeardTime(void)  const { return m_LastHeardTime; }
 	const std::string &GetProtocol(void) const { return m_Protocol; }
 	const std::string &GetLocator(void) const  { return m_Locator; }
+	const CCallsign &GetRpt1(void) const       { return m_Rpt1; }
+	const CCallsign &GetRpt2(void) const       { return m_Rpt2; }
+	const CCallsign &GetXlx(void) const        { return m_Xlx; }
 	bool IsCallsign(const CCallsign &cs) const { return m_My.GetBase() == cs.GetBase(); }
 
 	// operation

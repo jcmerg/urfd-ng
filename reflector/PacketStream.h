@@ -19,6 +19,7 @@
 #pragma once
 
 #include <atomic>
+#include <mutex>
 #include "Timer.h"
 #include "DVHeaderPacket.h"
 #include "Client.h"
@@ -64,7 +65,10 @@ public:
 	bool             IsOpen(void) const             { return m_bOpen; }
 	uint16_t         GetStreamId(void) const        { return m_uiStreamId; }
 	char             GetModule(void) const          { return m_PSModule; }
-	const CCallsign &GetUserCallsign(void) const    { return m_DvHeader.GetMyCallsign(); }
+	CCallsign        GetUserCallsign(void) const    { std::lock_guard<std::mutex> lock(m_UserMutex); return m_DvHeader.GetMyCallsign(); }
+	// the talker turned out to be someone else (a DMR ID learned from its talker
+	// alias): what the dashboard shows, the modes got the header already
+	void             SetUserCallsign(const CCallsign &cs) { std::lock_guard<std::mutex> lock(m_UserMutex); m_DvHeader.SetMyCallsign(cs); }
 	char             GetRpt2Module(void) const      { return m_DvHeader.GetRpt2Module(); }
 	CCodecStream    *GetCodecStream(void) const     { return m_CodecStream.get(); }
 	// a D-Star frame's slow data, true with a new DPRS position
@@ -92,6 +96,7 @@ protected:
 	uint32_t            m_uiPacketCntr;
 	CTimer              m_LastPacketTime;
 	CDvHeaderPacket     m_DvHeader;
+	mutable std::mutex  m_UserMutex;	// its MY may change while the stream runs
 	std::shared_ptr<CClient> m_OwnerClient;
 	std::unique_ptr<CCodecStream> m_CodecStream;
 	std::atomic<bool> m_Transcode { false };	// this stream goes through the transcoder (decided when it opens)

@@ -52,17 +52,22 @@ void CUsers::Hearing(const CCallsign &my, const CCallsign &rpt1, const CCallsign
 	Hearing(my, rpt1, rpt2, g_Reflector.GetCallsign(), proto);
 }
 
-static void DispatchStationEvent(const std::string &eventType, const CUser &heard)
+// replaces: the callsign this station was shown as so far (StationRenamed)
+static void DispatchStationEvent(const std::string &eventType, const CUser &heard, const std::string &replaces = "")
 {
-	CNotifierManager::Instance().Dispatch(eventType, [&]() -> nlohmann::json { return {
-		{ "callsign", heard.GetCallsign() },
-		{ "name", heard.GetName() },
-		{ "via_node", heard.GetViaNode() },
-		{ "via_peer", heard.GetViaPeer() },
-		{ "on_module", std::string(1, heard.GetOnModule()) },
-		{ "protocol", heard.GetProtocol() },
-		{ "last_heard_time", heard.GetLastHeardTime() },
-		{ "locator", heard.GetLocator() } }; });
+	CNotifierManager::Instance().Dispatch(eventType, [&]() -> nlohmann::json {
+		nlohmann::json j = {
+			{ "callsign", heard.GetCallsign() },
+			{ "name", heard.GetName() },
+			{ "via_node", heard.GetViaNode() },
+			{ "via_peer", heard.GetViaPeer() },
+			{ "on_module", std::string(1, heard.GetOnModule()) },
+			{ "protocol", heard.GetProtocol() },
+			{ "last_heard_time", heard.GetLastHeardTime() },
+			{ "locator", heard.GetLocator() } };
+		if (!replaces.empty())
+			j["replaces"] = replaces;
+		return j; });
 }
 
 // one stream per module, so one talking station per module
@@ -89,6 +94,31 @@ void CUsers::StationStopped(char module)
 		return;
 	DispatchStationEvent("station_stopped", it->second);
 	m_ActiveStations.erase(it);
+}
+
+void CUsers::StationRenamed(char module, const CCallsign &from, const CCallsign &to)
+{
+	auto active = m_ActiveStations.find(module);
+	if (active != m_ActiveStations.end() && active->second.IsCallsign(from))
+	{
+		const CUser renamed(to, active->second.GetRpt1(), active->second.GetRpt2(), active->second.GetXlx(), active->second.GetProtocol());
+		const std::string was = active->second.GetCallsign();
+		DispatchStationEvent("station_stopped", active->second);
+		active->second = renamed;
+		DispatchStationEvent("station_started", renamed, was);
+	}
+
+	// the newest entry of the old callsign on the module, as Hearing() made it
+	for (auto it = m_Users.begin(); it != m_Users.end(); it++)
+	{
+		if (it->IsCallsign(from) && it->GetOnModule() == module)
+		{
+			const CUser old(*it);
+			m_Users.erase(it);
+			Hearing(to, old.GetRpt1(), old.GetRpt2(), old.GetXlx(), old.GetProtocol());
+			break;
+		}
+	}
 }
 
 void CUsers::Hearing(const CCallsign &my, const CCallsign &rpt1, const CCallsign &rpt2, const CCallsign &xlx, const std::string &proto)
