@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.30.4** | tcd 0.13.1 | Dashboard v2.14.2
+**urfd 4.30.4** | tcd 0.13.2 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1018,6 +1018,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.13.2**: without AMBE devices (codec plugins only) the start no longer logs "No USB serial devices found, is the AMBE device plugged in?"; "No AMBE device: D-Star and DMR in software" says it, and a missing device is still reported as before
 - **tcd 0.13.1**: a lost AMBE device stops tcd again (since 0.12.4 it logged "Lost the AMBE device" and kept running without it), and a device that answers nothing for 3 s counts as lost, so the service restarts tcd without it and a codec plugin or a standby tcd takes over; `OutputGainDMR = -14` in the template, the level of speech on BrandMeister (-18 left DMR/YSF about 4 dB below it)
 - **tcd 0.13.0**: an IMBE encoder and decoder per module (two P25 modules at once no longer garble each other), a 300 Hz high-pass in front of Codec2 for P25 audio, builds and runs on macOS, DV3000/DV3003 told apart by the chip's product id, a device that does not answer is left out instead of stopping tcd, exclusive serial access
 - **In this repository**: tcd moved into `tcd/` with its history; it builds against the urfd sources it shares (`TCPacketDef.h`, `TCSocket.*`) from `../reflector`, so both sides always speak the same protocol

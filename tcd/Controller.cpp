@@ -492,12 +492,10 @@ bool CController::DiscoverFtdiDevices(std::list<std::pair<std::string, std::stri
 	const auto &whitelist = g_Conf.GetDeviceSerials();
 	BindFtdiSio(whitelist);
 
+	// none at all is fine with codec plugins; InitVocoders says what is missing
 	std::vector<SSerialDevice> devices;
 	if (!ListSerialDevices(devices))
-	{
-		std::cerr << "No USB serial devices found, is the AMBE device plugged in?" << std::endl;
 		return false;
-	}
 
 	for (const auto &dev : devices)
 	{
