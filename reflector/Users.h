@@ -54,6 +54,9 @@ public:
 	// WebSocket station_started/station_stopped, from OpenStream and CloseStream
 	void   StationStarted(const CCallsign &, const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "");
 	void   StationStopped(char module);
+	// the talker on a module turned out to be someone else: the live station
+	// and its last heard entry take the new callsign
+	void   StationRenamed(char module, const CCallsign &from, const CCallsign &to);
 	void   Location(const CCallsign &, double lat, double lon);
 
 protected:

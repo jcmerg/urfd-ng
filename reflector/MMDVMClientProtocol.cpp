@@ -759,7 +759,14 @@ void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t s
 
 	CCallsign my = DmrIdToCallsign(srcId);
 	if (!retry)
-		std::cout << m_Name << ": voice from " << my << " (ID " << srcId << ") TG" << dstId << " -> Module " << module << std::endl;
+	{
+		std::ostringstream who;
+		if (my.IsValid())
+			who << my;
+		else
+			who << "unknown";
+		std::cout << m_Name << ": voice from " << who.str() << " (ID " << srcId << ") TG" << dstId << " -> Module " << module << std::endl;
+	}
 
 	auto header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(srcId, CCallsign("CQCQCQ"), rpt1, rpt2, urfStreamId, 0, 0));
 	// a source without a callsign (an ID not in the DMR ID database yet, or none
@@ -1383,6 +1390,23 @@ void CMMDVMClientProtocol::LearnTalkerAlias(uint32_t streamId, unsigned burst, c
 	g_LDid.Learn(srcId, cs.GetKey(), name);
 	g_LDid.Unlock();
 	std::cout << m_Name << ": ID " << srcId << " is " << cs << " by its talker alias, until the DMR ID database has it" << std::endl;
+
+	// the dashboard shows it already for this call; the other modes got the
+	// header with N0CALL and keep it until the call ends
+	auto incoming = m_IncomingStreams.find(streamId);
+	if (incoming == m_IncomingStreams.end() || incoming->second == 0)
+		return;
+	auto stream = GetStream(incoming->second, &m_MasterIp);
+	if (!stream)
+		return;
+	const CCallsign was = stream->GetUserCallsign();
+	if (was.GetBase() != CCallsign(UNKNOWN_CALLSIGN).GetBase())
+		return;
+	CCallsign now(cs);
+	now.SetDmrid(srcId, false);
+	stream->SetUserCallsign(now);
+	g_Reflector.GetUsers()->StationRenamed(stream->GetModule(), was, now);
+	g_Reflector.ReleaseUsers();
 }
 
 void CMMDVMClientProtocol::AppendDmrIdToBuffer(CBuffer *buffer, uint32_t id) const

@@ -230,6 +230,10 @@ export default {
         last_heard_time: entry.last_heard_time || Math.floor(Date.now() / 1000),
         locator: entry.locator || '',
       };
+      // the station was shown under another callsign so far (a DMR ID urfd learned from its talker alias)
+      if (entry.replaces) {
+        state.lastHeard = state.lastHeard.filter((item) => !(item.callsign === entry.replaces && item.on_module === entry.on_module));
+      }
       const index = state.lastHeard.findIndex((item) => item.callsign === entry.callsign && item.on_module === entry.on_module);
       // urfd learns a locator only from M17 GNSS data: keep a known one
       if (!nextEntry.locator && index >= 0) nextEntry.locator = state.lastHeard[index].locator || '';
