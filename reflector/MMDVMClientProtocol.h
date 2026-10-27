@@ -14,6 +14,7 @@
 #include "SHA256.h"
 #include "TGModuleMap.h"
 #include "BPTC19696.h"
+#include "DMREmbeddedLC.h"
 #include "BrandMeisterApi.h"
 #include "MmdvmClientConfig.h"
 #include <chrono>
@@ -134,6 +135,8 @@ protected:
 	// DMR ID / Callsign helpers
 	uint32_t CallsignToDmrId(const CCallsign &cs) const;
 	CCallsign DmrIdToCallsign(uint32_t id) const;
+	// the talker alias of a call from an ID the database does not know yet
+	void LearnTalkerAlias(uint32_t streamId, unsigned burst, const uint8_t *sync);
 
 	// Stream helpers
 	void OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &, const CIp &);
@@ -182,6 +185,8 @@ private:
 
 	// Incoming stream tracking: master streamId -> URFD streamId
 	std::unordered_map<uint32_t, uint16_t> m_IncomingStreams;
+	// master streamId -> source ID and its talker alias, for unknown IDs only
+	std::unordered_map<uint32_t, std::pair<uint32_t, CDmrTalkerAliasIn>> m_UnknownTA;
 
 	// Outbound stream cache per module (triplet buffering)
 	std::unordered_map<char, SMMDVMClientStreamCache> m_OutboundCache;

@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.30.4** | tcd 0.13.2 | Dashboard v2.14.2
+**urfd 4.30.5** | tcd 0.13.2 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -936,6 +936,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **MMDVMClient: unknown DMR IDs (4.30.5)**: a call from a DMR ID the ID database does not have yet (new registrations take a day or so to reach the exports) showed the connector's own callsign as the talker, as if the operator were talking. It shows N0CALL with the DMR ID now, and the talker alias BrandMeister sends names the station from its next call on, until the database has the ID. DMR hotspots get no talker alias for N0CALL
 - **NXDN codec in the transcoder table (4.30.4)**: the NXDN header announced P25, so the admin page showed an NXDN stream on a transcoded module as P25; it shows DMR (AMBE+2) now. The audio was not affected
 - **Version without `-dht` (4.30.3)**: the version reads `4.30.3` in the log, the XML, the XLX directory and the DHT, built with or without OpenDHT; at the start the log says whether DHT is built in. `URFD_DHT=false` builds the Docker image without it, like `DHT = false` in `urfd.mk`
 - **MMDVMClient frequencies (4.30.1)**: the hotspot is duplex (both timeslots need it), and BrandMeister refuses a duplex hotspot with RX = TX right after its config; the defaults without `RxFreq`/`TxFreq` (both 439.000 MHz) never got in. They are a split now, urfd and inicheck warn about `RxFreq = TxFreq`, and a refused config is logged as such

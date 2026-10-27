@@ -56,6 +56,9 @@ const UCallsign *CLookupDmr::FindCallsign(const uint32_t dmrid) const
 	{
 		return &(found->second);
 	}
+	auto learned = m_LearnedCallsign.find(dmrid);
+	if ( learned != m_LearnedCallsign.end() )
+		return &(learned->second);
 	return nullptr;
 }
 
@@ -64,7 +67,29 @@ std::string CLookupDmr::FindName(uint32_t dmrid) const
 	auto found = m_NameMap.find(dmrid);
 	if (found != m_NameMap.end())
 		return found->second;
+	if (m_CallsignMap.count(dmrid))
+		return {};
+	auto learned = m_LearnedName.find(dmrid);
+	if (learned != m_LearnedName.end())
+		return learned->second;
 	return {};
+}
+
+void CLookupDmr::Learn(uint32_t dmrid, const UCallsign &ucs, const std::string &name)
+{
+	if (m_CallsignMap.count(dmrid))
+		return;
+	// new IDs are few, they reach the database within a day or two
+	if (m_LearnedCallsign.size() >= 1000)
+	{
+		m_LearnedCallsign.clear();
+		m_LearnedName.clear();
+	}
+	m_LearnedCallsign[dmrid] = ucs;
+	if (name.empty())
+		m_LearnedName.erase(dmrid);
+	else
+		m_LearnedName[dmrid] = name;
 }
 
 void CLookupDmr::UpdateContent(std::stringstream &ss, Eaction action)
