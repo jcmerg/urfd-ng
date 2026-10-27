@@ -599,7 +599,7 @@ bool CNXDNProtocol::MakeDvHeader(const CIp &Ip, const CBuffer &Buffer, std::uniq
 	CCallsign rpt2 = m_ReflectorCallsign;
 	rpt1.SetCSModule(mod);
 	rpt2.SetCSModule(' ');
-	header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, sid, false));
+	header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, sid, uint8_t(0)));
 	return true;
 }
 
