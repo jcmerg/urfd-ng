@@ -26,7 +26,7 @@
 // The major byte should only change if the interlink packet changes! [URF] InterlinkVersion = 3 still announces 3
 #define URFD_VERSION_MAJOR    4
 #define URFD_VERSION_MINOR    30
-#define URFD_VERSION_REVISION 3
+#define URFD_VERSION_REVISION 4
 
 class CVersion
 {

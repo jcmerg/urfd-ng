@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.30.3** | tcd 0.13.1 | Dashboard v2.14.2
+**urfd 4.30.4** | tcd 0.13.1 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -936,7 +936,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
-- **Version without `-dht` (4.30.3)**: the version reads `4.30.3` in the log, the XML, the XLX directory and the DHT, built with or without OpenDHT; at the start the log says whether DHT is built in. `URFD_DHT=false` builds the Docker image without it, like `DHT = false` in `urfd.mk`
+- **NXDN codec in the transcoder table (4.30.4)**: the NXDN header announced P25, so the admin page showed an NXDN stream on a transcoded module as P25; it shows DMR (AMBE+2) now. The audio was not affected
 - **Version without `-dht` (4.30.3)**: the version reads `4.30.3` in the log, the XML, the XLX directory and the DHT, built with or without OpenDHT; at the start the log says whether DHT is built in. `URFD_DHT=false` builds the Docker image without it, like `DHT = false` in `urfd.mk`
 - **MMDVMClient frequencies (4.30.1)**: the hotspot is duplex (both timeslots need it), and BrandMeister refuses a duplex hotspot with RX = TX right after its config; the defaults without `RxFreq`/`TxFreq` (both 439.000 MHz) never got in. They are a split now, urfd and inicheck warn about `RxFreq = TxFreq`, and a refused config is logged as such
 - **Protocol fixes (4.30.0)**: a stream ends with its end packet instead of 1.6 s later, and a stream that times out sends every protocol's normal end; the echo plays back on transcoded modules; DMR TS1 and dual slot work; DMR+ in no longer corrupts every third AMBE frame and DMR+ out sends its end packet; NXDN headers and TX_REL of real gateways are recognised, the call end reaches the listeners and NXDN clients no longer share one stream; P25 sends its TDU and talkers no longer cut each other; the USRP unkey ends the stream and SET_INFO is read as chan_usrp writes it; the D-Star client connectors address the mapped remote module and take only its streams, header CRC and slow data header are right; no deadlock on the first YSFClient stream into a transcoded module; P25 and NXDN are on by default like the other protocols; a second tcd for the same modules is refused
