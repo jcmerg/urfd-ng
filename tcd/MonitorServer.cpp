@@ -158,10 +158,11 @@ std::string CMonitorServer::BuildStatsJson()
 			first = false;
 		}
 	}
-	// what does D-Star and DMR for new streams, and what could
+	// what does D-Star, DMR and P25 for new streams, and what could
 	js << "],\"codecs\":{";
 	for (auto [key, options, choice] : { std::make_tuple("dstar", &g_Stats.dstar_options, &g_Stats.config.codec_dstar),
-	                                     std::make_tuple("dmr", &g_Stats.dmr_options, &g_Stats.config.codec_dmr) })
+	                                     std::make_tuple("dmr", &g_Stats.dmr_options, &g_Stats.config.codec_dmr),
+	                                     std::make_tuple("p25", &g_Stats.p25_options, &g_Stats.config.codec_p25) })
 	{
 		js << (std::string("dstar") == key ? "" : ",") << "\"" << key << "\":{\"options\":[";
 		for (size_t i = 0; i < options->size(); i++)
@@ -334,7 +335,7 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 	}
 	else if (uri == "/api/codec" && !body.empty())
 	{
-		// POST {"codec": "dstar"|"dmr", "use": "dvsi"|"<plugin>"}: for the streams that start from now on
+		// POST {"codec": "dstar"|"dmr"|"p25", "use": "dvsi"|"op25"|"<plugin>"}: for the streams that start from now on
 		auto field = [&body](const char *name) {
 			const std::string key = std::string("\"") + name + "\"";
 			auto p = body.find(key);
@@ -345,8 +346,8 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 			return e == std::string::npos ? std::string() : body.substr(p + 1, e - p - 1);
 		};
 		const std::string codec = field("codec"), use = field("use");
-		const auto *options = codec == "dstar" ? &g_Stats.dstar_options : codec == "dmr" ? &g_Stats.dmr_options : nullptr;
-		auto *choice = codec == "dstar" ? &g_Stats.config.codec_dstar : &g_Stats.config.codec_dmr;
+		const auto *options = codec == "dstar" ? &g_Stats.dstar_options : codec == "dmr" ? &g_Stats.dmr_options : codec == "p25" ? &g_Stats.p25_options : nullptr;
+		auto *choice = codec == "dstar" ? &g_Stats.config.codec_dstar : codec == "dmr" ? &g_Stats.config.codec_dmr : &g_Stats.config.codec_p25;
 		int found = -1;
 		if (options)
 			for (size_t i = 0; i < options->size(); i++)
@@ -360,7 +361,7 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 		else
 		{
 			choice->store(found);
-			std::cout << "Monitor: new " << (codec == "dstar" ? "D-Star" : "DMR") << " streams go to " << use << std::endl;
+			std::cout << "Monitor: new " << (codec == "dstar" ? "D-Star" : codec == "dmr" ? "DMR" : "P25") << " streams go to " << use << std::endl;
 			reply = "{\"status\":\"ok\"}";
 			return 200;
 		}
@@ -962,7 +963,7 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 	std::string line;
 	// the codec choice: replaced where it stands, else written at the end when there is a choice;
 	// the module view likewise, written when it is not auto
-	bool codecDStarWritten = false, codecDmrWritten = false, viewWritten = false;
+	bool codecDStarWritten = false, codecDmrWritten = false, codecP25Written = false, viewWritten = false;
 	static const char *views[] = { "auto", "cards", "compact" };
 	const int view = std::clamp(g_Stats.config.monitor_view.load(), 0, 2);
 	while (std::getline(in, line))
@@ -1001,6 +1002,7 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 				if (key == "MonitorView") { out << key << " = " << views[view] << "\n"; viewWritten = true; continue; }
 				if (key == "CodecDStar" && !g_Stats.dstar_options.empty()) { out << key << " = " << g_Stats.dstar_options[g_Stats.config.codec_dstar.load()] << "\n"; codecDStarWritten = true; continue; }
 				if (key == "CodecDMR" && !g_Stats.dmr_options.empty())     { out << key << " = " << g_Stats.dmr_options[g_Stats.config.codec_dmr.load()] << "\n"; codecDmrWritten = true; continue; }
+				if (key == "CodecP25" && g_Stats.p25_options.size() > 1)   { out << key << " = " << g_Stats.p25_options[g_Stats.config.codec_p25.load()] << "\n"; codecP25Written = true; continue; }
 				if (key == "AGC")               { out << key << " = " << (g_Stats.config.agc_enabled.load() ? "true" : "false") << "\n"; continue; }
 				if (key == "AGCTarget")         { out << key << " = " << g_Stats.config.agc_target.load() << "\n"; continue; }
 				if (key == "AGCAttack")         { out << key << " = " << g_Stats.config.agc_attack.load() << "\n"; continue; }
@@ -1028,6 +1030,8 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 		out << "CodecDStar = " << g_Stats.dstar_options[g_Stats.config.codec_dstar.load()] << "\n";
 	if (!codecDmrWritten && g_Stats.dmr_options.size() > 1)
 		out << "CodecDMR = " << g_Stats.dmr_options[g_Stats.config.codec_dmr.load()] << "\n";
+	if (!codecP25Written && g_Stats.p25_options.size() > 1)
+		out << "CodecP25 = " << g_Stats.p25_options[g_Stats.config.codec_p25.load()] << "\n";
 	if (!viewWritten && view != 0)
 		out << "MonitorView = " << views[view] << "\n";
 
