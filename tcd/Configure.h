@@ -87,12 +87,14 @@ public:
 	// a codec plugin's name: D-Star or DMR in software, even when a device could do it
 	const std::string &GetCodecDStar(void) const { return codec_dstar; }
 	const std::string &GetCodecDMR(void) const { return codec_dmr; }
+	// P25: "op25" (tcd's own vocoder, also when empty) or a codec plugin's name
+	const std::string &GetCodecP25(void) const { return codec_p25; }
 
 private:
 	std::string tcmods, standbymods, address, password, ini_path;
 	std::vector<std::string> device_serials;
 	std::vector<std::string> codec_plugins;
-	std::string codec_dstar, codec_dmr;
+	std::string codec_dstar, codec_dmr, codec_p25;
 	std::vector<std::pair<std::string, std::string>> unknown_lines;
 	uint16_t port;
 	int dstar_in = 0, dstar_out = 0, dmr_in = 0, dmr_out = 0, dmr_reencode = 0;

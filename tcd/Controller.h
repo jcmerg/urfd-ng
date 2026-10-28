@@ -35,6 +35,7 @@
 #include "AGC.h"
 #include "NoiseSuppress.h"
 #include "AmbeGain.h"
+#include "CodecPlugin.h"
 
 class CController
 {
@@ -68,21 +69,31 @@ protected:
 	CPacketQueue usrp_queue;
 	std::mutex send_mux;
 	std::mutex p25vocoder_mux;
-	// what does D-Star and DMR: nullptr = the device, else a codec plugin's codec
-	// (CodecPlugin.h), as g_Stats.dstar_options/dmr_options name them; a stream
-	// keeps the one it started with (Pick), config.codec_dstar/codec_dmr is for new streams
-	std::vector<class CSoftCodec *> dstar_choices, dmr_choices;
+	// what does D-Star, DMR and P25: nullptr = the device (P25: tcd's own OP25 vocoder),
+	// else a codec plugin's codec (CodecPlugin.h), as g_Stats.dstar_options/dmr_options/
+	// p25_options name them; a stream keeps the one it started with (Pick),
+	// config.codec_dstar/codec_dmr/codec_p25 is for new streams
+	std::vector<class CSoftCodec *> dstar_choices, dmr_choices, p25_choices;
 	struct SPinned { int choice; std::chrono::steady_clock::time_point last; };
 	std::mutex pinned_mux;
-	std::unordered_map<uint16_t, SPinned> dstar_pinned, dmr_pinned;
+	std::unordered_map<uint16_t, SPinned> dstar_pinned, dmr_pinned, p25_pinned;
 	// the modules the devices do D-Star and DMR for; the other modules go to a plugin
 	std::string dstar_hw_modules, dmr_hw_modules;
-	int Pick(bool dstar, uint16_t streamid, char module);
-	class CSoftCodec *SwCodec(bool dstar, const std::shared_ptr<CTranscoderPacket> &packet)
+	std::vector<class CSoftCodec *> &Choices(uint32_t codec)
 	{
-		auto &c = dstar ? dstar_choices : dmr_choices;
-		return c.empty() ? nullptr : c[Pick(dstar, packet->GetStreamId(), packet->GetModule())];
+		return codec == TCD_CODEC_DSTAR ? dstar_choices : codec == TCD_CODEC_DMR ? dmr_choices : p25_choices;
 	}
+	// codec: TCD_CODEC_DSTAR, _DMR or _P25
+	int Pick(uint32_t codec, uint16_t streamid, char module);
+	class CSoftCodec *SwCodec(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet)
+	{
+		auto &c = Choices(codec);
+		return c.empty() ? nullptr : c[Pick(codec, packet->GetStreamId(), packet->GetModule())];
+	}
+	// P25 with the stream's choice: OP25 or a plugin. A plugin's error gives IMBE
+	// silence (encode) or silent samples (decode)
+	void EncodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *imbe);
+	void DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm);
 	void PurgePinned(void);
 	// the DMR plugin for DmrGainMode = reencode, nullptr without one
 	class CSoftCodec *dmr_sw = nullptr;

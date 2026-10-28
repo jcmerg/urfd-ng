@@ -366,33 +366,16 @@ void CNXDNProtocol::HandleQueue(void)
 		if ( packet->IsDvHeader() )
 		{
 			auto &hdr = (CDvHeaderPacket &)*packet.get();
-			// check if we can resolve an NXDN ID for outbound
-			uint16_t srcId = hdr.GetMyCallsign().GetNXDNid();
-			if (srcId == 0) srcId = hdr.GetUrCallsign().GetNXDNid();
-			if (srcId == 0 && m_FallbackNxdnId != 0) srcId = m_FallbackNxdnId;
-			if (srcId == 0)
-			{
-				// no NXDN ID available — skip this stream for NXDN clients
-				static std::set<char> warned;
-				if (warned.insert(mod).second)
-					std::cout << "NXDN: dropping outbound stream from " << hdr.GetMyCallsign() << " on module " << mod << " - no NXDN ID" << std::endl;
-				// its frames and its end as well, up to the next header
-				m_StreamsCache[mod].m_bDropped = true;
-				continue;
-			}
+			// a talker without an NXDN ID (AllStar, a D-Star or M17 callsign in no ID
+			// database) goes out with FallbackNxdnId, else the reflector's NXDN ID
+			// (EncodeNXDNHeaderPacket), as DMR sends FallbackDmrId: heard, not dropped
 
 			// update local stream cache
 			// this relies on queue feeder setting valid module id
 			m_StreamsCache[mod].m_dvHeader = hdr;
 			m_StreamsCache[mod].m_iSeqCounter = 0;
-			m_StreamsCache[mod].m_bDropped = false;
 
 			encode = EEncode::header;
-		}
-		// a stream without an NXDN ID
-		else if ( m_StreamsCache[mod].m_bDropped )
-		{
-			continue;
 		}
 		// check if it's a last frame
 		else if ( packet->IsLastPacket() )

@@ -546,6 +546,13 @@ bool CController::InitVocoders()
 		std::cerr << "ERROR: CodecDStar/CodecDMR names no loaded codec plugin that does that codec" << std::endl;
 		return true;
 	}
+	// P25: "op25" (or no CodecP25) is tcd's own vocoder, else a plugin that does P25
+	const std::string p25_name = g_Conf.GetCodecP25() == "op25" ? std::string() : g_Conf.GetCodecP25();
+	if (!p25_name.empty() && !g_Codecs.Get(TCD_CODEC_P25, p25_name))
+	{
+		std::cerr << "ERROR: CodecP25 = " << p25_name << ": no loaded codec plugin of that name does P25 (op25 is tcd's own)" << std::endl;
+		return true;
+	}
 
 	// the 3000 or 3003 devices that answer
 	std::list<std::pair<std::string, std::string>> found;
@@ -702,17 +709,19 @@ bool CController::InitVocoders()
 	}
 
 	// what may do D-Star and DMR: the device first, then every plugin that has the
-	// codec; the monitor switches between them, CodecDStar/CodecDMR is the start
+	// codec; P25: tcd's own OP25 vocoder first. The monitor switches between them,
+	// CodecDStar/CodecDMR/CodecP25 is the start
 	dstar_in_num = calcNumerator(g_Conf.GetGain(EGainType::dstarin));
 	dstar_out_num = calcNumerator(g_Conf.GetGain(EGainType::dstarout));
-	for (auto [codec, device, choices, options, choice, name, label] : {
-			std::make_tuple(TCD_CODEC_DSTAR, dstar_device.get(), &dstar_choices, &g_Stats.dstar_options, &g_Stats.config.codec_dstar, dstar_name, "D-Star"),
-			std::make_tuple(TCD_CODEC_DMR, dmrsf_device.get(), &dmr_choices, &g_Stats.dmr_options, &g_Stats.config.codec_dmr, dmr_name, "DMR") })
+	for (auto [codec, builtin, choices, options, choice, name, label] : {
+			std::make_tuple(TCD_CODEC_DSTAR, dstar_device ? "dvsi" : "", &dstar_choices, &g_Stats.dstar_options, &g_Stats.config.codec_dstar, dstar_name, "D-Star"),
+			std::make_tuple(TCD_CODEC_DMR, dmrsf_device ? "dvsi" : "", &dmr_choices, &g_Stats.dmr_options, &g_Stats.config.codec_dmr, dmr_name, "DMR"),
+			std::make_tuple(TCD_CODEC_P25, "op25", &p25_choices, &g_Stats.p25_options, &g_Stats.config.codec_p25, p25_name, "IMBE (P25, YSF VW)") })
 	{
-		if (device)
+		if (*builtin)
 		{
 			choices->push_back(nullptr);
-			options->push_back("dvsi");
+			options->push_back(builtin);
 		}
 		for (auto *sw : g_Codecs.All(codec))
 		{
@@ -722,7 +731,7 @@ bool CController::InitVocoders()
 			{
 				auto &st = g_Stats.sw[g_Stats.num_sw];
 				st.name = sw->GetName();
-				st.codec = codec == TCD_CODEC_DSTAR ? "dstar" : "dmr";
+				st.codec = codec == TCD_CODEC_DSTAR ? "dstar" : codec == TCD_CODEC_DMR ? "dmr" : "p25";
 				sw->stats = g_Stats.num_sw++;
 			}
 		}
@@ -861,7 +870,7 @@ void CController::ReadReflectorThread()
 				const bool reencode = dmr_sw && dmrsf_device &&
 					(g_Stats.config.dmr_gain_mode.load(std::memory_order_relaxed) == 2) &&
 					(m_agcDigital.IsEnabled() || outgain_dmr_num != 256 || dmr_reencode_num != 256);
-				for (auto *choices : { &dstar_choices, &dmr_choices })
+				for (auto *choices : { &dstar_choices, &dmr_choices, &p25_choices })
 					for (auto *sw : *choices)
 					{
 						if (!sw || sw->stats < 0)
@@ -1075,8 +1084,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 		int16_t imbe_buf[160];
 		memcpy(imbe_buf, packet->GetAudioSamples(), sizeof(imbe_buf));
 		ApplyGain(imbe_buf, 160, outgain_imbe_num);
-		std::lock_guard<std::mutex> lock(p25vocoder_mux);
-		imbe_enc[packet->GetModule()]->encode_4400(imbe_buf, imbe);
+		EncodeIMBE(packet, imbe_buf, imbe);
 	}
 	packet->SetP25Data(imbe);
 
@@ -1137,7 +1145,7 @@ void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 		for (int i = 0; i < 160; ++i)
 			gained[i] = int16_t((gained[i] * ambe_in_num) >> 8);
 	}
-	auto *sw = SwCodec(false, packet);
+	auto *sw = SwCodec(TCD_CODEC_DMR, packet);
 	sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), gained, ambe2);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 	BitstreamDmrGain(ambe2, packet->GetStreamId());
@@ -1152,7 +1160,7 @@ void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t tmp[160] = {};
-	auto *sw = SwCodec(false, packet);
+	auto *sw = SwCodec(TCD_CODEC_DMR, packet);
 	sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDMRData(), tmp);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::decodes);
 	if (ambe_out_num != 256)
@@ -1233,7 +1241,7 @@ void CController::AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 	ApplyGain(pcm, 160, outgain_dstar_num);
 	ApplyGain(pcm, 160, dstar_in_num);
 	uint8_t frame[9] = {};
-	auto *sw = SwCodec(true, packet);
+	auto *sw = SwCodec(TCD_CODEC_DSTAR, packet);
 	sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), pcm, frame);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 	packet->SetDStarData(frame);
@@ -1245,7 +1253,7 @@ void CController::AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 void CController::SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t pcm[160] = {};
-	auto *sw = SwCodec(true, packet);
+	auto *sw = SwCodec(TCD_CODEC_DSTAR, packet);
 	sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDStarData(), pcm);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::decodes);
 	ApplyGain(pcm, 160, dstar_out_num);
@@ -1271,19 +1279,20 @@ void CController::ProcessSWDStarThread()
 
 // the choice of a stream, made at its first packet: the one for new streams, but a
 // module the devices do not serve always goes to a plugin (the chosen one, else the first)
-int CController::Pick(bool dstar, uint16_t streamid, char module)
+int CController::Pick(uint32_t codec, uint16_t streamid, char module)
 {
-	auto &choices = dstar ? dstar_choices : dmr_choices;
-	auto &pinned = dstar ? dstar_pinned : dmr_pinned;
+	auto &choices = Choices(codec);
+	auto &pinned = codec == TCD_CODEC_DSTAR ? dstar_pinned : codec == TCD_CODEC_DMR ? dmr_pinned : p25_pinned;
 	std::lock_guard<std::mutex> lock(pinned_mux);
 	const auto now = std::chrono::steady_clock::now();
 	auto it = pinned.find(streamid);
 	if (it == pinned.end())
 	{
-		int c = (dstar ? g_Stats.config.codec_dstar : g_Stats.config.codec_dmr).load(std::memory_order_relaxed);
+		int c = (codec == TCD_CODEC_DSTAR ? g_Stats.config.codec_dstar : codec == TCD_CODEC_DMR ? g_Stats.config.codec_dmr : g_Stats.config.codec_p25).load(std::memory_order_relaxed);
 		if (c < 0 || c >= int(choices.size()))
 			c = 0;
-		if (!choices[c] && std::string::npos == (dstar ? dstar_hw_modules : dmr_hw_modules).find(module))
+		// OP25 does P25 for every module; the devices only for theirs
+		if (!choices[c] && codec != TCD_CODEC_P25 && std::string::npos == (codec == TCD_CODEC_DSTAR ? dstar_hw_modules : dmr_hw_modules).find(module))
 			for (size_t i = 0; i < choices.size(); i++)
 				if (choices[i])
 				{
@@ -1301,14 +1310,14 @@ void CController::PurgePinned(void)
 {
 	std::lock_guard<std::mutex> lock(pinned_mux);
 	const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(30);
-	for (auto *pinned : { &dstar_pinned, &dmr_pinned })
+	for (auto *pinned : { &dstar_pinned, &dmr_pinned, &p25_pinned })
 		for (auto it = pinned->begin(); it != pinned->end(); )
 			it = it->second.last < cutoff ? pinned->erase(it) : std::next(it);
 }
 
 void CController::ToDStar(std::shared_ptr<CTranscoderPacket> packet)
 {
-	if (SwCodec(true, packet))
+	if (SwCodec(TCD_CODEC_DSTAR, packet))
 		swdstar_queue.push(packet);
 	else if (mixed_mode && packet->GetModule() == mixed_dstar_module)
 		mixed_dv3003->AddPacketToChannel(packet, 0);	// ch0 = D-Star
@@ -1318,7 +1327,7 @@ void CController::ToDStar(std::shared_ptr<CTranscoderPacket> packet)
 
 void CController::ToDmr(std::shared_ptr<CTranscoderPacket> packet)
 {
-	if (SwCodec(false, packet))
+	if (SwCodec(TCD_CODEC_DMR, packet))
 		swambe2_queue.push(packet);
 	else if (mixed_mode)
 	{
@@ -1330,17 +1339,44 @@ void CController::ToDmr(std::shared_ptr<CTranscoderPacket> packet)
 		dmrsf_device->AddPacket(packet);
 }
 
+// IMBE silence, as MMDVMHost and P25Gateway (and urfd's P25Protocol) fill a lost frame with
+static const uint8_t IMBE_SILENCE[11] = { 0x04U, 0x0CU, 0xFDU, 0x7BU, 0xFBU, 0x7DU, 0xF2U, 0x7BU, 0x3DU, 0x9EU, 0x45U };
+
+void CController::EncodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *imbe)
+{
+	if (auto *sw = SwCodec(TCD_CODEC_P25, packet))
+	{
+		if (!sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), gained, imbe))
+			memcpy(imbe, IMBE_SILENCE, sizeof(IMBE_SILENCE));
+		SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
+		return;
+	}
+	int16_t pcm[160];	// encode_4400 takes a non-const buffer
+	memcpy(pcm, gained, sizeof(pcm));
+	std::lock_guard<std::mutex> lock(p25vocoder_mux);
+	imbe_enc[packet->GetModule()]->encode_4400(pcm, imbe);
+}
+
+void CController::DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm)
+{
+	if (auto *sw = SwCodec(TCD_CODEC_P25, packet))
+	{
+		if (!sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetP25Data(), pcm))
+			memset(pcm, 0, 160 * sizeof(int16_t));
+		SwStat(sw, packet->GetModule(), &SwVocoderStats::decodes);
+		return;
+	}
+	std::lock_guard<std::mutex> lock(p25vocoder_mux);
+	imbe_dec[packet->GetModule()]->decode_4400(pcm, (uint8_t *)packet->GetP25Data());
+}
+
 void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
 {
 	uint8_t imbe[11];
 	int16_t gained[160];
 	memcpy(gained, packet->GetAudioSamples(), sizeof(gained));
 	ApplyGain(gained, 160, outgain_imbe_num);
-
-	{
-		std::lock_guard<std::mutex> lock(p25vocoder_mux);
-		imbe_enc[packet->GetModule()]->encode_4400(gained, imbe);
-	}
+	EncodeIMBE(packet, gained, imbe);
 	packet->SetP25Data(imbe);
 	// we might be all done...
 	send_mux.lock();
@@ -1351,10 +1387,7 @@ void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
 void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t tmp[160] = { 0 };
-	{
-		std::lock_guard<std::mutex> lock(p25vocoder_mux);
-		imbe_dec[packet->GetModule()]->decode_4400(tmp, (uint8_t*)packet->GetP25Data());
-	}
+	DecodeIMBE(packet, tmp);
 	g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 	{
 		float agc_db; bool agc_gate;

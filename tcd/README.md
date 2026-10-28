@@ -2,9 +2,9 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.13.2** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.14.0** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
-tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF/NXDN (AMBE2+), and software vocoders for M17 (Codec2) and P25 (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF/NXDN in software. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
+tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF/NXDN (AMBE2+), and software vocoders for M17 (Codec2) and P25 (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF/NXDN in software, and since 0.14.0 P25 as a choice next to the built-in IMBE vocoder. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
 ## Contents
 
@@ -125,22 +125,25 @@ One module, D-Star on the DV3000 or DV3003 and DMR/YSF through a codec plugin. I
 
 ## Codec plugins
 
-A codec plugin is a shared object that brings D-Star (AMBE) and/or DMR/YSF (AMBE2+) in software. tcd loads it at start:
+A codec plugin is a shared object that brings D-Star (AMBE) and/or DMR/YSF (AMBE2+) in software, and since 0.14.0 P25 (IMBE) as a choice next to tcd's own OP25 vocoder. tcd loads it at start:
 
 ```ini
 CodecPlugin = /usr/local/lib/tcd/foo.so   # as many lines as needed
 CodecDStar  = dvsi                        # the vocoder new D-Star streams get: dvsi or a plugin's name
 CodecDMR    = foo                         # the same for DMR/YSF
+CodecP25    = op25                        # P25: op25 (tcd's own, the default) or a plugin's name
 ```
 
-- **Which vocoder**: without `CodecDStar`/`CodecDMR` the devices come first and a plugin only does what no device does. A plugin's name there puts that codec in software from the start, even when a device could do it; with a single device, the device then takes the other codec.
-- **More modules than channels**: the devices take the first modules of `Modules`, as many as they have channels (mixed mode 2, two DV3003 3, ...); the other modules always go to a plugin. With DV3000 + DV3003 and `Modules = FSABC`, F and S are transcoded on the devices and A, B and C in software. Without a plugin for the rest, tcd does not start.
-- **Switching at run time**: the web dashboard (settings, "Vocoder") and `POST /api/codec` with `{"codec": "dstar", "use": "foo"}` choose the vocoder for the streams that start from then on: a running transmission keeps its vocoder. Everything loaded at start is offered: a device for the codec and every plugin that does it. "Save" writes the choice to `tcd.ini`.
-- **Options**: lines of `tcd.ini` that tcd does not know go to the plugins, e.g. a path the plugin needs; a line nobody takes is warned about.
-- **Interface**: plain C, [`CodecPlugin.h`](CodecPlugin.h): `open`/`close` a state per stream, `encode`/`decode` 160 samples of 8 kHz PCM to and from a 9 byte frame, `start`/`stop` at the first and after the last frame of a transmission (since 0.12.0, `TCD_CODEC_API 2`), so a plugin begins every transmission afresh, also when a stream id comes again. tcd calls a plugin from one thread at a time and closes the state of a stream that has been quiet for 30 s. A plugin is built against this header only and does not have to be rebuilt with every tcd update; tcd checks `TCD_CODEC_API`.
-- **Frames**: D-Star as the 9 data bytes of a DV frame, DMR/YSF as the 72 bits of an AMBE2+ frame in air order, MSB first, the formats the DVSI devices use.
+P25 here means the IMBE codec: urfd 4.31.0 hands YSF VW (IMBE) to tcd as P25, so `CodecP25` also decodes VW (tcd never encodes VW: YSF gets DN from tcd, VW only passes through urfd on modules without transcoder); the monitor calls the codec IMBE (P25, YSF VW).
 
-No codec plugin is part of this repository: software implementations of AMBE and AMBE2+ may touch patents (AMBE2+ half rate, US 8,359,197, projected to run until 2028-05-20), so whether to build and use one is the operator's decision. A plugin for D-Star and DMR/YSF with [mbelib-neo](https://github.com/arancormonk/mbelib-neo) is [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin); read its patent notice first.
+- **Which vocoder**: without `CodecDStar`/`CodecDMR` the devices come first and a plugin only does what no device does. A plugin's name there puts that codec in software from the start, even when a device could do it; with a single device, the device then takes the other codec. P25 runs on tcd's own OP25 vocoder for every module unless `CodecP25` names a plugin that does P25; one that names a plugin not loaded or without P25 stops tcd.
+- **More modules than channels**: the devices take the first modules of `Modules`, as many as they have channels (mixed mode 2, two DV3003 3, ...); the other modules always go to a plugin. With DV3000 + DV3003 and `Modules = FSABC`, F and S are transcoded on the devices and A, B and C in software. Without a plugin for the rest, tcd does not start.
+- **Switching at run time**: the web dashboard (settings, "Vocoder") and `POST /api/codec` with `{"codec": "dstar", "use": "foo"}` (`dstar`, `dmr` or `p25`) choose the vocoder for the streams that start from then on: a running transmission keeps its vocoder. Everything loaded at start is offered: a device for the codec (for P25 `op25`) and every plugin that does it. "Save" writes the choice to `tcd.ini`.
+- **Options**: lines of `tcd.ini` that tcd does not know go to the plugins, e.g. a path the plugin needs; a line nobody takes is warned about.
+- **Interface**: plain C, [`CodecPlugin.h`](CodecPlugin.h): `open`/`close` a state per stream, `encode`/`decode` 160 samples of 8 kHz PCM to and from a 9 byte frame (P25: 11 bytes), `start`/`stop` at the first and after the last frame of a transmission (since 0.12.0, `TCD_CODEC_API 2`), so a plugin begins every transmission afresh, also when a stream id comes again. tcd calls a plugin from one thread at a time and closes the state of a stream that has been quiet for 30 s. A plugin is built against this header only and does not have to be rebuilt with every tcd update; tcd checks `TCD_CODEC_API`.
+- **Frames**: D-Star as the 9 data bytes of a DV frame, DMR/YSF as the 72 bits of an AMBE2+ frame in air order, MSB first, the formats the DVSI devices use; P25 as the 88 IMBE parameter bits u0..u7 in 11 bytes, MSB first, as tcd's OP25 vocoder has them. A plugin's error gives IMBE silence (encode) or silent samples (decode) for that frame.
+
+No codec plugin is part of this repository: software implementations of AMBE and AMBE2+ may touch patents (AMBE2+ half rate, US 8,359,197, projected to run until 2028-05-20), so whether to build and use one is the operator's decision. A plugin for D-Star, DMR/YSF and P25 with [mbelib-neo](https://github.com/arancormonk/mbelib-neo) is [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin); read its patent notice first.
 
 `tools/` has test tools for plugins (`make` there): `codectest <plugin.so> dmr|dstar|p25 in.raw out.frames out.raw [option=value ...]` encodes and decodes 8 kHz s16le PCM, prints the time per frame and checks that two interleaved streams stay apart; `decode` decodes a frames file; `dvsitest <device> enc|dec dstar|dmr in out` does the same on a DV3003, or with `DVSI_TYPE=3000` on a DV3000 (tcd stopped), to compare a plugin with the hardware; `dvsitest <device> info` prints the chip's product ID and version.
 
@@ -343,7 +346,7 @@ The gain limits are asymmetric on purpose: attenuating is safe, amplifying also 
 - signal path of the active stream with the level at each stage
 - AGC and gain controls that apply immediately, and a button to save them to `tcd.ini`
 - DVSI devices: serial, type, role, channels in use and their modules, buffer depth
-- codec plugins: their codec, counters and streams, and which vocoder new D-Star and DMR streams get (switchable, see [Codec plugins](#codec-plugins))
+- codec plugins: their codec, counters and streams, and which vocoder new D-Star, DMR and P25 streams get (switchable, see [Codec plugins](#codec-plugins))
 - reflector connection and packet counters; a standby module shows "standby" while another tcd has it and "taken over" while this tcd has it
 - behind a reverse proxy under a path (since 0.11.0): the page uses relative paths, so `https://<host>/tcd/` works (see [tcd in Docker](#tcd-in-docker)); behind a proxy on the same machine the failed-login pause counts per address in the last `X-Forwarded-For` entry, and the session cookie is `Secure` when the proxy sends `X-Forwarded-Proto: https`; tcdmon shows standby modules too
 

@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.30.5** | tcd 0.13.2 | Dashboard v2.14.2
+**urfd 4.31.0** | tcd 0.14.0 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -422,7 +422,7 @@ NXDN 26363 my.reflector.org 41400    -> AutoLinkModule
 
 Outgoing frames carry the destination ID each client polled with, encoded per distinct dstId on the module. This is required, not cosmetic: `NXDNGateway` drops every frame from the reflector whose dstId differs from the TG the hotspot is linked to, so a client linked to the plain reflector ID and one linked to a module dstId must each receive their own.
 
-**NXDN ID Resolution**: Incoming NXDN IDs are resolved to callsigns via the NXDN ID database. If not found, the DMR ID database is used as fallback (many operators reuse their DMR ID as NXDN ID). This enables cross-protocol callsign display and D-Star slow data name lookup. Unknown IDs are dropped unless FallbackNxdnId is configured.
+**NXDN ID Resolution**: Incoming NXDN IDs are resolved to callsigns via the NXDN ID database. If not found, the DMR ID database is used as fallback (many operators reuse their DMR ID as NXDN ID). This enables cross-protocol callsign display and D-Star slow data name lookup. Unknown IDs are dropped unless FallbackNxdnId is configured. Outbound, a talker without an NXDN ID (AllStar, a D-Star or M17 callsign in no ID database) goes to NXDN with FallbackNxdnId, else with the reflector's `ReflectorID` (before 4.31.0 such a stream was dropped for NXDN, while DMR got it).
 
 **D-Star Slow Data**: NXDN sources show `NXDN RAN<n>` in the D-Star text field. Operator names are looked up from both DMR and NXDN databases.
 
@@ -676,7 +676,7 @@ The XML status file now includes:
 - **Per-station protocol**: which protocol a user was heard on (DCS, MMDVMClient, YSF, etc.)
 - **Per-station name**: `<Name>` with the operator's first name from the DMR ID database, else the NXDN one, when the callsign is in there
 - **On air**: `<OnAir>` in each module that has an open stream, with the callsign transmitting
-- **Per-station position**: `<Locator>`, `<Latitude>` and `<Longitude>` for stations that sent an M17 GNSS or a D-Star DPRS position
+- **Per-station position**: `<Locator>`, `<Latitude>` and `<Longitude>` for stations that sent an M17 GNSS, a D-Star DPRS or a YSF GPS position
 - **Dynamic TG indicators**: `<Dynamic>true</Dynamic>` and `<Remaining>` seconds for runtime-added TGs
 
 Module names are configured once in `urfd.ini` and automatically available in the dashboard.
@@ -701,7 +701,7 @@ Every page but Last heard and Admin carries a slim LCD line with the current tra
 - Font (Saira, OFL) served from the dashboard itself, no Google Fonts request
 - No Bootstrap any more; jQuery only on the admin page
 - Content refreshes in place every `PageRefreshDelay` ms, and at once on a speaker change, not while you type in a field
-- Locator of stations that send an M17 GNSS or a D-Star DPRS position, linked to OpenStreetMap
+- Locator of stations that send an M17 GNSS, a D-Star DPRS or a YSF GPS position, linked to OpenStreetMap
 - MOTD/maintenance banner via `$PageOptions['MOTD']` in config.inc.php
 - Module names read from urfd XML (single source of truth)
 - Contact email obfuscated against bots
@@ -733,7 +733,7 @@ Read-only HTTP endpoints under `/json/`, served by the dashboard:
 | `/json/reflector` | Full reflector record including modules and metadata |
 | `/json/links` | Connected nodes with callsign, IP, module, protocol, connect and last-heard time |
 | `/json/peers` | Linked peer reflectors |
-| `/json/stations` | Last-heard stations with country lookup and `name` (first name from the DMR or NXDN ID database, empty if unknown); `locator`, `latitude` and `longitude` when the station sent an M17 GNSS or a D-Star DPRS position |
+| `/json/stations` | Last-heard stations with country lookup and `name` (first name from the DMR or NXDN ID database, empty if unknown); `locator`, `latitude` and `longitude` when the station sent an M17 GNSS, a D-Star DPRS or a YSF GPS position |
 | `/json/modulesinuse` | Modules with the callsigns currently on them |
 
 Collection endpoints return `[]` when empty (`/json/stations` returns
@@ -931,11 +931,14 @@ Outgoing only, nothing to open: SvxReflector (to the SvxLink server's port, usua
 
 ## YSF
 
-URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users connect via hotspot software (Pi-Star/WPSD) which discovers URF reflectors through the XLX API. No registration at ysfreflector.de is needed. If `EnableDGID = true`, users can switch modules via DG-ID values (10=A, 11=B, ... 35=Z), and the reflector sends each module with its DG-ID, so radios that filter on it hear the module.
+URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users connect via hotspot software (Pi-Star/WPSD) which discovers URF reflectors through the XLX API. No registration at ysfreflector.de is needed. If `EnableDGID = true`, users can switch modules via DG-ID values (10=A, 11=B, ... 35=Z), and the reflector sends each module with its DG-ID, so radios that filter on it hear the module. DN and VW (since 4.31.0) are taken: VW, IMBE as P25's, goes through the transcoder as P25 and to YSF as VW on modules without transcoder.
 
 ## Changes from upstream
 
 ### Protocol Connectors
+- **YSF positions (4.31.0)**: the GPS position Yaesu radios send in the data channel (DN: DT1/DT2, V/D mode 1: DT1 to DT5; short and long form, checked against its sum, as YSFGateway reads it) shows up as locator in the last heard list, the XML and `/json/stations`, like D-Star and M17 positions, published as the middle of its locator field
+- **YSF VW (4.31.0)**: a Yaesu radio in VW (Voice Wide, IMBE full rate) was dropped without a word; urfd takes VW now. Its IMBE is the codec of P25, so the transcoder makes D-Star, DMR/YSF/NXDN, M17 and the others from it as from P25 (with OP25 or a codec plugin, `CodecP25`), P25 listeners get the very frames, and YSF listeners on a transcoded module get DN. On a module without transcoder an IMBE stream (VW or P25) goes to YSF as VW (its header says IMBE), with the sending radio's id. The dashboard still shows the talker as YSF; tcd's monitor calls the codec IMBE (P25, YSF VW). V/D mode 1 (DN with twice the data and the AMBE+2 frames as DMR has them, without DN's extra voice FEC) is taken like DN; data FR mode is not voice (Wires-X uses it). urfd's links to other YSF reflectors (YSF client connector) carry no VW yet. VW speech reaches the other modes about 85 ms later than DN: the first VW frame after the header has 40 ms of speech
+- **NXDN without an NXDN ID (4.31.0)**: a talker without an NXDN ID (AllStar, a D-Star or M17 callsign in no ID database) was dropped for NXDN, while DMR got the call; it goes to NXDN with `FallbackNxdnId`, else with the reflector's `ReflectorID` now
 - **MMDVMClient: unknown DMR IDs (4.30.5)**: a call from a DMR ID the ID database does not have yet (new registrations take a day or so to reach the exports) showed the connector's own callsign as the talker, as if the operator were talking. It shows N0CALL with the DMR ID now, and as soon as the talker alias BrandMeister sends has arrived (about a second into the call) the dashboard shows the callsign for that call already; the other modes get it from the next call on, until the database has the ID. The log says `voice from unknown (ID …)`. DMR hotspots get no talker alias for N0CALL
 - **NXDN codec in the transcoder table (4.30.4)**: the NXDN header announced P25, so the admin page showed an NXDN stream on a transcoded module as P25; it shows DMR (AMBE+2) now. The audio was not affected
 - **Version without `-dht` (4.30.3)**: the version reads `4.30.3` in the log, the XML, the XLX directory and the DHT, built with or without OpenDHT; at the start the log says whether DHT is built in. `URFD_DHT=false` builds the Docker image without it, like `DHT = false` in `urfd.mk`
@@ -1019,6 +1022,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.14.0**: P25 through a codec plugin as a choice next to tcd's own OP25 vocoder: `CodecP25 = op25` (the default) or a plugin's name, switchable in the web dashboard and with `POST /api/codec` like D-Star and DMR, written by Save; the plugin API stays `TCD_CODEC_API 2` (`TCD_CODEC_P25`, 11-byte IMBE frames), older plugins keep working. tcd-mbelib-neo-plugin 1.0.3 does P25 with mbelib-neo (PESQ about 0.1 above OP25 on 19 clips, mostly from the encoder)
 - **tcd 0.13.2**: without AMBE devices (codec plugins only) the start no longer logs "No USB serial devices found, is the AMBE device plugged in?"; "No AMBE device: D-Star and DMR in software" says it, and a missing device is still reported as before
 - **tcd 0.13.1**: a lost AMBE device stops tcd again (since 0.12.4 it logged "Lost the AMBE device" and kept running without it), and a device that answers nothing for 3 s counts as lost, so the service restarts tcd without it and a codec plugin or a standby tcd takes over; `OutputGainDMR = -14` in the template, the level of speech on BrandMeister (-18 left DMR/YSF about 4 dB below it)
 - **tcd 0.13.0**: an IMBE encoder and decoder per module (two P25 modules at once no longer garble each other), a 300 Hz high-pass in front of Codec2 for P25 audio, builds and runs on macOS, DV3000/DV3003 told apart by the chip's product id, a device that does not answer is left out instead of stopping tcd, exclusive serial access

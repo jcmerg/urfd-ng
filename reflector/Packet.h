@@ -70,6 +70,7 @@ public:
 	void SetLastPacket(bool value)  { m_bLastPacket = value; }
 	void SetStreamId(uint16_t id)   { m_uiStreamId = id; }
 	void SetLocalOrigin(void)       { m_eOrigin = EOrigin::local; }
+	void SetCodecIn(ECodecType c)   { m_eCodecIn = c; }	// a YSF header: DN (AMBE+2) or VW (IMBE, as P25)
 	void SetRemotePeerOrigin(void)  { m_eOrigin = EOrigin::peer; }
 
 protected:
