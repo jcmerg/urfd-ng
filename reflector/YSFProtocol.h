@@ -62,9 +62,8 @@ public:
 	CDvFramePacket  m_dvFrames[5];
 	uint8_t         m_uiPending = 0;	// frames of the current group of 5 not sent yet
 	uint8_t         m_uiFrameId = 0;	// network frame counter of the last group sent
-	// a module without transcoder: the header waits for the first frame, an IMBE stream (VW, P25)
-	// goes out as VW (2 IMBE frames in the first VW frame, then 5), anything else as DN
-	bool            m_bHeaderPending = false;
+	// a module without transcoder: an IMBE stream (VW, P25, by its header's codec) goes out as VW
+	// (2 IMBE frames in the first VW frame, then 5), anything else as DN
 	bool            m_bVW = false;
 	std::vector<std::array<uint8_t, 11>> m_vwImbe;
 	uint8_t         m_uiVwFrames = 0;	// VW voice frames sent
@@ -149,7 +148,7 @@ protected:
 	std::unordered_map<char, CYsfStreamCacheItem> m_StreamsCache;
 	// VW: the radio id of a stream's first frame, for the VW out (by stream id)
 	std::unordered_map<uint16_t, std::array<uint8_t, 20>> m_VwRadioId;
-	// V/D mode 1 and data FR: when they were last said not to be supported, by callsign
+	// V/D mode 1: when it was last said not to be supported, by callsign
 	std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_UnsupportedLogged;
 
 	// for wires-x

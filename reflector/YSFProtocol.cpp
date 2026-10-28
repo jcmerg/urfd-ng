@@ -332,32 +332,20 @@ void CYsfProtocol::HandleQueue(void)
 			cache.m_dvHeader = CDvHeaderPacket((CDvHeaderPacket &)*packet.get());
 			cache.m_uiPending = 0;
 			cache.m_uiFrameId = 0;
-			cache.m_bVW = false;
 			cache.m_vwImbe.clear();
 			cache.m_uiVwFrames = 0;
 			cache.m_uiVwCounter = 1;
 
-			// without transcoder the first frame tells VW (IMBE) from DN; else encode it
-			cache.m_bHeaderPending = !g_Reflector.IsTranscoded(mod);
-			if ( !cache.m_bHeaderPending )
-			{
-				buffers.emplace_back();
-				EncodeYSFHeaderPacket((CDvHeaderPacket &)*packet.get(), &buffers.back());
-			}
+			// an IMBE stream (VW, P25) on a module without transcoder goes out as VW, else DN
+			cache.m_bVW = !g_Reflector.IsTranscoded(mod) && (packet->GetCodecIn() == ECodecType::p25);
+			buffers.emplace_back();
+			if ( cache.m_bVW )
+				EncodeVWHeaderPacket(cache.m_dvHeader, YSF_FI_HEADER, 0, &buffers.back());
+			else
+				EncodeYSFHeaderPacket(cache.m_dvHeader, &buffers.back());
 		}
 		else
 		{
-			// a module without transcoder: the first frame tells VW (an IMBE stream) from DN
-			if ( cache.m_bHeaderPending )
-			{
-				cache.m_bHeaderPending = false;
-				cache.m_bVW = (packet->GetCodecIn() == ECodecType::p25);
-				buffers.emplace_back();
-				if ( cache.m_bVW )
-					EncodeVWHeaderPacket(cache.m_dvHeader, YSF_FI_HEADER, 0, &buffers.back());
-				else
-					EncodeYSFHeaderPacket(cache.m_dvHeader, &buffers.back());
-			}
 			if ( cache.m_bVW )
 				HandleVWFrame(cache, *packet, buffers);
 			else
@@ -535,18 +523,19 @@ bool CYsfProtocol::IsValidDvPacket(const CBuffer &Buffer, CYSFFICH *Fich)
 		// decode YSH fich
 		if ( Fich->decode(&(Buffer.data()[40])) )
 		{
-			// DN (V/D mode 2) and VW (voice FR mode, IMBE); V/D mode 1 and data FR are not
-			// supported: said once per talker and minute
+			// DN (V/D mode 2) and VW (voice FR mode, IMBE); V/D mode 1 is not supported: said
+			// once per talker and minute (data FR is Wires-X and the like, not voice)
 			valid = (Fich->getDT() == YSF_DT_VD_MODE2) || (Fich->getDT() == YSF_DT_VOICE_FR_MODE);
-			if ( !valid )
+			if ( Fich->getDT() == YSF_DT_VD_MODE1 )
 			{
-				const std::string call((const char *)&(Buffer.data()[14]), YSF_CALLSIGN_LENGTH);
+				std::string call((const char *)&(Buffer.data()[14]), YSF_CALLSIGN_LENGTH);
+				call.erase(call.find_last_not_of(' ') + 1);
 				const auto now = std::chrono::steady_clock::now();
 				auto &last = m_UnsupportedLogged[call];
 				if ( now - last > std::chrono::minutes(1) )
 				{
 					last = now;
-					std::cout << "YSF: " << (Fich->getDT() == YSF_DT_VD_MODE1 ? "V/D mode 1" : "data FR mode") << " from " << call << " not supported" << std::endl;
+					std::cout << "YSF: V/D mode 1 from " << call << " not supported" << std::endl;
 				}
 			}
 		}
@@ -592,6 +581,8 @@ bool CYsfProtocol::IsValidDvHeaderPacket(const CIp &Ip, const CYSFFICH &Fich, co
 
 			// and packet
 			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, uiStreamId, Fich.getFN()));
+			if ( Fich.getDT() == YSF_DT_VOICE_FR_MODE )
+				header->SetCodecIn(ECodecType::p25);	// VW: IMBE, the codec of P25
 		}
 		// and 2 DV Frames
 		{
@@ -640,6 +631,8 @@ bool CYsfProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fich, con
 			CCallsign rpt2 = m_ReflectorCallsign;
 			rpt2.SetCSModule(' ');
 			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, uiStreamId, Fich.getFN()));
+			if ( Fich.getDT() == YSF_DT_VOICE_FR_MODE )
+				header->SetCodecIn(ECodecType::p25);	// VW: IMBE, the codec of P25
 
 			if ( g_GateKeeper.MayTransmit(header->GetMyCallsign(), Ip, EProtocol::ysf, header->GetRpt2Module())  )
 			{
