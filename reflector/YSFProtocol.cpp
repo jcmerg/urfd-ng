@@ -23,6 +23,7 @@
 #include "YSFClient.h"
 #include "YSFUtils.h"
 #include "YSFVW.h"
+#include "YSFGps.h"
 #include "YSFProtocol.h"
 #include "Global.h"
 
@@ -569,6 +570,8 @@ bool CYsfProtocol::IsValidDvHeaderPacket(const CIp &Ip, const CYSFFICH &Fich, co
 
 			// and packet
 			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, uiStreamId, Fich.getFN()));
+			// a new transmission: its position (GPS in the data channel) is read again
+			GpsOf(uiStreamId).Reset();
 			if ( Fich.getDT() == YSF_DT_VOICE_FR_MODE )
 				header->SetCodecIn(ECodecType::p25);	// VW: IMBE, the codec of P25
 		}
@@ -688,6 +691,24 @@ bool CYsfProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fich, con
 		}
 
         CCallsign csMY = CCallsign((const char *)sz);
+
+		// the position in the data channel (DT1/DT2 of DN, DT1.. of V/D mode 1) goes to the
+		// last heard list, as D-Star's DPRS and M17's GNSS
+		{
+			CYSFPayload payload;
+			uint8_t dt[20];
+			double lat, lon;
+			bool got = false;
+			if ( Fich.getDT() == YSF_DT_VD_MODE1 )
+				got = payload.readVDMode1Data(&(Buffer.data()[35]), dt) && GpsOf(uiStreamId).AddVD1(Fich.getFN(), Fich.getFT(), dt, lat, lon);
+			else
+				got = payload.readVDMode2Data(&(Buffer.data()[35]), dt) && GpsOf(uiStreamId).AddVD2(Fich.getFN(), Fich.getFT(), dt, lat, lon);
+			if ( got )
+			{
+				g_Reflector.GetUsers()->Location(csMY, lat, lon);
+				g_Reflector.ReleaseUsers();
+			}
+		}
 
 		// get DV frames
 		uint8_t fid = Buffer.data()[34];
@@ -952,6 +973,13 @@ bool CYsfProtocol::EncodeLastYSFPacket(const CDvHeaderPacket &Header, uint8_t la
 
 	// done
 	return true;
+}
+
+CYsfGps &CYsfProtocol::GpsOf(uint32_t streamid)
+{
+	if ( m_Gps.size() > 64 && m_Gps.find(uint16_t(streamid)) == m_Gps.end() )
+		m_Gps.clear();
+	return m_Gps[uint16_t(streamid)];
 }
 
 void CYsfProtocol::VwRadioId(const CDvHeaderPacket &Header, uint8_t *id20) const

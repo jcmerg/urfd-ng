@@ -676,7 +676,7 @@ The XML status file now includes:
 - **Per-station protocol**: which protocol a user was heard on (DCS, MMDVMClient, YSF, etc.)
 - **Per-station name**: `<Name>` with the operator's first name from the DMR ID database, else the NXDN one, when the callsign is in there
 - **On air**: `<OnAir>` in each module that has an open stream, with the callsign transmitting
-- **Per-station position**: `<Locator>`, `<Latitude>` and `<Longitude>` for stations that sent an M17 GNSS or a D-Star DPRS position
+- **Per-station position**: `<Locator>`, `<Latitude>` and `<Longitude>` for stations that sent an M17 GNSS, a D-Star DPRS or a YSF GPS position
 - **Dynamic TG indicators**: `<Dynamic>true</Dynamic>` and `<Remaining>` seconds for runtime-added TGs
 
 Module names are configured once in `urfd.ini` and automatically available in the dashboard.
@@ -701,7 +701,7 @@ Every page but Last heard and Admin carries a slim LCD line with the current tra
 - Font (Saira, OFL) served from the dashboard itself, no Google Fonts request
 - No Bootstrap any more; jQuery only on the admin page
 - Content refreshes in place every `PageRefreshDelay` ms, and at once on a speaker change, not while you type in a field
-- Locator of stations that send an M17 GNSS or a D-Star DPRS position, linked to OpenStreetMap
+- Locator of stations that send an M17 GNSS, a D-Star DPRS or a YSF GPS position, linked to OpenStreetMap
 - MOTD/maintenance banner via `$PageOptions['MOTD']` in config.inc.php
 - Module names read from urfd XML (single source of truth)
 - Contact email obfuscated against bots
@@ -733,7 +733,7 @@ Read-only HTTP endpoints under `/json/`, served by the dashboard:
 | `/json/reflector` | Full reflector record including modules and metadata |
 | `/json/links` | Connected nodes with callsign, IP, module, protocol, connect and last-heard time |
 | `/json/peers` | Linked peer reflectors |
-| `/json/stations` | Last-heard stations with country lookup and `name` (first name from the DMR or NXDN ID database, empty if unknown); `locator`, `latitude` and `longitude` when the station sent an M17 GNSS or a D-Star DPRS position |
+| `/json/stations` | Last-heard stations with country lookup and `name` (first name from the DMR or NXDN ID database, empty if unknown); `locator`, `latitude` and `longitude` when the station sent an M17 GNSS, a D-Star DPRS or a YSF GPS position |
 | `/json/modulesinuse` | Modules with the callsigns currently on them |
 
 Collection endpoints return `[]` when empty (`/json/stations` returns
@@ -936,6 +936,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **YSF positions (4.31.0)**: the GPS position Yaesu radios send in the data channel (DN: DT1/DT2, V/D mode 1: DT1 to DT5; short and long form, checked against its sum, as YSFGateway reads it) shows up as locator in the last heard list, the XML and `/json/stations`, like D-Star and M17 positions, published as the middle of its locator field
 - **YSF VW (4.31.0)**: a Yaesu radio in VW (Voice Wide, IMBE full rate) was dropped without a word; urfd takes VW now. Its IMBE is the codec of P25, so the transcoder makes D-Star, DMR/YSF/NXDN, M17 and the others from it as from P25 (with OP25 or a codec plugin, `CodecP25`), P25 listeners get the very frames, and YSF listeners on a transcoded module get DN. On a module without transcoder an IMBE stream (VW or P25) goes to YSF as VW (its header says IMBE), with the sending radio's id. The dashboard still shows the talker as YSF; tcd's monitor calls the codec IMBE (P25, YSF VW). V/D mode 1 (DN with twice the data and the AMBE+2 frames as DMR has them, without DN's extra voice FEC) is taken like DN; data FR mode is not voice (Wires-X uses it). urfd's links to other YSF reflectors (YSF client connector) carry no VW yet. VW speech reaches the other modes about 85 ms later than DN: the first VW frame after the header has 40 ms of speech
 - **NXDN without an NXDN ID (4.31.0)**: a talker without an NXDN ID (AllStar, a D-Star or M17 callsign in no ID database) was dropped for NXDN, while DMR got the call; it goes to NXDN with `FallbackNxdnId`, else with the reflector's `ReflectorID` now
 - **MMDVMClient: unknown DMR IDs (4.30.5)**: a call from a DMR ID the ID database does not have yet (new registrations take a day or so to reach the exports) showed the connector's own callsign as the talker, as if the operator were talking. It shows N0CALL with the DMR ID now, and as soon as the talker alias BrandMeister sends has arrived (about a second into the call) the dashboard shows the callsign for that call already; the other modes get it from the next call on, until the database has the ID. The log says `voice from unknown (ID …)`. DMR hotspots get no talker alias for N0CALL
