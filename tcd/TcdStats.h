@@ -63,7 +63,7 @@ struct DeviceStats
 // a codec of a codec plugin (CodecPlugin.h)
 struct SwVocoderStats
 {
-	std::string name, codec;                  // the plugin's and "dstar"/"dmr", set once before the monitor starts
+	std::string name, codec;                  // the plugin's and "dstar"/"dmr"/"p25", set once before the monitor starts
 	std::atomic<bool> reencode_active{false}; // re-encode triggered by AGC/OutputGainDMR
 	std::atomic<uint32_t> encodes{0};        // total encode calls
 	std::atomic<uint32_t> decodes{0};        // total decode calls
@@ -91,9 +91,10 @@ public:
 	static constexpr int MAX_SW = 8;
 	SwVocoderStats sw[MAX_SW];              // the codecs of the codec plugins
 	int            num_sw{0};
-	// what may do D-Star and DMR: "dvsi" (a device) or a codec plugin's name, set
-	// once at start; config.codec_dstar/codec_dmr is the one new streams get
-	std::vector<std::string> dstar_options, dmr_options;
+	// what may do D-Star and DMR: "dvsi" (a device) or a codec plugin's name; P25:
+	// "op25" (tcd's own) or a plugin's name. Set once at start;
+	// config.codec_dstar/codec_dmr/codec_p25 is the one new streams get
+	std::vector<std::string> dstar_options, dmr_options, p25_options;
 	std::atomic<bool> reencode_available{false};	// a codec plugin for DmrGainMode = reencode
 	int            num_devices{0};
 	ReflectorStats reflector;
@@ -128,6 +129,7 @@ public:
 		std::atomic<int>   ambe_gain_db{-2};
 		std::atomic<int>   codec_dstar{0};     // index into dstar_options
 		std::atomic<int>   codec_dmr{0};       // index into dmr_options
+		std::atomic<int>   codec_p25{0};       // index into p25_options
 		std::atomic<int>   monitor_view{0};    // 0 auto, 1 cards, 2 compact
 	} config;
 

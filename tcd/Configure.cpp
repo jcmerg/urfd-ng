@@ -68,6 +68,7 @@
 #define CODECPLUGIN    "CodecPlugin"
 #define CODECDSTAR     "CodecDStar"
 #define CODECDMR       "CodecDMR"
+#define CODECP25       "CodecP25"
 
 static inline void split(const std::string &s, char delim, std::vector<std::string> &v)
 {
@@ -250,6 +251,8 @@ bool CConfigure::ReadData(const std::string &path)
 			codec_dstar = value;
 		else if (0 == key.compare(CODECDMR))
 			codec_dmr = value;
+		else if (0 == key.compare(CODECP25))
+			codec_p25 = value;
 		else
 			unknown_lines.emplace_back(key, value);	// perhaps a codec plugin's, see CodecPlugins.cpp
 	}
