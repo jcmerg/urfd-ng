@@ -332,48 +332,37 @@ void CYsfProtocol::HandleQueue(void)
 			cache.m_dvHeader = CDvHeaderPacket((CDvHeaderPacket &)*packet.get());
 			cache.m_uiPending = 0;
 			cache.m_uiFrameId = 0;
+			cache.m_bVW = false;
+			cache.m_vwImbe.clear();
+			cache.m_uiVwFrames = 0;
+			cache.m_uiVwCounter = 1;
 
-			// encode it
-			buffers.emplace_back();
-			EncodeYSFHeaderPacket((CDvHeaderPacket &)*packet.get(), &buffers.back());
-		}
-		// check if it's a last frame
-		else if ( packet->IsLastPacket() )
-		{
-			// a group of 5 that is not complete (sources that are not YSF) goes out filled
-			// with silence, or the listeners lose its frames
-			if ( cache.m_uiPending > 0 )
+			// without transcoder the first frame tells VW (IMBE) from DN; else encode it
+			cache.m_bHeaderPending = !g_Reflector.IsTranscoded(mod);
+			if ( !cache.m_bHeaderPending )
 			{
-				for ( uint8_t i = cache.m_uiPending; i < 5; i++ )
-					cache.m_dvFrames[i] = CDvFramePacket(AMBE72_SILENCE, 0, 0, false);
 				buffers.emplace_back();
-				EncodeYSFPacket(cache.m_dvHeader, cache.m_dvFrames, &buffers.back());
-				cache.m_uiFrameId = cache.m_dvFrames[0].GetYsfPacketFrameId();
-				cache.m_uiPending = 0;
+				EncodeYSFHeaderPacket((CDvHeaderPacket &)*packet.get(), &buffers.back());
 			}
-			// encode it
-			buffers.emplace_back();
-			EncodeLastYSFPacket(cache.m_dvHeader, cache.m_uiFrameId, &buffers.back());
 		}
-		// otherwise, just a regular DV frame
 		else
 		{
-			// update local stream cache or send triplet when needed
-			uint8_t sid = packet->GetYsfPacketSubId();
-			if (sid <= 4)
+			// a module without transcoder: the first frame tells VW (an IMBE stream) from DN
+			if ( cache.m_bHeaderPending )
 			{
-				cache.m_dvFrames[sid] = CDvFramePacket((CDvFramePacket &)*packet.get());
-				cache.m_uiPending = sid + 1;
-				if ( sid == 4 )
-				{
-					buffers.emplace_back();
-					EncodeYSFPacket(cache.m_dvHeader, cache.m_dvFrames, &buffers.back());
-					cache.m_uiFrameId = cache.m_dvFrames[0].GetYsfPacketFrameId();
-					cache.m_uiPending = 0;
-				}
+				cache.m_bHeaderPending = false;
+				cache.m_bVW = (packet->GetCodecIn() == ECodecType::p25);
+				buffers.emplace_back();
+				if ( cache.m_bVW )
+					EncodeVWHeaderPacket(cache.m_dvHeader, YSF_FI_HEADER, 0, &buffers.back());
+				else
+					EncodeYSFHeaderPacket(cache.m_dvHeader, &buffers.back());
 			}
+			if ( cache.m_bVW )
+				HandleVWFrame(cache, *packet, buffers);
+			else
+				HandleDNFrame(cache, *packet, buffers);
 		}
-
 		// send it
 		if ( ! buffers.empty() )
 		{
@@ -393,6 +382,84 @@ void CYsfProtocol::HandleQueue(void)
 			}
 			g_Reflector.ReleaseClients();
 		}
+	}
+}
+
+void CYsfProtocol::HandleDNFrame(CYsfStreamCacheItem &cache, CPacket &packet, std::vector<CBuffer> &buffers) const
+{
+	// check if it's a last frame
+	if ( packet.IsLastPacket() )
+	{
+		// a group of 5 that is not complete (sources that are not YSF) goes out filled
+		// with silence, or the listeners lose its frames
+		if ( cache.m_uiPending > 0 )
+		{
+			for ( uint8_t i = cache.m_uiPending; i < 5; i++ )
+				cache.m_dvFrames[i] = CDvFramePacket(AMBE72_SILENCE, 0, 0, false);
+			buffers.emplace_back();
+			EncodeYSFPacket(cache.m_dvHeader, cache.m_dvFrames, &buffers.back());
+			cache.m_uiFrameId = cache.m_dvFrames[0].GetYsfPacketFrameId();
+			cache.m_uiPending = 0;
+		}
+		// encode it
+		buffers.emplace_back();
+		EncodeLastYSFPacket(cache.m_dvHeader, cache.m_uiFrameId, &buffers.back());
+	}
+	// otherwise, just a regular DV frame
+	else
+	{
+		// update local stream cache or send triplet when needed
+		uint8_t sid = packet.GetYsfPacketSubId();
+		if (sid <= 4)
+		{
+			cache.m_dvFrames[sid] = CDvFramePacket((CDvFramePacket &)packet);
+			cache.m_uiPending = sid + 1;
+			if ( sid == 4 )
+			{
+				buffers.emplace_back();
+				EncodeYSFPacket(cache.m_dvHeader, cache.m_dvFrames, &buffers.back());
+				cache.m_uiFrameId = cache.m_dvFrames[0].GetYsfPacketFrameId();
+				cache.m_uiPending = 0;
+			}
+		}
+	}
+}
+
+void CYsfProtocol::HandleVWFrame(CYsfStreamCacheItem &cache, CPacket &packet, std::vector<CBuffer> &buffers) const
+{
+	// the last packet's IMBE frame is silence; it fills the last VW frame like the rest
+	std::array<uint8_t, 11> f;
+	const uint8_t *imbe = ((CDvFramePacket &)packet).GetCodecData(ECodecType::p25);
+	memcpy(f.data(), imbe ? imbe : IMBE11_SILENCE, 11);
+	cache.m_vwImbe.push_back(f);
+	const bool last = packet.IsLastPacket();
+	for (;;)
+	{
+		// as a Yaesu radio sends: FN 0 FT 1 (radio id + 2), FN 1 FT 1 (5), then FN 0 FT 0 (5 each)
+		const uint8_t fn = (cache.m_uiVwFrames == 1U) ? 1U : 0U;
+		const uint8_t ft = (cache.m_uiVwFrames < 2U) ? 1U : 0U;
+		const unsigned *offs;
+		const size_t need = CYsfVW::Offsets(fn, ft, &offs);
+		if ( cache.m_vwImbe.empty() || (cache.m_vwImbe.size() < need && !last) )
+			break;
+		while ( cache.m_vwImbe.size() < need )
+		{
+			std::array<uint8_t, 11> s;
+			memcpy(s.data(), IMBE11_SILENCE, 11);
+			cache.m_vwImbe.push_back(s);
+		}
+		buffers.emplace_back();
+		EncodeVWPacket(cache.m_dvHeader, fn, ft, cache.m_vwImbe.data(), cache.m_uiVwCounter++, &buffers.back());
+		cache.m_vwImbe.erase(cache.m_vwImbe.begin(), cache.m_vwImbe.begin() + need);
+		if ( cache.m_uiVwFrames < 2U )
+			cache.m_uiVwFrames++;
+	}
+	if ( last )
+	{
+		buffers.emplace_back();
+		EncodeVWHeaderPacket(cache.m_dvHeader, YSF_FI_TERMINATOR, cache.m_uiVwCounter, &buffers.back());
+		cache.m_bVW = false;
+		cache.m_vwImbe.clear();
 	}
 }
 
@@ -896,6 +963,109 @@ bool CYsfProtocol::EncodeLastYSFPacket(const CDvHeaderPacket &Header, uint8_t la
 
 	// done
 	return true;
+}
+
+void CYsfProtocol::VwRadioId(const CDvHeaderPacket &Header, uint8_t *id20) const
+{
+	const auto it = m_VwRadioId.find(Header.GetStreamId());
+	if ( it != m_VwRadioId.end() )
+		memcpy(id20, it->second.data(), 20);
+	else
+		memset(id20, ' ', 20);
+}
+
+// VW header (YSF_FI_HEADER) or terminator (YSF_FI_TERMINATOR): CSD1 = dest (***** + the radio id) +
+// src, CSD2 = src twice, as a Yaesu radio sends them; the counter's bit 0 marks the end
+void CYsfProtocol::EncodeVWHeaderPacket(const CDvHeaderPacket &Header, uint8_t fi, uint8_t counter, CBuffer *Buffer) const
+{
+	uint8_t tag[]  = { 'Y','S','F','D' };
+	uint8_t dest[] = { 'A','L','L',' ',' ',' ',' ',' ',' ',' ' };
+	char  sz[YSF_CALLSIGN_LENGTH];
+	char  my[YSF_CALLSIGN_LENGTH];
+	uint8_t fichd[YSF_FICH_LENGTH_BYTES];
+
+	Buffer->Set(tag, sizeof(tag));
+	memset(sz, ' ', sizeof(sz));
+	Header.GetRpt1Callsign().GetCallsignString(sz);
+	sz[::strlen(sz)] = ' ';
+	Buffer->Append((uint8_t *)sz, YSF_CALLSIGN_LENGTH);
+	memset(my, ' ', sizeof(my));
+	Header.GetMyCallsign().GetCallsignString(my);
+	my[::strlen(my)] = ' ';
+	Buffer->Append((uint8_t *)my, YSF_CALLSIGN_LENGTH);
+	Buffer->Append(dest, 10);
+	Buffer->Append((uint8_t)(((counter << 1) & 0xFEU) | (fi == YSF_FI_TERMINATOR ? 0x01U : 0x00U)));
+	Buffer->Append((uint8_t *)YSF_SYNC_BYTES, YSF_SYNC_LENGTH_BYTES);
+	CYSFFICH fich;
+	fich.setFI(fi);
+	fich.setCS(2U);
+	fich.setFN(0U);
+	fich.setFT(0U);
+	fich.setDev(0U);
+	fich.setMR(YSF_MR_BUSY);
+	fich.setDT(YSF_DT_VOICE_FR_MODE);
+	fich.setSQL(0U);
+	fich.setSQ(ModuleToDGID(Header.GetPacketModule()));
+	fich.encode(fichd);
+	Buffer->Append(fichd, YSF_FICH_LENGTH_BYTES);
+	uint8_t id[20];
+	VwRadioId(Header, id);
+	unsigned char csd1[20U], csd2[20U];
+	memset(csd1, '*', 5);
+	memcpy(csd1 + 5, id + 15, 5);
+	memcpy(csd1 + YSF_CALLSIGN_LENGTH, my, YSF_CALLSIGN_LENGTH);
+	memcpy(csd2, my, YSF_CALLSIGN_LENGTH);
+	memcpy(csd2 + YSF_CALLSIGN_LENGTH, my, YSF_CALLSIGN_LENGTH);
+	CYSFPayload payload;
+	uint8_t temp[120];
+	payload.writeHeader(temp, csd1, csd2);
+	Buffer->Append(temp+30, 120-30);
+}
+
+void CYsfProtocol::EncodeVWPacket(const CDvHeaderPacket &Header, uint8_t fn, uint8_t ft, const std::array<uint8_t, 11> *imbe, uint8_t counter, CBuffer *Buffer) const
+{
+	uint8_t tag[]  = { 'Y','S','F','D' };
+	uint8_t dest[] = { 'A','L','L',' ',' ',' ',' ',' ',' ',' ' };
+	char  sz[YSF_CALLSIGN_LENGTH];
+	uint8_t fichd[YSF_FICH_LENGTH_BYTES];
+
+	Buffer->Set(tag, sizeof(tag));
+	memset(sz, ' ', sizeof(sz));
+	Header.GetRpt1Callsign().GetCallsignString(sz);
+	sz[::strlen(sz)] = ' ';
+	Buffer->Append((uint8_t *)sz, YSF_CALLSIGN_LENGTH);
+	memset(sz, ' ', sizeof(sz));
+	Header.GetMyCallsign().GetCallsignString(sz);
+	sz[::strlen(sz)] = ' ';
+	Buffer->Append((uint8_t *)sz, YSF_CALLSIGN_LENGTH);
+	Buffer->Append(dest, 10);
+	Buffer->Append((uint8_t)((counter << 1) & 0xFEU));
+	Buffer->Append((uint8_t *)YSF_SYNC_BYTES, YSF_SYNC_LENGTH_BYTES);
+	CYSFFICH fich;
+	fich.setFI(YSF_FI_COMMUNICATIONS);
+	fich.setCS(2U);
+	fich.setFN(fn);
+	fich.setFT(ft);
+	fich.setDev(0U);
+	fich.setMR(YSF_MR_BUSY);
+	fich.setDT(YSF_DT_VOICE_FR_MODE);
+	fich.setSQL(0U);
+	fich.setSQ(ModuleToDGID(Header.GetPacketModule()));
+	fich.encode(fichd);
+	Buffer->Append(fichd, YSF_FICH_LENGTH_BYTES);
+	uint8_t payload[90];
+	memset(payload, 0, sizeof(payload));
+	if ( fn == 0U && ft == 1U )
+	{
+		uint8_t id[20];
+		VwRadioId(Header, id);
+		CYsfVW::EncodeData(id, payload);
+	}
+	const unsigned *offs;
+	const unsigned n = CYsfVW::Offsets(fn, ft, &offs);
+	for ( unsigned i = 0; i < n; i++ )
+		CYsfVW::EncodeImbe(imbe[i].data(), payload + offs[i]);
+	Buffer->Append(payload, sizeof(payload));
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////

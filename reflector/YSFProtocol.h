@@ -22,6 +22,7 @@
 #include <chrono>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "Defines.h"
 #include "Timer.h"
@@ -61,6 +62,13 @@ public:
 	CDvFramePacket  m_dvFrames[5];
 	uint8_t         m_uiPending = 0;	// frames of the current group of 5 not sent yet
 	uint8_t         m_uiFrameId = 0;	// network frame counter of the last group sent
+	// a module without transcoder: the header waits for the first frame, an IMBE stream (VW, P25)
+	// goes out as VW (2 IMBE frames in the first VW frame, then 5), anything else as DN
+	bool            m_bHeaderPending = false;
+	bool            m_bVW = false;
+	std::vector<std::array<uint8_t, 11>> m_vwImbe;
+	uint8_t         m_uiVwFrames = 0;	// VW voice frames sent
+	uint8_t         m_uiVwCounter = 0;	// network frame counter
 };
 
 class CYsfProtocol : public CProtocol
@@ -101,6 +109,14 @@ protected:
 	bool EncodeYSFHeaderPacket(const CDvHeaderPacket &, CBuffer *) const;
 	bool EncodeYSFPacket(const CDvHeaderPacket &, const CDvFramePacket *, CBuffer *) const;
 	bool EncodeLastYSFPacket(const CDvHeaderPacket &, uint8_t, CBuffer *) const;
+	// VW: header (fi header or terminator) and voice frames; the radio id of the stream, else spaces
+	void EncodeVWHeaderPacket(const CDvHeaderPacket &, uint8_t fi, uint8_t counter, CBuffer *) const;
+	void EncodeVWPacket(const CDvHeaderPacket &, uint8_t fn, uint8_t ft, const std::array<uint8_t, 11> *imbe, uint8_t counter, CBuffer *) const;
+	void VwRadioId(const CDvHeaderPacket &, uint8_t *id20) const;
+	// a frame of a stream to YSF: DN (groups of 5, the last one filled with silence) or VW (the IMBE
+	// frames of the cache in VW frames of 2, then 5; at the end the rest filled with silence)
+	void HandleDNFrame(CYsfStreamCacheItem &, CPacket &, std::vector<CBuffer> &) const;
+	void HandleVWFrame(CYsfStreamCacheItem &, CPacket &, std::vector<CBuffer> &) const;
 	uint8_t ModuleToDGID(char) const;
 
 	// Wires-X packet decoding helpers
