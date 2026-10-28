@@ -2,7 +2,7 @@
 
 [English](README.md) | **Deutsch**
 
-**Version 0.13.2** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.14.0** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF/NXDN (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25 (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF/NXDN in Software ergänzen. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
@@ -125,22 +125,23 @@ Ein Modul, D-Star auf dem DV3000 oder DV3003, DMR/YSF über ein Codec-Plugin. In
 
 ## Codec-Plugins
 
-Ein Codec-Plugin ist eine Shared Library, die D-Star (AMBE) und/oder DMR/YSF (AMBE2+) in Software mitbringt. tcd lädt es beim Start:
+Ein Codec-Plugin ist eine Shared Library, die D-Star (AMBE) und/oder DMR/YSF (AMBE2+) in Software mitbringt, seit 0.14.0 auch P25 (IMBE) als Wahl neben dem eigenen OP25-Vocoder von tcd. tcd lädt es beim Start:
 
 ```ini
 CodecPlugin = /usr/local/lib/tcd/foo.so   # so viele Zeilen wie nötig
 CodecDStar  = dvsi                        # der Vocoder für neue D-Star-Streams: dvsi oder der Name eines Plugins
 CodecDMR    = foo                         # dasselbe für DMR/YSF
+CodecP25    = op25                        # P25: op25 (der eigene von tcd, Standard) oder der Name eines Plugins
 ```
 
-- **Welcher Vocoder**: Ohne `CodecDStar`/`CodecDMR` haben die Geräte Vorrang, ein Plugin übernimmt nur, was kein Gerät macht. Steht dort der Name eines Plugins, läuft dieser Codec von Anfang an in Software, auch wenn ein Gerät ihn könnte; bei nur einem Gerät übernimmt das Gerät dann den anderen Codec.
+- **Welcher Vocoder**: Ohne `CodecDStar`/`CodecDMR` haben die Geräte Vorrang, ein Plugin übernimmt nur, was kein Gerät macht. Steht dort der Name eines Plugins, läuft dieser Codec von Anfang an in Software, auch wenn ein Gerät ihn könnte; bei nur einem Gerät übernimmt das Gerät dann den anderen Codec. P25 läuft für alle Module über den eigenen OP25-Vocoder von tcd, außer `CodecP25` nennt ein Plugin, das P25 kann; nennt es ein Plugin, das nicht geladen ist oder kein P25 kann, startet tcd nicht.
 - **Mehr Module als Kanäle**: Die Geräte übernehmen die ersten Module aus `Modules`, so viele, wie sie Kanäle haben (Mischbetrieb 2, zwei DV3003 3, ...); die übrigen Module gehen immer an ein Plugin. Mit DV3000 + DV3003 und `Modules = FSABC` werden F und S auf den Geräten transcodiert, A, B und C in Software. Ohne Plugin für den Rest startet tcd nicht.
-- **Umschalten zur Laufzeit**: Das Web-Dashboard (Einstellungen, „Vocoder“) und `POST /api/codec` mit `{"codec": "dstar", "use": "foo"}` wählen den Vocoder für die Streams, die ab dann beginnen; eine laufende Aussendung behält ihren Vocoder. Angeboten wird alles, was beim Start geladen wurde: ein Gerät für den Codec und jedes Plugin, das ihn kann. „Speichern“ schreibt die Wahl in die `tcd.ini`.
+- **Umschalten zur Laufzeit**: Das Web-Dashboard (Einstellungen, „Vocoder“) und `POST /api/codec` mit `{"codec": "dstar", "use": "foo"}` (`dstar`, `dmr` oder `p25`) wählen den Vocoder für die Streams, die ab dann beginnen; eine laufende Aussendung behält ihren Vocoder. Angeboten wird alles, was beim Start geladen wurde: ein Gerät für den Codec (für P25 `op25`) und jedes Plugin, das ihn kann. „Speichern“ schreibt die Wahl in die `tcd.ini`.
 - **Optionen**: Zeilen der `tcd.ini`, die tcd nicht kennt, gehen an die Plugins, etwa ein Pfad, den ein Plugin braucht; eine Zeile, die niemand nimmt, wird gemeldet.
-- **Schnittstelle**: schlichtes C, [`CodecPlugin.h`](CodecPlugin.h): `open`/`close` eines Zustands pro Stream, `encode`/`decode` von 160 Samples PCM mit 8 kHz in einen und aus einem 9-Byte-Frame, `start`/`stop` vor dem ersten und nach dem letzten Frame einer Aussendung (seit 0.12.0, `TCD_CODEC_API 2`), damit ein Plugin jede Aussendung frisch beginnt, auch wenn eine Stream-ID wiederkommt. tcd ruft ein Plugin immer nur aus einem Thread zur Zeit auf und schließt den Zustand eines Streams, der 30 s still war. Ein Plugin wird nur gegen diesen Header gebaut und muss nicht bei jedem tcd-Update neu gebaut werden; tcd prüft `TCD_CODEC_API`.
-- **Frames**: D-Star als die 9 Datenbytes eines DV-Frames, DMR/YSF als die 72 Bits eines AMBE2+-Frames in Luft-Reihenfolge, MSB zuerst, so wie die DVSI-Geräte sie nutzen.
+- **Schnittstelle**: schlichtes C, [`CodecPlugin.h`](CodecPlugin.h): `open`/`close` eines Zustands pro Stream, `encode`/`decode` von 160 Samples PCM mit 8 kHz in einen und aus einem 9-Byte-Frame (P25: 11 Byte), `start`/`stop` vor dem ersten und nach dem letzten Frame einer Aussendung (seit 0.12.0, `TCD_CODEC_API 2`), damit ein Plugin jede Aussendung frisch beginnt, auch wenn eine Stream-ID wiederkommt. tcd ruft ein Plugin immer nur aus einem Thread zur Zeit auf und schließt den Zustand eines Streams, der 30 s still war. Ein Plugin wird nur gegen diesen Header gebaut und muss nicht bei jedem tcd-Update neu gebaut werden; tcd prüft `TCD_CODEC_API`.
+- **Frames**: D-Star als die 9 Datenbytes eines DV-Frames, DMR/YSF als die 72 Bits eines AMBE2+-Frames in Luft-Reihenfolge, MSB zuerst, so wie die DVSI-Geräte sie nutzen; P25 als die 88 IMBE-Parameterbits u0..u7 in 11 Byte, MSB zuerst, wie der OP25-Vocoder von tcd sie hat. Ein Fehler des Plugins ergibt für diesen Frame IMBE-Stille (Kodieren) oder stille Samples (Dekodieren).
 
-Dieses Repository enthält kein Codec-Plugin: Software-Umsetzungen von AMBE und AMBE2+ können Patente berühren (AMBE2+ Halbrate, US 8,359,197, voraussichtlich bis 20.05.2028), ob man eines baut und nutzt, entscheidet der Betreiber. Ein Plugin für D-Star und DMR/YSF mit [mbelib-neo](https://github.com/arancormonk/mbelib-neo) ist [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin); bitte zuerst dessen Patenthinweis lesen.
+Dieses Repository enthält kein Codec-Plugin: Software-Umsetzungen von AMBE und AMBE2+ können Patente berühren (AMBE2+ Halbrate, US 8,359,197, voraussichtlich bis 20.05.2028), ob man eines baut und nutzt, entscheidet der Betreiber. Ein Plugin für D-Star, DMR/YSF und P25 mit [mbelib-neo](https://github.com/arancormonk/mbelib-neo) ist [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin); bitte zuerst dessen Patenthinweis lesen.
 
 `tools/` enthält Testwerkzeuge für Plugins (`make` dort): `codectest <plugin.so> dmr|dstar|p25 in.raw out.frames out.raw [option=wert ...]` kodiert und dekodiert 8-kHz-s16le-PCM, gibt die Zeit pro Frame aus und prüft, dass zwei verschachtelte Streams getrennt bleiben; `decode` dekodiert eine Frame-Datei; `dvsitest <Gerät> enc|dec dstar|dmr ein aus` tut dasselbe auf einem DV3003, oder mit `DVSI_TYPE=3000` auf einem DV3000 (tcd gestoppt), um ein Plugin mit der Hardware zu vergleichen; `dvsitest <Gerät> info` gibt Produkt-ID und Version des Chips aus.
 
@@ -343,7 +344,7 @@ Die Grenzen sind absichtlich ungleich: Absenken ist unkritisch, Anheben hebt auc
 - Signalweg des aktiven Streams mit dem Pegel an jeder Stufe
 - AGC- und Verstärkungsregler, die sofort wirken, und ein Knopf, um sie in `tcd.ini` zu speichern
 - DVSI-Geräte: Seriennummer, Typ, Rolle, belegte Kanäle mit ihren Modulen, Puffertiefe
-- Codec-Plugins: ihr Codec, Zähler und Streams, und welcher Vocoder neue D-Star- und DMR-Streams bekommt (umschaltbar, siehe [Codec-Plugins](#codec-plugins))
+- Codec-Plugins: ihr Codec, Zähler und Streams, und welcher Vocoder neue D-Star-, DMR- und P25-Streams bekommt (umschaltbar, siehe [Codec-Plugins](#codec-plugins))
 - Verbindung zum Reflektor und Paketzähler; ein Standby-Modul zeigt „standby“, solange ein anderer tcd es hat, und „taken over“, solange dieser tcd es hat
 - hinter einem Reverse-Proxy unter einem Pfad (seit 0.11.0): Die Seite nutzt relative Pfade, `https://<host>/tcd/` funktioniert also (siehe [tcd in Docker](#tcd-in-docker)); hinter einem Proxy auf demselben Rechner zählt die Pause nach Fehlanmeldungen je Adresse aus dem letzten `X-Forwarded-For`-Eintrag, und das Session-Cookie ist `Secure`, wenn der Proxy `X-Forwarded-Proto: https` schickt; tcdmon zeigt Standby-Module ebenfalls
 
