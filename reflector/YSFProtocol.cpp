@@ -523,21 +523,9 @@ bool CYsfProtocol::IsValidDvPacket(const CBuffer &Buffer, CYSFFICH *Fich)
 		// decode YSH fich
 		if ( Fich->decode(&(Buffer.data()[40])) )
 		{
-			// DN (V/D mode 2) and VW (voice FR mode, IMBE); V/D mode 1 is not supported: said
-			// once per talker and minute (data FR is Wires-X and the like, not voice)
-			valid = (Fich->getDT() == YSF_DT_VD_MODE2) || (Fich->getDT() == YSF_DT_VOICE_FR_MODE);
-			if ( Fich->getDT() == YSF_DT_VD_MODE1 )
-			{
-				std::string call((const char *)&(Buffer.data()[14]), YSF_CALLSIGN_LENGTH);
-				call.erase(call.find_last_not_of(' ') + 1);
-				const auto now = std::chrono::steady_clock::now();
-				auto &last = m_UnsupportedLogged[call];
-				if ( now - last > std::chrono::minutes(1) )
-				{
-					last = now;
-					std::cout << "YSF: V/D mode 1 from " << call << " not supported" << std::endl;
-				}
-			}
+			// voice: DN (V/D mode 2), V/D mode 1 (DN with more data, the same AMBE+2) and VW
+			// (voice FR mode, IMBE); data FR (Wires-X and the like) is not voice
+			valid = (Fich->getDT() == YSF_DT_VD_MODE2) || (Fich->getDT() == YSF_DT_VD_MODE1) || (Fich->getDT() == YSF_DT_VOICE_FR_MODE);
 		}
 	}
 	return valid;
@@ -679,7 +667,15 @@ bool CYsfProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fich, con
 		uint8_t   ambe3[9];
 		uint8_t   ambe4[9];
 		uint8_t *ambes[5] = { ambe0, ambe1, ambe2, ambe3, ambe4 };
-		CYsfUtils::DecodeVD2Vchs((unsigned char *)&(Buffer.data()[35]), ambes);
+		if ( Fich.getDT() == YSF_DT_VD_MODE1 )
+		{
+			// V/D mode 1: each block of 18 bytes is 9 bytes of data and the AMBE+2 frame as DMR has
+			// it (MMDVMHost's YSFPayload::processVDMode1Audio regenerates it with the DMR tables)
+			for ( unsigned i = 0; i < 5; i++ )
+				memcpy(ambes[i], &(Buffer.data()[65 + 18 * i + 9]), 9);
+		}
+		else
+			CYsfUtils::DecodeVD2Vchs((unsigned char *)&(Buffer.data()[35]), ambes);
 
 		char sz[YSF_CALLSIGN_LENGTH+1];
         ::memcpy(sz, &(Buffer.data()[14]), YSF_CALLSIGN_LENGTH);
