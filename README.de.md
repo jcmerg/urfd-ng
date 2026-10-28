@@ -80,7 +80,7 @@ Description = My URF Reflector
 URL = https://example.com
 RxFreq = 430412500             # anders als TxFreq: der Hotspot ist duplex (zwei Zeitschlitze), BrandMeister lehnt RX = TX ab
 TxFreq = 439812500
-# FallbackDmrId = 1234567           # DMR ID for unknown callers (0 or omit = drop)
+# FallbackDmrId = 1234567           # DMR ID for talkers without one (0 or omit = drop)
 # BlockProtocols = SvxReflector,YSF # Block protocols bidirectionally
 # Network = brandmeister.network    # Standard: brandmeister.network bei BM-Mastern, sonst der Host (siehe „Mehrere Verbindungen“)
 #
@@ -266,16 +266,16 @@ Module = A                     # Must be a transcoded module
 
 **RxGain / TxGain**: wie bei SVX pro Anbindung in der `urfd.ini`; Werte über Vollaussteuerung werden begrenzt. tcd schickt AllStar-Audio durch seine AGC analog, die beiden bleiben daher normalerweise 0.
 
-**Sprecher**: Ein TEXT-Paket mit SET_INFO-TLV vor dem Ton, wie es DVSwitch Analog_Bridge schickt, nennt den Sprecher (Rufzeichen und DMR-ID); urfd schickt dasselbe Paket vor jedem Stream, den es zum Knoten spielt. Ohne eines läuft der Stream unter `Callsign`, mit der DMR-ID dieses Rufzeichens aus der DMR-Datenbank, sonst zeigen DMR und P25 `[MMDVM] FallbackDmrId`. Das Unkey beendet den Stream.
+**Sprecher**: Ein TEXT-Paket mit SET_INFO-TLV vor dem Ton, wie es DVSwitch Analog_Bridge schickt, nennt den Sprecher (Rufzeichen und DMR-ID); urfd schickt dasselbe Paket vor jedem Stream, den es zum Knoten spielt. Ohne eines läuft der Stream unter `Callsign`, mit der DMR-ID dieses Rufzeichens aus der DMR-Datenbank, sonst bekommen DMR-Hotspots, DMR+ und P25 ihn mit `[MMDVM] FallbackDmrId`, ohne sie gar nicht. Das Unkey beendet den Stream.
 
 ### MMDVM-Server
-Nimmt Verbindungen von MMDVM-Hotspots und -Repeatern direkt an (ohne BrandMeister). Implementiert das HomeBrew-DMR-Protokoll (Handshake RPTL→RPTK→RPTC→RPTO). Für reinen DMR-zu-DMR-Betrieb ohne Transcoder nutzbar, transcodierte Module sind nur für die Verbindung zwischen Betriebsarten nötig. Die TG-Zuordnung funktioniert wie beim MMDVMClient, mit Timeslots. **Dual-Slot**: Jeder Timeslot (TS1/TS2) verbindet sich unabhängig mit seinem eigenen Modul, ein Hotspot kann also gleichzeitig auf zwei Modulen sein.
+Nimmt Verbindungen von MMDVM-Hotspots und -Repeatern direkt an (ohne BrandMeister). Implementiert das HomeBrew-DMR-Protokoll (Handshake RPTL→RPTK→RPTC→RPTO). Für reinen DMR-zu-DMR-Betrieb ohne Transcoder nutzbar, transcodierte Module sind nur für die Verbindung zwischen Betriebsarten nötig. Ein Sprecher ohne DMR-ID (in keiner ID-Datenbank registriert: AllStar, ein D-Star- oder M17-Rufzeichen) geht nur mit `FallbackDmrId` an die Hotspots, an DMR+ und an P25; ohne sie wird der Stream für sie verworfen, wie für die DMR-Netze (MMDVMClient) und für NXDN (`FallbackNxdnId`). Die TG-Zuordnung funktioniert wie beim MMDVMClient, mit Timeslots. **Dual-Slot**: Jeder Timeslot (TS1/TS2) verbindet sich unabhängig mit seinem eigenen Modul, ein Hotspot kann also gleichzeitig auf zwei Modulen sein.
 
 ```ini
 [MMDVM]
 Enable = true
 Port = 62030
-# FallbackDmrId = 0                # DMR ID for unknown callers (0 or omit = drop)
+# FallbackDmrId = 0                # DMR ID for talkers without one, to the hotspots, DMR+ and P25 (0 or omit = drop)
 # RequireAuth = false              # Set to false to accept all connections (legacy)
 # BlockProtocols = SVXServer,USRP  # Block protocols bidirectionally
 #
@@ -422,7 +422,7 @@ NXDN 26363 my.reflector.org 41400    -> AutoLinkModule
 
 Ausgehende Frames tragen die Ziel-ID, mit der der jeweilige Client gepollt hat, pro unterschiedlicher Ziel-ID auf dem Modul getrennt kodiert. Das ist nötig, nicht kosmetisch: `NXDNGateway` verwirft jedes Frame des Reflektors, dessen Ziel-ID nicht zur TG passt, mit der der Hotspot verbunden ist. Ein Client auf der reinen Reflektor-ID und einer auf einer Modul-Ziel-ID brauchen also jeweils eigene Frames.
 
-**NXDN-ID-Auflösung**: Eingehende NXDN-IDs werden über die NXDN-ID-Datenbank in Rufzeichen übersetzt. Fehlt eine ID dort, wird die DMR-ID-Datenbank verwendet (viele Funkamateure nutzen ihre DMR-ID auch als NXDN-ID). Das ermöglicht die Anzeige des Rufzeichens über Betriebsarten hinweg und die Namenssuche für D-Star-Slow-Data. Unbekannte IDs werden verworfen, außer FallbackNxdnId ist gesetzt. Ausgehend geht ein Sprecher ohne NXDN-ID (AllStar, ein D-Star- oder M17-Rufzeichen in keiner ID-Datenbank) mit FallbackNxdnId an NXDN, sonst mit der `ReflectorID` des Reflektors (vor 4.31.0 wurde so ein Strom für NXDN verworfen, während DMR ihn bekam).
+**NXDN-ID-Auflösung**: Eingehende NXDN-IDs werden über die NXDN-ID-Datenbank in Rufzeichen übersetzt. Fehlt eine ID dort, wird die DMR-ID-Datenbank verwendet (viele Funkamateure nutzen ihre DMR-ID auch als NXDN-ID). Das ermöglicht die Anzeige des Rufzeichens über Betriebsarten hinweg und die Namenssuche für D-Star-Slow-Data. Unbekannte IDs werden verworfen, außer FallbackNxdnId ist gesetzt.
 
 **D-Star-Slow-Data**: NXDN-Quellen erscheinen im D-Star-Textfeld als `NXDN RAN<n>`. Betreibernamen werden in der DMR- und der NXDN-Datenbank gesucht.
 
@@ -914,9 +914,9 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **Ohne DMR-ID kein DMR und P25 (4.31.0)**: Ein Sprecher ohne DMR-ID (in keiner ID-Datenbank registriert: AllStar, ein D-Star- oder M17-Rufzeichen) ging an die Hotspots an `[MMDVM]`, an DMR+ und an P25 mit Quell-ID 0; jetzt wird er für sie verworfen, außer `[MMDVM] FallbackDmrId` ist gesetzt, wie es MMDVMClient und NXDN schon tun. Nur Sprecher mit ID erreichen also DMR, NXDN und P25. Im Log steht `dropping outbound stream from … - no DMR ID`
 - **YSF-Positionen (4.31.0)**: Die GPS-Position, die Yaesu-Geräte im Datenkanal senden (DN: DT1/DT2, V/D Mode 1: DT1 bis DT5; Kurz- und Langform, gegen ihre Prüfsumme geprüft, wie YSFGateway sie liest), erscheint als Locator in der Liste der zuletzt Gehörten, im XML und in `/json/stations`, wie D-Star- und M17-Positionen, veröffentlicht als Mitte ihres Locator-Feldes
 - **YSF VW (4.31.0)**: Ein Yaesu-Gerät im VW-Modus (Voice Wide, IMBE-Vollrate) wurde kommentarlos verworfen; urfd nimmt VW jetzt an. Sein IMBE ist der Codec von P25, deshalb macht der Transcoder daraus D-Star, DMR/YSF/NXDN, M17 und die anderen wie aus P25 (mit OP25 oder einem Codec-Plugin, `CodecP25`), P25-Hörer bekommen genau diese Frames, YSF-Hörer auf einem transcodierten Modul DN. Auf einem Modul ohne Transcoder geht ein IMBE-Strom (VW oder P25) als VW an YSF (sein Kopf sagt IMBE), mit der Gerätenummer des sendenden Funkgeräts. Das Dashboard zeigt den Sprecher weiter als YSF; der Monitor von tcd nennt den Codec IMBE (P25, YSF VW). V/D Mode 1 (DN mit doppeltem Datenanteil und den AMBE+2-Frames im DMR-Format, ohne den zusätzlichen Sprach-Fehlerschutz von DN) wird wie DN angenommen; Data FR ist keine Sprache (Wires-X nutzt es). Die Verbindungen von urfd zu anderen YSF-Reflektoren (YSF-Client-Anbindung) tragen noch kein VW. VW-Sprache kommt bei den anderen Betriebsarten etwa 85 ms später an als DN: Der erste VW-Frame nach dem Kopf trägt 40 ms Sprache
-- **NXDN ohne NXDN-ID (4.31.0)**: Ein Sprecher ohne NXDN-ID (AllStar, ein D-Star- oder M17-Rufzeichen in keiner ID-Datenbank) wurde für NXDN verworfen, während DMR den Ruf bekam; er geht jetzt mit `FallbackNxdnId` an NXDN, sonst mit der `ReflectorID` des Reflektors
 - **MMDVMClient: unbekannte DMR-IDs (4.30.5)**: Ein Ruf von einer DMR-ID, die die ID-Datenbank noch nicht hat (neue Registrierungen brauchen etwa einen Tag bis in die Exporte), zeigte das Rufzeichen des Connectors als Sprecher, als würde der Betreiber selbst senden. Jetzt steht dort N0CALL mit der DMR-ID, und sobald der Talker Alias, den BrandMeister mitschickt, angekommen ist (etwa eine Sekunde nach Beginn), zeigt das Dashboard schon in diesem Durchgang das Rufzeichen; die anderen Betriebsarten bekommen es ab dem nächsten Durchgang, bis die Datenbank die ID hat. Im Log steht `voice from unknown (ID …)`. DMR-Hotspots bekommen für N0CALL keinen Talker Alias
 - **NXDN-Codec in der Transcoder-Tabelle (4.30.4)**: Der NXDN-Header meldete P25, deshalb zeigte die Admin-Seite einen NXDN-Stream auf einem transcodierten Modul als P25; jetzt steht dort DMR (AMBE+2). Der Ton war nicht betroffen
 - **Version ohne `-dht` (4.30.3)**: Die Version heißt `4.30.3` im Log, im XML, im XLX-Verzeichnis und im DHT, mit oder ohne OpenDHT gebaut; beim Start steht im Log, ob DHT eingebaut ist. `URFD_DHT=false` baut das Docker-Image ohne, wie `DHT = false` in `urfd.mk`

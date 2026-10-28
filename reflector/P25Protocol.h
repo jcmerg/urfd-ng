@@ -32,10 +32,11 @@
 class CP25StreamCacheItem
 {
 public:
-	CP25StreamCacheItem() : m_iSeqCounter(0) {}
+	CP25StreamCacheItem() : m_iSeqCounter(0), m_bDropped(false) {}
 
 	CDvHeaderPacket m_dvHeader;
 	uint32_t        m_iSeqCounter;
+	bool            m_bDropped;		// no DMR ID for the stream, nothing of it goes out
 };
 
 class CP25Protocol : public CProtocol

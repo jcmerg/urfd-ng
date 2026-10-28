@@ -46,6 +46,8 @@ bool CDmrplusProtocol::Initialize(const char *type, const EProtocol ptype, const
 	if (! CProtocol::Initialize(type, ptype, port, has_ipv4, has_ipv6))
 		return false;
 
+	m_DefaultId = g_Configure.Contains(g_Keys.mmdvm.fallbackdmrid) ? g_Configure.GetUnsigned(g_Keys.mmdvm.fallbackdmrid) : 0;
+
 	// update time
 	m_LastKeepaliveTime.start();
 
@@ -238,9 +240,20 @@ void CDmrplusProtocol::HandleQueue(void)
 		// check if it's header
 		if ( packet->IsDvHeader() )
 		{
+			// a talker without a DMR ID (registered in no ID database) does not go out,
+			// unless [MMDVM] FallbackDmrId is set, as on the hotspots, P25 and NXDN
+			const auto &hdr = (const CDvHeaderPacket &)*packet.get();
+			cache.m_bDropped = (0 == hdr.GetMyCallsign().GetDmrid()) && (0 == m_DefaultId);
+			if ( cache.m_bDropped )
+			{
+				static std::set<char> warned;
+				if (warned.insert(mod).second)
+					std::cout << "DMR+: dropping outbound stream from " << hdr.GetMyCallsign() << " on module " << mod << " - no DMR ID" << std::endl;
+				continue;
+			}
 			// update local stream cache
 			// this relies on queue feeder setting valid module id
-			cache.m_dvHeader = CDvHeaderPacket((const CDvHeaderPacket &)*packet.get());
+			cache.m_dvHeader = CDvHeaderPacket(hdr);
 			cache.m_uiSeqId = 4;
 			// a packet held from a stream that ended without its last one is stale
 			cache.m_Held.clear();
@@ -248,6 +261,11 @@ void CDmrplusProtocol::HandleQueue(void)
 			// encode it
 			EncodeDMRPlusHeaderPacket((const CDvHeaderPacket &)*packet.get(), &buffer);
 			SendBufferToClients(buffer, mod);
+		}
+		// a stream without a DMR ID: its frames and its end as well
+		else if ( cache.m_bDropped )
+		{
+			continue;
 		}
 		else
 		{
@@ -539,6 +557,8 @@ bool CDmrplusProtocol::EncodeDMRPlusHeaderPacket(const CDvHeaderPacket &Packet, 
 	Buffer->Append((uint16_t)0x0000);
 	// payload
 	uint32_t uiSrcId = Packet.GetMyCallsign().GetDmrid()  & 0x00FFFFFF;
+	if (uiSrcId == 0)
+		uiSrcId = m_DefaultId & 0x00FFFFFF;
 	uint32_t uiDstId = ModuleToDmrDestId(Packet.GetRpt2Module()) & 0x00FFFFFF;
 	Buffer->Append((uint8_t)0x00, 34);
 	Buffer->ReplaceAt(36, HIBYTE(HIWORD(uiSrcId)));
@@ -590,6 +610,8 @@ void CDmrplusProtocol::EncodeDMRPlusPacket(const CDvHeaderPacket &Header, const 
 
 	// payload
 	uint32_t uiSrcId = Header.GetMyCallsign().GetDmrid()  & 0x00FFFFFF;
+	if (uiSrcId == 0)
+		uiSrcId = m_DefaultId & 0x00FFFFFF;
 	uint32_t uiDstId = ModuleToDmrDestId(Header.GetRpt2Module()) & 0x00FFFFFF;
 	// frame0
 	Buffer->ReplaceAt(26, DvFrame0.GetCodecData(ECodecType::dmr), 9);

@@ -43,6 +43,7 @@ public:
 	CDvFramePacket  m_dvFrame1;
 
 	uint8_t   m_uiSeqId;
+	bool      m_bDropped = false;	// no DMR ID for the stream, nothing of it goes out
 	// the last voice packet encoded, sent when the next one comes: the
 	// stream's last goes out as packet type 3
 	CBuffer   m_Held;
@@ -104,4 +105,7 @@ protected:
 
 	// for queue header caches
 	std::unordered_map<char, CDmrplusStreamCacheItem> m_StreamsCache;
+
+	// [MMDVM] FallbackDmrId: the DMR ID of talkers without one, 0 = they don't go out
+	uint32_t m_DefaultId = 0;
 };
