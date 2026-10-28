@@ -623,14 +623,17 @@ int main(int argc, char *argv[])
 			row++;
 		}
 
-		// who codes AMBE for new streams, when there is a choice
+		// who codes AMBE (and P25) for new streams, when it is not the default
 		{
 			auto codecs = json_obj(last_json, "codecs");
 			std::string ds = json_str(json_obj(codecs, "dstar"), "use"), dm = json_str(json_obj(codecs, "dmr"), "use");
-			if (!codecs.empty() && (ds != "dvsi" || dm != "dvsi"))
+			std::string p2 = json_str(json_obj(codecs, "p25"), "use");
+			const bool p25 = !p2.empty() && p2 != "op25";
+			if (!codecs.empty() && (ds != "dvsi" || dm != "dvsi" || p25))
 			{
 				attron(COLOR_PAIR(5));
-				mvprintw(row++, 2, "Vocoder for new streams: D-Star %s, DMR %s", ds.empty() ? "-" : ds.c_str(), dm.empty() ? "-" : dm.c_str());
+				mvprintw(row++, 2, "Vocoder for new streams: D-Star %s, DMR %s%s%s", ds.empty() ? "-" : ds.c_str(), dm.empty() ? "-" : dm.c_str(),
+				         p25 ? ", P25 " : "", p25 ? p2.c_str() : "");
 				attroff(COLOR_PAIR(5));
 			}
 		}

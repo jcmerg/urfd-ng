@@ -870,7 +870,7 @@ void CController::ReadReflectorThread()
 				const bool reencode = dmr_sw && dmrsf_device &&
 					(g_Stats.config.dmr_gain_mode.load(std::memory_order_relaxed) == 2) &&
 					(m_agcDigital.IsEnabled() || outgain_dmr_num != 256 || dmr_reencode_num != 256);
-				for (auto *choices : { &dstar_choices, &dmr_choices })
+				for (auto *choices : { &dstar_choices, &dmr_choices, &p25_choices })
 					for (auto *sw : *choices)
 					{
 						if (!sw || sw->stats < 0)
