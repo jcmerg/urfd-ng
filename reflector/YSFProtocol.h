@@ -18,6 +18,11 @@
 
 #pragma once
 
+#include <array>
+#include <chrono>
+#include <string>
+#include <unordered_map>
+
 #include "Defines.h"
 #include "Timer.h"
 #include "Protocol.h"
@@ -126,6 +131,10 @@ protected:
 
 	// for queue header caches
 	std::unordered_map<char, CYsfStreamCacheItem> m_StreamsCache;
+	// VW: the radio id of a stream's first frame, for the VW out (by stream id)
+	std::unordered_map<uint16_t, std::array<uint8_t, 20>> m_VwRadioId;
+	// V/D mode 1 and data FR: when they were last said not to be supported, by callsign
+	std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_UnsupportedLogged;
 
 	// for wires-x
 	CWiresxCmdHandler   m_WiresxCmdHandler;

@@ -22,6 +22,7 @@
 #include "YSFPayload.h"
 #include "YSFClient.h"
 #include "YSFUtils.h"
+#include "YSFVW.h"
 #include "YSFProtocol.h"
 #include "Global.h"
 
@@ -125,11 +126,10 @@ void CYsfProtocol::Task(void)
 		{
 			if ( IsValidDvFramePacket(Ip, Fich, Buffer, Header, Frames) )
 			{
-				OnDvFramePacketIn(Frames[0], &Ip);
-				OnDvFramePacketIn(Frames[1], &Ip);
-				OnDvFramePacketIn(Frames[2], &Ip);
-				OnDvFramePacketIn(Frames[3], &Ip);
-				OnDvFramePacketIn(Frames[4], &Ip);
+				// 5 frames, 2 in the first VW frame
+				for ( auto &frame : Frames )
+					if ( frame )
+						OnDvFramePacketIn(frame, &Ip);
 			}
 			else if ( IsValidDvHeaderPacket(Ip, Fich, Buffer, Header, Frames) )
 			{
@@ -468,7 +468,20 @@ bool CYsfProtocol::IsValidDvPacket(const CBuffer &Buffer, CYSFFICH *Fich)
 		// decode YSH fich
 		if ( Fich->decode(&(Buffer.data()[40])) )
 		{
-			valid = (Fich->getDT() == YSF_DT_VD_MODE2);
+			// DN (V/D mode 2) and VW (voice FR mode, IMBE); V/D mode 1 and data FR are not
+			// supported: said once per talker and minute
+			valid = (Fich->getDT() == YSF_DT_VD_MODE2) || (Fich->getDT() == YSF_DT_VOICE_FR_MODE);
+			if ( !valid )
+			{
+				const std::string call((const char *)&(Buffer.data()[14]), YSF_CALLSIGN_LENGTH);
+				const auto now = std::chrono::steady_clock::now();
+				auto &last = m_UnsupportedLogged[call];
+				if ( now - last > std::chrono::minutes(1) )
+				{
+					last = now;
+					std::cout << "YSF: " << (Fich->getDT() == YSF_DT_VD_MODE1 ? "V/D mode 1" : "data FR mode") << " from " << call << " not supported" << std::endl;
+				}
+			}
 		}
 	}
 	return valid;
@@ -567,6 +580,38 @@ bool CYsfProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fich, con
 			}
 		}
 
+		// VW: IMBE frames, to the transcoder as P25 (the same codec); the first frame after the
+		// header has 2 of them and the radio id
+		if ( Fich.getDT() == YSF_DT_VOICE_FR_MODE )
+		{
+			const uint8_t *payload = &(Buffer.data()[65]);
+			if ( Fich.getFN() == 0U && Fich.getFT() == 1U )
+			{
+				std::array<uint8_t, 20> id;
+				if ( CYsfVW::DecodeData(payload, id.data()) )
+				{
+					if ( m_VwRadioId.size() > 64 )
+						m_VwRadioId.clear();
+					m_VwRadioId[uint16_t(uiStreamId)] = id;
+				}
+			}
+			const unsigned *offs;
+			const unsigned n = CYsfVW::Offsets(Fich.getFN(), Fich.getFT(), &offs);
+			for ( unsigned i = 0; i < 5; i++ )
+			{
+				frames[i].reset();
+				if ( i < n )
+				{
+					uint8_t imbe[11];
+					CYsfVW::DecodeImbe(payload + offs[i], imbe);
+					frames[i] = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(imbe, uiStreamId, false));
+					if ( !frames[i]->IsValid() )
+						return false;
+				}
+			}
+			return true;
+		}
+
 		// get DV frames
 		uint8_t   ambe0[9];
 		uint8_t   ambe1[9];
@@ -625,7 +670,10 @@ bool CYsfProtocol::IsValidDvLastFramePacket(const CIp &Ip, const CYSFFICH &Fich,
 
 			CCallsign csMY = CCallsign((const char *)sz);
 
-			lastframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(AMBE72_SILENCE, uiStreamId, Fich.getFN(), 0, 0, csMY, true));
+			if ( Fich.getDT() == YSF_DT_VOICE_FR_MODE )
+				lastframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(IMBE11_SILENCE, uiStreamId, true));
+			else
+				lastframe = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(AMBE72_SILENCE, uiStreamId, Fich.getFN(), 0, 0, csMY, true));
 		}
 
 		// check validity of packets
