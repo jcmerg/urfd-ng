@@ -502,9 +502,20 @@ void CDmrmmdvmProtocol::HandleQueue(void)
 
 		if ( isHeader )
 		{
-			// update local stream cache
+			// a talker without a DMR ID (registered in no ID database) does not go out,
+			// unless FallbackDmrId is set, as on the DMR networks (MMDVMClient) and NXDN
 			auto &cache = m_StreamsCache[cacheKey];
-			cache.m_dvHeader = CDvHeaderPacket((const CDvHeaderPacket &)*packet.get());
+			const auto &hdr = (const CDvHeaderPacket &)*packet.get();
+			cache.m_bDropped = (0 == hdr.GetMyCallsign().GetDmrid()) && (0 == m_DefaultId);
+			if ( cache.m_bDropped )
+			{
+				static std::set<char> warned;
+				if (warned.insert(mod).second)
+					std::cout << "MMDVM: dropping outbound stream from " << hdr.GetMyCallsign() << " on module " << mod << " - no DMR ID" << std::endl;
+				continue;
+			}
+			// update local stream cache
+			cache.m_dvHeader = CDvHeaderPacket(hdr);
 			cache.m_uiSeqId = 0;
 			// the talker alias, as BrandMeister sets it: callsign and first name
 			cache.m_TalkerAlias = CDmrEmbeddedLC::TalkerAlias(TalkerAliasText(cache.m_dvHeader.GetMyCallsign()));
@@ -512,6 +523,11 @@ void CDmrmmdvmProtocol::HandleQueue(void)
 			cache.m_uiTAIndex = 0;
 			cache.m_bEmbeddedReady = false;
 			cache.m_SourceTA = CDmrTalkerAliasIn();
+		}
+		// a stream without a DMR ID: its frames and its end as well
+		else if ( m_StreamsCache[cacheKey].m_bDropped )
+		{
+			continue;
 		}
 		else
 		{
@@ -1134,6 +1150,8 @@ bool CDmrmmdvmProtocol::EncodeMMDVMHeaderPacket(const CDvHeaderPacket &Packet, u
 	Buffer->Append((uint8_t)seqid);
 	// uiSrcId
 	uint32_t uiSrcId = Packet.GetMyCallsign().GetDmrid();
+	if (uiSrcId == 0)
+		uiSrcId = m_DefaultId;
 	AppendDmrIdToBuffer(Buffer, uiSrcId);
 	// uiDstId — use override if provided, else from TG map
 	uint32_t uiDstId = (overrideDstId != 0) ? overrideDstId : ModuleToDmrDestId(Packet.GetRpt2Module());
@@ -1255,6 +1273,8 @@ void CDmrmmdvmProtocol::EncodeLastMMDVMPacket(const CDvHeaderPacket &Packet, uin
 	Buffer->Append((uint8_t)seqid);
 	// uiSrcId
 	uint32_t uiSrcId = Packet.GetMyCallsign().GetDmrid();
+	if (uiSrcId == 0)
+		uiSrcId = m_DefaultId;
 	AppendDmrIdToBuffer(Buffer, uiSrcId);
 	// uiDstId — use override if provided, else from TG map
 	uint32_t uiDstId = (overrideDstId != 0) ? overrideDstId : ModuleToDmrDestId(Packet.GetRpt2Module());

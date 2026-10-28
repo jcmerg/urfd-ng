@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.31.0** | tcd 0.14.0 | Dashboard v2.14.2
+**urfd 4.31.0** | tcd 0.14.1 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -80,7 +80,7 @@ Description = My URF Reflector
 URL = https://example.com
 RxFreq = 430412500             # must differ from TxFreq: the hotspot is duplex (two timeslots), BrandMeister refuses RX = TX
 TxFreq = 439812500
-# FallbackDmrId = 1234567           # DMR ID for unknown callers (0 or omit = drop)
+# FallbackDmrId = 1234567           # DMR ID for talkers without one (0 or omit = drop)
 # BlockProtocols = SvxReflector,YSF # Block protocols bidirectionally
 # Network = brandmeister.network    # default: brandmeister.network for BM masters, else the host (see "Several connections")
 #
@@ -266,16 +266,16 @@ Module = A                     # Must be a transcoded module
 
 **RxGain / TxGain**: like the SVX ones, per connection in `urfd.ini`; samples past full scale are clipped. tcd runs AllStar audio through its AGC analog, so they normally stay 0.
 
-**Talker**: a TEXT packet with a SET_INFO TLV before the voice, as DVSwitch Analog_Bridge sends it, names the talker (callsign and DMR id); urfd sends the same packet ahead of every stream it plays to the node. Without one the stream runs under `Callsign`, with that callsign's DMR id from the DMR database, else DMR and P25 show `[MMDVM] FallbackDmrId`. The unkey ends the stream.
+**Talker**: a TEXT packet with a SET_INFO TLV before the voice, as DVSwitch Analog_Bridge sends it, names the talker (callsign and DMR id); urfd sends the same packet ahead of every stream it plays to the node. Without one the stream runs under `Callsign`, with that callsign's DMR id from the DMR database, else DMR hotspots, DMR+ and P25 get it with `[MMDVM] FallbackDmrId`, and without that not at all. The unkey ends the stream.
 
 ### MMDVM Server
-Accept incoming connections from MMDVM hotspots and repeaters directly (no BrandMeister needed). Implements the HomeBrew DMR protocol (RPTL→RPTK→RPTC→RPTO handshake). Works without transcoder for pure DMR-to-DMR operation; transcoded modules needed only for cross-mode bridging. TG mapping works like MMDVMClient — TGs map to modules with timeslot support. **Dual-slot**: Each timeslot (TS1/TS2) independently links to its own module, so a hotspot can be on two modules simultaneously.
+Accept incoming connections from MMDVM hotspots and repeaters directly (no BrandMeister needed). Implements the HomeBrew DMR protocol (RPTL→RPTK→RPTC→RPTO handshake). Works without transcoder for pure DMR-to-DMR operation; transcoded modules needed only for cross-mode bridging. A talker without a DMR ID (registered in no ID database: AllStar, a D-Star or M17 callsign) goes to the hotspots, and to DMR+ and P25, only with `FallbackDmrId`; without it the stream is dropped for them, as for the DMR networks (MMDVMClient) and for NXDN (`FallbackNxdnId`). TG mapping works like MMDVMClient — TGs map to modules with timeslot support. **Dual-slot**: Each timeslot (TS1/TS2) independently links to its own module, so a hotspot can be on two modules simultaneously.
 
 ```ini
 [MMDVM]
 Enable = true
 Port = 62030
-# FallbackDmrId = 0                # DMR ID for unknown callers (0 or omit = drop)
+# FallbackDmrId = 0                # DMR ID for talkers without one, to the hotspots, DMR+ and P25 (0 or omit = drop)
 # RequireAuth = false              # Set to false to accept all connections (legacy)
 # BlockProtocols = SVXServer,USRP  # Block protocols bidirectionally
 #
@@ -422,7 +422,7 @@ NXDN 26363 my.reflector.org 41400    -> AutoLinkModule
 
 Outgoing frames carry the destination ID each client polled with, encoded per distinct dstId on the module. This is required, not cosmetic: `NXDNGateway` drops every frame from the reflector whose dstId differs from the TG the hotspot is linked to, so a client linked to the plain reflector ID and one linked to a module dstId must each receive their own.
 
-**NXDN ID Resolution**: Incoming NXDN IDs are resolved to callsigns via the NXDN ID database. If not found, the DMR ID database is used as fallback (many operators reuse their DMR ID as NXDN ID). This enables cross-protocol callsign display and D-Star slow data name lookup. Unknown IDs are dropped unless FallbackNxdnId is configured. Outbound, a talker without an NXDN ID (AllStar, a D-Star or M17 callsign in no ID database) goes to NXDN with FallbackNxdnId, else with the reflector's `ReflectorID` (before 4.31.0 such a stream was dropped for NXDN, while DMR got it).
+**NXDN ID Resolution**: Incoming NXDN IDs are resolved to callsigns via the NXDN ID database. If not found, the DMR ID database is used as fallback (many operators reuse their DMR ID as NXDN ID). This enables cross-protocol callsign display and D-Star slow data name lookup. Unknown IDs are dropped unless FallbackNxdnId is configured.
 
 **D-Star Slow Data**: NXDN sources show `NXDN RAN<n>` in the D-Star text field. Operator names are looked up from both DMR and NXDN databases.
 
@@ -936,9 +936,9 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **No DMR ID, no DMR and P25 (4.31.0)**: a talker without a DMR ID (registered in no ID database: AllStar, a D-Star or M17 callsign) went to the hotspots on `[MMDVM]`, to DMR+ and to P25 with source ID 0; now it is dropped for them unless `[MMDVM] FallbackDmrId` is set, as MMDVMClient and NXDN already do. So only talkers with an ID reach DMR, NXDN and P25. The log says `dropping outbound stream from … - no DMR ID`
 - **YSF positions (4.31.0)**: the GPS position Yaesu radios send in the data channel (DN: DT1/DT2, V/D mode 1: DT1 to DT5; short and long form, checked against its sum, as YSFGateway reads it) shows up as locator in the last heard list, the XML and `/json/stations`, like D-Star and M17 positions, published as the middle of its locator field
 - **YSF VW (4.31.0)**: a Yaesu radio in VW (Voice Wide, IMBE full rate) was dropped without a word; urfd takes VW now. Its IMBE is the codec of P25, so the transcoder makes D-Star, DMR/YSF/NXDN, M17 and the others from it as from P25 (with OP25 or a codec plugin, `CodecP25`), P25 listeners get the very frames, and YSF listeners on a transcoded module get DN. On a module without transcoder an IMBE stream (VW or P25) goes to YSF as VW (its header says IMBE), with the sending radio's id. The dashboard still shows the talker as YSF; tcd's monitor calls the codec IMBE (P25, YSF VW). V/D mode 1 (DN with twice the data and the AMBE+2 frames as DMR has them, without DN's extra voice FEC) is taken like DN; data FR mode is not voice (Wires-X uses it). urfd's links to other YSF reflectors (YSF client connector) carry no VW yet. VW speech reaches the other modes about 85 ms later than DN: the first VW frame after the header has 40 ms of speech
-- **NXDN without an NXDN ID (4.31.0)**: a talker without an NXDN ID (AllStar, a D-Star or M17 callsign in no ID database) was dropped for NXDN, while DMR got the call; it goes to NXDN with `FallbackNxdnId`, else with the reflector's `ReflectorID` now
 - **MMDVMClient: unknown DMR IDs (4.30.5)**: a call from a DMR ID the ID database does not have yet (new registrations take a day or so to reach the exports) showed the connector's own callsign as the talker, as if the operator were talking. It shows N0CALL with the DMR ID now, and as soon as the talker alias BrandMeister sends has arrived (about a second into the call) the dashboard shows the callsign for that call already; the other modes get it from the next call on, until the database has the ID. The log says `voice from unknown (ID …)`. DMR hotspots get no talker alias for N0CALL
 - **NXDN codec in the transcoder table (4.30.4)**: the NXDN header announced P25, so the admin page showed an NXDN stream on a transcoded module as P25; it shows DMR (AMBE+2) now. The audio was not affected
 - **Version without `-dht` (4.30.3)**: the version reads `4.30.3` in the log, the XML, the XLX directory and the DHT, built with or without OpenDHT; at the start the log says whether DHT is built in. `URFD_DHT=false` builds the Docker image without it, like `DHT = false` in `urfd.mk`
@@ -1022,6 +1022,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.14.1**: tcd's own vocoders are rows of the monitor's vocoder table next to the devices and codec plugins: OP25 (P25, YSF VW) and Codec2 (M17), with their encode and decode counters and the module they work for; so the table shows who does P25 also when it is on OP25 (also in tcdmon, `"builtin": true` in `/api/stats`)
 - **tcd 0.14.0**: P25 through a codec plugin as a choice next to tcd's own OP25 vocoder: `CodecP25 = op25` (the default) or a plugin's name, switchable in the web dashboard and with `POST /api/codec` like D-Star and DMR, written by Save; the plugin API stays `TCD_CODEC_API 2` (`TCD_CODEC_P25`, 11-byte IMBE frames), older plugins keep working. tcd-mbelib-neo-plugin 1.0.3 does P25 with mbelib-neo (PESQ about 0.1 above OP25 on 19 clips, mostly from the encoder)
 - **tcd 0.13.2**: without AMBE devices (codec plugins only) the start no longer logs "No USB serial devices found, is the AMBE device plugged in?"; "No AMBE device: D-Star and DMR in software" says it, and a missing device is still reported as before
 - **tcd 0.13.1**: a lost AMBE device stops tcd again (since 0.12.4 it logged "Lost the AMBE device" and kept running without it), and a device that answers nothing for 3 s counts as lost, so the service restarts tcd without it and a codec plugin or a standby tcd takes over; `OutputGainDMR = -14` in the template, the level of speech on BrandMeister (-18 left DMR/YSF about 4 dB below it)

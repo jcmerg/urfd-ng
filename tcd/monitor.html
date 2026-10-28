@@ -538,9 +538,9 @@ function render() {
   });
   (data.swvocoders || []).forEach(function (x) {
     var act = x.active_module && x.active_module.length > 0;
-    rows += '<tr><td><b>' + esc(x.name) + '</b></td><td>Codec plugin <span class="muted">' + esc(x.codec) + '</span></td>' +
+    rows += '<tr><td><b>' + esc(x.name) + '</b></td><td>' + (x.builtin ? 'Built in' : 'Codec plugin') + ' <span class="muted">' + esc(x.codec) + '</span></td>' +
       '<td>' + (act ? '<span class="state-use">in use</span>' : '<span class="state-ok">ready</span>') + '</td>' +
-      '<td>' + (act ? '<span class="mod-tag">' + esc(x.active_module) + '</span>' : '') + '<span class="muted">' + x.cached_streams + ' active, ' +
+      '<td>' + (act ? '<span class="mod-tag">' + esc(x.active_module) + '</span>' : '') + '<span class="muted">' + (x.builtin ? '' : x.cached_streams + ' active, ') +
       x.encodes + ' encoded, ' + x.decodes + ' decoded' + (x.reencodes || x.reencode_active ? ', ' + x.reencodes + ' re-encoded' : '') + '</span></td>' +
       '<td class="r opt muted">-</td><td class="r muted">-</td></tr>';
   });

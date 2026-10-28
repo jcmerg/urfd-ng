@@ -61,6 +61,7 @@ public:
 	CDvFramePacket  m_dvFrame1;
 
 	uint8_t  m_uiSeqId;
+	bool     m_bDropped = false;	// no DMR ID for the stream, nothing of it goes out
 
 	// talker alias of the stream, one of its LCs per superframe
 	std::vector<std::array<uint8_t, 9>> m_TalkerAlias;

@@ -273,8 +273,24 @@ void CP25Protocol::HandleQueue(void)
 		{
 			// this relies on queue feeder setting valid module id
 			// m_StreamsCache[module] will be created if it doesn't exist
-			m_StreamsCache[module].m_dvHeader = CDvHeaderPacket((const CDvHeaderPacket &)*packet.get());
+			const auto &hdr = (const CDvHeaderPacket &)*packet.get();
+			// a talker without a DMR ID (registered in no ID database) does not go out,
+			// unless FallbackDmrId is set, as on DMR and NXDN
+			m_StreamsCache[module].m_bDropped = (0 == hdr.GetMyCallsign().GetDmrid()) && (0 == m_DefaultId);
+			if ( m_StreamsCache[module].m_bDropped )
+			{
+				static std::set<char> warned;
+				if (warned.insert(module).second)
+					std::cout << "P25: dropping outbound stream from " << hdr.GetMyCallsign() << " on module " << module << " - no DMR ID" << std::endl;
+				continue;
+			}
+			m_StreamsCache[module].m_dvHeader = CDvHeaderPacket(hdr);
 			m_StreamsCache[module].m_iSeqCounter = 0;
+		}
+		// a stream without a DMR ID: its frames and its end as well
+		else if ( m_StreamsCache[module].m_bDropped )
+		{
+			continue;
 		}
 		else
 		{

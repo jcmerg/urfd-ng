@@ -336,18 +336,37 @@ void CController::ApplyGain(int16_t *samples, int count, int32_t num)
 	}
 }
 
-// counts a call of a codec plugin for the monitor
-static void SwStat(const CSoftCodec *sw, char module, std::atomic<uint32_t> SwVocoderStats::*counter)
+// counts a call of a vocoder in software (an entry of g_Stats.sw) for the monitor
+static void Stat(int stats, char module, std::atomic<uint32_t> SwVocoderStats::*counter)
 {
-	if (!sw || sw->stats < 0)
+	if (stats < 0)
 		return;
-	auto &st = g_Stats.sw[sw->stats];
+	auto &st = g_Stats.sw[stats];
 	(st.*counter).fetch_add(1, std::memory_order_relaxed);
 	st.active_module.store(module, std::memory_order_relaxed);
 	st.last_active_ms.store(
 		(uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
 			std::chrono::steady_clock::now().time_since_epoch()).count(),
 		std::memory_order_relaxed);
+}
+
+// counts a call of a codec plugin for the monitor
+static void SwStat(const CSoftCodec *sw, char module, std::atomic<uint32_t> SwVocoderStats::*counter)
+{
+	if (sw)
+		Stat(sw->stats, module, counter);
+}
+
+// a monitor entry for one of tcd's own vocoders, -1 when all are taken
+static int BuiltinStats(const char *name, const char *codec)
+{
+	if (g_Stats.num_sw >= CTcdStats::MAX_SW)
+		return -1;
+	auto &st = g_Stats.sw[g_Stats.num_sw];
+	st.name = name;
+	st.codec = codec;
+	st.builtin = true;
+	return g_Stats.num_sw++;
 }
 
 CController::CController() : keep_running(true), ambe_in_num(256), ambe_out_num(256), dmr_reencode_num(256), outgain_dstar_num(256), outgain_dmr_num(256), outgain_usrp_num(256), outgain_imbe_num(256), outgain_m17_num(256) {}
@@ -722,6 +741,8 @@ bool CController::InitVocoders()
 		{
 			choices->push_back(nullptr);
 			options->push_back(builtin);
+			if (codec == TCD_CODEC_P25)
+				op25_stats = BuiltinStats("OP25", "p25");
 		}
 		for (auto *sw : g_Codecs.All(codec))
 		{
@@ -745,6 +766,7 @@ bool CController::InitVocoders()
 			list += (i ? ", " : "") + (*options)[i] + (int(i) == start ? " (now)" : "");
 		std::cout << label << ": " << list << std::endl;
 	}
+	codec2_stats = BuiltinStats("Codec2", "m17");
 	// the modules beyond the devices' channels go to a plugin
 	for (auto [hw, choices, label] : { std::make_tuple(&dstar_hw_modules, &dstar_choices, "D-Star"), std::make_tuple(&dmr_hw_modules, &dmr_choices, "DMR") })
 	{
@@ -870,15 +892,19 @@ void CController::ReadReflectorThread()
 				const bool reencode = dmr_sw && dmrsf_device &&
 					(g_Stats.config.dmr_gain_mode.load(std::memory_order_relaxed) == 2) &&
 					(m_agcDigital.IsEnabled() || outgain_dmr_num != 256 || dmr_reencode_num != 256);
+				for (int i = 0; i < g_Stats.num_sw; i++)
+				{
+					auto &st = g_Stats.sw[i];
+					uint64_t last = st.last_active_ms.load(std::memory_order_relaxed);
+					if (last > 0 && (now_ms - last) > 2000)
+						st.active_module.store(' ', std::memory_order_relaxed);
+				}
 				for (auto *choices : { &dstar_choices, &dmr_choices, &p25_choices })
 					for (auto *sw : *choices)
 					{
 						if (!sw || sw->stats < 0)
 							continue;
 						auto &st = g_Stats.sw[sw->stats];
-						uint64_t last = st.last_active_ms.load(std::memory_order_relaxed);
-						if (last > 0 && (now_ms - last) > 2000)
-							st.active_module.store(' ', std::memory_order_relaxed);
 						st.cached_streams.store(sw->Streams(), std::memory_order_relaxed);
 						st.reencode_active.store(reencode && sw == dmr_sw, std::memory_order_relaxed);
 					}
@@ -1005,6 +1031,7 @@ void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 		memcpy(data_store[packet->GetModule()], m17data, 8);
 		packet->SetM17Data(m17data);
 	}
+	Stat(codec2_stats, m, &SwVocoderStats::encodes);
 
 	// we might be all done...
 	send_mux.lock();
@@ -1034,6 +1061,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 		{
 			int16_t tmp[160];
 			c2_32[packet->GetModule()]->codec2_decode(tmp, packet->GetM17Data()+8);
+			Stat(codec2_stats, packet->GetModule(), &SwVocoderStats::decodes);
 			g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 			float agc_db; bool agc_gate;
 			m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
@@ -1048,6 +1076,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 		{
 			int16_t tmp[320];
 			c2_16[m]->codec2_decode(tmp, packet->GetM17Data());
+			Stat(codec2_stats, packet->GetModule(), &SwVocoderStats::decodes);
 			g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 			float agc_db; bool agc_gate;
 			m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
@@ -1060,6 +1089,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 		{
 			int16_t tmp[160];
 			c2_32[m]->codec2_decode(tmp, packet->GetM17Data());
+			Stat(codec2_stats, packet->GetModule(), &SwVocoderStats::decodes);
 			g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 			float agc_db; bool agc_gate;
 			m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
@@ -1355,6 +1385,7 @@ void CController::EncodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, c
 	memcpy(pcm, gained, sizeof(pcm));
 	std::lock_guard<std::mutex> lock(p25vocoder_mux);
 	imbe_enc[packet->GetModule()]->encode_4400(pcm, imbe);
+	Stat(op25_stats, packet->GetModule(), &SwVocoderStats::encodes);
 }
 
 void CController::DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm)
@@ -1368,6 +1399,7 @@ void CController::DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, i
 	}
 	std::lock_guard<std::mutex> lock(p25vocoder_mux);
 	imbe_dec[packet->GetModule()]->decode_4400(pcm, (uint8_t *)packet->GetP25Data());
+	Stat(op25_stats, packet->GetModule(), &SwVocoderStats::decodes);
 }
 
 void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
