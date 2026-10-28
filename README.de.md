@@ -422,7 +422,7 @@ NXDN 26363 my.reflector.org 41400    -> AutoLinkModule
 
 Ausgehende Frames tragen die Ziel-ID, mit der der jeweilige Client gepollt hat, pro unterschiedlicher Ziel-ID auf dem Modul getrennt kodiert. Das ist nötig, nicht kosmetisch: `NXDNGateway` verwirft jedes Frame des Reflektors, dessen Ziel-ID nicht zur TG passt, mit der der Hotspot verbunden ist. Ein Client auf der reinen Reflektor-ID und einer auf einer Modul-Ziel-ID brauchen also jeweils eigene Frames.
 
-**NXDN-ID-Auflösung**: Eingehende NXDN-IDs werden über die NXDN-ID-Datenbank in Rufzeichen übersetzt. Fehlt eine ID dort, wird die DMR-ID-Datenbank verwendet (viele Funkamateure nutzen ihre DMR-ID auch als NXDN-ID). Das ermöglicht die Anzeige des Rufzeichens über Betriebsarten hinweg und die Namenssuche für D-Star-Slow-Data. Unbekannte IDs werden verworfen, außer FallbackNxdnId ist gesetzt.
+**NXDN-ID-Auflösung**: Eingehende NXDN-IDs werden über die NXDN-ID-Datenbank in Rufzeichen übersetzt. Fehlt eine ID dort, wird die DMR-ID-Datenbank verwendet (viele Funkamateure nutzen ihre DMR-ID auch als NXDN-ID). Das ermöglicht die Anzeige des Rufzeichens über Betriebsarten hinweg und die Namenssuche für D-Star-Slow-Data. Unbekannte IDs werden verworfen, außer FallbackNxdnId ist gesetzt. Ausgehend geht ein Sprecher ohne NXDN-ID (AllStar, ein D-Star- oder M17-Rufzeichen in keiner ID-Datenbank) mit FallbackNxdnId an NXDN, sonst mit der `ReflectorID` des Reflektors (vor 4.31.0 wurde so ein Strom für NXDN verworfen, während DMR ihn bekam).
 
 **D-Star-Slow-Data**: NXDN-Quellen erscheinen im D-Star-Textfeld als `NXDN RAN<n>`. Betreibernamen werden in der DMR- und der NXDN-Datenbank gesucht.
 

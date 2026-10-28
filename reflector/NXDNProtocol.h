@@ -31,12 +31,11 @@
 class CNXDNStreamCacheItem
 {
 public:
-	CNXDNStreamCacheItem() : m_iSeqCounter(0), m_bDropped(false) {}
+	CNXDNStreamCacheItem() : m_iSeqCounter(0) {}
 
 	CDvHeaderPacket m_dvHeader;
 	CDvFramePacket  m_dvFrames[4];
 	uint32_t        m_iSeqCounter;
-	bool            m_bDropped;		// no NXDN ID for the stream, nothing of it goes out
 };
 
 class CNXDNProtocol : public CProtocol
