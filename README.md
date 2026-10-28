@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.30.5** | tcd 0.14.0 | Dashboard v2.14.2
+**urfd 4.31.0** | tcd 0.14.0 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -931,11 +931,13 @@ Outgoing only, nothing to open: SvxReflector (to the SvxLink server's port, usua
 
 ## YSF
 
-URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users connect via hotspot software (Pi-Star/WPSD) which discovers URF reflectors through the XLX API. No registration at ysfreflector.de is needed. If `EnableDGID = true`, users can switch modules via DG-ID values (10=A, 11=B, ... 35=Z), and the reflector sends each module with its DG-ID, so radios that filter on it hear the module.
+URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users connect via hotspot software (Pi-Star/WPSD) which discovers URF reflectors through the XLX API. No registration at ysfreflector.de is needed. If `EnableDGID = true`, users can switch modules via DG-ID values (10=A, 11=B, ... 35=Z), and the reflector sends each module with its DG-ID, so radios that filter on it hear the module. DN and VW (since 4.31.0) are taken: VW, IMBE as P25's, goes through the transcoder as P25 and to YSF as VW on modules without transcoder.
 
 ## Changes from upstream
 
 ### Protocol Connectors
+- **YSF VW (4.31.0)**: a Yaesu radio in VW (Voice Wide, IMBE full rate) was dropped without a word; urfd takes VW now. Its IMBE is the codec of P25, so the transcoder makes D-Star, DMR/YSF/NXDN, M17 and the others from it as from P25 (with OP25 or a codec plugin, `CodecP25`), P25 listeners get the very frames, and YSF listeners on a transcoded module get DN. On a module without transcoder an IMBE stream (VW or P25) goes to YSF as VW, with the sending radio's id; there the header waits for the first frame, which tells VW from DN. The dashboard still shows the talker as YSF; tcd's monitor calls the codec IMBE (P25, YSF VW). V/D mode 1 and data FR mode are still not taken, now with a log line (`YSF: V/D mode 1 from … not supported`, once a minute per talker). urfd's links to other YSF reflectors (YSF client connector) carry no VW yet. VW speech reaches the other modes about 85 ms later than DN: the first VW frame after the header has 40 ms of speech
+- **NXDN without an NXDN ID (4.31.0)**: a talker without an NXDN ID (AllStar, a D-Star or M17 callsign in no ID database) was dropped for NXDN, while DMR got the call; it goes to NXDN with `FallbackNxdnId`, else with the reflector's `ReflectorID` now
 - **MMDVMClient: unknown DMR IDs (4.30.5)**: a call from a DMR ID the ID database does not have yet (new registrations take a day or so to reach the exports) showed the connector's own callsign as the talker, as if the operator were talking. It shows N0CALL with the DMR ID now, and as soon as the talker alias BrandMeister sends has arrived (about a second into the call) the dashboard shows the callsign for that call already; the other modes get it from the next call on, until the database has the ID. The log says `voice from unknown (ID …)`. DMR hotspots get no talker alias for N0CALL
 - **NXDN codec in the transcoder table (4.30.4)**: the NXDN header announced P25, so the admin page showed an NXDN stream on a transcoded module as P25; it shows DMR (AMBE+2) now. The audio was not affected
 - **Version without `-dht` (4.30.3)**: the version reads `4.30.3` in the log, the XML, the XLX directory and the DHT, built with or without OpenDHT; at the start the log says whether DHT is built in. `URFD_DHT=false` builds the Docker image without it, like `DHT = false` in `urfd.mk`

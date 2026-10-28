@@ -716,7 +716,7 @@ bool CController::InitVocoders()
 	for (auto [codec, builtin, choices, options, choice, name, label] : {
 			std::make_tuple(TCD_CODEC_DSTAR, dstar_device ? "dvsi" : "", &dstar_choices, &g_Stats.dstar_options, &g_Stats.config.codec_dstar, dstar_name, "D-Star"),
 			std::make_tuple(TCD_CODEC_DMR, dmrsf_device ? "dvsi" : "", &dmr_choices, &g_Stats.dmr_options, &g_Stats.config.codec_dmr, dmr_name, "DMR"),
-			std::make_tuple(TCD_CODEC_P25, "op25", &p25_choices, &g_Stats.p25_options, &g_Stats.config.codec_p25, p25_name, "P25") })
+			std::make_tuple(TCD_CODEC_P25, "op25", &p25_choices, &g_Stats.p25_options, &g_Stats.config.codec_p25, p25_name, "IMBE (P25, YSF VW)") })
 	{
 		if (*builtin)
 		{

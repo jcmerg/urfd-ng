@@ -76,7 +76,7 @@ void CMonitorServer::Stop()
 // HTTP + WebSocket thread (libwebsockets)
 
 static const char *s_codec_names[] = {
-	"none", "D-Star", "DMR/YSF", "Codec2 1600", "Codec2 3200", "P25", "USRP", "SVX"
+	"none", "D-Star", "DMR/YSF", "Codec2 1600", "Codec2 3200", "IMBE (P25, YSF VW)", "USRP", "SVX"
 };
 
 static const char *codec_name(uint8_t c)
@@ -361,7 +361,7 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 		else
 		{
 			choice->store(found);
-			std::cout << "Monitor: new " << (codec == "dstar" ? "D-Star" : codec == "dmr" ? "DMR" : "P25") << " streams go to " << use << std::endl;
+			std::cout << "Monitor: new " << (codec == "dstar" ? "D-Star" : codec == "dmr" ? "DMR" : "IMBE (P25, YSF VW)") << " streams go to " << use << std::endl;
 			reply = "{\"status\":\"ok\"}";
 			return 200;
 		}

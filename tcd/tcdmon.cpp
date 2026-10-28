@@ -633,7 +633,7 @@ int main(int argc, char *argv[])
 			{
 				attron(COLOR_PAIR(5));
 				mvprintw(row++, 2, "Vocoder for new streams: D-Star %s, DMR %s%s%s", ds.empty() ? "-" : ds.c_str(), dm.empty() ? "-" : dm.c_str(),
-				         p25 ? ", P25 " : "", p25 ? p2.c_str() : "");
+				         p25 ? ", IMBE (P25, YSF VW) " : "", p25 ? p2.c_str() : "");
 				attroff(COLOR_PAIR(5));
 			}
 		}

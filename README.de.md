@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.30.5** | tcd 0.14.0 | Dashboard v2.14.2
+**urfd 4.31.0** | tcd 0.14.0 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -909,11 +909,13 @@ Nur ausgehend, nichts zu öffnen: SvxReflector (zum Port des SvxLink-Servers, me
 
 ## YSF
 
-URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). YSF-Nutzer verbinden sich über Hotspot-Software (Pi-Star/WPSD), die URF-Reflektoren über die XLX-API findet. Eine Registrierung bei ysfreflector.de ist nicht nötig. Mit `EnableDGID = true` können Nutzer das Modul über DG-ID-Werte wechseln (10=A, 11=B, ... 35=Z), und der Reflektor sendet jedes Modul mit seiner DG-ID, sodass Funkgeräte, die danach filtern, das Modul hören.
+URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). YSF-Nutzer verbinden sich über Hotspot-Software (Pi-Star/WPSD), die URF-Reflektoren über die XLX-API findet. Eine Registrierung bei ysfreflector.de ist nicht nötig. Mit `EnableDGID = true` können Nutzer das Modul über DG-ID-Werte wechseln (10=A, 11=B, ... 35=Z), und der Reflektor sendet jedes Modul mit seiner DG-ID, sodass Funkgeräte, die danach filtern, das Modul hören. DN und VW (seit 4.31.0) werden angenommen: VW, IMBE wie bei P25, geht als P25 durch den Transcoder und auf Modulen ohne Transcoder als VW an YSF.
 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **YSF VW (4.31.0)**: Ein Yaesu-Gerät im VW-Modus (Voice Wide, IMBE-Vollrate) wurde kommentarlos verworfen; urfd nimmt VW jetzt an. Sein IMBE ist der Codec von P25, deshalb macht der Transcoder daraus D-Star, DMR/YSF/NXDN, M17 und die anderen wie aus P25 (mit OP25 oder einem Codec-Plugin, `CodecP25`), P25-Hörer bekommen genau diese Frames, YSF-Hörer auf einem transcodierten Modul DN. Auf einem Modul ohne Transcoder geht ein IMBE-Strom (VW oder P25) als VW an YSF, mit der Gerätenummer des sendenden Funkgeräts; dort wartet der Kopf auf den ersten Frame, der VW von DN unterscheidet. Das Dashboard zeigt den Sprecher weiter als YSF; der Monitor von tcd nennt den Codec IMBE (P25, YSF VW). V/D Mode 1 und Data FR werden weiterhin nicht angenommen, jetzt mit einer Logzeile (`YSF: V/D mode 1 from … not supported`, einmal pro Minute und Sprecher). Die Verbindungen von urfd zu anderen YSF-Reflektoren (YSF-Client-Anbindung) tragen noch kein VW. VW-Sprache kommt bei den anderen Betriebsarten etwa 85 ms später an als DN: Der erste VW-Frame nach dem Kopf trägt 40 ms Sprache
+- **NXDN ohne NXDN-ID (4.31.0)**: Ein Sprecher ohne NXDN-ID (AllStar, ein D-Star- oder M17-Rufzeichen in keiner ID-Datenbank) wurde für NXDN verworfen, während DMR den Ruf bekam; er geht jetzt mit `FallbackNxdnId` an NXDN, sonst mit der `ReflectorID` des Reflektors
 - **MMDVMClient: unbekannte DMR-IDs (4.30.5)**: Ein Ruf von einer DMR-ID, die die ID-Datenbank noch nicht hat (neue Registrierungen brauchen etwa einen Tag bis in die Exporte), zeigte das Rufzeichen des Connectors als Sprecher, als würde der Betreiber selbst senden. Jetzt steht dort N0CALL mit der DMR-ID, und sobald der Talker Alias, den BrandMeister mitschickt, angekommen ist (etwa eine Sekunde nach Beginn), zeigt das Dashboard schon in diesem Durchgang das Rufzeichen; die anderen Betriebsarten bekommen es ab dem nächsten Durchgang, bis die Datenbank die ID hat. Im Log steht `voice from unknown (ID …)`. DMR-Hotspots bekommen für N0CALL keinen Talker Alias
 - **NXDN-Codec in der Transcoder-Tabelle (4.30.4)**: Der NXDN-Header meldete P25, deshalb zeigte die Admin-Seite einen NXDN-Stream auf einem transcodierten Modul als P25; jetzt steht dort DMR (AMBE+2). Der Ton war nicht betroffen
 - **Version ohne `-dht` (4.30.3)**: Die Version heißt `4.30.3` im Log, im XML, im XLX-Verzeichnis und im DHT, mit oder ohne OpenDHT gebaut; beim Start steht im Log, ob DHT eingebaut ist. `URFD_DHT=false` baut das Docker-Image ohne, wie `DHT = false` in `urfd.mk`

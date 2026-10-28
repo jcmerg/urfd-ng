@@ -134,6 +134,8 @@ CodecDMR    = foo                         # dasselbe für DMR/YSF
 CodecP25    = op25                        # P25: op25 (der eigene von tcd, Standard) oder der Name eines Plugins
 ```
 
+P25 heißt hier der IMBE-Codec: urfd 4.31.0 gibt YSF VW (IMBE) als P25 an tcd, deshalb dekodiert `CodecP25` auch VW (tcd kodiert nie VW: YSF bekommt von tcd DN, VW läuft nur auf Modulen ohne Transcoder durch urfd hindurch); der Monitor nennt den Codec IMBE (P25, YSF VW).
+
 - **Welcher Vocoder**: Ohne `CodecDStar`/`CodecDMR` haben die Geräte Vorrang, ein Plugin übernimmt nur, was kein Gerät macht. Steht dort der Name eines Plugins, läuft dieser Codec von Anfang an in Software, auch wenn ein Gerät ihn könnte; bei nur einem Gerät übernimmt das Gerät dann den anderen Codec. P25 läuft für alle Module über den eigenen OP25-Vocoder von tcd, außer `CodecP25` nennt ein Plugin, das P25 kann; nennt es ein Plugin, das nicht geladen ist oder kein P25 kann, startet tcd nicht.
 - **Mehr Module als Kanäle**: Die Geräte übernehmen die ersten Module aus `Modules`, so viele, wie sie Kanäle haben (Mischbetrieb 2, zwei DV3003 3, ...); die übrigen Module gehen immer an ein Plugin. Mit DV3000 + DV3003 und `Modules = FSABC` werden F und S auf den Geräten transcodiert, A, B und C in Software. Ohne Plugin für den Rest startet tcd nicht.
 - **Umschalten zur Laufzeit**: Das Web-Dashboard (Einstellungen, „Vocoder“) und `POST /api/codec` mit `{"codec": "dstar", "use": "foo"}` (`dstar`, `dmr` oder `p25`) wählen den Vocoder für die Streams, die ab dann beginnen; eine laufende Aussendung behält ihren Vocoder. Angeboten wird alles, was beim Start geladen wurde: ein Gerät für den Codec (für P25 `op25`) und jedes Plugin, das ihn kann. „Speichern“ schreibt die Wahl in die `tcd.ini`.
