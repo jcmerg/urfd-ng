@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.31.0** | tcd 0.14.0 | Dashboard v2.14.2
+**urfd 4.31.0** | tcd 0.14.1 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -1000,6 +1000,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.14.1**: Die eigenen Vocoder von tcd sind Zeilen der Vocoder-Tabelle im Monitor neben den Geräten und Codec-Plugins: OP25 (P25, YSF VW) und Codec2 (M17), mit ihren Zählern für Kodieren und Dekodieren und dem Modul, für das sie arbeiten; die Tabelle zeigt also auch, wer P25 macht, wenn es auf OP25 steht (auch in tcdmon, `"builtin": true` in `/api/stats`)
 - **tcd 0.14.0**: P25 über ein Codec-Plugin als Wahl neben dem eigenen OP25-Vocoder von tcd: `CodecP25 = op25` (Standard) oder der Name eines Plugins, umschaltbar im Web-Dashboard und mit `POST /api/codec` wie D-Star und DMR, „Speichern“ schreibt es; die Plugin-API bleibt `TCD_CODEC_API 2` (`TCD_CODEC_P25`, 11-Byte-IMBE-Frames), ältere Plugins laufen weiter. tcd-mbelib-neo-plugin 1.0.3 macht P25 mit mbelib-neo (PESQ etwa 0,1 über OP25 auf 19 Clips, vor allem vom Encoder)
 - **tcd 0.13.2**: Ohne AMBE-Geräte (nur Codec-Plugins) meldet der Start nicht mehr „No USB serial devices found, is the AMBE device plugged in?“; das sagt „No AMBE device: D-Star and DMR in software“, und ein fehlendes Gerät wird weiter gemeldet wie bisher
 - **tcd 0.13.1**: ein verlorenes AMBE-Gerät beendet tcd wieder (seit 0.12.4 meldete er "Lost the AMBE device" und lief ohne es weiter), und ein Gerät, das 3 s lang nichts beantwortet, gilt als verloren: der Dienst startet tcd ohne es neu, und ein Codec-Plugin oder ein Standby-tcd übernimmt; `OutputGainDMR = -14` in der Vorlage, der Pegel der Sprache bei BrandMeister (-18 ließ DMR/YSF rund 4 dB darunter)

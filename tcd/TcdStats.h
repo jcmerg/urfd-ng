@@ -60,10 +60,11 @@ struct DeviceStats
 	std::atomic<uint64_t> ch_last_ms[MAX_CHANNELS] = {0, 0, 0};
 };
 
-// a codec of a codec plugin (CodecPlugin.h)
+// a codec of a codec plugin (CodecPlugin.h), or one of tcd's own vocoders (OP25, Codec2)
 struct SwVocoderStats
 {
-	std::string name, codec;                  // the plugin's and "dstar"/"dmr"/"p25", set once before the monitor starts
+	std::string name, codec;                  // the plugin's and "dstar"/"dmr"/"p25" ("m17" for Codec2), set once before the monitor starts
+	bool builtin{false};                      // tcd's own vocoder, not a plugin
 	std::atomic<bool> reencode_active{false}; // re-encode triggered by AGC/OutputGainDMR
 	std::atomic<uint32_t> encodes{0};        // total encode calls
 	std::atomic<uint32_t> decodes{0};        // total decode calls
@@ -89,7 +90,7 @@ public:
 	ModuleStats    modules[MAX_MODULES];    // indexed by module - 'A'
 	DeviceStats    devices[MAX_DEVICES];
 	static constexpr int MAX_SW = 8;
-	SwVocoderStats sw[MAX_SW];              // the codecs of the codec plugins
+	SwVocoderStats sw[MAX_SW];              // the codecs of the codec plugins and tcd's own vocoders
 	int            num_sw{0};
 	// what may do D-Star and DMR: "dvsi" (a device) or a codec plugin's name; P25:
 	// "op25" (tcd's own) or a plugin's name. Set once at start;

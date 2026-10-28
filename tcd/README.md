@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.14.0** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.14.1** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF/NXDN (AMBE2+), and software vocoders for M17 (Codec2) and P25 (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF/NXDN in software, and since 0.14.0 P25 as a choice next to the built-in IMBE vocoder. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -346,7 +346,7 @@ The gain limits are asymmetric on purpose: attenuating is safe, amplifying also 
 - signal path of the active stream with the level at each stage
 - AGC and gain controls that apply immediately, and a button to save them to `tcd.ini`
 - DVSI devices: serial, type, role, channels in use and their modules, buffer depth
-- codec plugins: their codec, counters and streams, and which vocoder new D-Star, DMR and P25 streams get (switchable, see [Codec plugins](#codec-plugins))
+- codec plugins: their codec, counters and streams, and which vocoder new D-Star, DMR and P25 streams get (switchable, see [Codec plugins](#codec-plugins)); tcd's own vocoders OP25 (P25, YSF VW) and Codec2 (M17) with their counters as "Built in" (since 0.14.1)
 - reflector connection and packet counters; a standby module shows "standby" while another tcd has it and "taken over" while this tcd has it
 - behind a reverse proxy under a path (since 0.11.0): the page uses relative paths, so `https://<host>/tcd/` works (see [tcd in Docker](#tcd-in-docker)); behind a proxy on the same machine the failed-login pause counts per address in the last `X-Forwarded-For` entry, and the session cookie is `Secure` when the proxy sends `X-Forwarded-Proto: https`; tcdmon shows standby modules too
 
@@ -359,7 +359,7 @@ tcdmon                      # this machine, port 8081
 tcdmon 192.0.2.20 8081      # another machine
 ```
 
-Shows level bars, signal flow, AGC state, the DVSI channels with their modules, the codec plugins and the output gains. `q` quits.
+Shows level bars, signal flow, AGC state, the DVSI channels with their modules, the codec plugins, tcd's own vocoders and the output gains. `q` quits.
 
 ### Stats CSV and agc-analyze
 

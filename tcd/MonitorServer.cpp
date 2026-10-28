@@ -139,7 +139,7 @@ std::string CMonitorServer::BuildStatsJson()
 		js << "]}";
 
 	}
-	// the codecs in software, from codec plugins
+	// the codecs in software: of codec plugins and tcd's own (OP25, Codec2)
 	js << "],\"swvocoders\":[";
 	{
 		bool first = true;
@@ -149,6 +149,7 @@ std::string CMonitorServer::BuildStatsJson()
 			const char mod = sw->active_module.load(std::memory_order_relaxed);
 			js << (first ? "" : ",") << "{\"codec\":\"" << sw->codec << "\""
 			   << ",\"name\":\"" << sw->name << "\""
+			   << ",\"builtin\":" << (sw->builtin ? "true" : "false")
 			   << ",\"reencode_active\":" << (sw->reencode_active.load(std::memory_order_relaxed) ? "true" : "false")
 			   << ",\"encodes\":" << sw->encodes.load(std::memory_order_relaxed)
 			   << ",\"decodes\":" << sw->decodes.load(std::memory_order_relaxed)

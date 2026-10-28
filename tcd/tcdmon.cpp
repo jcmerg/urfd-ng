@@ -588,13 +588,14 @@ int main(int argc, char *argv[])
 			row++;
 		}
 
-		// the codecs of codec plugins
+		// the codecs of codec plugins and tcd's own vocoders
 		for (const auto &sw_json : json_arr_items(json_arr(last_json, "swvocoders")))
 		{
 			std::string name = json_str(sw_json, "name");
 			std::string codec = json_str(sw_json, "codec");
 			std::string active_mod = json_str(sw_json, "active_module");
 			bool active = !active_mod.empty();
+			bool builtin = json_bool(sw_json, "builtin");
 			bool reencode = json_bool(sw_json, "reencode_active");
 			int cached = json_int(sw_json, "cached_streams");
 			int enc = json_int(sw_json, "encodes");
@@ -606,7 +607,10 @@ int main(int argc, char *argv[])
 			mvprintw(row, 2, "%s", active ? ">>" : "OK");
 			attroff(COLOR_PAIR(1) | COLOR_PAIR(7) | A_BOLD);
 
-			printw("  %s (codec plugin) [%s]  active:%d", name.c_str(), codec.c_str(), cached);
+			if (builtin)
+				printw("  %s (built in) [%s]", name.c_str(), codec.c_str());
+			else
+				printw("  %s (codec plugin) [%s]  active:%d", name.c_str(), codec.c_str(), cached);
 			if (codec == "dmr")
 				printw("  re-enc:%s", reencode ? "ON" : "off");
 			if (active)

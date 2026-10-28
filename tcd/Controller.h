@@ -97,6 +97,8 @@ protected:
 	void PurgePinned(void);
 	// the DMR plugin for DmrGainMode = reencode, nullptr without one
 	class CSoftCodec *dmr_sw = nullptr;
+	// the monitor's entries of tcd's own vocoders, -1 without one
+	int op25_stats = -1, codec2_stats = -1;
 	int32_t dstar_in_num = 256, dstar_out_num = 256;	// DStarGainIn/Out for a D-Star plugin
 	int32_t ambe_in_num, ambe_out_num, dmr_reencode_num;
 	int32_t outgain_dstar_num, outgain_dmr_num, outgain_usrp_num, outgain_imbe_num, outgain_m17_num;

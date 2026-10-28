@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.31.0** | tcd 0.14.0 | Dashboard v2.14.2
+**urfd 4.31.0** | tcd 0.14.1 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1022,6 +1022,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.14.1**: tcd's own vocoders are rows of the monitor's vocoder table next to the devices and codec plugins: OP25 (P25, YSF VW) and Codec2 (M17), with their encode and decode counters and the module they work for; so the table shows who does P25 also when it is on OP25 (also in tcdmon, `"builtin": true` in `/api/stats`)
 - **tcd 0.14.0**: P25 through a codec plugin as a choice next to tcd's own OP25 vocoder: `CodecP25 = op25` (the default) or a plugin's name, switchable in the web dashboard and with `POST /api/codec` like D-Star and DMR, written by Save; the plugin API stays `TCD_CODEC_API 2` (`TCD_CODEC_P25`, 11-byte IMBE frames), older plugins keep working. tcd-mbelib-neo-plugin 1.0.3 does P25 with mbelib-neo (PESQ about 0.1 above OP25 on 19 clips, mostly from the encoder)
 - **tcd 0.13.2**: without AMBE devices (codec plugins only) the start no longer logs "No USB serial devices found, is the AMBE device plugged in?"; "No AMBE device: D-Star and DMR in software" says it, and a missing device is still reported as before
 - **tcd 0.13.1**: a lost AMBE device stops tcd again (since 0.12.4 it logged "Lost the AMBE device" and kept running without it), and a device that answers nothing for 3 s counts as lost, so the service restarts tcd without it and a codec plugin or a standby tcd takes over; `OutputGainDMR = -14` in the template, the level of speech on BrandMeister (-18 left DMR/YSF about 4 dB below it)
