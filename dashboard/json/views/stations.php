@@ -26,7 +26,7 @@ for ($i=0;$i<$Reflector->StationCount();$i++) {
         'lastheard'      => gmdate('Y-m-d\TH:i:sp', $Reflector->Stations[$i]->GetLastHeardTime())
     );
 
-    // position reported by M17 GNSS or D-Star DPRS, rounded to its locator, only present when known
+    // position reported by M17 GNSS, D-Star DPRS or YSF GPS, rounded to its locator, only present when known
     if ($Reflector->Stations[$i]->GetLocator() != '') {
         $payload['stations'][$i]['locator']   = $Reflector->Stations[$i]->GetLocator();
         $payload['stations'][$i]['latitude']  = (float)$Reflector->Stations[$i]->GetLatitude();

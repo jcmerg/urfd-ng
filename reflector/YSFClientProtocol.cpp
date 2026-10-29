@@ -564,6 +564,8 @@ bool CYsfClientProtocol::IsValidDvHeaderPacket(const CIp &Ip, const CYSFFICH &Fi
 			rpt2.SetCSModule(' ');
 
 			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, uiStreamId, Fich.getFN()));
+			// a new transmission: its position (GPS in the data channel) is read again
+			m_Gps[uiStreamId].Reset();
 		}
 
 		uint8_t uiAmbe[9];
@@ -601,6 +603,7 @@ bool CYsfClientProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fic
 			CCallsign rpt2(m_ClientCallsign);
 			rpt2.SetCSModule(' ');
 			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, uiStreamId, Fich.getFN()));
+			m_Gps[uiStreamId].Reset();
 		}
 
 		// decode 5 AMBE frames
@@ -615,6 +618,18 @@ bool CYsfClientProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fic
 			if (sz[i] == '/' || sz[i] == '\\' || sz[i] == '-' || sz[i] == ' ')
 				sz[i] = 0;
 		CCallsign csMY((const char *)sz);
+
+		// the position in the data channel (DT1/DT2 of DN) goes to the last heard list, as on the YSF server
+		{
+			CYSFPayload payload;
+			uint8_t dt[20];
+			double lat, lon;
+			if ( payload.readVDMode2Data((unsigned char *)&(Buffer.data()[35]), dt) && m_Gps[uiStreamId].AddVD2(Fich.getFN(), Fich.getFT(), dt, lat, lon) )
+			{
+				g_Reflector.GetUsers()->Location(csMY, lat, lon);
+				g_Reflector.ReleaseUsers();
+			}
+		}
 
 		uint8_t fid = Buffer.data()[34];
 		frames[0] = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(ambe0, uiStreamId, Fich.getFN(), 0, fid, csMY, false));

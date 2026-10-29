@@ -31,7 +31,7 @@ class Station {
       $this->CallsignOnly = $tmp[0];
       $this->OnModule     = $OnModule;
       $this->Protocol     = trim($Protocol);
-      // position reported by M17 GNSS META, empty if none
+      // position reported by M17 GNSS META, D-Star DPRS or YSF GPS, empty if none
       $this->Locator      = trim($Locator);
       $this->Latitude     = trim($Latitude);
       $this->Longitude    = trim($Longitude);

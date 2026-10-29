@@ -15,6 +15,7 @@
 #include "YSFFich.h"
 #include "YSFPayload.h"
 #include "YSFUtils.h"
+#include "YSFGps.h"
 
 // YSF client protocol constants (aligned with g4klx YSFGateway)
 #define YSFCLI_POLL_PERIOD          5   // seconds between polls
@@ -106,6 +107,9 @@ private:
 
 	// outbound stream cache per local module
 	std::unordered_map<char, SYsfClientStreamCache> m_StreamsCache;
+
+	// the positions in the data channel, by stream id (one per remote reflector)
+	std::unordered_map<uint32_t, CYsfGps> m_Gps;
 
 	// reconnect flag
 	std::atomic<bool> m_ReconnectRequested{false};

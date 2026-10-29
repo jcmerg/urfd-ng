@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.31.0** | tcd 0.14.1 | Dashboard v2.14.2
+**urfd 4.31.1** | tcd 0.14.1 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -936,6 +936,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **YSF positions from linked YSF reflectors (4.31.1)**: the YSF client connector (urfd's links to other YSF reflectors) reads the GPS position in the DN data channel too, so stations talking on a linked YSF reflector get their locator in the last heard list, as on urfd's own YSF port. A transmission picked up without its header (late entry) is read again on both, it kept the previous transmission's state before and showed no position
 - **No DMR ID, no DMR and P25 (4.31.0)**: a talker without a DMR ID (registered in no ID database: AllStar, a D-Star or M17 callsign) went to the hotspots on `[MMDVM]`, to DMR+ and to P25 with source ID 0; now it is dropped for them unless `[MMDVM] FallbackDmrId` is set, as MMDVMClient and NXDN already do. So only talkers with an ID reach DMR, NXDN and P25. The log says `dropping outbound stream from … - no DMR ID`
 - **YSF positions (4.31.0)**: the GPS position Yaesu radios send in the data channel (DN: DT1/DT2, V/D mode 1: DT1 to DT5; short and long form, checked against its sum, as YSFGateway reads it) shows up as locator in the last heard list, the XML and `/json/stations`, like D-Star and M17 positions, published as the middle of its locator field
 - **YSF VW (4.31.0)**: a Yaesu radio in VW (Voice Wide, IMBE full rate) was dropped without a word; urfd takes VW now. Its IMBE is the codec of P25, so the transcoder makes D-Star, DMR/YSF/NXDN, M17 and the others from it as from P25 (with OP25 or a codec plugin, `CodecP25`), P25 listeners get the very frames, and YSF listeners on a transcoded module get DN. On a module without transcoder an IMBE stream (VW or P25) goes to YSF as VW (its header says IMBE), with the sending radio's id. The dashboard still shows the talker as YSF; tcd's monitor calls the codec IMBE (P25, YSF VW). V/D mode 1 (DN with twice the data and the AMBE+2 frames as DMR has them, without DN's extra voice FEC) is taken like DN; data FR mode is not voice (Wires-X uses it). urfd's links to other YSF reflectors (YSF client connector) carry no VW yet. VW speech reaches the other modes about 85 ms later than DN: the first VW frame after the header has 40 ms of speech

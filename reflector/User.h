@@ -74,7 +74,7 @@ protected:
 	CCallsign   m_Xlx;
 	time_t      m_LastHeardTime;
 	std::string m_Protocol;
-	// from M17 GNSS META, empty if unknown
+	// from M17 GNSS META, D-Star DPRS or YSF GPS, empty if unknown
 	std::string m_Locator;
 	double      m_Latitude = 0.0;
 	double      m_Longitude = 0.0;
