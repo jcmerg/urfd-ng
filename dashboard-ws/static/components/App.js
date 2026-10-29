@@ -235,7 +235,7 @@ export default {
         state.lastHeard = state.lastHeard.filter((item) => !(item.callsign === entry.replaces && item.on_module === entry.on_module));
       }
       const index = state.lastHeard.findIndex((item) => item.callsign === entry.callsign && item.on_module === entry.on_module);
-      // urfd learns a locator only from M17 GNSS data: keep a known one
+      // urfd learns a locator only from position data (M17 GNSS, D-Star DPRS, YSF GPS): keep a known one
       if (!nextEntry.locator && index >= 0) nextEntry.locator = state.lastHeard[index].locator || '';
       if (index >= 0) {
         state.lastHeard[index] = { ...state.lastHeard[index], ...nextEntry };

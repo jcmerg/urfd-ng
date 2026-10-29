@@ -74,7 +74,7 @@ static void DispatchStationEvent(const std::string &eventType, const CUser &hear
 void CUsers::StationStarted(const CCallsign &my, const CCallsign &rpt1, const CCallsign &rpt2, const CCallsign &xlx, const std::string &proto)
 {
 	CUser heard(my, rpt1, rpt2, xlx, proto);
-	// the locator is known from an earlier transmission (M17 GNSS), if at all
+	// the locator is known from an earlier transmission (M17 GNSS, D-Star DPRS, YSF GPS), if at all
 	for (const auto &user : m_Users)
 	{
 		if (user.GetCallsign() == heard.GetCallsign() && !user.GetLocator().empty())

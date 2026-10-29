@@ -622,6 +622,8 @@ bool CYsfProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fich, con
 			CCallsign rpt2 = m_ReflectorCallsign;
 			rpt2.SetCSModule(' ');
 			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, uiStreamId, Fich.getFN()));
+			// late entry is a new transmission too: its position is read again
+			GpsOf(uiStreamId).Reset();
 			if ( Fich.getDT() == YSF_DT_VOICE_FR_MODE )
 				header->SetCodecIn(ECodecType::p25);	// VW: IMBE, the codec of P25
 

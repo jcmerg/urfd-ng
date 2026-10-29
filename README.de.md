@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.31.0** | tcd 0.14.1 | Dashboard v2.14.2
+**urfd 4.31.1** | tcd 0.14.1 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -914,6 +914,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **YSF-Positionen von verbundenen YSF-Reflektoren (4.31.1)**: Die YSF-Client-Anbindung (die Verbindungen von urfd zu anderen YSF-Reflektoren) liest die GPS-Position im DN-Datenkanal ebenfalls, sodass Stationen auf einem verbundenen YSF-Reflektor ihren Locator in der Liste der zuletzt Gehörten bekommen, wie am eigenen YSF-Port von urfd. Ein Durchgang, der ohne seinen Kopf aufgenommen wird (Late Entry), wird bei beiden neu gelesen; vorher behielt er den Zustand des vorigen Durchgangs und zeigte keine Position
 - **Ohne DMR-ID kein DMR und P25 (4.31.0)**: Ein Sprecher ohne DMR-ID (in keiner ID-Datenbank registriert: AllStar, ein D-Star- oder M17-Rufzeichen) ging an die Hotspots an `[MMDVM]`, an DMR+ und an P25 mit Quell-ID 0; jetzt wird er für sie verworfen, außer `[MMDVM] FallbackDmrId` ist gesetzt, wie es MMDVMClient und NXDN schon tun. Nur Sprecher mit ID erreichen also DMR, NXDN und P25. Im Log steht `dropping outbound stream from … - no DMR ID`
 - **YSF-Positionen (4.31.0)**: Die GPS-Position, die Yaesu-Geräte im Datenkanal senden (DN: DT1/DT2, V/D Mode 1: DT1 bis DT5; Kurz- und Langform, gegen ihre Prüfsumme geprüft, wie YSFGateway sie liest), erscheint als Locator in der Liste der zuletzt Gehörten, im XML und in `/json/stations`, wie D-Star- und M17-Positionen, veröffentlicht als Mitte ihres Locator-Feldes
 - **YSF VW (4.31.0)**: Ein Yaesu-Gerät im VW-Modus (Voice Wide, IMBE-Vollrate) wurde kommentarlos verworfen; urfd nimmt VW jetzt an. Sein IMBE ist der Codec von P25, deshalb macht der Transcoder daraus D-Star, DMR/YSF/NXDN, M17 und die anderen wie aus P25 (mit OP25 oder einem Codec-Plugin, `CodecP25`), P25-Hörer bekommen genau diese Frames, YSF-Hörer auf einem transcodierten Modul DN. Auf einem Modul ohne Transcoder geht ein IMBE-Strom (VW oder P25) als VW an YSF (sein Kopf sagt IMBE), mit der Gerätenummer des sendenden Funkgeräts. Das Dashboard zeigt den Sprecher weiter als YSF; der Monitor von tcd nennt den Codec IMBE (P25, YSF VW). V/D Mode 1 (DN mit doppeltem Datenanteil und den AMBE+2-Frames im DMR-Format, ohne den zusätzlichen Sprach-Fehlerschutz von DN) wird wie DN angenommen; Data FR ist keine Sprache (Wires-X nutzt es). Die Verbindungen von urfd zu anderen YSF-Reflektoren (YSF-Client-Anbindung) tragen noch kein VW. VW-Sprache kommt bei den anderen Betriebsarten etwa 85 ms später an als DN: Der erste VW-Frame nach dem Kopf trägt 40 ms Sprache

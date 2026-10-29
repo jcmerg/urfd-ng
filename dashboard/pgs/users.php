@@ -152,7 +152,7 @@ for ($i = 0; $i < $count; $i++) {
     echo '<td class="meta">'.h(trim($proto.($via != '' ? ' via '.$via : ''))).'</td>';
     echo '<td class="opt">';
     if ($st->GetLocator() != '') {
-        // position sent along with the transmission (M17 GNSS, D-Star DPRS), rounded to its locator
+        // position sent along with the transmission (M17 GNSS, D-Star DPRS, YSF GPS), rounded to its locator
         $lat = (float)$st->GetLatitude();
         $lon = (float)$st->GetLongitude();
         echo '<a href="https://www.openstreetmap.org/?mlat='.$lat.'&amp;mlon='.$lon.'#map=12/'.$lat.'/'.$lon.'" target="_blank" rel="noopener" title="Position sent with the transmission">'.h($st->GetLocator()).'</a>';
