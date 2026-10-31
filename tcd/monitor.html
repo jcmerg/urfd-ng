@@ -541,7 +541,10 @@ function render() {
     rows += '<tr><td><b>' + esc(x.name) + '</b></td><td>' + (x.builtin ? 'Built in' : 'Codec plugin') + ' <span class="muted">' + esc(x.codec) + '</span></td>' +
       '<td>' + (act ? '<span class="state-use">in use</span>' : '<span class="state-ok">ready</span>') + '</td>' +
       '<td>' + (act ? '<span class="mod-tag">' + esc(x.active_module) + '</span>' : '') + '<span class="muted">' + (x.builtin ? '' : x.cached_streams + ' active, ') +
-      x.encodes + ' encoded, ' + x.decodes + ' decoded' + (x.reencodes || x.reencode_active ? ', ' + x.reencodes + ' re-encoded' : '') + '</span></td>' +
+      x.encodes + ' encoded, ' + x.decodes + ' decoded' + (x.reencodes || x.reencode_active ? ', ' + x.reencodes + ' re-encoded' : '') +
+      // how the decoded frames came out (plugins of codec API 3 report it)
+      (x.error_frames ? ', ' + x.error_frames + ' with bit errors' : '') + (x.repeats ? ', ' + x.repeats + ' repeated' : '') +
+      (x.mutes ? ', ' + x.mutes + ' muted' : '') + '</span></td>' +
       '<td class="r opt muted">-</td><td class="r muted">-</td></tr>';
   });
   $('devices').innerHTML = rows || '<tr><td colspan="6" class="empty">No vocoder found. Check the DeviceSerial lines in tcd.ini.</td></tr>';

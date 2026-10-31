@@ -105,4 +105,13 @@ protected:
 	std::atomic<bool> m_bEcho { false };
 	uint32_t            m_uiSourceTG;
 	CDStarDprs          m_Dprs;
+
+private:
+	// lost frames: the position the next frame should have in its protocol's
+	// frame cycle (-1: unknown) and how many frames this stream got filled in
+	int                 m_iNextWireIdx { -1 };
+	uint32_t            m_uiLostFrames { 0 };
+
+	void PushFrame(std::unique_ptr<CPacket> packet);
+	bool FillLostFrames(const CPacket &next, double since);	// false: drop next, it came late or again
 };

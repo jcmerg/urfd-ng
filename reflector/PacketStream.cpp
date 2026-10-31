@@ -63,6 +63,8 @@ bool CPacketStream::OpenPacketStream(const CDvHeaderPacket &DvHeader, std::share
 		m_bOpen = true;
 		m_uiPacketCntr = 0;
 		m_uiSourceTG = 0;
+		m_iNextWireIdx = -1;
+		m_uiLostFrames = 0;
 		{
 			std::lock_guard<std::mutex> lock(m_UserMutex);
 			m_DvHeader = DvHeader;
@@ -88,15 +90,108 @@ void CPacketStream::ClosePacketStream(void)
 	m_OwnerClient.reset();
 	if (m_Transcode)
 		m_CodecStream->ReportStats();
+	if (m_uiLostFrames)
+		std::cout << "Module " << m_PSModule << ": " << m_uiLostFrames << " lost voice frames filled in" << std::endl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // push & pop
 
+// Lost frames. D-Star and DMR count their voice frames on the wire, D-Star
+// 0..20, DMR burst A..F with three frames each, so a frame that does not follow
+// its predecessor shows how many went missing. Up to MAX_LOST_FILL of them are
+// filled in with each vocoder's own lost-frame code: every decoder, a
+// transcoder's or a radio's, then repeats the last frame and mutes after three,
+// as for a frame it could not correct, and the stream keeps its frame count,
+// D-Star sync and DMR bursts. A longer gap is left as it is. The filled frames
+// go out at once, before the frame that showed the gap, so the stream's delay
+// grows by the gap. A frame up to MAX_LATE positions behind is late or
+// repeated: its position went out already, it is dropped. Reordering deeper
+// than that cannot be told from a loss. A late frame comes right after its
+// successor; one after a pause of LATE_SECONDS or more ends a longer gap
+// instead. XLX peers send D-Star and DMR in one frame and are not filled, nor
+// is the echo's playback.
+#define MAX_LOST_FILL 6
+#define MAX_LATE      6
+#define LATE_SECONDS  0.2
+
+// AMBE 3600x2400 (D-Star) with b0 127, the lost-frame code, FEC included
+static const uint8_t DSTAR_LOST[9] = { 0xE3, 0x0B, 0x2C, 0xC3, 0x42, 0x18, 0x20, 0x40, 0x11 };
+// AMBE+2 3600x2450 with b0 120, an erasure (TIA-102.BABA-1 7.3), in DMR air order
+static const uint8_t DMR_LOST[9]   = { 0xAC, 0xAA, 0x40, 0x20, 0x00, 0x44, 0x40, 0x80, 0x80 };
+
+// a frame's position in its protocol's frame cycle from the wire counters, or -1
+static int WireIndex(const CPacket &p, int &cycle)
+{
+	if (ECodecType::dstar == p.GetCodecIn() && 0xffu != p.GetDstarPacketId())
+	{
+		cycle = 21;
+		const int pid = p.GetDstarPacketId() & 0x1f;
+		return pid < 21 ? pid : -1;
+	}
+	if (ECodecType::dmr == p.GetCodecIn() && 0xffu == p.GetDstarPacketId() && p.GetDmrPacketId() < 6 && p.GetDmrPacketSubid() >= 1 && p.GetDmrPacketSubid() <= 3)
+	{
+		cycle = 18;
+		return 3 * p.GetDmrPacketId() + p.GetDmrPacketSubid() - 1;
+	}
+	return -1;
+}
+
+bool CPacketStream::FillLostFrames(const CPacket &next, double since)
+{
+	int cycle = 0;
+	const int idx = WireIndex(next, cycle);
+	const int expected = m_iNextWireIdx;
+	if (idx < 0 || expected < 0 || next.IsLastPacket())
+	{
+		m_iNextWireIdx = idx < 0 ? -1 : (idx + 1) % cycle;
+		return true;
+	}
+	const int gap = (idx - expected + cycle) % cycle;
+	// up to MAX_LATE behind: a late or repeated frame, its position went out
+	// already (as itself or filled in); the stream goes on where it was
+	if (gap >= cycle - MAX_LATE && since < LATE_SECONDS)
+		return false;
+	m_iNextWireIdx = (idx + 1) % cycle;
+	if (gap == 0 || gap > MAX_LOST_FILL)	// a longer gap: follow it
+		return true;
+	for (int k = 0; k < gap; k++)
+	{
+		const int pos = (expected + k) % cycle;
+		std::unique_ptr<CDvFramePacket> frame;
+		if (21 == cycle)
+		{
+			// D-Star slow data: the sync pattern on frame 0, else the scrambled filler
+			SDStarFrame f;
+			memcpy(f.AMBE, DSTAR_LOST, sizeof(f.AMBE));
+			static const uint8_t sync[3] = { 0x55, 0x2D, 0x16 }, filler[3] = { 0x16, 0x29, 0xF5 };
+			memcpy(f.DVDATA, pos ? filler : sync, sizeof(f.DVDATA));
+			frame.reset(new CDvFramePacket(&f, m_uiStreamId, uint8_t(pos)));
+		}
+		else
+		{
+			static const uint8_t sync[7] = { 0 };
+			frame.reset(new CDvFramePacket(DMR_LOST, sync, m_uiStreamId, uint8_t(pos / 3), uint8_t(pos % 3 + 1), false));
+		}
+		frame->SetPacketModule(m_PSModule);
+		PushFrame(std::move(frame));
+	}
+	m_uiLostFrames += gap;
+	return true;
+}
+
 void CPacketStream::Push(std::unique_ptr<CPacket> Packet)
 {
 	// update stream dependent packet data
+	const double since = m_LastPacketTime.time();	// since the stream's last packet
 	m_LastPacketTime.start();
+	if (Packet->IsDvFrame() && Packet->IsLocalOrigin() && !m_bEcho && !FillLostFrames(*Packet, since))
+		return;
+	PushFrame(std::move(Packet));
+}
+
+void CPacketStream::PushFrame(std::unique_ptr<CPacket> Packet)
+{
 	if (Packet->IsDvFrame())
 	{
 		Packet->UpdatePids(m_uiPacketCntr++);

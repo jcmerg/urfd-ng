@@ -92,11 +92,17 @@ bool CSoftCodec::Encode(uint16_t streamid, uint32_t sequence, bool last, const i
 	return ok;
 }
 
-bool CSoftCodec::Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm)
+bool CSoftCodec::Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm, tcd_frame_info *info)
 {
 	std::lock_guard<std::mutex> lock(*m_Mutex);
 	SState *s = State(Key(streamid, false), sequence);
-	const bool ok = s && 0 == m_Plugin->decode(s->state, frame, pcm);
+	tcd_frame_info none{ 0, 0 };
+	if (!info)
+		info = &none;
+	*info = none;
+	bool ok = false;
+	if (s)
+		ok = 0 == (m_Plugin->api >= 3 && m_Plugin->decode_info ? m_Plugin->decode_info(s->state, frame, pcm, info) : m_Plugin->decode(s->state, frame, pcm));
 	Stop(s, last);
 	return ok;
 }
@@ -143,9 +149,9 @@ bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vecto
 			dlclose(handle);
 			return true;
 		}
-		if (plugin->api != TCD_CODEC_API)
+		if (plugin->api < TCD_CODEC_API_MIN || plugin->api > TCD_CODEC_API)
 		{
-			std::cerr << "ERROR: CodecPlugin " << path << " was built for codec API " << plugin->api << ", this tcd has " << TCD_CODEC_API << std::endl;
+			std::cerr << "ERROR: CodecPlugin " << path << " was built for codec API " << plugin->api << ", this tcd loads " << TCD_CODEC_API_MIN << " to " << TCD_CODEC_API << std::endl;
 			dlclose(handle);
 			return true;
 		}
@@ -160,6 +166,23 @@ bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vecto
 			std::cerr << "ERROR: CodecPlugin " << path << " lacks a function" << std::endl;
 			dlclose(handle);
 			return true;
+		}
+		// tcd carries 20 ms frames of the classic sizes only
+		if (plugin->api >= 3 && plugin->frame_format)
+		{
+			bool unusable = false;
+			for (const auto &[bit, bytes] : { std::make_pair(TCD_CODEC_DSTAR, 9u), std::make_pair(TCD_CODEC_DMR, 9u), std::make_pair(TCD_CODEC_P25, 11u) })
+			{
+				uint32_t b = 0, n = 0;
+				if ((plugin->codecs & bit) && (plugin->frame_format(bit, &b, &n) || b != bytes || n != 160))
+					unusable = true;
+			}
+			if (unusable)
+			{
+				std::cerr << "ERROR: CodecPlugin " << path << " codes frames of a format tcd cannot carry" << std::endl;
+				dlclose(handle);
+				return true;
+			}
 		}
 		// the name chooses the plugin (CodecDStar/CodecDMR, the monitor), so it must be unique
 		for (const auto &l : m_Loaded)

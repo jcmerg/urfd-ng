@@ -14,7 +14,8 @@
 // TCD_CODEC_P25 can do P25 instead of tcd's own OP25 vocoder (CodecP25).
 //
 // The interface is plain C, so a plugin needs none of tcd's classes and does not
-// have to be rebuilt with every tcd update; tcd checks TCD_CODEC_API only.
+// have to be rebuilt with every tcd update; tcd checks the plugin's api only, and
+// loads plugins from TCD_CODEC_API_MIN to TCD_CODEC_API.
 // A shared object exports one function:
 //
 //   extern "C" const struct tcd_codec_plugin *tcd_codec_plugin(void);
@@ -35,12 +36,25 @@
 extern "C" {
 #endif
 
-#define TCD_CODEC_API 2	// 2: start and stop
+#define TCD_CODEC_API     3	// 2: start and stop; 3: decode_info, frame_format
+#define TCD_CODEC_API_MIN 2	// the oldest api tcd still loads
 
 // the codecs, also as bits in tcd_codec_plugin.codecs
 #define TCD_CODEC_DSTAR 0x01u   // D-Star AMBE 3600x2400, 9 bytes with FEC
 #define TCD_CODEC_DMR   0x02u   // DMR/YSF/NXDN AMBE+2 3600x2450, 9 bytes (72 bits with FEC)
 #define TCD_CODEC_P25   0x04u   // P25 IMBE 4400, 11 bytes
+
+// how a frame was decoded (api 3), as bits in tcd_frame_info.flags
+#define TCD_FRAME_REPEAT  0x01u   // played as a repeat of the last good frame
+#define TCD_FRAME_MUTE    0x02u   // muted: too many bit errors or repeats in a row
+#define TCD_FRAME_TONE    0x04u   // a tone frame (DTMF or another signalling tone)
+#define TCD_FRAME_SILENCE 0x08u   // the codec's silence frame
+
+struct tcd_frame_info
+{
+	int32_t errors;             // bit errors the FEC corrected (0 for a codec without FEC)
+	uint32_t flags;             // TCD_FRAME_*
+};
 
 struct tcd_codec_plugin
 {
@@ -69,6 +83,16 @@ struct tcd_codec_plugin
 	// next start on the state, or close, ends it.
 	void (*start)(void *state);
 	void (*stop)(void *state);
+
+	// api 3: tcd reads these only from a plugin built for api 3 or later; each
+	// may be NULL.
+	// decode_info: decode, and say how the frame came out (info is never NULL);
+	// tcd uses it instead of decode for its statistics.
+	int (*decode_info)(void *state, const uint8_t *frame, int16_t *pcm, struct tcd_frame_info *info);
+	// frame_format: bytes and 8 kHz samples per frame of a codec, 0 = ok. NULL:
+	// 9 bytes for D-Star and DMR, 11 for P25, 160 samples (20 ms). tcd carries
+	// only these and refuses a plugin that reports another format.
+	int (*frame_format)(uint32_t codec, uint32_t *bytes, uint32_t *samples);
 };
 
 typedef const struct tcd_codec_plugin *(*tcd_codec_plugin_func)(void);
