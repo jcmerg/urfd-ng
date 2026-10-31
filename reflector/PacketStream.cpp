@@ -64,6 +64,7 @@ bool CPacketStream::OpenPacketStream(const CDvHeaderPacket &DvHeader, std::share
 		m_uiPacketCntr = 0;
 		m_uiSourceTG = 0;
 		m_iNextWireIdx = -1;
+		m_iFilledFrom = -1;
 		m_uiLostFrames = 0;
 		{
 			std::lock_guard<std::mutex> lock(m_UserMutex);
@@ -103,7 +104,10 @@ void CPacketStream::ClosePacketStream(void)
 // filled in with each vocoder's own lost-frame code: every decoder, a
 // transcoder's or a radio's, then repeats the last frame and mutes after three,
 // as for a frame it could not correct, and the stream keeps its frame count,
-// D-Star sync and DMR bursts. A longer gap is left as it is.
+// D-Star sync and DMR bursts. A longer gap is left as it is. The filled frames
+// go out at once, before the frame that showed the gap, so the stream's delay
+// grows by the gap. A frame that arrives late for a position filled already is
+// dropped. XLX peers send D-Star and DMR in one frame and are not filled.
 #define MAX_LOST_FILL 6
 
 // AMBE 3600x2400 (D-Star) with b0 127, the lost-frame code, FEC included
@@ -120,7 +124,7 @@ static int WireIndex(const CPacket &p, int &cycle)
 		const int pid = p.GetDstarPacketId() & 0x1f;
 		return pid < 21 ? pid : -1;
 	}
-	if (ECodecType::dmr == p.GetCodecIn() && p.GetDmrPacketId() < 6 && p.GetDmrPacketSubid() >= 1 && p.GetDmrPacketSubid() <= 3)
+	if (ECodecType::dmr == p.GetCodecIn() && 0xffu == p.GetDstarPacketId() && p.GetDmrPacketId() < 6 && p.GetDmrPacketSubid() >= 1 && p.GetDmrPacketSubid() <= 3)
 	{
 		cycle = 18;
 		return 3 * p.GetDmrPacketId() + p.GetDmrPacketSubid() - 1;
@@ -128,17 +132,37 @@ static int WireIndex(const CPacket &p, int &cycle)
 	return -1;
 }
 
-void CPacketStream::FillLostFrames(const CPacket &next)
+bool CPacketStream::FillLostFrames(const CPacket &next)
 {
 	int cycle = 0;
 	const int idx = WireIndex(next, cycle);
 	const int expected = m_iNextWireIdx;
-	m_iNextWireIdx = idx < 0 ? -1 : (idx + 1) % cycle;
 	if (idx < 0 || expected < 0 || next.IsLastPacket())
-		return;
+	{
+		m_iNextWireIdx = idx < 0 ? -1 : (idx + 1) % cycle;
+		m_iFilledFrom = -1;
+		return true;
+	}
 	const int gap = (idx - expected + cycle) % cycle;	// a repeated or late frame wraps to a large gap
-	if (gap == 0 || gap > MAX_LOST_FILL)
-		return;
+	if (gap > MAX_LOST_FILL)
+	{
+		// late for a position filled already: that frame went out, drop this one
+		if (m_iFilledFrom >= 0 && (idx - m_iFilledFrom + cycle) % cycle < m_iFilledCount)
+			return false;
+		m_iNextWireIdx = (idx + 1) % cycle;	// a longer gap, or a repeated frame: follow it
+		m_iFilledFrom = -1;
+		return true;
+	}
+	m_iNextWireIdx = (idx + 1) % cycle;
+	if (gap == 0)
+	{
+		// a late frame comes within a few frames, then the filled positions are forgotten
+		if (m_iFilledFrom >= 0 && (idx - m_iFilledFrom - m_iFilledCount + cycle) % cycle >= MAX_LOST_FILL)
+			m_iFilledFrom = -1;
+		return true;
+	}
+	m_iFilledFrom = expected;
+	m_iFilledCount = gap;
 	for (int k = 0; k < gap; k++)
 	{
 		const int pos = (expected + k) % cycle;
@@ -161,14 +185,15 @@ void CPacketStream::FillLostFrames(const CPacket &next)
 		PushFrame(std::move(frame));
 	}
 	m_uiLostFrames += gap;
+	return true;
 }
 
 void CPacketStream::Push(std::unique_ptr<CPacket> Packet)
 {
 	// update stream dependent packet data
 	m_LastPacketTime.start();
-	if (Packet->IsDvFrame() && Packet->IsLocalOrigin())
-		FillLostFrames(*Packet);
+	if (Packet->IsDvFrame() && Packet->IsLocalOrigin() && !FillLostFrames(*Packet))
+		return;
 	PushFrame(std::move(Packet));
 }
 
