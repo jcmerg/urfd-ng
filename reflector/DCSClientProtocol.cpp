@@ -593,11 +593,12 @@ void CDcsClientProtocol::EncodeConnectPacket(CBuffer *Buffer, char localModule, 
 	Buffer->Append((uint8_t)0x20, 8);           // bytes 11-18: reflector callsign (spaces)
 	// bytes 19-518: HTML info (gateway type + software version, like ircDDBGateway)
 	{
+		// hf.jpg: the repeater picture of the DCS status pages (ircDDBGateway's), they have no repeater.jpg
 		std::ostringstream html;
 		html << "<table border=\"0\" width=\"95%\"><tr>"
-		     << "<td width=\"4%\"><img border=\"0\" src=repeater.jpg></td>"
+		     << "<td width=\"4%\"><img border=\"0\" src=hf.jpg></td>"
 		     << "<td width=\"96%\"><font size=\"2\">"
-		     << "<b>REFLECTOR</b> urfd " << g_Version << "<br>"
+		     << "<b>REFLECTOR</b> " << g_Configure.GetString(g_Keys.names.callsign) << " urfd " << g_Version << "<br>"
 		     << "Link of module " << localModule
 		     << "</font></td></tr></table>";
 		std::string info = html.str();
