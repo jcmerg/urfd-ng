@@ -594,11 +594,11 @@ void CDcsClientProtocol::EncodeConnectPacket(CBuffer *Buffer, char localModule, 
 	// bytes 19-518: HTML info (gateway type + software version, like ircDDBGateway)
 	{
 		std::ostringstream html;
-		html << "<table border=\"0\" width=\"95%%\"><tr>"
-		     << "<td width=\"4%%\"><img border=\"0\" src=dongle.jpg></td>"
-		     << "<td width=\"96%%\"><font size=\"2\">"
-		     << "<b>DONGLE</b> urfd " << g_Version << "<br>"
-		     << "Reflector Client"
+		html << "<table border=\"0\" width=\"95%\"><tr>"
+		     << "<td width=\"4%\"><img border=\"0\" src=repeater.jpg></td>"
+		     << "<td width=\"96%\"><font size=\"2\">"
+		     << "<b>REFLECTOR</b> urfd " << g_Version << "<br>"
+		     << "Link of module " << localModule
 		     << "</font></td></tr></table>";
 		std::string info = html.str();
 		uint8_t htmlBuf[500];

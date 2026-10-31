@@ -92,6 +92,10 @@ CDvFramePacket::CDvFramePacket
 	memcpy(m_TCPack.dmr,   dmrambe,   sizeof(m_TCPack.dmr));
 	memcpy(m_uiDvData, dstardvdata, sizeof(m_uiDvData));
 	memcpy(m_uiDvSync, dmrsync,     sizeof(m_uiDvSync));
+	memset(m_TCPack.m17,  0, sizeof(m_TCPack.m17));
+	memset(m_TCPack.p25,  0, sizeof(m_TCPack.p25));
+	memset(m_TCPack.usrp, 0, sizeof(m_TCPack.usrp));
+	memset(m_Nonce,       0, sizeof(m_Nonce));
 	m_TCPack.codec_in = codecInType;
 }
 
@@ -179,7 +183,9 @@ CDvFramePacket::CDvFramePacket(const CBuffer &buf) : CPacket(buf)
 		memcpy(m_TCPack.dmr,   data+off, sizeof(m_TCPack.dmr));   off += sizeof (m_TCPack.dmr);
 		memcpy(m_TCPack.m17,   data+off, sizeof(m_TCPack.m17));   off += sizeof(m_TCPack.m17);
 		memcpy(m_TCPack.p25,   data+off, sizeof(m_TCPack.p25));   off += sizeof(m_TCPack.p25);
-		memcpy(m_TCPack.usrp,  data+off, sizeof(m_TCPack.usrp));
+		// the PCM samples little endian, whatever the host
+		for (unsigned i = 0; i < sizeof(m_TCPack.usrp) / sizeof(m_TCPack.usrp[0]); i++, off += 2)
+			m_TCPack.usrp[i] = int16_t(uint16_t(data[off]) | uint16_t(data[off + 1]) << 8);
 		SetTCParams(seq, m_cModule);
 	}
 	else
@@ -203,7 +209,11 @@ void CDvFramePacket::EncodeInterlinkPacket(CBuffer &buf) const
 	memcpy(data+off, m_TCPack.dmr,   sizeof(m_TCPack.dmr));   off += sizeof(m_TCPack.dmr);
 	memcpy(data+off, m_TCPack.m17,   sizeof(m_TCPack.m17));   off += sizeof(m_TCPack.m17);
 	memcpy(data+off, m_TCPack.p25,   sizeof(m_TCPack.p25));   off += sizeof(m_TCPack.p25);
-	memcpy(data+off, m_TCPack.usrp,  sizeof(m_TCPack.usrp));
+	for (unsigned i = 0; i < sizeof(m_TCPack.usrp) / sizeof(m_TCPack.usrp[0]); i++)
+	{
+		data[off++] = uint16_t(m_TCPack.usrp[i]) & 0xffu;
+		data[off++] = uint16_t(m_TCPack.usrp[i]) >> 8;
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////

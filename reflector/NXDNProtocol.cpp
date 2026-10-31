@@ -852,14 +852,12 @@ bool CNXDNProtocol::EncodeNXDNPacket(const CDvHeaderPacket &Header, uint16_t dst
 		Buffer.data()[21+i] |= (ambe[7+i] >> 1);
 		Buffer.data()[22+i] = (ambe[7+i] & 1) << 7;
 	}
-	Buffer.data()[28] |= (ambe[13] >> 2);
 
 	memcpy(&Buffer.data()[29], &ambe[14], 7);
 	for(int i = 0; i < 7; ++i){
 		Buffer.data()[35+i] |= (ambe[21+i] >> 1);
 		Buffer.data()[36+i] = (ambe[21+i] & 1) << 7;
 	}
-	Buffer.data()[41] |= (ambe[27] >> 2);
 
 	return true;
 }

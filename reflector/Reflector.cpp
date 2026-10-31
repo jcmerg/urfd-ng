@@ -552,6 +552,57 @@ void CReflector::CloseStream(std::shared_ptr<CPacketStream> stream)
 ////////////////////////////////////////////////////////////////////////////////////////
 // router threads
 
+
+// The codec a stream from this protocol carries, none where it is not known
+// (interlinks carry every codec, plugins their own): a YSF header or frame says
+// VW (IMBE, as P25), else YSF is DN (AMBE+2); M17 says 1600 or 3200.
+static ECodecType SourceCodec(EProtocol p, ECodecType packetCodec)
+{
+	switch (p)
+	{
+	case EProtocol::dextra: case EProtocol::dplus: case EProtocol::dcs: case EProtocol::g3:
+	case EProtocol::dextraclient: case EProtocol::dplusclient: case EProtocol::dcsclient:
+		return ECodecType::dstar;
+	case EProtocol::dmrplus: case EProtocol::dmrmmdvm: case EProtocol::mmdvmclient: case EProtocol::nxdn: case EProtocol::ysfclient:
+		return ECodecType::dmr;
+	case EProtocol::ysf:
+		return ECodecType::p25 == packetCodec ? ECodecType::p25 : ECodecType::dmr;
+	case EProtocol::p25:
+		return ECodecType::p25;
+	case EProtocol::m17:
+		return ECodecType::c2_1600 == packetCodec ? ECodecType::c2_1600 : ECodecType::c2_3200;
+	case EProtocol::usrp:
+		return ECodecType::usrp;
+	case EProtocol::svx: case EProtocol::svxreflector:
+		return ECodecType::svx;
+	default:
+		return ECodecType::none;
+	}
+}
+
+// whether a protocol can send a stream of this codec as it came (no transcoder)
+static bool CarriesCodec(EProtocol p, ECodecType c)
+{
+	switch (p)
+	{
+	case EProtocol::dextra: case EProtocol::dplus: case EProtocol::dcs: case EProtocol::g3:
+	case EProtocol::dextraclient: case EProtocol::dplusclient: case EProtocol::dcsclient:
+		return ECodecType::dstar == c;
+	case EProtocol::dmrplus: case EProtocol::dmrmmdvm: case EProtocol::mmdvmclient: case EProtocol::nxdn: case EProtocol::ysfclient:
+		return ECodecType::dmr == c;
+	case EProtocol::ysf:
+		return ECodecType::dmr == c || ECodecType::p25 == c;	// DN, and VW (since 4.31.0)
+	case EProtocol::p25:
+		return ECodecType::p25 == c;
+	case EProtocol::m17:
+		return ECodecType::c2_1600 == c || ECodecType::c2_3200 == c;
+	case EProtocol::usrp: case EProtocol::svx: case EProtocol::svxreflector:
+		return ECodecType::usrp == c || ECodecType::svx == c;	// PCM both
+	default:
+		return true;	// interlinks and plugins take every stream
+	}
+}
+
 void CReflector::RouterThread(const char ThisModule)
 {
 	auto pitem = m_Stream.find(ThisModule);
@@ -598,6 +649,8 @@ void CReflector::RouterThread(const char ThisModule)
 			srcInstance = ownerClient->GetOwnerProtocol();
 		}
 
+		const ECodecType srcCodec = SourceCodec(srcProto, packet->GetCodecIn());
+
 		// iterate on all protocols
 		m_Protocols.Lock();
 		for ( auto it=m_Protocols.begin(); it!=m_Protocols.end(); it++ )
@@ -643,6 +696,11 @@ void CReflector::RouterThread(const char ThisModule)
 					std::cout << "Router: " << g_GateKeeper.ProtocolName(srcProto) << " -> " << g_GateKeeper.ProtocolName(dstProto) << " blocked on module " << ThisModule << std::endl;
 				continue;
 			}
+			// without the transcoder a module carries only the source's codec: a
+			// protocol of another one would send empty frames (zeros, which decode
+			// as noise), so it gets no stream
+			if (!streamIn->IsTranscoding() && packet->IsLocalOrigin() && ECodecType::none != srcCodec && !CarriesCodec(dstProto, srcCodec))
+				continue;
 
 			auto copy = packet->Copy();
 
