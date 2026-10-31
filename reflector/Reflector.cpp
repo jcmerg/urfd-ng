@@ -398,6 +398,32 @@ bool CReflector::IsStreaming(char module)
 }
 
 // clients MUST have bee locked by the caller so we can freely access it within the function
+// the D-Star suffix of MY for a stream from this protocol, nullptr for none:
+// D-Star sources keep their own, interlinks pass their origin's on, plugins
+// set theirs themselves
+static const char *SourceSuffix(EProtocol p)
+{
+	switch (p)
+	{
+	case EProtocol::dmrplus: case EProtocol::dmrmmdvm: case EProtocol::mmdvmclient:
+		return "DMR";
+	case EProtocol::ysf: case EProtocol::ysfclient:
+		return "YSF";
+	case EProtocol::nxdn:
+		return "NXDN";
+	case EProtocol::p25:
+		return "P25";
+	case EProtocol::m17:
+		return "M17";
+	case EProtocol::usrp:
+		return "USRP";
+	case EProtocol::svx: case EProtocol::svxreflector:
+		return "SVX";
+	default:
+		return nullptr;
+	}
+}
+
 std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderPacket> &DvHeader, std::shared_ptr<CClient>client)
 {
 	// check sid is not zero
@@ -451,6 +477,18 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 	{
 		std::cerr << "Can't find module '" << module << "' for Client " << client->GetCallsign() << std::endl;
 		return nullptr;
+	}
+
+	// the source as the suffix of MY, where the stream has none of its own:
+	// D-Star radios show it next to the callsign ("DL4JC / DMR")
+	if (!DvHeader->GetMyCallsign().HasSuffix())
+	{
+		if (const char *suffix = SourceSuffix(client->GetProtocol()))
+		{
+			CCallsign my(DvHeader->GetMyCallsign());
+			my.SetSuffix(suffix);
+			DvHeader->SetMyCallsign(my);
+		}
 	}
 
 	// is it available ?

@@ -76,8 +76,8 @@ void CDStarSlowData::EncodeHeader(const CCallsign &my, const CCallsign &rpt1, co
 	my.GetCallsign(cs);
 	memcpy(&header[27], cs, 8);
 
-	// MY suffix (bytes 35-38)
-	memset(&header[35], ' ', 4);
+	// MY suffix (bytes 35-38), as in the stream's header
+	my.GetSuffix(&header[35]);
 
 	// CRC (bytes 39-40)
 	CCRC::addCCITT161(header, 41);
