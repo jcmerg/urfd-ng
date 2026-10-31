@@ -30,7 +30,9 @@ public:
 	// false on an error of the plugin; the frame has the size of the codec.
 	// sequence and last of the packet: where a transmission begins and ends
 	bool Encode(uint16_t streamid, uint32_t sequence, bool last, const int16_t *pcm, uint8_t *frame);
-	bool Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm);
+	// info, when not nullptr, gets how the frame was decoded (a plugin before
+	// api 3 reports nothing: errors 0, no flags)
+	bool Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm, tcd_frame_info *info = nullptr);
 	// the streams it codes right now (a frame in the last 2 s)
 	int Streams(void);
 	// its entry in g_Stats.sw, -1 for none

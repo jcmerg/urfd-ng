@@ -69,6 +69,10 @@ struct SwVocoderStats
 	std::atomic<uint32_t> encodes{0};        // total encode calls
 	std::atomic<uint32_t> decodes{0};        // total decode calls
 	std::atomic<uint32_t> reencodes{0};      // total re-encode calls
+	// how the decoded frames came out, from plugins of codec api 3 (0 otherwise)
+	std::atomic<uint32_t> error_frames{0};   // frames with bit errors the FEC corrected
+	std::atomic<uint32_t> repeats{0};        // frames played as a repeat of the last good one
+	std::atomic<uint32_t> mutes{0};          // frames muted for errors or repeats
 	std::atomic<int> cached_streams{0};      // streams with a vocoder state
 	std::atomic<char> active_module{' '};    // last active module
 	std::atomic<uint64_t> last_active_ms{0}; // timestamp of last operation
@@ -89,7 +93,7 @@ public:
 
 	ModuleStats    modules[MAX_MODULES];    // indexed by module - 'A'
 	DeviceStats    devices[MAX_DEVICES];
-	static constexpr int MAX_SW = 8;
+	static constexpr int MAX_SW = 16;
 	SwVocoderStats sw[MAX_SW];              // the codecs of the codec plugins and tcd's own vocoders
 	int            num_sw{0};
 	// what may do D-Star and DMR: "dvsi" (a device) or a codec plugin's name; P25:

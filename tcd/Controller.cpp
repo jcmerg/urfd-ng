@@ -357,6 +357,21 @@ static void SwStat(const CSoftCodec *sw, char module, std::atomic<uint32_t> SwVo
 		Stat(sw->stats, module, counter);
 }
 
+// counts a decode of a codec plugin and how the frame came out for the monitor
+static void SwDecodeStat(const CSoftCodec *sw, char module, const tcd_frame_info &info)
+{
+	if (!sw || sw->stats < 0)
+		return;
+	Stat(sw->stats, module, &SwVocoderStats::decodes);
+	auto &st = g_Stats.sw[sw->stats];
+	if (info.errors > 0)
+		st.error_frames.fetch_add(1, std::memory_order_relaxed);
+	if (info.flags & TCD_FRAME_REPEAT)
+		st.repeats.fetch_add(1, std::memory_order_relaxed);
+	if (info.flags & TCD_FRAME_MUTE)
+		st.mutes.fetch_add(1, std::memory_order_relaxed);
+}
+
 // a monitor entry for one of tcd's own vocoders, -1 when all are taken
 static int BuiltinStats(const char *name, const char *codec)
 {
@@ -1191,8 +1206,9 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t tmp[160] = {};
 	auto *sw = SwCodec(TCD_CODEC_DMR, packet);
-	sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDMRData(), tmp);
-	SwStat(sw, packet->GetModule(), &SwVocoderStats::decodes);
+	tcd_frame_info info;
+	sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDMRData(), tmp, &info);
+	SwDecodeStat(sw, packet->GetModule(), info);
 	if (ambe_out_num != 256)
 	{
 		for (int i=0; i<160; i++)
@@ -1284,8 +1300,9 @@ void CController::SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t pcm[160] = {};
 	auto *sw = SwCodec(TCD_CODEC_DSTAR, packet);
-	sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDStarData(), pcm);
-	SwStat(sw, packet->GetModule(), &SwVocoderStats::decodes);
+	tcd_frame_info info;
+	sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDStarData(), pcm, &info);
+	SwDecodeStat(sw, packet->GetModule(), info);
 	ApplyGain(pcm, 160, dstar_out_num);
 	packet->SetAudioSamples(pcm, false);
 	dstar_mux.lock();
@@ -1392,9 +1409,10 @@ void CController::DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, i
 {
 	if (auto *sw = SwCodec(TCD_CODEC_P25, packet))
 	{
-		if (!sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetP25Data(), pcm))
+		tcd_frame_info info;
+		if (!sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetP25Data(), pcm, &info))
 			memset(pcm, 0, 160 * sizeof(int16_t));
-		SwStat(sw, packet->GetModule(), &SwVocoderStats::decodes);
+		SwDecodeStat(sw, packet->GetModule(), info);
 		return;
 	}
 	std::lock_guard<std::mutex> lock(p25vocoder_mux);

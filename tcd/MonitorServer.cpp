@@ -154,6 +154,9 @@ std::string CMonitorServer::BuildStatsJson()
 			   << ",\"encodes\":" << sw->encodes.load(std::memory_order_relaxed)
 			   << ",\"decodes\":" << sw->decodes.load(std::memory_order_relaxed)
 			   << ",\"reencodes\":" << sw->reencodes.load(std::memory_order_relaxed)
+			   << ",\"error_frames\":" << sw->error_frames.load(std::memory_order_relaxed)
+			   << ",\"repeats\":" << sw->repeats.load(std::memory_order_relaxed)
+			   << ",\"mutes\":" << sw->mutes.load(std::memory_order_relaxed)
 			   << ",\"cached_streams\":" << sw->cached_streams.load(std::memory_order_relaxed)
 			   << ",\"active_module\":\"" << (mod != ' ' ? std::string(1, mod) : "") << "\"}";
 			first = false;
