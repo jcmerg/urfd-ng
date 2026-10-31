@@ -50,6 +50,7 @@ public:
 	// push & pop
 	void ReturnPacket(std::unique_ptr<CPacket> p) { m_Queue.Push(std::move(p)); }
 	void Push(std::unique_ptr<CPacket> packet);
+	uint32_t         GetLostFrames(void) const      { return m_uiLostFrames; }
 	void Tickle(void)                               { m_LastPacketTime.start(); }
 
 	// get
@@ -105,4 +106,12 @@ protected:
 	std::atomic<bool> m_bEcho { false };
 	uint32_t            m_uiSourceTG;
 	CDStarDprs          m_Dprs;
+	// lost frames: the position the next frame should have in its protocol's
+	// frame cycle (-1: unknown), and how many frames this stream got filled in
+	int                 m_iNextWireIdx { -1 };
+	uint32_t            m_uiLostFrames { 0 };
+
+private:
+	void PushFrame(std::unique_ptr<CPacket> packet);
+	void FillLostFrames(const CPacket &next);
 };
