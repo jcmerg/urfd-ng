@@ -397,10 +397,8 @@ bool CReflector::IsStreaming(char module)
 	return false;
 }
 
-// clients MUST have bee locked by the caller so we can freely access it within the function
 // the D-Star suffix of MY for a stream from this protocol, nullptr for none:
-// D-Star sources keep their own, interlinks pass their origin's on, plugins
-// set theirs themselves
+// D-Star sources keep their own, a plugin's is its type ("HYT")
 static const char *SourceSuffix(EProtocol p)
 {
 	switch (p)
@@ -420,10 +418,37 @@ static const char *SourceSuffix(EProtocol p)
 	case EProtocol::svx: case EProtocol::svxreflector:
 		return "SVX";
 	default:
+		if (const CPlugin *plugin = g_Plugins.Find(p))
+			return plugin->GetType();
 		return nullptr;
 	}
 }
 
+// the protocols that send to D-Star radios
+static bool IsDStarProtocol(EProtocol p)
+{
+	switch (p)
+	{
+	case EProtocol::dextra: case EProtocol::dplus: case EProtocol::dcs: case EProtocol::g3:
+	case EProtocol::dextraclient: case EProtocol::dplusclient: case EProtocol::dcsclient:
+		return true;
+	default:
+		return false;
+	}
+}
+
+CCallsign CReflector::DStarMy(const CCallsign &my, EProtocol src)
+{
+	CCallsign cs(my);
+	if (!cs.HasSuffix())
+	{
+		if (const char *suffix = SourceSuffix(src))
+			cs.SetSuffix(suffix);
+	}
+	return cs;
+}
+
+// clients MUST have bee locked by the caller so we can freely access it within the function
 std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderPacket> &DvHeader, std::shared_ptr<CClient>client)
 {
 	// check sid is not zero
@@ -477,18 +502,6 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 	{
 		std::cerr << "Can't find module '" << module << "' for Client " << client->GetCallsign() << std::endl;
 		return nullptr;
-	}
-
-	// the source as the suffix of MY, where the stream has none of its own:
-	// D-Star radios show it next to the callsign ("DL4JC / DMR")
-	if (!DvHeader->GetMyCallsign().HasSuffix())
-	{
-		if (const char *suffix = SourceSuffix(client->GetProtocol()))
-		{
-			CCallsign my(DvHeader->GetMyCallsign());
-			my.SetSuffix(suffix);
-			DvHeader->SetMyCallsign(my);
-		}
 	}
 
 	// is it available ?
@@ -749,7 +762,12 @@ void CReflector::RouterThread(const char ThisModule)
 				CCallsign csRPT = (*it)->GetReflectorCallsign();
 				csRPT.SetCSModule(ThisModule);
 				// and put it in the copy
-				(dynamic_cast<CDvHeaderPacket *>(copy.get()))->SetRpt2Callsign(csRPT);
+				auto *header = dynamic_cast<CDvHeaderPacket *>(copy.get());
+				header->SetRpt2Callsign(csRPT);
+				// D-Star radios show the source next to the callsign ("N0CALL / DMR"),
+				// the other protocols and the dashboard keep the callsign alone
+				if (IsDStarProtocol(dstProto))
+					header->SetMyCallsign(DStarMy(header->GetMyCallsign(), srcProto));
 			}
 
 			(*it)->Push(std::move(copy));
