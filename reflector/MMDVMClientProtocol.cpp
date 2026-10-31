@@ -631,13 +631,18 @@ void CMMDVMClientProtocol::SendKerchunk(uint32_t tg)
 			buf.Append(flags);
 			buf.Append((uint8_t *)&streamId, 4);
 
-			// 33-byte payload: 3x silent AMBE frames
+			// 33-byte payload: 3x silent AMBE frames as a voice burst, the middle
+			// one around the sync or EMB, as EncodeDMRDVoice lays them out
 			uint8_t payload[33];
 			::memset(payload, 0, sizeof(payload));
 			::memcpy(payload, silentAmbe, 9);
-			::memcpy(payload + 12, silentAmbe, 9);
+			::memcpy(payload + 9, silentAmbe, 5);
+			payload[13] &= 0xF0;
+			::memcpy(payload + 19, silentAmbe + 4, 5);
+			payload[19] &= 0x0F;
 			::memcpy(payload + 24, silentAmbe, 9);
 			buf.Append(payload, 33);
+			ReplaceEMBInBuffer(&buf, (uint8_t)voiceSeq);
 			buf.Append((uint8_t)0);
 			buf.Append((uint8_t)0x32);
 			Send(buf, m_MasterIp);
@@ -1289,7 +1294,7 @@ void CMMDVMClientProtocol::ReplaceEMBInBuffer(CBuffer *buffer, uint8_t uiDmrPack
 		emb[1]  = 0x00;
 		CQR1676::encode(emb);
 		buffer->ReplaceAt(33, (uint8_t)((buffer->at(33) & 0xF0) | ((emb[0] >> 4) & 0x0F)));
-		buffer->ReplaceAt(34, (uint8_t)(buffer->at(34) & 0xF0));
+		buffer->ReplaceAt(34, (uint8_t)((emb[0] << 4) & 0xF0));
 		buffer->ReplaceAt(35, (uint8_t)0);
 		buffer->ReplaceAt(36, (uint8_t)0);
 		buffer->ReplaceAt(37, (uint8_t)0);

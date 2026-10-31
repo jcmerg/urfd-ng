@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include "Global.h"
+#include "YSFDefines.h"
 #include "YSFClientPeer.h"
 #include "YSFClientProtocol.h"
 
@@ -261,12 +262,7 @@ void CYsfClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 				OnDvHeaderPacketIn(Header, Ip);
 			}
 
-			// push initial frames
-			for (int i = 0; i < 2; i++)
-			{
-				if (Frames[i])
-					OnDvFramePacketIn(Frames[i], &Ip);
-			}
+			// the header carries no voice: its two frames are not pushed (as YSFProtocol)
 		}
 		else if (IsValidDvFramePacket(Ip, Fich, Buffer, Header, Frames))
 		{
@@ -653,8 +649,9 @@ bool CYsfClientProtocol::IsValidDvLastFramePacket(const CIp &Ip, const CYSFFICH 
 	{
 		uint32_t uiStreamId = IpToStreamId(Ip);
 
+		// the terminator carries no voice: AMBE+2 silence (zero bits would decode as voice)
 		uint8_t uiAmbe[9];
-		memset(uiAmbe, 0x00, sizeof(uiAmbe));
+		memcpy(uiAmbe, AMBE72_SILENCE, sizeof(uiAmbe));
 
 		char sz[YSF_CALLSIGN_LENGTH+1];
 		memcpy(sz, &(Buffer.data()[14]), YSF_CALLSIGN_LENGTH);

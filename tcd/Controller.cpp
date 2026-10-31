@@ -1032,7 +1032,7 @@ void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 	if (ECodecType::p25 == packet->GetCodecIn())
 		HighPass(packet->GetModule(), packet->GetStreamId(), gained);
 
-	uint8_t m17data[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x01, 0x43, 0x09, 0xe4, 0x9c, 0x08, 0x21 };
+	uint8_t m17data[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0x01, 0x00, 0x09, 0x43, 0x9C, 0xE4, 0x21, 0x08 };	// second half: Codec2 3200 silence
 	const auto m = packet->GetModule();
 	if (packet->IsSecond())
 	{

@@ -24,6 +24,7 @@
 #include <sstream>
 
 #include "Global.h"
+#include "YSFDefines.h"
 #include "RejectLog.h"
 #include "DMRMMDVMClient.h"
 #include "DMRMMDVMProtocol.h"
@@ -1068,9 +1069,9 @@ bool CDmrmmdvmProtocol::IsValidDvLastFramePacket(const CBuffer &Buffer, std::uni
 				//uint8_t uiVoiceSeq = (Buffer.data()[15] & 0x0F);
 				uint16_t uiStreamId = DmrdStreamId(Buffer, uiSlot);
 
-				// dummy ambe
+				// the last frame: AMBE+2 silence (72 zero bits would decode as voice)
 				uint8_t ambe[9];
-				memset(ambe, 0, sizeof(ambe));
+				memcpy(ambe, AMBE72_SILENCE, sizeof(ambe));
 
 
 				// and packet

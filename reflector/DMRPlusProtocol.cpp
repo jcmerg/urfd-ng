@@ -748,7 +748,7 @@ void CDmrplusProtocol::ReplaceEMBInBuffer(CBuffer *buffer, uint8_t uiDmrPacketId
 	{
 		// EMB LC
 		uint8_t emb[2];
-		emb[0]  = (DMRMMDVM_REFLECTOR_COLOUR << 4) & 0xF0;
+		emb[0]  = (DMRPLUS_REFLECTOR_COLOUR << 4) & 0xF0;
 		//emb[0] |= PI ? 0x08U : 0x00;
 		//emb[0] |= (LCSS << 1) & 0x06;
 		emb[1]  = 0x00;
@@ -770,7 +770,7 @@ void CDmrplusProtocol::ReplaceEMBInBuffer(CBuffer *buffer, uint8_t uiDmrPacketId
 	{
 		// nullptr
 		uint8_t emb[2];
-		emb[0]  = (DMRMMDVM_REFLECTOR_COLOUR << 4) & 0xF0;
+		emb[0]  = (DMRPLUS_REFLECTOR_COLOUR << 4) & 0xF0;
 		//emb[0] |= PI ? 0x08U : 0x00;
 		//emb[0] |= (LCSS << 1) & 0x06;
 		emb[1]  = 0x00;
