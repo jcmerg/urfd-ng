@@ -285,7 +285,6 @@ void CM17Protocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, 
 	{
 		// no stream open yet, open a new one
 		CCallsign my(Header->GetMyCallsign());
-		my.SetSuffix("M17");
 		CCallsign rpt1(Header->GetRpt1Callsign());
 		CCallsign rpt2(Header->GetRpt2Callsign());
 
@@ -777,7 +776,6 @@ void CM17Protocol::OnPacketModePacketIn(const CBuffer &Buffer, const CIp &Ip, ch
 
 	if ( heard )
 	{
-		src.SetSuffix("M17");
 		g_Reflector.GetUsers()->Hearing(src, rpt1, rpt2, "M17");
 		g_Reflector.ReleaseUsers();
 	}

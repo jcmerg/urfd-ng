@@ -58,7 +58,7 @@ public:
 	// the protocol, made once at start when it is enabled; urfd initializes
 	// it with GetType(), its EProtocol, GetPort(), HasIPv4() and HasIPv6()
 	virtual std::unique_ptr<CProtocol> CreateProtocol(void) = 0;
-	virtual const char *GetType(void) const { return nullptr; }	// CProtocol::Initialize's type
+	virtual const char *GetType(void) const { return nullptr; }	// CProtocol::Initialize's type, and the D-Star suffix of its callers ("HYT")
 	virtual uint16_t GetPort(void) const = 0;	// also in the XML file and for the dashboard, 0 = none
 	virtual bool HasIPv4(void) const { return true; }
 	virtual bool HasIPv6(void) const { return false; }

@@ -68,6 +68,8 @@ public:
 	// stream opening & closing
 	std::shared_ptr<CPacketStream> OpenStream(std::unique_ptr<CDvHeaderPacket> &, std::shared_ptr<CClient>);
 	bool IsStreaming(char);
+	// MY as D-Star radios get it: with the source as its suffix, where it has none
+	static CCallsign DStarMy(const CCallsign &my, EProtocol src);
 	// a stream opened or closed or a station was heard: write the status file now
 	void StatusChanged(void) { m_StatusChanged = true; }
 	void EndStream(std::shared_ptr<CPacketStream>);

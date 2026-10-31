@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.33.0** | tcd 0.15.1 | Dashboard v2.14.2
+**urfd 4.33.1** | tcd 0.15.1 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -936,6 +936,8 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **The source as D-Star suffix only towards D-Star (4.33.1)**: the suffix of 4.33.0 (`DMR`, `YSF`, ...) is added only to the header that goes to D-Star radios and links (DExtra, DPlus, DCS, G3 and their clients) and to the copy in the D-Star slow data; the stream itself keeps the callsign as it came in. So the dashboard, the logs and the other modes show the callsign alone again, as before 4.33.0 (it showed `N0CALL / DMR`). A plugin's suffix is its type (`GetType()` in `Plugin.h`, e.g. three letters). Interlinks no longer pass on the source as a suffix; D-Star callers keep their own as before. M17 callers no longer carry `M17` in the dashboard either (it came from upstream), D-Star radios get it as for the other modes
+- **DCS client names the reflector (4.33.1)**: the info of the DCS connect reads `REFLECTOR <callsign> urfd <version>`, the callsign from `[Names]`, with the repeater image `hf.jpg` of the DCS status pages (they have no `repeater.jpg`, which showed as a broken image)
 - **The source as D-Star suffix (4.33.0)**: a stream from another mode carries its source as the 4 character suffix of the caller's callsign, which D-Star radios show next to it and keep in their call list: `DMR` (MMDVM, DMR+, MMDVMClient), `YSF` (also the YSF client), `NXDN`, `P25`, `M17` (as before), `USRP` and `SVX` (SVXServer and SvxReflector client), e.g. `DL4JC / DMR`. D-Star callers keep their own suffix, interlinks pass on the one of the reflector the stream came from, and a plugin can set its own. The last heard lists and the dashboard show the callsign without it as before. The copy of the header in the D-Star slow data carries the suffix too (it was always empty); the D-Star text keeps naming the source, the name and the TG
 - **DCS client shows up as reflector (4.32.2)**: the info the DCS client sends with its connect, which DCS dashboards show next to the link, said DONGLE with a dongle image; it now says `REFLECTOR urfd <version>` and `Link of module C`, with the repeater image. The band column of those dashboards still comes from the module letter (A 23 cm, B 70 cm, C 2 m), the letter names the link at the reflector and stays
 - **Codec frames between the connectors (4.32.2)**: a review of every place where urfd takes codec frames apart or puts them together fixed: MMDVMClient's EMB of bursts B..F kept the colour code of the burst before instead of the reflector's, and its kerchunk (the short transmission after a connect) built the burst from wrongly placed frames, both now as in every other burst; the DMR hotspot and YSF client connectors ended a stream with a frame of zero bits, which decodes as a short noise, now with AMBE+2 silence, and the YSF client no longer passes on the two empty frames of the header as voice (as the YSF master); NXDN no longer sets a bit of the last AMBE+2 frame a second time in the padding of the VCH; DMR+ uses its own colour code constant (both 1, no change on the air); URF carries the USRP samples little endian on every host (no change on the wire for x86 and ARM)

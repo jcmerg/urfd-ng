@@ -110,7 +110,8 @@ void CCodecStream::ResetStats(uint16_t streamid, ECodecType type)
 	// Initialize D-Star slow data for transcoded (non-D-Star) streams
 	if (type != ECodecType::dstar && m_PacketStream)
 	{
-		CCallsign my = m_PacketStream->GetUserCallsign();
+		auto owner = m_PacketStream->GetOwnerClient();
+		CCallsign my = CReflector::DStarMy(m_PacketStream->GetUserCallsign(), owner ? owner->GetProtocol() : EProtocol::none);
 		CCallsign rpt1 = g_Reflector.GetCallsign();
 		rpt1.SetCSModule(m_CSModule);
 		CCallsign rpt2 = g_Reflector.GetCallsign();
@@ -118,7 +119,6 @@ void CCodecStream::ResetStats(uint16_t streamid, ECodecType type)
 
 		// the source: "<Protocol> <TG/info>" (the name goes in front, ComposeSlowData)
 		std::string msg;
-		auto owner = m_PacketStream->GetOwnerClient();
 		if (owner)
 		{
 			EProtocol proto = owner->GetProtocol();
@@ -276,7 +276,12 @@ void CCodecStream::UpdateSlowDataTG(uint32_t tg)
 	ComposeSlowData();
 
 	// Re-init slow data with updated message
-	CCallsign my = m_PacketStream ? m_PacketStream->GetUserCallsign() : CCallsign();
+	CCallsign my;
+	if (m_PacketStream)
+	{
+		auto owner = m_PacketStream->GetOwnerClient();
+		my = CReflector::DStarMy(m_PacketStream->GetUserCallsign(), owner ? owner->GetProtocol() : EProtocol::none);
+	}
 	CCallsign rpt1 = g_Reflector.GetCallsign();
 	rpt1.SetCSModule(m_CSModule);
 	CCallsign rpt2 = g_Reflector.GetCallsign();
