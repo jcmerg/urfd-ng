@@ -833,7 +833,9 @@ void CMMDVMClientProtocol::OnDMRDVoiceFrameIn(const CBuffer &Buffer, uint32_t sr
 	// Extract 3 x 9-byte AMBE2+ from interleaved DMR frame
 	uint8_t dmr3ambe[27];
 	::memcpy(dmr3ambe, dmrframe, 13);
-	dmr3ambe[13] = (dmr3ambe[13] & 0xF0) | (dmrframe[19] & 0x0F);
+	// the middle frame: the burst's byte 13 holds its bits 32..35 in the high
+	// nibble (the low nibble starts the sync), byte 19 its bits 36..39 in the low
+	dmr3ambe[13] = (dmrframe[13] & 0xF0) | (dmrframe[19] & 0x0F);
 	::memcpy(dmr3ambe + 14, dmrframe + 20, 13);
 
 	uint8_t dmrsync[7];
