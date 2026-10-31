@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.32.0** | tcd 0.15.0 | Dashboard v2.14.2
+**urfd 4.32.1** | tcd 0.15.0 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -914,6 +914,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **MMDVMClient: mittlerer AMBE-Frame jedes Bursts (4.32.1)**: urfd setzte den mittleren der drei AMBE+2-Frames jedes vom Master empfangenen Bursts mit vier Bits (32..35) aus nicht initialisiertem Speicher statt aus dem Burst zusammen, meist Nullen. Die FEC korrigierte das größtenteils, deshalb war es kaum hörbar, aber etwa ein Viertel aller Frames von BrandMeister erreichte tcd und DMR-Clients mit Bitfehlern (die Bursts des Masters selbst haben keine), und Frames mit zusätzlichen Fehlern wurden wiederholt oder stummgeschaltet. Die neuen Zähler von tcd 0.15.0 haben es gezeigt. Das Senden an den Master war nicht betroffen
 - **YSF-Positionen von verbundenen YSF-Reflektoren (4.31.1)**: Die YSF-Client-Anbindung (die Verbindungen von urfd zu anderen YSF-Reflektoren) liest die GPS-Position im DN-Datenkanal ebenfalls, sodass Stationen auf einem verbundenen YSF-Reflektor ihren Locator in der Liste der zuletzt Gehörten bekommen, wie am eigenen YSF-Port von urfd. Ein Durchgang, der ohne seinen Kopf aufgenommen wird (Late Entry), wird bei beiden neu gelesen; vorher behielt er den Zustand des vorigen Durchgangs und zeigte keine Position
 - **Ohne DMR-ID kein DMR und P25 (4.31.0)**: Ein Sprecher ohne DMR-ID (in keiner ID-Datenbank registriert: AllStar, ein D-Star- oder M17-Rufzeichen) ging an die Hotspots an `[MMDVM]`, an DMR+ und an P25 mit Quell-ID 0; jetzt wird er für sie verworfen, außer `[MMDVM] FallbackDmrId` ist gesetzt, wie es MMDVMClient und NXDN schon tun. Nur Sprecher mit ID erreichen also DMR, NXDN und P25. Im Log steht `dropping outbound stream from … - no DMR ID`
 - **YSF-Positionen (4.31.0)**: Die GPS-Position, die Yaesu-Geräte im Datenkanal senden (DN: DT1/DT2, V/D Mode 1: DT1 bis DT5; Kurz- und Langform, gegen ihre Prüfsumme geprüft, wie YSFGateway sie liest), erscheint als Locator in der Liste der zuletzt Gehörten, im XML und in `/json/stations`, wie D-Star- und M17-Positionen, veröffentlicht als Mitte ihres Locator-Feldes
