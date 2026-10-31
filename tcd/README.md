@@ -405,6 +405,7 @@ journalctl -u tcd -f
 - **SVX codec path**: its own `ECodecType::svx` for SVX audio
 
 ### Audio
+- **M17 silence placeholder** (0.15.1): the second Codec2 3200 half of an M17 frame, before its audio is encoded, holds Codec2 silence in the codec's byte order (the bytes were swapped in pairs)
 - **Output gains per codec**: after the AGC, for D-Star, M17/Codec2, DMR/YSF/NXDN, P25 and USRP, applied on copies (the shared buffer is never changed)
 - **AMBE2+ bitstream gain**: `AmbeGainDb` adjusts the b2 parameter in the AMBE2+ frame, with Golay(24,12) FEC recomputed for the A partition and the B partition unscrambled and scrambled again with the new A data (0.2.3; before, the decoder lost the B partition); since 0.2.5 driven by the AGC and computed in the gamma domain, so the gain no longer depends on the level, also with a single device and a codec plugin
 - **AGC v3**: sliding RMS window, per-speaker tracking, gate with decay, fast release after the gate, asymmetric limits, noise gate, peak limiter that cuts the applied gain at once (0.2.3; before, loud onsets after quiet speech clipped), live changes from the dashboard; thread safe since 0.2.3, as every codec's decode thread uses it. Since 0.2.4 the gate holds 60 ms and fades out instead of switching (word endings are no longer chopped), noise just above it no longer pumps the gain up, and the gain ramps across each frame instead of stepping every 20 ms
