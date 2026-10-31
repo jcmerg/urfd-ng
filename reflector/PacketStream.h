@@ -108,13 +108,10 @@ protected:
 
 private:
 	// lost frames: the position the next frame should have in its protocol's
-	// frame cycle (-1: unknown), the positions filled last (from, count; from
-	// -1: none) and how many frames this stream got filled in
+	// frame cycle (-1: unknown) and how many frames this stream got filled in
 	int                 m_iNextWireIdx { -1 };
-	int                 m_iFilledFrom { -1 };
-	int                 m_iFilledCount { 0 };
 	uint32_t            m_uiLostFrames { 0 };
 
 	void PushFrame(std::unique_ptr<CPacket> packet);
-	bool FillLostFrames(const CPacket &next);	// false: drop next, it came late
+	bool FillLostFrames(const CPacket &next, double since);	// false: drop next, it came late or again
 };

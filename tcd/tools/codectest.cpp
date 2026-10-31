@@ -29,7 +29,7 @@ int main(int argc, char *argv[])
 	if (!h) { fprintf(stderr, "%s\n", dlerror()); return 1; }
 	auto func = reinterpret_cast<tcd_codec_plugin_func>(dlsym(h, "tcd_codec_plugin"));
 	const tcd_codec_plugin *p = func ? func() : nullptr;
-	if (!p || p->api != TCD_CODEC_API) { fprintf(stderr, "no tcd codec plugin of API %d\n", TCD_CODEC_API); return 1; }
+	if (!p || p->api < TCD_CODEC_API_MIN || p->api > TCD_CODEC_API) { fprintf(stderr, "no tcd codec plugin of API %d to %d\n", TCD_CODEC_API_MIN, TCD_CODEC_API); return 1; }
 
 	const std::string c(argv[2]);
 	const uint32_t codec = c == "dmr" ? TCD_CODEC_DMR : c == "dstar" ? TCD_CODEC_DSTAR : TCD_CODEC_P25;
