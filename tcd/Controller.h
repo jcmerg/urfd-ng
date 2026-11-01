@@ -68,10 +68,57 @@ protected:
 	static bool Begin(std::unordered_map<char, SStreamPos> &pos, const std::shared_ptr<CTranscoderPacket> &packet);
 	// the module's Codec2 of the mode the packet needs, afresh for a new transmission
 	CCodec2 &Codec2For(const std::shared_ptr<CTranscoderPacket> &packet, bool is1600);
-	std::unique_ptr<CDVDevice> dstar_device, dmrsf_device;
-	bool mixed_mode = false;
-	char mixed_dstar_module = ' ';
-	CDV3003 *mixed_dv3003 = nullptr;  // cached pointer, owned by dmrsf_device
+	// an AMBE device in use: how to open it again, its channels' codecs, and
+	// whether it answers. A lost device is left to the codec plugins and opened
+	// again when it is back (DeviceWatchThread)
+	struct SDeviceSlot
+	{
+		std::string node, desc;		// device node, /dev/serial/by-id name
+		Edvtype type;
+		unsigned long baud;
+		Encoding enc;			// the device's codec
+		Encoding ch_enc[3];		// per channel, a DV3003 in mixed mode has both
+		bool per_channel;		// a DV3003 with ch_enc set
+		int8_t in_gain, out_gain;	// for enc, the other codec's come from tcd.ini
+		const char *role;		// for the monitor: dstar, dmr, mixed
+		std::shared_ptr<CDVDevice> dev;
+		std::atomic<bool> up{false};
+		bool closed = false;		// the lost device's threads are joined
+		int stats = -1;			// g_Stats.devices
+		std::chrono::steady_clock::time_point next_try;
+		bool told = false;		// the watch said why it cannot open it yet
+	};
+	std::vector<std::unique_ptr<SDeviceSlot>> slots;
+	// the AMBE channels for D-Star and for DMR (indexed by kChoiceDStar and
+	// kChoiceDMR): fixed, channel i belongs to the i-th module of Modules; with
+	// DeviceChannels = pool a stream takes a free one, whatever its module
+	struct SHwChannel
+	{
+		int slot;
+		uint8_t ch;
+		bool busy = false;		// pool: a stream has it
+		char module = ' ';
+		uint16_t streamid = 0;
+		std::chrono::steady_clock::time_point last;
+	};
+	std::vector<SHwChannel> hw_channels[kNumChoices];
+	bool pool = false;
+	std::future<void> watchFuture;
+	// the device nodes with "mixed" after their DeviceSerial
+	std::vector<std::string> mixed_nodes;
+	// opens the device of slots[i] on node and sets its channels up, nullptr when it fails
+	std::shared_ptr<CDVDevice> OpenSlot(int i, const std::string &node);
+	void AddSlot(const std::string &node, const std::string &desc, Edvtype type, unsigned long baud, Encoding enc, const char *role, const Encoding *ch_enc = nullptr);
+	void AddChannels(int k, int slot, std::initializer_list<uint8_t> channels);
+	// dev: the lost device, ignored when it is no longer the slot's
+	void DeviceLost(int slot, const CDVDevice *dev);
+	void DeviceWatchThread();
+	// the channel of codec k for a stream, -1 for none (under pinned_mux)
+	int TakeChannel(int k, char module, uint16_t streamid);
+	bool HasChannel(int k, int hw, char module, uint16_t streamid) const;
+	bool HwAny(int k) const { return !hw_channels[k].empty(); }
+	// a name for channel c of codec k in the log: DV3003 ch1
+	std::string ChannelName(int k, size_t c) const;
 
 	CPacketQueue codec2_queue;
 
@@ -86,22 +133,24 @@ protected:
 	// alongside choices[kChoiceM17]: the same plugin's M17 1600 codec, nullptr
 	// where tcd's own Codec2 decodes 1600
 	std::vector<class CSoftCodec *> choices[kNumChoices], m17_1600_choices;
-	struct SPinned { int choice; std::chrono::steady_clock::time_point last; };
+	// hw: the stream's AMBE channel (hw_channels[k]), -1 for none
+	struct SPinned { int choice; int hw; std::chrono::steady_clock::time_point last; };
 	std::mutex pinned_mux;
 	std::unordered_map<uint16_t, SPinned> pinned[kNumChoices];
 	// the modules the devices do D-Star and DMR for; the other modules go to a
 	// plugin (empty for the choices with an own vocoder, which does every module)
 	std::string hw_modules[kNumChoices];
 	// the index of a stream's choice k (CodecChoice.h) into a list of
-	// list_size, pinned for the stream
-	int Pick(int k, size_t list_size, uint16_t streamid, char module);
+	// list_size, pinned for the stream; for a device its AMBE channel in
+	// dev and ch (dev stays empty for a plugin or tcd's own vocoder)
+	int Pick(int k, size_t list_size, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev = nullptr, uint8_t *ch = nullptr);
 	// codec: TCD_CODEC_DSTAR, _DMR, _P25, _M17 or _M17_1600 (the two M17 share the choice)
-	class CSoftCodec *SwCodec(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet)
+	class CSoftCodec *SwCodec(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev = nullptr, uint8_t *ch = nullptr)
 	{
 		const int k = ChoiceOfCodec(codec);
 		assert(k >= 0);
 		const auto &list = codec == TCD_CODEC_M17_1600 ? m17_1600_choices : choices[k];
-		return list.empty() ? nullptr : list[Pick(k, list.size(), packet->GetStreamId(), packet->GetModule())];
+		return list.empty() ? nullptr : list[Pick(k, list.size(), packet, dev, ch)];
 	}
 	// P25 with the stream's choice: OP25 or a plugin. A plugin's error gives IMBE
 	// silence (encode) or silent samples (decode)

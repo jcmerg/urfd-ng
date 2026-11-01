@@ -39,7 +39,7 @@
 CCodecStream::CCodecStream(CPacketStream *PacketStream, char module) : m_CSModule(module), m_IsOpen(false), m_EventFD(-1),
 	m_uiStreamId(0), m_uiPort(0), m_uiPid(0), m_eCodecIn(ECodecType::none),
 	m_RTMin(-1), m_RTMax(-1), m_RTSum(0), m_RTCount(0),
-	m_uiTotalPackets(0), m_uiMismatchCount(0), m_uiSuperframeCount(0)
+	m_uiTotalPackets(0), m_uiMismatchCount(0), m_uiSkipCount(0), m_uiSuperframeCount(0)
 {
 	m_PacketStream = PacketStream;
 	m_EventFD = eventfd(0, EFD_NONBLOCK);
@@ -105,6 +105,7 @@ void CCodecStream::ResetStats(uint16_t streamid, ECodecType type)
 	m_RTCount = 0;
 	m_uiTotalPackets = 0;
 	m_uiMismatchCount = 0;
+	m_uiSkipCount = 0;
 	m_uiSuperframeCount = 0;
 
 	// Initialize D-Star slow data for transcoded (non-D-Star) streams
@@ -338,6 +339,19 @@ void CCodecStream::Task(void)
 		receivedAny = true;
 		if (m_IsOpen && pack.streamid == m_uiStreamId && !m_LocalQueue.IsEmpty())
 		{
+			// frames tcd never answered (lost in an AMBE device that hung) come before
+			// this answer: skip them, else every later answer missed its frame and the
+			// rest of the transmission was dropped
+			while (!m_LocalQueue.IsEmpty() && int32_t(pack.sequence - m_LocalQueue.Front()->GetCodecPacket()->sequence) > 0)
+			{
+				m_LocalQueue.Pop();
+				if (m_uiSkipCount++ == 0)
+					std::cerr << "Transcoder lost frames on module " << m_CSModule << ", skipped" << std::endl;
+			}
+			// an answer older than the queue's head was skipped already: drop it, the
+			// head waits for its own answer
+			if (m_LocalQueue.IsEmpty() || int32_t(pack.sequence - m_LocalQueue.Front()->GetCodecPacket()->sequence) < 0)
+				continue;
 			auto Packet = m_LocalQueue.Pop();
 
 			if ((pack.streamid == Packet->GetCodecPacket()->streamid) && (pack.sequence == Packet->GetCodecPacket()->sequence))

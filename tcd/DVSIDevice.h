@@ -22,6 +22,8 @@
 #include <future>
 #include <atomic>
 #include <memory>
+#include <functional>
+#include <unordered_map>
 
 #include "PacketQueue.h"
 #include "DVSIPacket.h"
@@ -45,6 +47,11 @@ public:
 	void Start();
 	void CloseDevice();
 	void AddPacket(const std::shared_ptr<CTranscoderPacket> packet);
+	// a packet for a channel the controller chose (a DV3000 has only channel 0)
+	void AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> packet, uint8_t channel);
+	// called once from the reader thread when the device is lost (unplugged, or it
+	// stopped answering); without a handler tcd stops, as before
+	void SetLostHandler(std::function<void()> handler) { m_onLost = std::move(handler); }
 	std::string GetProductID() { return productid; }
 	Edvtype GetType() const { return devtype; }
 	unsigned int GetBufferDepth() const { return buffer_depth.load(std::memory_order_relaxed); }
@@ -64,15 +71,24 @@ protected:
 	std::mutex buffer_mutex;
 	std::condition_variable buffer_cv;
 	std::atomic<bool> keep_running;
-	// steady clock ms of the last packet sent and the last answer: a device that gets
-	// packets for DEVICE_SILENCE_MS without answering one is taken as lost
-	std::atomic<int64_t> m_lastSent{0}, m_lastAnswer{0};
+	// steady clock ms of the oldest packet sent since the last answer, 0 for none: a
+	// device that leaves one unanswered for DEVICE_SILENCE_MS is taken as lost. (The
+	// last packet sent against the last answer took an idle device as lost when the
+	// reader's wait ran out between a new stream's first packet and its answer.)
+	std::atomic<int64_t> m_unanswered{0};
 	CPacketQueue input_queue;
 	std::future<void> feedFuture, readFuture;
 	std::string description, productid;
 	std::atomic<int32_t> m_outputGainDStar{256}, m_outputGainDmr{256};
 	int m_statsIndex = -1;
 	bool probing = false;	// Probe: fewer messages
+	std::function<void()> m_onLost;
+	// the channel AddPacketToChannel chose for a packet, until FeedDevice takes it
+	mutable std::unordered_map<CTranscoderPacket *, uint8_t> target_channel;
+	mutable std::mutex target_mutex;
+	// the channel of a packet from AddPacketToChannel (and forgets it), 0xFF without one
+	uint8_t TargetChannel(const std::shared_ptr<CTranscoderPacket> &packet) const;
+	void Lost(void);
 
 	bool ConfigureVocoder(uint8_t pkt_ch, Encoding type, int8_t in_gain, int8_t out_gain);
 	bool checkResponse(SDV_Packet &responsePacket, uint8_t response) const;

@@ -57,92 +57,9 @@ void CDV3003::SetChannelEncoding(uint8_t channel, Encoding enc)
 		channel_enc[channel] = enc;
 }
 
-void CDV3003::SetModuleDStarChannel(char module, uint8_t channel)
-{
-	dstar_channel_map[module] = channel;
-}
-
-void CDV3003::SetModuleDMRChannel(char module, uint8_t channel)
-{
-	dmr_channel_map[module] = channel;
-}
-
-void CDV3003::AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> packet, uint8_t channel)
-{
-	{
-		std::lock_guard<std::mutex> lock(target_mutex);
-		target_channel[packet.get()] = channel;
-	}
-	AddPacket(packet);
-}
-
 Encoding CDV3003::GetChannelEncoding(uint8_t channel) const
 {
 	return (channel < 3) ? channel_enc[channel] : type;
-}
-
-uint8_t CDV3003::MapPacketToChannel(const std::shared_ptr<CTranscoderPacket> &packet) const
-{
-	// Determine if this packet needs a D-Star or DMR channel on this DV3003.
-	// FeedDevice will check: for D-Star channel, DStarIsSet → decode, else encode.
-	//                        for DMR channel, DMRIsSet → decode, else encode.
-	//
-	// If DStarIsSet → packet has D-Star AMBE data → route to D-Star channel for decode
-	// If DMRIsSet but !DStarIsSet → packet has DMR data → route to DMR channel for decode
-	// If neither is set for the target codec → packet has PCM → route for encode
-	//
-	// The Controller sends to this device for a specific purpose:
-	//   - ReadReflectorThread sends D-Star packets here (mixed_dstar_module) → D-Star channel
-	//   - ReadReflectorThread sends DMR packets here → DMR channel
-	//   - RouteDstPacket sends decoded D-Star (has PCM) for DMR encode → DMR channel
-	//   - RouteDmrPacket sends decoded DMR (has PCM) for D-Star encode → D-Star channel
-	//
-	// Key insight: if DStarIsSet, we need a D-Star channel. If DMRIsSet, we need a DMR channel.
-	// If neither: the packet was decoded elsewhere and needs encoding.
-	//   codec_in tells us the original source, so the target is the OTHER codec.
-
-	char mod = packet->GetModule();
-	// Check explicit channel override (set by AddPacketToChannel)
-	{
-		std::lock_guard<std::mutex> lock(target_mutex);
-		auto it = target_channel.find(packet.get());
-		if (it != target_channel.end())
-		{
-			uint8_t ch = it->second;
-			target_channel.erase(it);
-			return ch;
-		}
-	}
-
-	// A device of one codec (no mixed mode, so no channel maps): the module's own
-	// channel, as CDVDevice does; only the first modules of Modules come here. The
-	// fallback below would decode no D-Star on a D-Star device (it looks for a DMR
-	// channel) and would put every module's stream on the first channel.
-	if (dstar_channel_map.empty() && dmr_channel_map.empty())
-		return CDVDevice::MapPacketToChannel(packet);
-
-	// Fallback: route to the channel for the codec that is NOT yet set
-	bool use_dstar = !packet->DStarIsSet();
-
-	if (use_dstar)
-	{
-		auto it = dstar_channel_map.find(mod);
-		if (it != dstar_channel_map.end())
-			return it->second;
-		// Fallback: first D-Star channel
-		for (uint8_t ch = 0; ch < 3; ch++)
-			if (channel_enc[ch] == Encoding::dstar) return ch;
-	}
-	else
-	{
-		auto it = dmr_channel_map.find(mod);
-		if (it != dmr_channel_map.end())
-			return it->second;
-		// Fallback: first DMR channel
-		for (uint8_t ch = 0; ch < 3; ch++)
-			if (channel_enc[ch] == Encoding::dmrsf) return ch;
-	}
-	return 0xFF;
 }
 
 void CDV3003::PushWaitingPacket(unsigned int channel, std::shared_ptr<CTranscoderPacket> packet)

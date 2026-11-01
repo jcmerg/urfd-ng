@@ -37,9 +37,11 @@
 #include "Configure.h"
 #include "TcdStats.h"
 
-// a device with packets waiting that answers nothing for this long is taken as lost,
-// like an unplugged one: tcd stops and its service restarts it without the device
-#define DEVICE_SILENCE_MS 3000
+// a device that leaves a packet unanswered for this long is taken as lost, like an
+// unplugged one: a codec plugin takes its streams (or tcd stops, without one). An
+// answer takes some 20-100 ms; within 1 s the plugin takes over before the radios
+// end the transmission for the pause (some after 1.5-2 s)
+#define DEVICE_SILENCE_MS 1000
 
 static int64_t SteadyMs()
 {
@@ -52,11 +54,45 @@ CDVDevice::CDVDevice(Encoding t) : type(t), devtype(Edvtype::dv3000), buffer_dep
 {
 }
 
+uint8_t CDVDevice::TargetChannel(const std::shared_ptr<CTranscoderPacket> &packet) const
+{
+	std::lock_guard<std::mutex> lock(target_mutex);
+	auto it = target_channel.find(packet.get());
+	if (it == target_channel.end())
+		return 0xFF;
+	const uint8_t ch = it->second;
+	target_channel.erase(it);
+	return ch;
+}
+
+void CDVDevice::AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> packet, uint8_t channel)
+{
+	{
+		std::lock_guard<std::mutex> lock(target_mutex);
+		target_channel[packet.get()] = channel;
+	}
+	AddPacket(packet);
+}
+
+// the device is gone or hung: the controller hands its channels to a codec plugin,
+// or, without a handler, tcd stops and its service restarts it without the device
+void CDVDevice::Lost(void)
+{
+	if (m_onLost)
+		m_onLost();
+	else
+		kill(getpid(), SIGINT);
+}
+
 uint8_t CDVDevice::MapPacketToChannel(const std::shared_ptr<CTranscoderPacket> &packet) const
 {
+	const uint8_t target = TargetChannel(packet);
+	if (target != 0xFF)
+		return target;
 	const std::string modules(g_Conf.GetTCMods());
 	auto index = modules.find(packet->GetModule());
-	return (index != std::string::npos) ? (uint8_t)index : 0xFF;
+	const size_t channels = (Edvtype::dv3000 == devtype) ? 1 : 3;
+	return (index < channels) ? (uint8_t)index : 0xFF;
 }
 
 bool CDVDevice::ConfigureChannel(uint8_t pkt_ch, Encoding enc, int8_t in_gain, int8_t out_gain)
@@ -368,7 +404,7 @@ bool CDVDevice::InitDevice()
 
 void CDVDevice::Start()
 {
-	m_lastAnswer.store(SteadyMs());
+	m_unanswered.store(0);
 	feedFuture = std::async(std::launch::async, &CDVDevice::FeedDevice, this);
 	readFuture = std::async(std::launch::async, &CDVDevice::ReadDevice, this);
 }
@@ -613,6 +649,9 @@ void CDVDevice::FeedDevice()
 						ds.ch_last_ms[index].store(now, std::memory_order_relaxed);
 					}
 
+					// stamped before it goes out, so its answer cannot come first
+					int64_t none = 0;
+					m_unanswered.compare_exchange_strong(none, SteadyMs());
 					Encoding ch_enc = GetChannelEncoding(index);
 					const bool needs_audio = (Encoding::dstar==ch_enc) ? packet->DStarIsSet() : packet->DMRIsSet();
 
@@ -639,7 +678,6 @@ void CDVDevice::FeedDevice()
 							SendAudio(index, packet->GetAudioSamples());
 					}
 					buffer_depth++;
-					m_lastSent.store(SteadyMs());
 				}
 			}
 		}
@@ -678,26 +716,28 @@ void CDVDevice::ReadDevice()
 			// a device that is still there but answers nothing (a hung chip) would hold
 			// the modules forever: give up as for a lost one, so tcd restarts without it
 			// and a codec plugin or a standby tcd takes over
-			if (0 == RxBytes && m_lastSent.load() - m_lastAnswer.load() > DEVICE_SILENCE_MS)
+			const int64_t unanswered = m_unanswered.load();
+			if (0 == RxBytes && unanswered && SteadyMs() - unanswered > DEVICE_SILENCE_MS)
 			{
-				std::cerr << "The AMBE device " << description << " has not answered for " << DEVICE_SILENCE_MS / 1000 << " s, shutting down" << std::endl;
-				kill(getpid(), SIGINT);
+				std::cerr << "The AMBE device " << description << " has not answered for " << DEVICE_SILENCE_MS << " ms" << std::endl;
+				Lost();
 				return;
 			}
 		}
 
 		if (RxBytes < 0)
 		{
-			// unplugged or reset: give up, systemd restarts tcd and it finds the device again
-			std::cerr << "Lost the AMBE device " << description << ", shutting down" << std::endl;
-			kill(getpid(), SIGINT);
+			// unplugged or reset: a codec plugin takes over until it is back, or tcd
+			// stops and its service restarts it
+			std::cerr << "Lost the AMBE device " << description << std::endl;
+			Lost();
 			return;
 		}
 
 		SDV_Packet p;
 		if (! GetResponse(p))
 		{
-			m_lastAnswer.store(SteadyMs());
+			m_unanswered.store(0);
 			ProcessPacket(p);
 		}
 	}

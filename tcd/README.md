@@ -89,6 +89,7 @@ Each transcoded module needs a D-Star channel and a DMR/YSF channel. A DV3000 (T
 | Hardware | Codec plugin | Modules | Notes |
 |---|---|---|---|
 | 1× DV3000 or 1× DV3003 | one for DMR (or D-Star) | 1 | D-Star on the device, DMR/YSF in software |
+| 1× DV3003 with `mixed` | one for D-Star and DMR | 1 on the device, more in software | D-Star and DMR/YSF of one module on the device, see [below](#single-dv3003-in-mixed-mode) |
 | DV3000 + DV3003 | — | 2 | mixed mode, recommended |
 | 2× DV3000 | — | 1 | one for D-Star, one for DMR/YSF |
 | 2× DV3003 | — | up to 3 | one for D-Star, one for DMR/YSF |
@@ -112,6 +113,24 @@ Modules = FS            # first = D-Star on the DV3000, second = D-Star on the D
 DeviceSerial = DQ015SBR # DV3000
 DeviceSerial = DKB7FXGE # DV3003
 ```
+
+### Single DV3003 in mixed mode
+
+`mixed` after the serial of a DV3003 that is the only device (since 0.17.0) sets its channels up as in mixed mode: channel 0 D-Star, channel 1 DMR/YSF, both for the first module, channel 2 stays free. That module is transcoded on the device in both directions, the other modules by the codec plugins (one for D-Star and DMR is needed then). Without `mixed` a DV3003 alone does D-Star for three modules, as before. `mixed` is for a DV3003 alone with `CodecDStar`/`CodecDMR` on `dvsi`; anywhere else tcd warns and ignores it.
+
+```ini
+Modules = FSA
+DeviceSerial = DKB7FXGE mixed   # F on the DV3003, S and A on the plugin
+CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so
+```
+
+### Channel pool (`DeviceChannels = pool`)
+
+By default the AMBE channels belong to the first modules of `Modules`. With `DeviceChannels = pool` (since 0.17.0) a stream takes any free channel when it starts, whatever its module, and keeps it until its last frame (or 1.5 s without one); a stream that finds no free channel goes to a codec plugin. D-Star and DMR are pools of their own: a D-Star stream takes a D-Star channel for its decode and a DMR channel for the DMR encode. So the devices serve the modules that are busy right now: with DV3000 + DV3003 (two channels each) the first two streams on any modules are transcoded on the devices, a third at the same time in software. A pool needs a codec plugin for the codecs of the devices when there are more modules than channels, as the fixed assignment does. The same module can sound different from one transmission to the next (device or plugin), depending on what else is on the air.
+
+### A device lost while tcd runs
+
+A device unplugged while tcd runs, or one that leaves a packet unanswered for 1 s (a hung chip), is taken out (since 0.17.0): its streams, also the ones on the air, go to a codec plugin, and tcd opens the device again as soon as it is there (looked for every 5 s by its `/dev/serial/by-id` name, so a replug may give it another node; the opening resets it). New streams use it again from then on. Without a plugin for one of the device's codecs tcd stops instead, as before, and its service restarts it (or a [standby tcd](#standby-a-second-tcd-for-the-same-modules) takes the modules). A device missing at the start is only used after the next start of tcd. The frames a hung device held are lost; urfd 4.34.0 skips them and goes on with the next ones (before, the rest of the transmission was dropped).
 
 ### Single device with a codec plugin
 
@@ -138,7 +157,7 @@ CodecM17    = codec2                      # M17: codec2 (tcd's own, the default)
 P25 here means the IMBE codec: urfd 4.31.0 hands YSF VW (IMBE) to tcd as P25, so `CodecP25` also decodes VW (tcd never encodes VW: YSF gets DN from tcd, VW only passes through urfd on modules without transcoder); the monitor calls the codec IMBE (P25, YSF VW).
 
 - **Which vocoder**: without `CodecDStar`/`CodecDMR` the devices come first and a plugin only does what no device does. A plugin's name there puts that codec in software from the start, even when a device could do it; with a single device, the device then takes the other codec. P25 runs on tcd's own OP25 vocoder for every module unless `CodecP25` names a plugin that does P25; one that names a plugin not loaded or without P25 stops tcd. M17 works the same way with tcd's own Codec2 and `CodecM17`; a plugin chosen for M17 that lacks Codec2 1600 leaves M17 voice+data streams to tcd's Codec2.
-- **More modules than channels**: the devices take the first modules of `Modules`, as many as they have channels (mixed mode 2, two DV3003 3, ...); the other modules always go to a plugin. With DV3000 + DV3003 and `Modules = FSABC`, F and S are transcoded on the devices and A, B and C in software. Without a plugin for the rest, tcd does not start.
+- **More modules than channels**: the devices take the first modules of `Modules`, as many as they have channels (mixed mode 2, two DV3003 3, ...); the other modules always go to a plugin (with [`DeviceChannels = pool`](#channel-pool-devicechannels--pool) any module's stream can take a free channel). With DV3000 + DV3003 and `Modules = FSABC`, F and S are transcoded on the devices and A, B and C in software. Without a plugin for the rest, tcd does not start.
 - **Switching at run time**: the web dashboard (settings, "Vocoder") and `POST /api/codec` with `{"codec": "dstar", "use": "foo"}` (`dstar`, `dmr`, `p25` or `m17`) choose the vocoder for the streams that start from then on: a running transmission keeps its vocoder. Everything loaded at start is offered: a device for the codec (for P25 `op25`, for M17 `codec2`) and every plugin that does it. "Save" writes the choice to `tcd.ini`.
 - **Options**: lines of `tcd.ini` that tcd does not know go to the plugins, e.g. a path the plugin needs; a line nobody takes is warned about.
 - **Interface**: plain C, [`CodecPlugin.h`](CodecPlugin.h): `open`/`close` a state per stream, `encode`/`decode` 160 samples of 8 kHz PCM to and from a 9 byte frame (P25: 11 bytes; M17: 8 bytes, M17 1600: 8 bytes and 320 samples), `start`/`stop` at the first and after the last frame of a transmission (since 0.12.0, `TCD_CODEC_API 2`), so a plugin begins every transmission afresh, also when a stream id comes again; since 0.15.0 (`TCD_CODEC_API 3`) optionally `decode_info`, which also reports how a frame came out (corrected bit errors, repeat, mute, tone, silence), and `frame_format`, a codec's frame size. tcd calls a plugin from one thread at a time and closes the state of a stream that has been quiet for 30 s. A plugin is built against this header only and does not have to be rebuilt with every tcd update; tcd loads plugins of API 2 and 3 (`TCD_CODEC_API_MIN` to `TCD_CODEC_API`) and reads the API 3 functions only from API 3 plugins.
@@ -163,7 +182,7 @@ sudo nano /opt/urfd/tcd/tcd.ini
 sudo docker/build.sh start
 ```
 
-`docker/build.sh` builds and starts what this machine has a configuration for: urfd with `$URFD_DATA/config/urfd.ini`, tcd with `$URFD_DATA/tcd/tcd.ini`, so it serves a machine with only tcd too. A `tcd.ini` with a `DeviceSerial`, or without a `CodecPlugin`, means AMBE sticks: build.sh adds `docker/docker-compose.tcd-sticks.yml`, which gives the container the host's `/dev` read only and the USB serial devices (major 188). tcd finds the sticks by `/dev/serial/by-id` as natively, also after a replug gives a stick another node, and sets their USB latency timer to 1 ms itself (the low latency ioctl, no `/sys` needed; tcd logs the value at start). tcd exits when it loses a device, and the container restarts. Inside the container: `docker exec -it tcd tcdmon`.
+`docker/build.sh` builds and starts what this machine has a configuration for: urfd with `$URFD_DATA/config/urfd.ini`, tcd with `$URFD_DATA/tcd/tcd.ini`, so it serves a machine with only tcd too. A `tcd.ini` with a `DeviceSerial`, or without a `CodecPlugin`, means AMBE sticks: build.sh adds `docker/docker-compose.tcd-sticks.yml`, which gives the container the host's `/dev` read only and the USB serial devices (major 188). tcd finds the sticks by `/dev/serial/by-id` as natively, also after a replug gives a stick another node, and sets their USB latency timer to 1 ms itself (the low latency ioctl, no `/sys` needed; tcd logs the value at start). A lost device goes to the codec plugins until it is back (see [above](#a-device-lost-while-tcd-runs)); without a plugin tcd exits and the container restarts. Inside the container: `docker exec -it tcd tcdmon`.
 
 In `tcd.ini`: `ServerAddress = 127.0.0.1` next to urfd (the container uses the host's network), else the reflector's address; `Modules` as many as wanted; with sticks `DeviceSerial` as natively, in software `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so` and no `DeviceSerial`; a `MonitorHttpPort` that is free on the host. In `urfd.ini`: `[Transcoder] Modules = auto`, so tcd's list alone decides. The image builds every `tcd/plugins/<name>/` with a `Makefile` (git ignores that directory); `tcd.ini` is writable for the monitor's Save. To update: `sudo ./setup.sh update`, or by hand `git pull` in the checkout and in each plugin clone (`git -C tcd/plugins/<name> pull`), then `docker/build.sh`. The containers carry a label that keeps watchtower from replacing them, as they are built here and not pulled.
 
@@ -200,7 +219,7 @@ tcd opens the devices through the kernel's `ftdi_sio` driver and sets their USB 
 
 Whether a device is a DV3000 (one channel) or a DV3003 (three) tcd takes from the product ID its chip reports (`AMBE3000…`, `AMBE3003…`), not from the USB name, which clones often leave generic. The baud rate still follows the name: 460800 for the single channel sticks (ThumbDV, DVstick-30, USB-3000 and the generic `FT230X_Basic_UART`/`FT232R_USB_UART`), 921600 for the others. tcd never tries another rate: bytes at a wrong rate can leave an AMBE3003 deaf until it is unplugged and plugged in again.
 
-A device that cannot be opened or does not answer is left out with a warning, and tcd carries on with the others and the codec plugins, as long as they cover the modules (before, it stopped). A device lost while tcd runs (unplugged, or one that gets packets for 3 s without answering any, such as a hung chip) stops tcd; its service starts it again, the device is left out, and the codec plugins take over its codec, or, without one, tcd does not start and a [standby tcd](#standby-a-second-tcd-for-the-same-modules) takes the modules. Each device is opened for tcd alone: a second tcd or `dvsitest` gets `is in use by another process` instead of resetting the chip under the running tcd.
+A device that cannot be opened or does not answer is left out with a warning, and tcd carries on with the others and the codec plugins, as long as they cover the modules (before, it stopped). A device lost while tcd runs (unplugged, or one that leaves a packet unanswered for 1 s, such as a hung chip) goes to the codec plugins until it is back, see [A device lost while tcd runs](#a-device-lost-while-tcd-runs). Each device is opened for tcd alone: a second tcd or `dvsitest` gets `is in use by another process` instead of resetting the chip under the running tcd.
 
 ## Configuration (tcd.ini)
 
@@ -215,7 +234,8 @@ A device that cannot be opened or does not answer is left out with a warning, an
 | `Password` | — | the reflector's `[Transcoder] Password`, needed when it has one (since 0.8.0) |
 | `Modules` | `FS` | transcoded modules; with the reflector's `[Transcoder] Modules = auto` (urfd 4.25.0) any of its modules, this list alone decides; else the same letters as there |
 | `StandbyModules` | — | modules this tcd takes only while no other tcd has them (since 0.11.0, urfd 4.26.0), see [Standby](#standby-a-second-tcd-for-the-same-modules); not in `Modules` as well |
-| `DeviceSerial` | — | AMBE device to use, one line each (see [above](#selecting-the-ambe-devices)) |
+| `DeviceSerial` | — | AMBE device to use, one line each (see [above](#selecting-the-ambe-devices)); `mixed` after the serial of a DV3003 alone: D-Star and DMR of one module on it (since 0.17.0, see [Single DV3003 in mixed mode](#single-dv3003-in-mixed-mode)) |
+| `DeviceChannels` | `fixed` | `fixed`: the AMBE channels belong to the first modules; `pool`: a stream takes any free channel (since 0.17.0, see [Channel pool](#channel-pool-devicechannels--pool)) |
 
 ### Gains
 
@@ -391,17 +411,19 @@ journalctl -u tcd -f
 | `USB latency timer is 16 ms` warning | tcd could not set the latency timer; natively it has to run as root (the systemd unit does); in Docker the kernel's `ftdi_sio` ignored the low latency request, set `/sys/bus/usb-serial/devices/<tty>/latency_timer` to 1 on the host |
 | `... does not answer at ... baud and is left out` | the device is left out, tcd runs with the others; unplug it and plug it in again, then restart tcd. A DV3003 with a generic USB name gets 460800 baud and cannot answer |
 | `... is in use by another process` | another tcd or `dvsitest` holds the device: stop it (`pgrep -a tcd`) |
-| `Lost the AMBE device ..., shutting down` | the device was unplugged or reset; systemd restarts tcd after 5 s and it finds the device again |
+| `Lost the AMBE device ...` / `... has not answered for 1000 ms` | the device was unplugged, reset or hung; a codec plugin takes its streams and tcd opens it again when it is back (`... is back on ...`). Without a plugin: `shutting down`, systemd restarts tcd after 5 s |
+| `... does not open or answer, trying again every 5 s` | a lost device is there but does not answer: unplug it and plug it in again |
 | the reflector shows no transcoder | `ServerAddress` and `Port` in `tcd.ini`, the same `Modules` on both sides, and port 10100/tcp reachable from the tcd machine |
 
 ## Changes from upstream
 
 ### Hardware and devices
-- **Serial access without libftd2xx**: through the kernel's `ftdi_sio` driver and `/dev/serial/by-id` (POSIX backend by Jason Kendall), RTS/CTS flow control, USB latency timer at 1 ms; devices left unbound by an older tcd are bound back; a lost device restarts tcd through systemd
+- **Serial access without libftd2xx**: through the kernel's `ftdi_sio` driver and `/dev/serial/by-id` (POSIX backend by Jason Kendall), RTS/CTS flow control, USB latency timer at 1 ms; devices left unbound by an older tcd are bound back; a lost device goes to the codec plugins until it is back (without one, systemd restarts tcd)
 - **Device selection**: `--list-devices`, `DeviceSerial` with exact matching
 - **Device type from the chip**: DV3000 or DV3003 by the product ID, a device that does not answer is left out instead of stopping tcd, a second reset try, the serial flush zeros leave before the input is flushed, exclusive open
 - **macOS**: builds with clang and runs natively with the AMBE devices, see [macOS](#macos)
 - **Mixed mode DV3000 + DV3003**: two modules at once with per-channel codec setup
+- **A DV3003 alone in mixed mode, channel pool, lost devices** (0.17.0): `DeviceSerial = ... mixed` puts D-Star and DMR of one module on a lone DV3003; `DeviceChannels = pool` lets a stream of any module take a free channel; a device lost while tcd runs goes to the codec plugins and is opened again when it is back, instead of stopping tcd
 - **DV3003 D-Star**: companding off, serial flush, per-channel encoding
 - **SVX codec path**: its own `ECodecType::svx` for SVX audio
 

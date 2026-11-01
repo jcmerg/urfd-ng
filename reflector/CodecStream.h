@@ -64,6 +64,7 @@ public:
 	unsigned int GetRTCount(void) const       { return m_RTCount; }
 	uint32_t GetTotalPackets(void) const      { return m_uiTotalPackets; }
 	uint32_t GetMismatchCount(void) const     { return m_uiMismatchCount; }
+	uint32_t GetSkipCount(void) const         { return m_uiSkipCount; }
 	bool     IsPipelineEmpty(void)              { return m_Queue.IsEmpty() && m_LocalQueue.IsEmpty(); }
 
 	// task
@@ -115,4 +116,5 @@ protected:
 	unsigned int m_RTCount;
 	uint32_t     m_uiTotalPackets;
 	uint32_t     m_uiMismatchCount;
+	uint32_t     m_uiSkipCount;		// frames of the stream tcd never answered
 };

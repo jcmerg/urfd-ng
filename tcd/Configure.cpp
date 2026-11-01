@@ -44,6 +44,7 @@
 #define PASSWORD       "Password"
 #define PORT           "Port"
 #define DEVICESERIAL   "DeviceSerial"
+#define DEVICECHANNELS "DeviceChannels"
 #define AGCENABLE      "AGC"
 #define AGCTARGET      "AGCTarget"
 #define AGCATTACK      "AGCAttack"
@@ -194,7 +195,26 @@ bool CConfigure::ReadData(const std::string &path)
 			if (ambe_gain_db < -30) ambe_gain_db = -30;
 		}
 		else if (0 == key.compare(DEVICESERIAL))
-			device_serials.push_back(value);
+		{
+			// the serial, then the options of the device
+			std::istringstream words(value);
+			std::string serial, option;
+			words >> serial;
+			device_serials.push_back(serial);
+			while (words >> option)
+			{
+				if (option == "mixed")
+					mixed_serials.push_back(serial);
+				else
+					std::cerr << "Warning: unknown option '" << option << "' of " << DEVICESERIAL << " " << serial << std::endl;
+			}
+		}
+		else if (0 == key.compare(DEVICECHANNELS))
+		{
+			if (value == "pool")       device_pool = true;
+			else if (value == "fixed") device_pool = false;
+			else std::cerr << "Warning: unknown " << DEVICECHANNELS << " '" << value << "', using 'fixed'" << std::endl;
+		}
 		else if (0 == key.compare(AGCENABLE))
 			agc_enabled = IS_TRUE(value[0]);
 		else if (0 == key.compare(AGCTARGET))
@@ -302,6 +322,8 @@ bool CConfigure::ReadData(const std::string &path)
 	std::cout << SERVERADDRESS << " = " << address << std::endl;
 	std::cout << PASSWORD << " = " << (password.empty() ? "(none)" : "(set)") << std::endl;
 	std::cout << PORT << " = " << port << std::endl;
+	if (device_pool)
+		std::cout << DEVICECHANNELS << " = pool (a stream takes a free AMBE channel, whatever its module)" << std::endl;
 	std::cout << DSTARGAININ << " = " << dstar_in << std::endl;
 	std::cout << DSTARGAINOUT << " = " << dstar_out << std::endl;
 	std::cout << DMRGAININ << " = " << dmr_in << std::endl;
