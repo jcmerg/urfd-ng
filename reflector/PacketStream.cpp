@@ -20,6 +20,8 @@
 #include <cstring>
 
 #include "PacketStream.h"
+#include "Golay24128.h"
+#include "YSFDefines.h"
 #include "Global.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -186,13 +188,27 @@ bool CPacketStream::FillLostFrames(const CPacket &next, double since)
 }
 
 // Repeated frames. Some radios and hotspots end a DMR (or YSF, NXDN) transmission
-// with the same AMBE+2 frame again and again, 6 to 30 times (seen on BrandMeister
-// TG 262 and 91: a third of the transmissions, from a third of the stations).
-// Every decoder plays it as the last sound once more. Speech never has the same
-// frame twice in a row, beyond the silence frame, so from the third one in a row
-// a frame is replaced by AMBE+2 silence, for every target.
+// with the same AMBE+2 voice frame again and again, 6 to 30 times (seen on
+// BrandMeister TG 262 and 91: a third of the transmissions, from a third of the
+// stations; mostly a frame of b0 0). Every decoder plays it as the last sound once
+// more. Speech never has the same voice frame twice in a row, so from the third one
+// in a row it is replaced by AMBE+2 silence, for every target. Only voice frames
+// (b0 below 120): a held tone (DTMF, a beep: tone frames, b0 126-127) repeats its
+// frame by design, and silence (124-125) and erasures (120-123) may repeat too.
 #define MAX_SAME_AMBE2 2
 static const uint8_t AMBE2_SILENCE[9] = { 0xB9, 0xE8, 0x81, 0x52, 0x61, 0x73, 0x00, 0x2A, 0x6B };
+
+// b0 of an AMBE+2 frame in DMR air order: the A partition's 4 high bits (FEC
+// corrected) and 3 bits of the C partition (mbelib ambe3600x2450.c)
+static int Ambe2B0(const uint8_t *ambe2)
+{
+	auto bit = [ambe2](unsigned i) { return (ambe2[i >> 3] & BIT_MASK_TABLE[i & 7]) != 0; };
+	unsigned a = 0;
+	for (int i = 0; i < 24; i++)
+		a = (a << 1) | (bit(DMR_A_TABLE[i]) ? 1u : 0u);
+	const unsigned u0 = CGolay24128::decode24128(a);
+	return int(((u0 >> 8) & 0x0F) << 3) | (bit(DMR_C_TABLE[13]) ? 4 : 0) | (bit(DMR_C_TABLE[14]) ? 2 : 0) | (bit(DMR_C_TABLE[15]) ? 1 : 0);
+}
 
 void CPacketStream::MuteRepeatedFrame(CPacket &packet)
 {
@@ -200,7 +216,7 @@ void CPacketStream::MuteRepeatedFrame(CPacket &packet)
 		return;
 	auto &frame = static_cast<CDvFramePacket &>(packet);
 	const uint8_t *ambe2 = frame.GetCodecData(ECodecType::dmr);
-	if (0 == memcmp(ambe2, m_LastAmbe2, sizeof(m_LastAmbe2)) && 0 != memcmp(ambe2, AMBE2_SILENCE, sizeof(AMBE2_SILENCE)))
+	if (0 == memcmp(ambe2, m_LastAmbe2, sizeof(m_LastAmbe2)) && Ambe2B0(ambe2) < 120)
 	{
 		if (++m_iAmbe2Repeats >= MAX_SAME_AMBE2)
 		{

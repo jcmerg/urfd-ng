@@ -155,6 +155,7 @@ static bool CredBackendBuilt(const std::string &backend)
 }
 
 std::function<bool(CConfigure &, const CIniSections &)> CConfigure::PluginHook;
+std::function<std::string(bool v6)> CConfigure::KnownExternalIp;
 
 CConfigure::CConfigure()
 {
@@ -395,7 +396,11 @@ bool CConfigure::ReadData(const std::string &path)
 				else if (0 == key.compare(JIPCHECKURL))
 					data[g_Keys.ip.checkurl] = value;
 				else if (0 == key.compare(JIPCHECKINTERVAL))
-					data[g_Keys.ip.checkinterval] = getUnsigned(value, "IP Check Interval", 0, 86400, 300);
+					{
+					// at most every 30 s: the services are public and limit their callers
+					unsigned v = getUnsigned(value, "IP Check Interval", 0, 86400, 300);
+					data[g_Keys.ip.checkinterval] = (v && v < 30) ? 30u : v;
+				}
 				else
 					badParam(key);
 				break;
@@ -1033,7 +1038,10 @@ bool CConfigure::ReadData(const std::string &path)
 			}
 			else
 			{
-				const std::string ipv4 = DetectExternalIp(false, ipurls);
+				// a reload keeps the address the reflector follows (the section needs a restart)
+				std::string ipv4 = KnownExternalIp ? KnownExternalIp(false) : std::string();
+				if (ipv4.empty())
+					ipv4 = DetectExternalIp(false, ipurls);
 				if (std::regex_match(ipv4, IPv4RegEx))
 				{
 					data[g_Keys.ip.ipv4address] = ipv4;
@@ -1069,7 +1077,10 @@ bool CConfigure::ReadData(const std::string &path)
 			}
 			else
 			{
-				const std::string ipv6 = DetectExternalIp(true, ipurls);
+				// a reload keeps the address the reflector follows (the section needs a restart)
+				std::string ipv6 = KnownExternalIp ? KnownExternalIp(true) : std::string();
+				if (ipv6.empty())
+					ipv6 = DetectExternalIp(true, ipurls);
 				if (std::regex_match(ipv6, IPv6RegEx))
 				{
 					data[g_Keys.ip.ipv6address] = ipv6;

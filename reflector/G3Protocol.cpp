@@ -174,7 +174,7 @@ void CG3Protocol::PresenceTask(void)
 			Buffer.data()[2] = 0x80; // response
 			Buffer.data()[3] = 0x00; // ok
 
-			Buffer.Append(GatewayAddress());
+			Buffer.Append(GatewayAddress(Ip));
 
 			CClients *clients = g_Reflector.GetClients();
 			auto it = clients->begin();
@@ -306,7 +306,7 @@ void CG3Protocol::ConfigTask(void)
 
 			if (Buffer.data()[3] == 0x00)
 			{
-				uint32_t gwAddr = GatewayAddress();
+				uint32_t gwAddr = GatewayAddress(Ip);
 				std::cout << "External G3 gateway address " << inet_ntoa(*(in_addr *)&gwAddr) << std::endl;
 				Buffer.Append(gwAddr);
 
@@ -783,15 +783,26 @@ void CG3Protocol::ReadOptions(void)
 	}
 }
 
-// the address the terminals are told to reach us at: "address" of the terminal
-// file, else the external IPv4 (behind NAT the bound one is not it, and it follows
-// a change of the uplink), else the bound one
-uint32_t CG3Protocol::GatewayAddress(void)
+// a private address (RFC 1918, shared address space, loopback), in network order
+static bool IsPrivateIPv4(uint32_t be)
+{
+	const uint32_t a = ntohl(be);
+	return (a >> 24) == 10 || (a >> 20) == (172u << 4 | 1) || (a >> 16) == (192u << 8 | 168)
+		|| (a >> 22) == (100u << 2 | 1) || (a >> 24) == 127;
+}
+
+// the address a terminal is told to reach us at: "address" of the terminal file;
+// else the address its packet came in at, unless that is a private one and the
+// terminal is on the internet (urfd behind NAT): then the external IPv4, which
+// follows a change of the uplink
+uint32_t CG3Protocol::GatewayAddress(const CIp &client)
 {
 	if (m_GwAddress)
 		return m_GwAddress;
+	const uint32_t local = *(uint32_t *)m_ConfigSocket.GetLocalAddr();
 	in_addr ext;
-	if (1 == inet_pton(AF_INET, g_Reflector.GetExternalIPv4().c_str(), &ext))
+	if (AF_INET == client.GetFamily() && !IsPrivateIPv4(client.GetAddr()) && (INADDR_ANY == local || IsPrivateIPv4(local))
+	    && 1 == inet_pton(AF_INET, g_Reflector.GetExternalIPv4().c_str(), &ext))
 		return ext.s_addr;
-	return *(uint32_t *)m_ConfigSocket.GetLocalAddr();
+	return local;
 }

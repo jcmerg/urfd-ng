@@ -68,6 +68,9 @@ public:
 	// for the plugins (Plugin.h): ReadData hands them the sections it does not
 	// know at its end; true on an error. Not set in inicheck and dbutil.
 	static std::function<bool(CConfigure &, const CIniSections &)> PluginHook;
+	// the external address the running reflector knows (v6 true: IPv6), so a reload
+	// takes it instead of asking the services again; unset at start
+	static std::function<std::string(bool v6)> KnownExternalIp;
 	// a plugin's settings, under keys of its own
 	void Set(const std::string &key, const nlohmann::json &value) { std::unique_lock<std::shared_mutex> lock(m_Lock); data[key] = value; }
 	// a plugin's number from min to max, def when it is out of range or no number (with a warning on label)

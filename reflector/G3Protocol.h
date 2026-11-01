@@ -119,7 +119,7 @@ protected:
 
 	// optional params
 	uint32_t              m_GwAddress;
-	uint32_t GatewayAddress(void);	// the address the terminals are told
+	uint32_t GatewayAddress(const CIp &client);	// the address a terminal is told
 	std::string         m_Modules;
 	std::vector<CCallsign> m_Aliases;
 	time_t              m_LastModTime;
