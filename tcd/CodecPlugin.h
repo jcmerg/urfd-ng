@@ -11,7 +11,10 @@
 // hardware for AMBE. A plugin brings a codec in software, for a codec tcd has no
 // device for: with one DVSI device for D-Star, a plugin with TCD_CODEC_DMR does
 // DMR/YSF (and DmrGainMode = reencode). Since tcd 0.14.0 a plugin with
-// TCD_CODEC_P25 can do P25 instead of tcd's own OP25 vocoder (CodecP25).
+// TCD_CODEC_P25 can do P25 instead of tcd's own OP25 vocoder (CodecP25), since
+// tcd 0.16.0 a plugin with TCD_CODEC_M17 can do M17 instead of tcd's own
+// Codec2 (CodecM17); with TCD_CODEC_M17_1600 as well it also decodes M17
+// voice+data streams.
 //
 // The interface is plain C, so a plugin needs none of tcd's classes and does not
 // have to be rebuilt with every tcd update; tcd checks the plugin's api only, and
@@ -21,7 +24,7 @@
 //   extern "C" const struct tcd_codec_plugin *tcd_codec_plugin(void);
 //
 // tcd calls a plugin from one thread at a time. A frame is 20 ms, 160 samples of
-// 8 kHz PCM. Each stream gets a state of its own (open/close), so streams do not
+// 8 kHz PCM, except TCD_CODEC_M17_1600: 40 ms, 320 samples. Each stream gets a state of its own (open/close), so streams do not
 // mix their vocoder state; tcd closes the state of a stream that has been quiet
 // for 30 s. start and stop tell the plugin where a transmission begins and ends:
 // a state can carry several transmissions one after the other (the same stream
@@ -40,9 +43,11 @@ extern "C" {
 #define TCD_CODEC_API_MIN 2	// the oldest api tcd still loads
 
 // the codecs, also as bits in tcd_codec_plugin.codecs
-#define TCD_CODEC_DSTAR 0x01u   // D-Star AMBE 3600x2400, 9 bytes with FEC
-#define TCD_CODEC_DMR   0x02u   // DMR/YSF/NXDN AMBE+2 3600x2450, 9 bytes (72 bits with FEC)
-#define TCD_CODEC_P25   0x04u   // P25 IMBE 4400, 11 bytes
+#define TCD_CODEC_DSTAR    0x01u   // D-Star AMBE 3600x2400, 9 bytes with FEC
+#define TCD_CODEC_DMR      0x02u   // DMR/YSF/NXDN AMBE+2 3600x2450, 9 bytes (72 bits with FEC)
+#define TCD_CODEC_P25      0x04u   // P25 IMBE 4400, 11 bytes
+#define TCD_CODEC_M17      0x08u   // M17 Codec2 3200, 8 bytes (half an M17 payload), 160 samples
+#define TCD_CODEC_M17_1600 0x10u   // M17 Codec2 1600, 8 bytes (the voice half of the payload), 320 samples
 
 // how a frame was decoded (api 3), as bits in tcd_frame_info.flags
 #define TCD_FRAME_REPEAT  0x01u   // played as a repeat of the last good frame
@@ -90,8 +95,10 @@ struct tcd_codec_plugin
 	// tcd uses it instead of decode for its statistics.
 	int (*decode_info)(void *state, const uint8_t *frame, int16_t *pcm, struct tcd_frame_info *info);
 	// frame_format: bytes and 8 kHz samples per frame of a codec, 0 = ok. NULL:
-	// 9 bytes for D-Star and DMR, 11 for P25, 160 samples (20 ms). tcd carries
-	// only these and refuses a plugin that reports another format.
+	// 9 bytes for D-Star and DMR, 11 for P25, 160 samples (20 ms). M17 is 8
+	// bytes and 160 samples, M17 1600 8 bytes and 320 samples; a plugin with
+	// either needs frame_format. tcd carries only these and refuses a plugin
+	// that reports another format.
 	int (*frame_format)(uint32_t codec, uint32_t *bytes, uint32_t *samples);
 };
 

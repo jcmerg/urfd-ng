@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.33.2** | tcd 0.15.1 | Dashboard v2.14.2
+**urfd 4.33.2** | tcd 0.16.0 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -1010,6 +1010,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.16.0**: M17 über ein Codec-Plugin als Wahl neben dem eigenen Codec2 von tcd: `CodecM17 = codec2` (Standard) oder der Name eines Plugins, umschaltbar im Web-Dashboard und mit `POST /api/codec` (`"codec": "m17"`), „Speichern“ schreibt es. Die Plugin-Schnittstelle bleibt `TCD_CODEC_API 3` und bekommt `TCD_CODEC_M17` (Codec2 3200, 8 Byte, 160 Samples) und `TCD_CODEC_M17_1600` (Codec2 1600, 8 Byte, 320 Samples); ein Plugin damit gibt seine Formate mit `frame_format` an. Ein Plugin mit M17, aber ohne 1600 überlässt M17-Streams mit Sprache und Daten dem Codec2 von tcd; ältere Plugins laufen weiter
 - **tcd 0.15.0**: Codec-Plugin-Schnittstelle 3 (`TCD_CODEC_API 3`): `decode_info` meldet, wie jeder Frame ausgefallen ist (von der FEC korrigierte Bitfehler, wiederholt, stummgeschaltet, Ton, Stille), und der Monitor zählt die Frames mit Bitfehlern, die wiederholten und die stummgeschalteten je Codec-Plugin (Vocoder-Tabelle und `/api/stats`: `error_frames`, `repeats`, `mutes`); `frame_format` gibt die Frame-Größe eines Codecs an, und tcd lehnt ein Plugin ab, dessen Frames es nicht tragen kann. tcd lädt Plugins der Schnittstellen 2 und 3, ältere Plugins laufen ohne die Zähler weiter. Der Monitor hat Platz für 16 Software-Vocoder (vorher 8). tcd-mbelib-neo-plugin 1.1.0 hat Schnittstelle 3
 - **tcd 0.14.1**: Die eigenen Vocoder von tcd sind Zeilen der Vocoder-Tabelle im Monitor neben den Geräten und Codec-Plugins: OP25 (P25, YSF VW) und Codec2 (M17), mit ihren Zählern für Kodieren und Dekodieren und dem Modul, für das sie arbeiten; die Tabelle zeigt also auch, wer P25 macht, wenn es auf OP25 steht (auch in tcdmon, `"builtin": true` in `/api/stats`)
 - **tcd 0.14.0**: P25 über ein Codec-Plugin als Wahl neben dem eigenen OP25-Vocoder von tcd: `CodecP25 = op25` (Standard) oder der Name eines Plugins, umschaltbar im Web-Dashboard und mit `POST /api/codec` wie D-Star und DMR, „Speichern“ schreibt es; die Plugin-API bleibt `TCD_CODEC_API 2` (`TCD_CODEC_P25`, 11-Byte-IMBE-Frames), ältere Plugins laufen weiter. tcd-mbelib-neo-plugin 1.0.3 macht P25 mit mbelib-neo (PESQ etwa 0,1 über OP25 auf 19 Clips, vor allem vom Encoder)

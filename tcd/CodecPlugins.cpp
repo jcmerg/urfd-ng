@@ -167,14 +167,18 @@ bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vecto
 			dlclose(handle);
 			return true;
 		}
-		// tcd carries 20 ms frames of the classic sizes only
-		if (plugin->api >= 3 && plugin->frame_format)
+		// tcd carries frames of the formats CodecPlugin.h names only; a plugin
+		// with M17 has to say its format
+		const bool has_format = plugin->api >= 3 && plugin->frame_format;
+		if (has_format || (plugin->codecs & (TCD_CODEC_M17 | TCD_CODEC_M17_1600)))
 		{
 			bool unusable = false;
-			for (const auto &[bit, bytes] : { std::make_pair(TCD_CODEC_DSTAR, 9u), std::make_pair(TCD_CODEC_DMR, 9u), std::make_pair(TCD_CODEC_P25, 11u) })
+			for (const auto &[bit, bytes, samples] : { std::make_tuple(TCD_CODEC_DSTAR, 9u, 160u), std::make_tuple(TCD_CODEC_DMR, 9u, 160u),
+			                                           std::make_tuple(TCD_CODEC_P25, 11u, 160u), std::make_tuple(TCD_CODEC_M17, 8u, 160u),
+			                                           std::make_tuple(TCD_CODEC_M17_1600, 8u, 320u) })
 			{
 				uint32_t b = 0, n = 0;
-				if ((plugin->codecs & bit) && (plugin->frame_format(bit, &b, &n) || b != bytes || n != 160))
+				if ((plugin->codecs & bit) && (!has_format || plugin->frame_format(bit, &b, &n) || b != bytes || n != samples))
 					unusable = true;
 			}
 			if (unusable)
@@ -229,7 +233,8 @@ bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vecto
 		}
 		l.ready = true;
 		std::string codecs;
-		for (const auto &[bit, name] : { std::make_pair(TCD_CODEC_DSTAR, "D-Star"), std::make_pair(TCD_CODEC_DMR, "DMR"), std::make_pair(TCD_CODEC_P25, "P25") })
+		for (const auto &[bit, name] : { std::make_pair(TCD_CODEC_DSTAR, "D-Star"), std::make_pair(TCD_CODEC_DMR, "DMR"), std::make_pair(TCD_CODEC_P25, "P25"),
+		                                 std::make_pair(TCD_CODEC_M17, "M17"), std::make_pair(TCD_CODEC_M17_1600, "M17 1600") })
 			if (l.plugin->codecs & bit)
 				codecs += (codecs.empty() ? "" : ", ") + std::string(name);
 		std::cout << "CodecPlugin " << l.plugin->name << " (" << codecs << ") loaded from " << l.path << (l.plugin->description ? std::string(": ") + l.plugin->description : std::string()) << std::endl;
