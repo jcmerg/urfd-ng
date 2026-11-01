@@ -182,6 +182,8 @@ td b { font-weight: 650; font-stretch: 85%; }
 .btn { font: inherit; font-size: var(--fs-s); font-weight: 600; color: var(--panel); background: var(--ink); border: 1px solid var(--ink);
        border-bottom-width: 2px; border-radius: 3px; padding: 0.35rem 0.9rem; cursor: pointer; }
 .btn:active { transform: translateY(1px); }
+.dev-btn { font: inherit; font-size: var(--fs-xs); color: var(--ink); background: var(--panel-raised); border: 1px solid var(--rule);
+           border-radius: 3px; padding: 0.05rem 0.45rem; margin-left: 0.4rem; cursor: pointer; white-space: nowrap; }
 .save-state { font-size: var(--fs-s); }
 
 /* login, with MonitorPassword */
@@ -273,12 +275,13 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
       <div class="settings">
         <div class="group codecs" id="codec_group" hidden>
           <h3>Vocoder</h3>
-          <p>Who codes AMBE, IMBE and Codec2 for the streams that start from now on; modules beyond the AMBE devices always use a codec plugin</p>
+          <p>Who codes AMBE, IMBE and Codec2 for the streams that start from now on. With fixed AMBE channels the modules beyond the devices use a codec plugin; with the pool a stream of any module takes a free channel, and one that finds none goes to the plugin</p>
           <div class="codec-rows">
             <div class="row" id="codec_dstar_row"><label for="codec_dstar">D-Star</label><select id="codec_dstar"></select></div>
             <div class="row" id="codec_dmr_row"><label for="codec_dmr">DMR and YSF</label><select id="codec_dmr"></select></div>
             <div class="row" id="codec_p25_row"><label for="codec_p25">IMBE (P25, YSF VW)</label><select id="codec_p25"></select></div>
             <div class="row" id="codec_m17_row"><label for="codec_m17">Codec2 (M17)</label><select id="codec_m17"></select></div>
+            <div class="row" id="pool_row" hidden><label for="device_pool">AMBE channels</label><select id="device_pool"><option value="0">Fixed: the first modules</option><option value="1">Pool: any module, first come</option></select></div>
           </div>
         </div>
         <div class="group">
@@ -528,10 +531,15 @@ function render() {
 
   // vocoders: DVSI devices and the codecs of codec plugins
   var rows = '';
-  data.devices.forEach(function (d) {
+  data.devices.forEach(function (d, i) {
     var used = d.channels ? d.channels.filter(function (c) { return c.module; }).map(function (c) { return c.module; }) : [];
     var total = d.type === 'DV3003' ? 3 : 1;
-    var state = !d.online ? '<span class="state-bad">offline</span>' : used.length ? '<span class="state-use">in use</span>' : '<span class="state-ok">ready</span>';
+    var state = d.phase === 2 ? '<span class="muted">phased out, can be unplugged</span>' :
+      d.phase === 1 ? '<span class="state-use">phasing out</span>' :
+      !d.online ? '<span class="state-bad">offline</span>' : used.length ? '<span class="state-use">in use</span>' : '<span class="state-ok">ready</span>';
+    // phase out: no new streams, closed when its streams are done; a codec plugin takes over
+    if (d.can_out)
+      state += '<button type="button" class="dev-btn" data-dev="' + i + '" data-out="' + (d.want_out ? 0 : 1) + '">' + (d.want_out ? 'Take back' : 'Phase out') + '</button>';
     rows += '<tr><td><b>' + esc(d.serial) + '</b></td><td>' + esc(d.type) + (d.role ? ' <span class="muted">' + esc(d.role) + '</span>' : '') + '</td>' +
       '<td>' + state + '</td><td>' + used.map(function (u) { return '<span class="mod-tag">' + esc(u) + '</span>'; }).join('') +
       '<span class="muted">' + used.length + ' of ' + total + '</span></td>' +
@@ -622,8 +630,15 @@ function loadCodecs(codecs) {
     $('codec_' + k + '_row').hidden = c.options.length < 2;
     any = any || c.options.length > 1;
   });
-  $('codec_group').hidden = !any;
+  $('pool_row').hidden = !data.pool_available;
+  $('device_pool').value = String(data.config.device_pool || 0);
+  $('codec_group').hidden = !any && !data.pool_available;
 }
+$('device_pool').addEventListener('change', function (e) { post('api/pool', { pool: e.target.value === '1' }); });
+$('devices').addEventListener('click', function (e) {
+  var b = e.target.closest('.dev-btn'); if (!b) return;
+  post('api/device', { device: Number(b.dataset.dev), out: b.dataset.out === '1' });
+});
 ['dstar', 'dmr', 'p25', 'm17'].forEach(function (k) {
   $('codec_' + k).addEventListener('change', function (e) { post('api/codec', { codec: k, use: e.target.value }); });
 });

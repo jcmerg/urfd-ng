@@ -752,8 +752,26 @@ bool CController::InitVocoders()
 	}
 	for (int k : { kChoiceDStar, kChoiceDMR })
 		hw_modules[k] = modules.substr(0, std::min(hw_channels[k].size(), modules.size()));
-	pool = g_Conf.GetDevicePool() && (HwAny(kChoiceDStar) || HwAny(kChoiceDMR));
-	if (pool)
+	g_Stats.pool_available.store(HwAny(kChoiceDStar) || HwAny(kChoiceDMR));
+	g_Stats.config.device_pool.store(g_Conf.GetDevicePool() && g_Stats.pool_available.load() ? 1 : 0);
+	// a device may be phased out from the monitor when a plugin does its codecs
+	for (size_t i = 0; i < slots.size(); i++)
+	{
+		bool can = slots[i]->stats >= 0;
+		for (int k : { kChoiceDStar, kChoiceDMR })
+		{
+			bool uses = false;
+			for (const auto &c : hw_channels[k])
+				uses = uses || c.slot == int(i);
+			bool plugin = false;
+			for (auto *sw : g_Codecs.All(g_CodecChoices[k].codec))
+				plugin = plugin || sw;
+			can = can && (!uses || plugin);
+		}
+		if (slots[i]->stats >= 0)
+			g_Stats.devices[slots[i]->stats].can_out = can;
+	}
+	if (Pool())
 	{
 		for (int k : { kChoiceDStar, kChoiceDMR })
 			if (HwAny(k))
@@ -836,9 +854,9 @@ bool CController::InitVocoders()
 			if (std::string::npos == hw.find(m))
 				rest += m;
 		const bool plugin = std::count(list.begin(), list.end(), nullptr) < (long)list.size();
-		if (!hw.empty() && !rest.empty() && !pool)
+		if (!hw.empty() && !rest.empty() && !Pool())
 			std::cout << label << ": modules " << hw << " on the devices, " << rest << (plugin ? " on a codec plugin" : "") << std::endl;
-		if (!hw.empty() && pool && plugin)
+		if (!hw.empty() && Pool() && plugin)
 			std::cout << label << ": a stream that finds no free AMBE channel goes to a codec plugin" << std::endl;
 		if (!rest.empty() && !plugin)
 		{
@@ -1442,8 +1460,8 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 	}
 	else if (device(it->second.choice) && !HasChannel(k, it->second.hw, module, streamid))
 	{
-		// its channel is gone: the device was lost, or the pool gave it away after
-		// a pause; another channel, else a plugin for the rest of the stream
+		// its channel is gone: the device was lost, or the channel went to another
+		// stream after a pause; another channel, else a plugin for the rest of the stream
 		it->second.hw = TakeChannel(k, module, streamid);
 		if (it->second.hw < 0)
 			it->second.choice = plugin(it->second.choice);
@@ -1459,16 +1477,16 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 			*dev = slots[c.slot]->dev;
 			*ch = c.ch;
 		}
-		// pool: the channel is free after the stream's last frame (the device
-		// answers its frames in order, a new stream's come after them)
-		if (pool && packet->IsLast())
+		// the channel is free after the stream's last frame (the device answers
+		// its frames in order, a new stream's come after them)
+		if (packet->IsLast())
 			c.busy = false;
 	}
 	return pin.choice;
 }
 
-// streams quiet for 30 s are forgotten; a pool channel quiet for 1.5 s is free
-// again (a stream whose last frame was lost)
+// streams quiet for 30 s are forgotten; a channel quiet for 1.5 s is free again
+// (a stream whose last frame was lost)
 void CController::PurgePinned(void)
 {
 	std::lock_guard<std::mutex> lock(pinned_mux);
@@ -1477,27 +1495,31 @@ void CController::PurgePinned(void)
 	for (auto &p : pinned)
 		for (auto it = p.begin(); it != p.end(); )
 			it = it->second.last < cutoff ? p.erase(it) : std::next(it);
-	if (pool)
-		for (auto &list : hw_channels)
-			for (auto &c : list)
-				if (c.busy && now - c.last > std::chrono::milliseconds(1500))
-					c.busy = false;
+	for (auto &list : hw_channels)
+		for (auto &c : list)
+			if (c.busy && now - c.last > std::chrono::milliseconds(1500))
+				c.busy = false;
 }
 
 int CController::TakeChannel(int k, char module, uint16_t streamid)
 {
 	auto &list = hw_channels[k];
-	if (!pool)
-	{
-		// fixed: the i-th channel belongs to the i-th module of Modules
-		const auto i = g_Conf.GetTCMods().find(module);
-		return (i < list.size() && slots[list[i].slot]->up) ? int(i) : -1;
-	}
+	const auto now = std::chrono::steady_clock::now();
+	// a device that is lost or phased out takes no new stream
+	auto usable = [&](const SHwChannel &c) { return slots[c.slot]->up && !slots[c.slot]->draining; };
 	int take = -1;
-	for (size_t i = 0; i < list.size(); i++)
+	if (!Pool())
+	{
+		// fixed: the i-th channel belongs to the i-th module of Modules; a stream of
+		// another module that has it (from the pool before a switch) keeps it
+		const auto i = g_Conf.GetTCMods().find(module);
+		if (i < list.size() && usable(list[i]) && (!list[i].busy || list[i].module == module || now - list[i].last > std::chrono::milliseconds(1500)))
+			take = int(i);
+	}
+	else for (size_t i = 0; i < list.size(); i++)
 	{
 		const auto &c = list[i];
-		if (!slots[c.slot]->up)
+		if (!usable(c))
 			continue;
 		if (c.busy && c.module == module)
 		{
@@ -1513,7 +1535,7 @@ int CController::TakeChannel(int k, char module, uint16_t streamid)
 		c.busy = true;
 		c.module = module;
 		c.streamid = streamid;
-		c.last = std::chrono::steady_clock::now();
+		c.last = now;
 	}
 	return take;
 }
@@ -1523,7 +1545,7 @@ bool CController::HasChannel(int k, int hw, char module, uint16_t streamid) cons
 	if (hw < 0 || hw >= int(hw_channels[k].size()))
 		return false;
 	const auto &c = hw_channels[k][hw];
-	return slots[c.slot]->up && (!pool || (c.busy && c.module == module && c.streamid == streamid));
+	return slots[c.slot]->up && c.busy && c.module == module && c.streamid == streamid;
 }
 
 std::string CController::ChannelName(int k, size_t c) const
@@ -1625,6 +1647,63 @@ void CController::DeviceLost(int i, const CDVDevice *dev)
 	std::cerr << s.desc << " is out: its streams go to a codec plugin until it is back" << std::endl;
 }
 
+// phasing out from the monitor: a device that is asked to go takes no new streams;
+// when its streams are done (its channels free) it is closed and can be unplugged.
+// Taken back, it is opened again like a lost one
+void CController::PhaseOut(int i)
+{
+	auto &s = *slots[i];
+	if (s.stats < 0)
+		return;
+	auto &st = g_Stats.devices[s.stats];
+	const bool want = st.want_out.load();
+	if (want && !s.out)
+	{
+		if (!s.draining)
+		{
+			s.draining = true;
+			st.phase.store(1);
+			std::cout << s.desc << " is phased out: no new streams, the ones on it run to their end" << std::endl;
+		}
+		bool busy = false;
+		{
+			std::lock_guard<std::mutex> lock(pinned_mux);
+			for (const auto &list : hw_channels)
+				for (const auto &c : list)
+					busy = busy || (c.slot == i && c.busy);
+			if (!busy)
+			{
+				s.up = false;
+				s.out = true;
+			}
+		}
+		if (s.out)
+		{
+			if (s.dev && !s.closed)
+			{
+				s.dev->CloseDevice();
+				s.closed = true;
+			}
+			st.online.store(false);
+			st.phase.store(2);
+			std::cout << s.desc << " is closed and can be unplugged" << std::endl;
+		}
+	}
+	else if (!want && (s.draining || s.out))
+	{
+		const bool was_out = s.out;
+		{
+			std::lock_guard<std::mutex> lock(pinned_mux);
+			s.draining = false;
+			s.out = false;
+			s.next_try = std::chrono::steady_clock::now();
+		}
+		st.phase.store(0);
+		// a device still open (taken back before it closed) is up as it was
+		std::cout << s.desc << (was_out ? " is taken back, opening it" : " is taken back") << std::endl;
+	}
+}
+
 // opens a lost device again when it is there: by its by-id name, as a replug can
 // give it another node; a hung one is reset by the opening
 void CController::DeviceWatchThread()
@@ -1636,7 +1715,8 @@ void CController::DeviceWatchThread()
 		for (size_t i = 0; i < slots.size() && keep_running; i++)
 		{
 			auto &s = *slots[i];
-			if (s.up || now < s.next_try)
+			PhaseOut(int(i));
+			if (s.up || s.out || now < s.next_try)
 				continue;
 			s.next_try = now + std::chrono::seconds(5);
 			if (s.dev && !s.closed)
