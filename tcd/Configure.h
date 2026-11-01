@@ -24,6 +24,8 @@
 #include <regex>
 #include <utility>
 
+#include "CodecChoice.h"
+
 enum class EGainType { dmrin, dmrout, dstarin, dstarout, dmrreencode, outgain_dstar, outgain_dmr, outgain_usrp, outgain_imbe, outgain_m17 };
 
 #define IS_TRUE(a) ((a)=='t' || (a)=='T' || (a)=='1')
@@ -84,19 +86,17 @@ public:
 	// codec plugins (CodecPlugin.h): the CodecPlugin lines, and the lines tcd does not know, for them
 	const std::vector<std::string> &GetCodecPlugins(void) const { return codec_plugins; }
 	const std::vector<std::pair<std::string, std::string>> &GetUnknownLines(void) const { return unknown_lines; }
-	// a codec plugin's name: D-Star or DMR in software, even when a device could do it
-	const std::string &GetCodecDStar(void) const { return codec_dstar; }
-	const std::string &GetCodecDMR(void) const { return codec_dmr; }
-	// P25: "op25" (tcd's own vocoder, also when empty) or a codec plugin's name
-	const std::string &GetCodecP25(void) const { return codec_p25; }
-	// M17: "codec2" (tcd's own, also when empty) or a codec plugin's name
-	const std::string &GetCodecM17(void) const { return codec_m17; }
+	// the line of a vocoder choice (CodecChoice.h): a codec plugin's name, the
+	// device ("dvsi") or tcd's own vocoder ("op25", "codec2"); empty without one.
+	// For D-Star or DMR a plugin's name puts the codec in software, even when a
+	// device could do it
+	const std::string &GetCodecChoice(int choice) const { return codec_choice[choice]; }
 
 private:
 	std::string tcmods, standbymods, address, password, ini_path;
 	std::vector<std::string> device_serials;
 	std::vector<std::string> codec_plugins;
-	std::string codec_dstar, codec_dmr, codec_p25, codec_m17;
+	std::string codec_choice[kNumChoices];
 	std::vector<std::pair<std::string, std::string>> unknown_lines;
 	uint16_t port;
 	int dstar_in = 0, dstar_out = 0, dmr_in = 0, dmr_out = 0, dmr_reencode = 0;
