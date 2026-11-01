@@ -234,6 +234,16 @@ void CCallingHome::Thread(void)
 		m_Reached = reached;
 
 		std::unique_lock<std::mutex> lock(m_Mutex);
-		m_Wake.wait_for(lock, std::chrono::seconds(m_PushDelay), [this] { return !m_Run; });
+		m_Wake.wait_for(lock, std::chrono::seconds(m_PushDelay), [this] { return !m_Run || m_PushNow; });
+		m_PushNow = false;
 	}
+}
+
+void CCallingHome::PushNow(void)
+{
+	{
+		std::lock_guard<std::mutex> lock(m_Mutex);
+		m_PushNow = true;
+	}
+	m_Wake.notify_all();
 }

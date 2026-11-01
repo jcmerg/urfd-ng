@@ -33,6 +33,7 @@
 
 #include "Global.h"
 #include "CurlGet.h"
+#include "ExternalIp.h"
 #include "MmdvmClientConfig.h"
 
 // ini file keywords
@@ -66,6 +67,8 @@
 #define JIPV4EXTERNAL            "IPv4External"
 #define JIPV6BINDING             "IPv6Binding"
 #define JIPV6EXTERNAL            "IPv6External"
+#define JIPCHECKURL              "IPCheckUrl"
+#define JIPCHECKINTERVAL         "IPCheckInterval"
 #define JJSONPATH                "JsonPath"
 #define JM17                     "M17"
 #define JMMDVM                   "MMDVM"
@@ -181,23 +184,6 @@ bool CConfigure::ReadData(const std::string &path)
 		return true;
 	}
 
-	std::string ipv4, ipv6;
-
-	{
-		CCurlGet curl;
-		std::stringstream ss;
-		if (CURLE_OK == curl.GetURL("https://ipv4.icanhazip.com", ss))
-		{
-			ipv4.assign(ss.str());
-			trim(ipv4);
-		}
-		ss.str(std::string());
-		if (CURLE_OK == curl.GetURL("https://ipv6.icanhazip.com", ss))
-		{
-			ipv6.assign(ss.str());
-			trim(ipv6);
-		}
-	}
 
 	std::string line;
 	while (std::getline(cfgfile, line))
@@ -399,11 +385,17 @@ bool CConfigure::ReadData(const std::string &path)
 				else if (0 == key.compare(JIPV4EXTERNAL))
 				{
 					data[g_Keys.ip.ipv4address] = value;
+					data[g_Keys.ip.ipv4fixed] = true;
 				}
 				else if (0 == key.compare(JIPV6EXTERNAL))
 				{
 					data[g_Keys.ip.ipv6address] = value;
+					data[g_Keys.ip.ipv6fixed] = true;
 				}
+				else if (0 == key.compare(JIPCHECKURL))
+					data[g_Keys.ip.checkurl] = value;
+				else if (0 == key.compare(JIPCHECKINTERVAL))
+					data[g_Keys.ip.checkinterval] = getUnsigned(value, "IP Check Interval", 0, 86400, 300);
 				else
 					badParam(key);
 				break;
@@ -1015,7 +1007,16 @@ bool CConfigure::ReadData(const std::string &path)
 	isDefined(ErrorLevel::mild, JNAMES, JCOUNTRY, g_Keys.names.country, rval);
 	isDefined(ErrorLevel::mild, JNAMES, JSPONSOR, g_Keys.names.sponsor, rval);
 
-	// IP Address section
+	// IP Address section: an external address that is set stays (behind NAT the
+	// configured one is meant), else the services of IPCheckUrl tell it, and with
+	// IPCheckInterval the reflector asks them again while it runs (ExternalIp.h)
+	if (!data.contains(g_Keys.ip.checkurl))
+		data[g_Keys.ip.checkurl] = "";
+	if (!data.contains(g_Keys.ip.checkinterval))
+		data[g_Keys.ip.checkinterval] = 300u;
+	const auto ipurls = ExternalIpUrls(data[g_Keys.ip.checkurl].get<std::string>());
+	data[g_Keys.ip.ipv4fixed] = data.contains(g_Keys.ip.ipv4fixed);
+	data[g_Keys.ip.ipv6fixed] = data.contains(g_Keys.ip.ipv6fixed);
 	// ipv4 bind and external
 	if (isDefined(ErrorLevel::fatal, JIPADDRESSES, JIPV4BINDING, g_Keys.ip.ipv4bind, rval))
 	{
@@ -1024,12 +1025,7 @@ bool CConfigure::ReadData(const std::string &path)
 			if (data.contains(g_Keys.ip.ipv4address))
 			{
 				auto v4 = data[g_Keys.ip.ipv4address].get<std::string>();
-				if (std::regex_match(v4, IPv4RegEx))
-				{
-					if (ipv4.compare(v4))
-					std::cout << "WARNING: specified IPv4 external address, " << v4 << ", is different than detected address, " << ipv4 << std::endl;
-				}
-				else
+				if (!std::regex_match(v4, IPv4RegEx))
 				{
 					std::cerr << "ERROR: specified IPv4 external address, " << v4 << ", is malformed" << std::endl;
 					rval = true;
@@ -1037,9 +1033,12 @@ bool CConfigure::ReadData(const std::string &path)
 			}
 			else
 			{
-				// make sure curl worked!
+				const std::string ipv4 = DetectExternalIp(false, ipurls);
 				if (std::regex_match(ipv4, IPv4RegEx))
+				{
 					data[g_Keys.ip.ipv4address] = ipv4;
+					std::cout << "External IPv4 address " << ipv4 << " (detected)" << std::endl;
+				}
 				else
 				{
 					std::cerr << "ERROR: could not detect IPv4 address at this time" << std::endl;
@@ -1062,12 +1061,7 @@ bool CConfigure::ReadData(const std::string &path)
 			if (data.contains(g_Keys.ip.ipv6address))
 			{
 				auto v6 = data[g_Keys.ip.ipv6address].get<std::string>();
-				if (std::regex_match(v6, IPv6RegEx))
-				{
-					if (ipv6.compare(v6))
-						std::cout << "WARNING: specified IPv6 external address [" << v6 << "], is different than detected address [" << ipv6 << ']' << std::endl;
-				}
-				else
+				if (!std::regex_match(v6, IPv6RegEx))
 				{
 					std::cerr << "ERROR: the specified IPv6 address [" << v6 << "] is malformed" << std::endl;
 					rval = true;
@@ -1075,9 +1069,12 @@ bool CConfigure::ReadData(const std::string &path)
 			}
 			else
 			{
-				// make sure curl worked!
+				const std::string ipv6 = DetectExternalIp(true, ipurls);
 				if (std::regex_match(ipv6, IPv6RegEx))
+				{
 					data[g_Keys.ip.ipv6address] = ipv6;
+					std::cout << "External IPv6 address " << ipv6 << " (detected)" << std::endl;
+				}
 				else
 				{
 					std::cerr << "ERROR: could not detect IPv6 address at this time" << std::endl;

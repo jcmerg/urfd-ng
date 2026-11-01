@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+#include <arpa/inet.h>
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
 #include <string.h>
@@ -173,14 +174,7 @@ void CG3Protocol::PresenceTask(void)
 			Buffer.data()[2] = 0x80; // response
 			Buffer.data()[3] = 0x00; // ok
 
-			if (m_GwAddress == 0)
-			{
-				Buffer.Append(*(uint32_t *)m_ConfigSocket.GetLocalAddr());
-			}
-			else
-			{
-				Buffer.Append(m_GwAddress);
-			}
+			Buffer.Append(GatewayAddress());
 
 			CClients *clients = g_Reflector.GetClients();
 			auto it = clients->begin();
@@ -312,7 +306,7 @@ void CG3Protocol::ConfigTask(void)
 
 			if (Buffer.data()[3] == 0x00)
 			{
-				uint32_t gwAddr = (m_GwAddress != 0) ? m_GwAddress : *(uint32_t *)m_ConfigSocket.GetLocalAddr();
+				uint32_t gwAddr = GatewayAddress();
 				std::cout << "External G3 gateway address " << inet_ntoa(*(in_addr *)&gwAddr) << std::endl;
 				Buffer.Append(gwAddr);
 
@@ -787,4 +781,17 @@ void CG3Protocol::ReadOptions(void)
 			m_LastModTime = fileStat.st_mtime;
 		}
 	}
+}
+
+// the address the terminals are told to reach us at: "address" of the terminal
+// file, else the external IPv4 (behind NAT the bound one is not it, and it follows
+// a change of the uplink), else the bound one
+uint32_t CG3Protocol::GatewayAddress(void)
+{
+	if (m_GwAddress)
+		return m_GwAddress;
+	in_addr ext;
+	if (1 == inet_pton(AF_INET, g_Reflector.GetExternalIPv4().c_str(), &ext))
+		return ext.s_addr;
+	return *(uint32_t *)m_ConfigSocket.GetLocalAddr();
 }

@@ -20,6 +20,8 @@
 
 #include <unordered_map>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <vector>
 
 #include "Users.h"
@@ -96,6 +98,11 @@ public:
 	bool IsTranscoded(char module) const;
 	std::string GetTranscodedModules(void) const;
 	const std::string &GetConfigPath(void) const    { return m_ConfigPath; }
+	// the external addresses as known now: IPv4External / IPv6External, else what the
+	// services of IPCheckUrl tell, followed while urfd runs (IPCheckInterval); empty
+	// without one. For G3 and the plugins, which tell clients where to reach us
+	std::string GetExternalIPv4(void) const;
+	std::string GetExternalIPv6(void) const;
 	void SetConfigPath(const std::string &p)        { m_ConfigPath = p; }
 
 	// notifications
@@ -158,6 +165,13 @@ protected:
 	std::atomic<bool> m_StatusChanged { false };
 	std::unordered_map<char, std::future<void>> m_RouterFuture;
 	std::future<void> m_MaintenanceFuture;
+
+	// the external addresses and the thread that follows them
+	mutable std::mutex m_ExternalMutex;
+	std::string m_ExternalIPv4, m_ExternalIPv6;
+	std::condition_variable m_ExternalWake;
+	std::future<void> m_ExternalFuture;
+	void ExternalIpThread(void);
 
 #ifndef NO_DHT
 	// Distributed Hash Table

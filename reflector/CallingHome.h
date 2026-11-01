@@ -25,6 +25,8 @@ public:
 
 	void Start(void);
 	void Stop(void);
+	// push now, e.g. after the external address changed
+	void PushNow(void);
 
 private:
 	void Thread(void);
@@ -43,6 +45,7 @@ private:
 	bool m_Reached = false;	// last push got through, for logging state changes only
 
 	std::atomic<bool> m_Run;
+	bool m_PushNow = false;
 	std::mutex m_Mutex;
 	std::condition_variable m_Wake;
 	std::future<void> m_Future;
