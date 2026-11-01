@@ -1049,7 +1049,7 @@ bool CConfigure::ReadData(const std::string &path)
 		}
 		else
 		{
-			std::cerr << "ERROR: IPv4 binding address, " << data[g_Keys.ip.ipv4address].get<std::string>() << ", is malformed" << std::endl;
+			std::cerr << "ERROR: IPv4 binding address, " << data[g_Keys.ip.ipv4bind].get<std::string>() << ", is malformed" << std::endl;
 			rval = true;
 		}
 	}
@@ -1087,7 +1087,7 @@ bool CConfigure::ReadData(const std::string &path)
 		}
 		else
 		{
-			std::cerr << "ERROR: IPv6 binding address, " << data[g_Keys.ip.ipv6address].get<std::string>() << ", is malformed" << std::endl;
+			std::cerr << "ERROR: IPv6 binding address, " << data[g_Keys.ip.ipv6bind].get<std::string>() << ", is malformed" << std::endl;
 			rval = true;
 		}
 	}
