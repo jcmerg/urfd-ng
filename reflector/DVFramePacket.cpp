@@ -253,6 +253,11 @@ void CDvFramePacket::SetCodecData(const STCPacket *pack)
 	memcpy(&m_TCPack, pack, sizeof(STCPacket));
 }
 
+void CDvFramePacket::SetDmrData(const uint8_t *ambe2)
+{
+	memcpy(m_TCPack.dmr, ambe2, sizeof(m_TCPack.dmr));
+}
+
 void CDvFramePacket::SetTCParams(uint32_t seq, char module)
 {
 	m_TCPack.sequence = seq;

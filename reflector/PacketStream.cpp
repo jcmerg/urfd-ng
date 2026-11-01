@@ -65,6 +65,9 @@ bool CPacketStream::OpenPacketStream(const CDvHeaderPacket &DvHeader, std::share
 		m_uiSourceTG = 0;
 		m_iNextWireIdx = -1;
 		m_uiLostFrames = 0;
+		memset(m_LastAmbe2, 0, sizeof(m_LastAmbe2));
+		m_iAmbe2Repeats = 0;
+		m_uiMutedRepeats = 0;
 		{
 			std::lock_guard<std::mutex> lock(m_UserMutex);
 			m_DvHeader = DvHeader;
@@ -92,6 +95,8 @@ void CPacketStream::ClosePacketStream(void)
 		m_CodecStream->ReportStats();
 	if (m_uiLostFrames)
 		std::cout << "Module " << m_PSModule << ": " << m_uiLostFrames << " lost voice frames filled in" << std::endl;
+	if (m_uiMutedRepeats)
+		std::cout << "Module " << m_PSModule << ": " << m_uiMutedRepeats << " repeated voice frames muted" << std::endl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -180,13 +185,45 @@ bool CPacketStream::FillLostFrames(const CPacket &next, double since)
 	return true;
 }
 
+// Repeated frames. Some radios and hotspots end a DMR (or YSF, NXDN) transmission
+// with the same AMBE+2 frame again and again, 6 to 30 times (seen on BrandMeister
+// TG 262 and 91: a third of the transmissions, from a third of the stations).
+// Every decoder plays it as the last sound once more. Speech never has the same
+// frame twice in a row, beyond the silence frame, so from the third one in a row
+// a frame is replaced by AMBE+2 silence, for every target.
+#define MAX_SAME_AMBE2 2
+static const uint8_t AMBE2_SILENCE[9] = { 0xB9, 0xE8, 0x81, 0x52, 0x61, 0x73, 0x00, 0x2A, 0x6B };
+
+void CPacketStream::MuteRepeatedFrame(CPacket &packet)
+{
+	if (ECodecType::dmr != packet.GetCodecIn())
+		return;
+	auto &frame = static_cast<CDvFramePacket &>(packet);
+	const uint8_t *ambe2 = frame.GetCodecData(ECodecType::dmr);
+	if (0 == memcmp(ambe2, m_LastAmbe2, sizeof(m_LastAmbe2)) && 0 != memcmp(ambe2, AMBE2_SILENCE, sizeof(AMBE2_SILENCE)))
+	{
+		if (++m_iAmbe2Repeats >= MAX_SAME_AMBE2)
+		{
+			frame.SetDmrData(AMBE2_SILENCE);
+			m_uiMutedRepeats++;
+		}
+		return;
+	}
+	memcpy(m_LastAmbe2, ambe2, sizeof(m_LastAmbe2));
+	m_iAmbe2Repeats = 0;
+}
+
 void CPacketStream::Push(std::unique_ptr<CPacket> Packet)
 {
 	// update stream dependent packet data
 	const double since = m_LastPacketTime.time();	// since the stream's last packet
 	m_LastPacketTime.start();
-	if (Packet->IsDvFrame() && Packet->IsLocalOrigin() && !m_bEcho && !FillLostFrames(*Packet, since))
-		return;
+	if (Packet->IsDvFrame() && Packet->IsLocalOrigin() && !m_bEcho)
+	{
+		if (!FillLostFrames(*Packet, since))
+			return;
+		MuteRepeatedFrame(*Packet);
+	}
 	PushFrame(std::move(Packet));
 }
 
