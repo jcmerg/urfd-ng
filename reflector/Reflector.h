@@ -172,6 +172,7 @@ protected:
 	std::condition_variable m_ExternalWake;
 	std::future<void> m_ExternalFuture;
 	void ExternalIpThread(void);
+	std::mutex m_DhtMutex;	// PutDHTConfig: the maintenance thread and ExternalIpThread
 
 #ifndef NO_DHT
 	// Distributed Hash Table

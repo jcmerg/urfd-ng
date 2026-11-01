@@ -11,6 +11,7 @@
 // Copyright (C) 2026 Jens-Christian Merg (DL4JC)
 // Licensed under the GNU General Public License v3 or later
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -22,5 +23,6 @@
 std::vector<std::string> ExternalIpUrls(const std::string &list);
 
 // the external IPv4 (v6 false) or IPv6 address, from the first service that
-// answers with a well-formed one; empty when none does
-std::string DetectExternalIp(bool v6, const std::vector<std::string> &urls);
+// answers with a well-formed one; empty when none does. stop, when given, is
+// asked before each service: true ends the search (urfd stops)
+std::string DetectExternalIp(bool v6, const std::vector<std::string> &urls, const std::function<bool()> &stop = nullptr);

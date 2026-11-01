@@ -562,7 +562,11 @@ function render() {
       (x.mutes ? ', ' + x.mutes + ' muted' : '') + '</span></td>' +
       '<td class="r opt muted">-</td><td class="r muted">-</td><td class="act"></td></tr>';
   });
-  $('devices').innerHTML = rows || '<tr><td colspan="7" class="empty">No vocoder found. Check the DeviceSerial lines in tcd.ini.</td></tr>';
+  // only when it changed: a rebuilt row swallows a click on its button
+  rows = rows || '<tr><td colspan="7" class="empty">No vocoder found. Check the DeviceSerial lines in tcd.ini.</td></tr>';
+  if (rows !== lastDeviceRows) { $('devices').innerHTML = rows; lastDeviceRows = rows; }
+  // the pool switch follows tcd (another browser, a refused request), not while it is used
+  if (document.activeElement !== $('device_pool')) $('device_pool').value = String(data.config.device_pool || 0);
 
   var r = data.reflector;
   $('reflector').innerHTML =
@@ -571,6 +575,7 @@ function render() {
 }
 
 // settings
+var lastDeviceRows = '';
 var gainKeys = ['dstar_in', 'dstar_out', 'dmr_in', 'dmr_out', 'dmr_reencode'];
 var outgainKeys = ['outgain_dstar', 'outgain_m17', 'outgain_dmr', 'outgain_imbe', 'outgain_usrp'];
 var agcKeys = ['agc_target', 'agc_attack', 'agc_release', 'agc_maxgain_down',

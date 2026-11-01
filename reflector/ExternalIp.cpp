@@ -31,13 +31,16 @@ std::vector<std::string> ExternalIpUrls(const std::string &list)
 	return urls;
 }
 
-std::string DetectExternalIp(bool v6, const std::vector<std::string> &urls)
+std::string DetectExternalIp(bool v6, const std::vector<std::string> &urls, const std::function<bool()> &stop)
 {
 	for (const auto &url : urls)
 	{
+		if (stop && stop())
+			break;
 		CCurlGet curl;
 		std::stringstream ss;
-		if (CURLE_OK != curl.GetURL(url, ss, 10, 5, v6 ? CURL_IPRESOLVE_V6 : CURL_IPRESOLVE_V4))
+		// short: with the uplink down every service times out
+		if (CURLE_OK != curl.GetURL(url, ss, 5, 3, v6 ? CURL_IPRESOLVE_V6 : CURL_IPRESOLVE_V4))
 			continue;
 		const std::string ip = Trim(ss.str());
 		unsigned char buf[16];

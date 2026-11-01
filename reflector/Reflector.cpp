@@ -193,8 +193,9 @@ bool CReflector::Start(void)
 	// register in the XLX directory, if switched on
 	m_CallingHome.Start();
 
-	// follow the external addresses
-	if (g_Configure.GetUnsigned(g_Keys.ip.checkinterval) && !(g_Configure.GetBoolean(g_Keys.ip.ipv4fixed) && (g_Configure.GetBoolean(g_Keys.ip.ipv6fixed) || m_ExternalIPv6.empty())))
+	// follow the external addresses; a reload takes them from here
+	CConfigure::KnownExternalIp = [this](bool v6) { return v6 ? GetExternalIPv6() : GetExternalIPv4(); };
+	if (g_Configure.GetUnsigned(g_Keys.ip.checkinterval))
 		m_ExternalFuture = std::async(std::launch::async, &CReflector::ExternalIpThread, this);
 
 	// start echo thread
@@ -1466,20 +1467,27 @@ std::string CReflector::GetExternalIPv6(void) const
 
 // Asks the services of IPCheckUrl every IPCheckInterval seconds for the addresses
 // that are not set in the configuration. A changed one (another uplink, a fallback
-// line) is logged and goes to the XLX directory and the DHT at once; G3 and the
-// plugins take it from GetExternalIPv4/6 for the clients that come from then on.
-// A service that does not answer changes nothing.
+// line), told by two checks in a row, the second 10 s after the first (one odd
+// answer, e.g. of a load-balancing router, changes nothing), is logged and goes to the XLX directory and the DHT at
+// once; G3 and the plugins take it from GetExternalIPv4/6 for the clients that come
+// from then on. A service that does not answer changes nothing.
 void CReflector::ExternalIpThread(void)
 {
 	const auto urls = ExternalIpUrls(g_Configure.GetString(g_Keys.ip.checkurl));
 	const auto interval = std::chrono::seconds(g_Configure.GetUnsigned(g_Keys.ip.checkinterval));
 	const bool v4 = !g_Configure.GetBoolean(g_Keys.ip.ipv4fixed);
 	const bool v6 = !g_Configure.GetBoolean(g_Keys.ip.ipv6fixed) && !g_Configure.GetString(g_Keys.ip.ipv6bind).empty();
+	if (!v4 && !v6)
+		return;	// both set by hand
+	const auto stop = [this] { return !keep_running; };
+	std::string candidate[2];	// a new address seen once, IPv4 and IPv6
 	while (keep_running)
 	{
 		{
+			// a new address waits for its confirmation 10 s, not a whole interval
+			const bool pending = !candidate[0].empty() || !candidate[1].empty();
 			std::unique_lock<std::mutex> lock(m_ExternalMutex);
-			m_ExternalWake.wait_for(lock, interval, [this] { return !keep_running; });
+			m_ExternalWake.wait_for(lock, pending ? std::min(interval, std::chrono::seconds(10)) : interval, [this] { return !keep_running; });
 		}
 		if (!keep_running)
 			break;
@@ -1488,13 +1496,19 @@ void CReflector::ExternalIpThread(void)
 		{
 			if (six ? !v6 : !v4)
 				continue;
-			const std::string now = DetectExternalIp(six, urls);
+			const std::string now = DetectExternalIp(six, urls, stop);
 			if (now.empty())
 				continue;
 			std::lock_guard<std::mutex> lock(m_ExternalMutex);
 			std::string &known = six ? m_ExternalIPv6 : m_ExternalIPv4;
-			if (now != known)
+			std::string &seen = candidate[six ? 1 : 0];
+			if (now == known)
+				seen.clear();
+			else if (now != seen)
+				seen = now;	// once: confirmed by the next check
+			else
 			{
+				seen.clear();
 				std::cout << "External IPv" << (six ? '6' : '4') << " address changed from " << (known.empty() ? std::string("none") : known) << " to " << now << std::endl;
 				known = now;
 				changed = true;
@@ -1514,6 +1528,7 @@ void CReflector::ExternalIpThread(void)
 // DHT put() and get()
 void CReflector::PutDHTConfig()
 {
+	std::lock_guard<std::mutex> dhtlock(m_DhtMutex);
 	const std::string cs(g_Configure.GetString(g_Keys.names.callsign));
 	SUrfdConfig1 cfg;
 	time(&cfg.timestamp);

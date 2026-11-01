@@ -754,23 +754,6 @@ bool CController::InitVocoders()
 		hw_modules[k] = modules.substr(0, std::min(hw_channels[k].size(), modules.size()));
 	g_Stats.pool_available.store(HwAny(kChoiceDStar) || HwAny(kChoiceDMR));
 	g_Stats.config.device_pool.store(g_Conf.GetDevicePool() && g_Stats.pool_available.load() ? 1 : 0);
-	// a device may be phased out from the monitor when a plugin does its codecs
-	for (size_t i = 0; i < slots.size(); i++)
-	{
-		bool can = slots[i]->stats >= 0;
-		for (int k : { kChoiceDStar, kChoiceDMR })
-		{
-			bool uses = false;
-			for (const auto &c : hw_channels[k])
-				uses = uses || c.slot == int(i);
-			bool plugin = false;
-			for (auto *sw : g_Codecs.All(g_CodecChoices[k].codec))
-				plugin = plugin || sw;
-			can = can && (!uses || plugin);
-		}
-		if (slots[i]->stats >= 0)
-			g_Stats.devices[slots[i]->stats].can_out = can;
-	}
 	if (Pool())
 	{
 		for (int k : { kChoiceDStar, kChoiceDMR })
@@ -868,6 +851,10 @@ bool CController::InitVocoders()
 	if (dmr_sw && HwAny(kChoiceDMR))
 		std::cout << "Codec plugin " << dmr_sw->GetName() << " can re-encode DMR (DmrGainMode = reencode)" << std::endl;
 	g_Stats.reencode_available.store(dmr_sw && HwAny(kChoiceDMR), std::memory_order_relaxed);
+	// a device may be phased out from the monitor when a plugin does its codecs
+	for (size_t i = 0; i < slots.size(); i++)
+		if (slots[i]->stats >= 0)
+			g_Stats.devices[slots[i]->stats].can_out = UncoveredChoice(int(i)) < 0;
 	if (!dmr_sw && g_Stats.config.dmr_gain_mode.load(std::memory_order_relaxed) == 2)
 	{
 		std::cerr << "WARNING: DmrGainMode=reencode needs a codec plugin for DMR. Falling back to ambe." << std::endl;
@@ -1515,6 +1502,11 @@ int CController::TakeChannel(int k, char module, uint16_t streamid)
 		const auto i = g_Conf.GetTCMods().find(module);
 		if (i < list.size() && usable(list[i]) && (!list[i].busy || list[i].module == module || now - list[i].last > std::chrono::milliseconds(1500)))
 			take = int(i);
+		// its channel still held by a stream from the pool (the switch was just now): a free one
+		else if (i < list.size())
+			for (size_t j = 0; j < list.size() && take < 0; j++)
+				if (usable(list[j]) && !list[j].busy)
+					take = int(j);
 	}
 	else for (size_t i = 0; i < list.size(); i++)
 	{
@@ -1607,6 +1599,22 @@ std::shared_ptr<CDVDevice> CController::OpenSlot(int i, const std::string &node)
 	return dev;
 }
 
+// the codec (D-Star or DMR) slot i has channels for that no codec plugin does, -1
+// for none: without it the device may go (phased out, or lost while tcd runs)
+int CController::UncoveredChoice(int i) const
+{
+	for (int k : { kChoiceDStar, kChoiceDMR })
+	{
+		bool uses = false;
+		for (const auto &c : hw_channels[k])
+			uses = uses || c.slot == i;
+		const auto &list = choices[k];
+		if (uses && std::count(list.begin(), list.end(), nullptr) == (long)list.size())
+			return k;
+	}
+	return -1;
+}
+
 // from the lost device's reader thread: its channels go to the codec plugins until
 // DeviceWatchThread has it back. Without a plugin for one of its codecs tcd stops,
 // as before, and its service restarts it (or a standby tcd takes the modules)
@@ -1620,18 +1628,12 @@ void CController::DeviceLost(int i, const CDVDevice *dev)
 		if (s.dev.get() != dev || !s.up)
 			return;	// an older device of the slot, or already out
 	}
-	for (int k : { kChoiceDStar, kChoiceDMR })
+	const int k = UncoveredChoice(i);
+	if (k >= 0)
 	{
-		bool uses = false;
-		for (const auto &c : hw_channels[k])
-			uses = uses || c.slot == i;
-		const auto &list = choices[k];
-		if (uses && std::count(list.begin(), list.end(), nullptr) == (long)list.size())
-		{
-			std::cerr << "No codec plugin does " << g_CodecChoices[k].label << " in place of " << s.desc << ": shutting down" << std::endl;
-			kill(getpid(), SIGINT);
-			return;
-		}
+		std::cerr << "No codec plugin does " << g_CodecChoices[k].label << " in place of " << s.desc << ": shutting down" << std::endl;
+		kill(getpid(), SIGINT);
+		return;
 	}
 	{
 		std::lock_guard<std::mutex> lock(pinned_mux);
@@ -1665,12 +1667,17 @@ void CController::PhaseOut(int i)
 			st.phase.store(1);
 			std::cout << s.desc << " is phased out: no new streams, the ones on it run to their end" << std::endl;
 		}
+		// its streams are done when its channels are free and quiet for a second and
+		// the device has answered every frame (the last one is freed at its Pick,
+		// before the device has it)
 		bool busy = false;
 		{
 			std::lock_guard<std::mutex> lock(pinned_mux);
+			const auto now = std::chrono::steady_clock::now();
 			for (const auto &list : hw_channels)
 				for (const auto &c : list)
-					busy = busy || (c.slot == i && c.busy);
+					busy = busy || (c.slot == i && (c.busy || now - c.last < std::chrono::seconds(1)));
+			busy = busy || (s.dev && s.up && s.dev->GetBufferDepth() > 0);
 			if (!busy)
 			{
 				s.up = false;
@@ -1696,7 +1703,7 @@ void CController::PhaseOut(int i)
 			std::lock_guard<std::mutex> lock(pinned_mux);
 			s.draining = false;
 			s.out = false;
-			s.next_try = std::chrono::steady_clock::now();
+			s.next_try = std::chrono::steady_clock::time_point::min();	// at this pass of the watch
 		}
 		st.phase.store(0);
 		// a device still open (taken back before it closed) is up as it was
