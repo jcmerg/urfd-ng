@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.33.3** | tcd 0.16.0 | Dashboard v2.14.2
+**urfd 4.33.4** | tcd 0.16.1 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1032,6 +1032,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.16.1**: builds with GCC again (`codec2/codec2.h` lacked `<cstdint>` for 0.16.0's noise generator per codec; clang on macOS got it through `<complex>`)
 - **tcd 0.16.0**: M17 through a codec plugin as a choice next to tcd's own Codec2: `CodecM17 = codec2` (the default) or a plugin's name, switchable in the web dashboard and with `POST /api/codec` (`"codec": "m17"`), written by Save. The plugin API stays `TCD_CODEC_API 3` and gains `TCD_CODEC_M17` (Codec2 3200, 8 bytes, 160 samples) and `TCD_CODEC_M17_1600` (Codec2 1600, 8 bytes, 320 samples); a plugin with them declares its formats with `frame_format`. A plugin with M17 but without 1600 leaves M17 voice+data streams to tcd's Codec2; older plugins keep working. tcd's own Codec2 and OP25 vocoder start every transmission afresh (a new stream id or a lower frame count on the module) and each have their own noise generator: before, a module carried the state of the previous transmission and all modules shared one generator, so the unvoiced sounds of a stream depended on the other modules
 - **tcd 0.15.0**: codec plugin API 3 (`TCD_CODEC_API 3`): `decode_info` reports how each frame came out (bit errors the FEC corrected, repeated, muted, tone, silence), and the monitor counts the frames with bit errors, the repeated and the muted ones per codec plugin (vocoder table and `/api/stats`: `error_frames`, `repeats`, `mutes`); `frame_format` declares a codec's frame size, and tcd refuses a plugin whose frames it cannot carry. tcd loads plugins of API 2 and 3, older plugins keep working without the counters. The monitor has room for 16 software vocoders (was 8). tcd-mbelib-neo-plugin 1.1.0 has API 3
 - **tcd 0.14.1**: tcd's own vocoders are rows of the monitor's vocoder table next to the devices and codec plugins: OP25 (P25, YSF VW) and Codec2 (M17), with their encode and decode counters and the module they work for; so the table shows who does P25 also when it is on OP25 (also in tcdmon, `"builtin": true` in `/api/stats`)

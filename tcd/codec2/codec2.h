@@ -30,6 +30,7 @@
 #define  __CODEC2__
 
 #include <complex>
+#include <cstdint>
 
 #include "codec2_internal.h"
 #include "defines.h"
