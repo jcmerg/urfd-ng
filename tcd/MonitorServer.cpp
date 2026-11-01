@@ -131,7 +131,7 @@ std::string CMonitorServer::BuildStatsJson()
 		   << ",\"online\":" << (d.online.load(std::memory_order_relaxed) ? "true" : "false")
 		   << ",\"phase\":" << d.phase.load(std::memory_order_relaxed)
 		   << ",\"want_out\":" << (d.want_out.load(std::memory_order_relaxed) ? "true" : "false")
-		   << ",\"can_out\":" << (d.can_out ? "true" : "false")
+		   << ",\"can_out\":" << (d.can_out.load() ? "true" : "false")
 		   << ",\"channels\":[";
 		for (int ch = 0; ch < DeviceStats::MAX_CHANNELS; ch++)
 		{
@@ -406,7 +406,7 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 			reply = "{\"status\":\"error\",\"message\":\"no such device\"}";
 			return 400;
 		}
-		if (out && !g_Stats.devices[i].can_out)
+		if (out && !g_Stats.devices[i].can_out.load())
 		{
 			reply = "{\"status\":\"error\",\"message\":\"no codec plugin takes its streams\"}";
 			return 400;

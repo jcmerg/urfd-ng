@@ -61,7 +61,7 @@ struct DeviceStats
 	// plugin does its codecs, so it may go (set once at start)
 	std::atomic<bool> want_out{false};
 	std::atomic<int> phase{0};
-	bool can_out = false;
+	std::atomic<bool> can_out{false};
 	// Per-channel activity: module letter + timestamp (ms since epoch)
 	std::atomic<char> ch_module[MAX_CHANNELS] = {' ', ' ', ' '};
 	std::atomic<uint64_t> ch_last_ms[MAX_CHANNELS] = {0, 0, 0};

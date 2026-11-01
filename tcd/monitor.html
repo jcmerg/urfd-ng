@@ -540,9 +540,11 @@ function render() {
   // hardware: the AMBE devices and their channels; software: codec plugins and tcd's own vocoders
   var rows = '';
   var hw = data.hw_channels || {};
-  var free = function (c) { return c ? (c.total - c.busy) + ' of ' + c.total + ' free' : '-'; };
+  // in use, not free: with fixed channels a free one belongs to its module
+  var use = function (c) { return c ? c.busy + ' of ' + c.total + ' in use' : '-'; };
   if (data.devices.length)
-    rows += '<tr class="grp"><th colspan="7">Hardware <span>- AMBE channels: D-Star ' + free(hw.dstar) + ', DMR ' + free(hw.dmr) + '</span></th></tr>';
+    rows += '<tr class="grp"><th colspan="7">Hardware <span>- AMBE channels: D-Star ' + use(hw.dstar) + ', DMR ' + use(hw.dmr) +
+      (data.config.device_pool ? ' (pool: any module)' : ' (fixed: one per module)') + '</span></th></tr>';
   data.devices.forEach(function (d, i) {
     var used = d.channels ? d.channels.filter(function (c) { return c.module; }).map(function (c) { return c.module; }) : [];
     var total = d.type === 'DV3003' ? 3 : 1;
@@ -561,7 +563,7 @@ function render() {
   });
   var swStreams = (data.swvocoders || []).reduce(function (n, x) { return n + (x.builtin ? 0 : x.cached_streams); }, 0);
   if ((data.swvocoders || []).length)
-    rows += '<tr class="grp"><th colspan="7">Software <span>- codec plugins and built-in vocoders, as many streams as the CPU takes: ' + swStreams + ' now</span></th></tr>';
+    rows += '<tr class="grp"><th colspan="7">Software <span>- codec plugins and built-in vocoders, as many streams as the CPU takes; on codec plugins now: ' + swStreams + '</span></th></tr>';
   (data.swvocoders || []).forEach(function (x) {
     var act = x.active_module && x.active_module.length > 0;
     rows += '<tr><td><b>' + esc(x.name) + '</b></td><td>' + (x.builtin ? 'Built in' : 'Codec plugin') + ' <span class="muted">' + esc(x.codec) + '</span></td>' +

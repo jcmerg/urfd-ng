@@ -551,10 +551,9 @@ int main(int argc, char *argv[])
 			mvprintw(row, 0, "Hardware");
 			attroff(COLOR_PAIR(7) | A_BOLD);
 			if (!dev_items.empty())
-				printw("  AMBE channels: D-Star %d of %d free, DMR %d of %d free, %s",
-					json_int(ds, "total") - json_int(ds, "busy"), json_int(ds, "total"),
-					json_int(dm, "total") - json_int(dm, "busy"), json_int(dm, "total"),
-					json_int(cfg_json, "device_pool") ? "pool" : "fixed");
+				printw("  AMBE channels: D-Star %d of %d in use, DMR %d of %d in use, %s",
+					json_int(ds, "busy"), json_int(ds, "total"), json_int(dm, "busy"), json_int(dm, "total"),
+					json_int(cfg_json, "device_pool") ? "pool (any module)" : "fixed (one per module)");
 			else
 				printw("  no AMBE device");
 		}
