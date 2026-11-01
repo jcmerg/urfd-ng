@@ -118,6 +118,7 @@ protected:
 	void DeviceLost(int slot, const CDVDevice *dev);
 	void DeviceWatchThread();
 	void PhaseOut(int slot);
+	int UncoveredChoice(int slot) const;
 	// the channel of codec k for a stream, -1 for none (under pinned_mux)
 	int TakeChannel(int k, char module, uint16_t streamid);
 	bool HasChannel(int k, int hw, char module, uint16_t streamid) const;

@@ -377,7 +377,12 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 	{
 		// POST {"pool": true|false}: DeviceChannels for the streams that start from now on; Save keeps it
 		bool on;
-		if (!g_Stats.pool_available.load() || !json_get_bool(body.c_str(), body.size(), "pool", on))
+		if (!json_get_bool(body.c_str(), body.size(), "pool", on))
+		{
+			reply = "{\"status\":\"error\",\"message\":\"pool: true or false expected\"}";
+			return 400;
+		}
+		if (!g_Stats.pool_available.load())
 		{
 			reply = "{\"status\":\"error\",\"message\":\"no AMBE channels\"}";
 			return 400;
@@ -1047,7 +1052,8 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 				if (key == "DmrGainMode")      { int m = g_Stats.config.dmr_gain_mode.load(); out << key << " = " << (m==2 ? "reencode" : m==1 ? "ambe" : "off") << "\n"; continue; }
 				if (key == "AmbeGainDb")       { out << key << " = " << g_Stats.config.ambe_gain_db.load() << "\n"; continue; }
 				if (key == "MonitorView") { out << key << " = " << views[view] << "\n"; viewWritten = true; continue; }
-				if (key == "DeviceChannels") { out << key << " = " << (pool ? "pool" : "fixed") << "\n"; poolWritten = true; continue; }
+				// without devices at this start the setting is not in use: the line stays
+				if (key == "DeviceChannels" && g_Stats.pool_available.load()) { out << key << " = " << (pool ? "pool" : "fixed") << "\n"; poolWritten = true; continue; }
 				const int k = ChoiceOfIni(key);
 				if (k >= 0 && g_Stats.codec_options[k].size() > (g_CodecChoices[k].own ? 1u : 0u))
 				{
