@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.34.2** | tcd 0.17.2 | Dashboard v2.14.2
+**urfd 4.34.3** | tcd 0.17.2 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -914,6 +914,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **Wiederholte AMBE+2-Frames stummgeschaltet (4.34.3)**: Manche Funkgeräte und Hotspots beenden eine DMR-, YSF- oder NXDN-Durchsage mit demselben AMBE+2-Frame, 6- bis 30-mal hintereinander (auf BrandMeister TG 262 und 91 ein Drittel der Durchsagen, von einem Drittel der Stationen); jeder Decoder spielte das als letzten Laut noch einmal. Sprache hat nie zweimal denselben Frame hintereinander, außer dem Stille-Frame, deshalb schickt urfd ab dem dritten in Folge AMBE+2-Stille, für jedes Ziel; das Log zählt sie je Stream
 - **Vom Transcoder verlorene Frames werden übersprungen (4.34.0)**: urfd ordnete jede Antwort von tcd über die Sequenznummer dem Kopf seiner Warteschlange zu; ein Frame, den tcd nie beantwortete (von einem hängenden AMBE-Gerät festgehalten), ließ jede spätere Antwort danebengehen, und der Rest der Durchsage fiel weg. Jetzt werden die Frames vor einer Antwort übersprungen, eine Antwort, die älter ist als der Kopf, wird verworfen, und die Durchsage läuft weiter
 - **Kein Protokoll im D-Star-Text (4.33.2)**: Der Text der D-Star-Slow-Data nennt das Protokoll (`DMR`, `YSF`, `SVX`, ...) nicht mehr, das Funkgerät zeigt es seit 4.33.0 schon als Suffix des Rufzeichens: `Max TG262` statt `Max DMR TG262`, `Max DG15` statt `YSF DG15`. Das lässt in den 20 Zeichen Platz für längere Namen und TGs. Ein Anrufer mit eigenem Suffix behält das Protokoll im Text. D-Star zu D-Star bleibt unverändert: Slow Data und Suffix des Funkgeräts gehen durch
 - **Die Quelle als D-Star-Suffix nur Richtung D-Star (4.33.1)**: Der Suffix aus 4.33.0 (`DMR`, `YSF`, ...) kommt nur in den Header, der an D-Star-Funkgeräte und -Links geht (DExtra, DPlus, DCS, G3 und ihre Clients), und in dessen Kopie in den D-Star-Slow-Data; der Stream selbst behält das Rufzeichen, wie es kam. Dashboard, Logs und die anderen Betriebsarten zeigen das Rufzeichen also wieder allein, wie vor 4.33.0 (dort stand `N0CALL / DMR`). Der Suffix eines Plugins ist sein Typ (`GetType()` in `Plugin.h`, z. B. drei Buchstaben). Interlinks reichen die Quelle nicht mehr als Suffix weiter; D-Star-Anrufer behalten ihren eigenen wie bisher. M17-Anrufer tragen im Dashboard auch kein `M17` mehr (das kam von upstream), D-Star-Funkgeräte bekommen es wie bei den anderen Betriebsarten

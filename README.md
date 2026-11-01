@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.34.2** | tcd 0.17.2 | Dashboard v2.14.2
+**urfd 4.34.3** | tcd 0.17.2 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -936,6 +936,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **Repeated AMBE+2 frames muted (4.34.3)**: some radios and hotspots end a DMR, YSF or NXDN transmission with the same AMBE+2 frame again and again, 6 to 30 times (on BrandMeister TG 262 and 91 a third of the transmissions, from a third of the stations); every decoder played it as the last sound once more. Speech never has the same frame twice in a row, beyond the silence frame, so from the third one in a row urfd sends AMBE+2 silence instead, for every target; the log counts them per stream
 - **Frames the transcoder lost are skipped (4.34.0)**: urfd matched each answer of tcd to the head of its queue by the sequence; one frame tcd never answered (held by an AMBE device that hung) made every later answer miss, and the rest of the transmission was dropped. Now the frames before an answer are skipped, an answer older than the head is dropped, and the transmission goes on
 - **No protocol in the D-Star text (4.33.2)**: the D-Star slow data text no longer names the protocol (`DMR`, `YSF`, `SVX`, ...), which the radio already shows as the suffix of the callsign since 4.33.0: `Max TG262` instead of `Max DMR TG262`, `Max DG15` instead of `YSF DG15`. That leaves room for longer names and TGs in the 20 characters. A caller with a suffix of their own keeps the protocol in the text. D-Star to D-Star is unchanged: the radio's own slow data and suffix pass through
 - **The source as D-Star suffix only towards D-Star (4.33.1)**: the suffix of 4.33.0 (`DMR`, `YSF`, ...) is added only to the header that goes to D-Star radios and links (DExtra, DPlus, DCS, G3 and their clients) and to the copy in the D-Star slow data; the stream itself keeps the callsign as it came in. So the dashboard, the logs and the other modes show the callsign alone again, as before 4.33.0 (it showed `N0CALL / DMR`). A plugin's suffix is its type (`GetType()` in `Plugin.h`, e.g. three letters). Interlinks no longer pass on the source as a suffix; D-Star callers keep their own as before. M17 callers no longer carry `M17` in the dashboard either (it came from upstream), D-Star radios get it as for the other modes
