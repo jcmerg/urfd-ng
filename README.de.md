@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.33.1** | tcd 0.15.1 | Dashboard v2.14.2
+**urfd 4.33.2** | tcd 0.15.1 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -424,7 +424,7 @@ Ausgehende Frames tragen die Ziel-ID, mit der der jeweilige Client gepollt hat, 
 
 **NXDN-ID-Auflösung**: Eingehende NXDN-IDs werden über die NXDN-ID-Datenbank in Rufzeichen übersetzt. Fehlt eine ID dort, wird die DMR-ID-Datenbank verwendet (viele Funkamateure nutzen ihre DMR-ID auch als NXDN-ID). Das ermöglicht die Anzeige des Rufzeichens über Betriebsarten hinweg und die Namenssuche für D-Star-Slow-Data. Unbekannte IDs werden verworfen, außer FallbackNxdnId ist gesetzt.
 
-**D-Star-Slow-Data**: NXDN-Quellen erscheinen im D-Star-Textfeld als `NXDN RAN<n>`. Betreibernamen werden in der DMR- und der NXDN-Datenbank gesucht.
+**D-Star-Slow-Data**: NXDN-Quellen erscheinen im D-Star-Textfeld als `RAN<n>` (`NXDN` steht im Suffix des Rufzeichens). Betreibernamen werden in der DMR- und der NXDN-Datenbank gesucht.
 
 **Dashboard**: Die Spalte NXDN RAN erscheint in der Modulübersicht, wenn NXDN eingeschaltet ist, daneben die Spalte `NXDN DST-ID`, sobald `ModuleDstIdBase` gesetzt ist. Die Spalten DMR+ und YSF DG-ID werden ausgeblendet, wenn das jeweilige Protokoll aus ist.
 
@@ -737,33 +737,33 @@ sudo systemctl restart apache2
 ### D-Star-Slow-Data für transcodierte Streams
 Transcodierte Streams (DMR, YSF, SVX, M17, P25, USRP, Client-Protokolle -> D-Star) enthalten jetzt korrekte D-Star-Slow-Data:
 - **Header**: Rufzeichen des Anrufers (MY), Reflektor-Rufzeichen (RPT1/RPT2)
-- **Textnachricht**: der Vorname des Betreibers (wenn das Rufzeichen in der DMR- oder NXDN-ID-Datenbank steht) und die Quelle: `Max DMR TG26363` (seit 4.29.0; vorher kam der Name als zweiter Text, den viele Funkgeräte nie anzeigen)
+- **Textnachricht**: der Vorname des Betreibers (wenn das Rufzeichen in der DMR- oder NXDN-ID-Datenbank steht) und die Quelle: `Max TG26363` (seit 4.29.0; vorher kam der Name als zweiter Text, den viele Funkgeräte nie anzeigen). Das Protokoll fehlt seit 4.33.2: das Funkgerät zeigt es schon als Suffix des Rufzeichens (`N0CALL / DMR`); es bleibt nur im Text, wenn der Anrufer ein eigenes Suffix mitbringt
 
 Beispiele der Textnachricht pro Protokoll:
 
 | Quelle | Slow-Data-Text |
 |--------|---------------|
-| MMDVMClient | `Max DMR TG26363` |
-| SvxReflector | `Max SVX TG317424` |
-| YSF (Server) | `YSF DG28` |
-| NXDN | `NXDN RAN6` |
-| YSFClient | `YSF DG15` |
-| M17, P25, USRP, DMR+ | `M17`, `P25` usw. |
+| MMDVMClient | `Max TG26363` |
+| SvxReflector | `Max TG317424` |
+| YSF (Server) | `Max DG28` |
+| NXDN | `Max RAN6` |
+| YSFClient | `Max DG15` |
+| M17, P25, USRP, DMR+ | `Max` (nur der Name) |
 
-YSFClient hängt die DG-ID an, wenn eine eingestellt ist (sonst nur `YSF`). D-Star-Quellen, auch die D-Star-Client-Anbindungen, werden nicht nach D-Star transcodiert: ihre eigenen Slow Data gehen unverändert durch.
+YSFClient zeigt die DG-ID, wenn eine eingestellt ist. Ohne Name und ohne TG, DG-ID oder RAN bleibt der Text leer, und das Funkgerät zeigt nur den Header. D-Star-Quellen, auch die D-Star-Client-Anbindungen, werden nicht nach D-Star transcodiert: ihre eigenen Slow Data gehen unverändert durch.
 
-Die Textnachricht hat 20 Zeichen. Ist `<Name> <Quelle> TG<n>` länger, wandert die TG in einen zweiten Text, der sich etwa alle 5 Sekunden mit dem ersten abwechselt; ist es dann noch zu lang, wird der Name gekürzt, damit die Quelle ganz bleibt:
+Die Textnachricht hat 20 Zeichen. Ist `<Name> <Quelle> TG<n>` länger (eine Quelle wie `DG15` oder, bei einem Anrufer mit eigenem Suffix, `DMR`), wandert die TG in einen zweiten Text, der sich etwa alle 5 Sekunden mit dem ersten abwechselt; ist es dann noch zu lang, wird der Name gekürzt, damit die Quelle ganz bleibt:
 
 ```
-Max DMR TG262                                  (alles passt)
-Maximilian DMR    <-> DMR TG263112              (die TG wechselt sich ab)
-Bartholomae YSF DG15  <-> Bartholomaeus         (der Name gekürzt)
+Max TG262                                      (alles passt)
+Maximilian TG263112                            (alles passt, 4.33.2)
+Maximilian DMR    <-> DMR TG263112          (eigenes Suffix: die TG wechselt sich ab)
 ```
 
 Header und Textnachricht wechseln mit jedem Superframe (etwa 420 ms):
 
 ```
-[Header: N0CALL > URF999 S] → [Max DMR TG262] → [Header] → [Max DMR TG262] → ...
+[Header: N0CALL > URF999 S] → [Max TG262] → [Header] → [Max TG262] → ...
 ```
 
 Die Namenssuche funktioniert für alle Protokolle: Jedes Rufzeichen mit Eintrag in der DMR-ID-Datenbank erscheint mit Namen auf D-Star-Funkgeräten.
@@ -914,6 +914,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **Kein Protokoll im D-Star-Text (4.33.2)**: Der Text der D-Star-Slow-Data nennt das Protokoll (`DMR`, `YSF`, `SVX`, ...) nicht mehr, das Funkgerät zeigt es seit 4.33.0 schon als Suffix des Rufzeichens: `Max TG262` statt `Max DMR TG262`, `Max DG15` statt `YSF DG15`. Das lässt in den 20 Zeichen Platz für längere Namen und TGs. Ein Anrufer mit eigenem Suffix behält das Protokoll im Text. D-Star zu D-Star bleibt unverändert: Slow Data und Suffix des Funkgeräts gehen durch
 - **Die Quelle als D-Star-Suffix nur Richtung D-Star (4.33.1)**: Der Suffix aus 4.33.0 (`DMR`, `YSF`, ...) kommt nur in den Header, der an D-Star-Funkgeräte und -Links geht (DExtra, DPlus, DCS, G3 und ihre Clients), und in dessen Kopie in den D-Star-Slow-Data; der Stream selbst behält das Rufzeichen, wie es kam. Dashboard, Logs und die anderen Betriebsarten zeigen das Rufzeichen also wieder allein, wie vor 4.33.0 (dort stand `N0CALL / DMR`). Der Suffix eines Plugins ist sein Typ (`GetType()` in `Plugin.h`, z. B. drei Buchstaben). Interlinks reichen die Quelle nicht mehr als Suffix weiter; D-Star-Anrufer behalten ihren eigenen wie bisher. M17-Anrufer tragen im Dashboard auch kein `M17` mehr (das kam von upstream), D-Star-Funkgeräte bekommen es wie bei den anderen Betriebsarten
 - **DCS-Client nennt den Reflektor (4.33.1)**: Die Info des DCS-Connects lautet `REFLECTOR <Rufzeichen> urfd <Version>`, das Rufzeichen aus `[Names]`, mit dem Repeater-Bild `hf.jpg` der DCS-Statusseiten (sie haben kein `repeater.jpg`, das als kaputtes Bild erschien)
 - **Die Quelle als D-Star-Suffix (4.33.0)**: Ein Stream aus einer anderen Betriebsart trägt seine Quelle als 4-stelligen Suffix des Rufzeichens, den D-Star-Funkgeräte daneben zeigen und in ihrer Anrufliste behalten: `DMR` (MMDVM, DMR+, MMDVMClient), `YSF` (auch der YSF-Client), `NXDN`, `P25`, `M17` (wie bisher), `USRP` und `SVX` (SVXServer und SvxReflector-Client), z. B. `DL4JC / DMR`. D-Star-Anrufer behalten ihren eigenen Suffix, Interlinks reichen den des Reflektors weiter, von dem der Stream kam, und ein Plugin kann seinen eigenen setzen. Die Listen der zuletzt Gehörten und das Dashboard zeigen das Rufzeichen wie bisher ohne. Die Kopie des Headers in den D-Star-Slow-Data trägt den Suffix ebenfalls (sie war immer leer); der D-Star-Text nennt weiter Quelle, Name und TG
