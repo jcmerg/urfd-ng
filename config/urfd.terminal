@@ -6,8 +6,9 @@
 #
 #  Options:
 #    address <ip>       Public IP for terminal route responder.
-#                        Leave unset if running on a public IP.
-#                        Set to public IP if behind NAT/router.
+#                        Without it urfd's external IPv4 ([IP Addresses],
+#                        detected and followed while urfd runs, also behind
+#                        NAT); set it to fix the address.
 #    modules <modules>  Modules that accept terminal connections.
 #                        Default: * (all modules)
 #    alias <callsign>   Additional reflector callsign accepted from terminals

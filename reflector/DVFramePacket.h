@@ -84,6 +84,7 @@ public:
 	// set
 	void SetDvData(const uint8_t *);
 	void SetCodecData(const STCPacket *pack);
+	void SetDmrData(const uint8_t *ambe2);	// the 9 bytes of the AMBE+2 frame
 	void SetTCParams(uint32_t seq, char module);
 
 	// the round-trip timer

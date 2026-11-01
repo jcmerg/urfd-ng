@@ -54,7 +54,7 @@ size_t CCurlGet::data_write(void* buf, size_t size, size_t nmemb, void* userp)
 }
 
 // options both requests use; NOSIGNAL because several threads use libcurl
-CURLcode CCurlGet::Prepare(CURL *curl, const std::string &url, std::stringstream &ss, long timeout, long connecttimeout)
+CURLcode CCurlGet::Prepare(CURL *curl, const std::string &url, std::stringstream &ss, long timeout, long connecttimeout, long ipresolve)
 {
 	CURLcode code;
 	if(CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &data_write))
@@ -63,19 +63,20 @@ CURLcode CCurlGet::Prepare(CURL *curl, const std::string &url, std::stringstream
 	&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L))
 	&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_FILE, &ss))
 	&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout))
-	&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connecttimeout)))
+	&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connecttimeout))
+	&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_IPRESOLVE, ipresolve)))
 		code = curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 	return code;
 }
 
-CURLcode CCurlGet::GetURL(const std::string &url, std::stringstream &ss, long timeout, long connecttimeout)
+CURLcode CCurlGet::GetURL(const std::string &url, std::stringstream &ss, long timeout, long connecttimeout, long ipresolve)
 {
 	CURLcode code(CURLE_FAILED_INIT);
 	CURL* curl = curl_easy_init();
 
 	if(curl)
 	{
-		if(CURLE_OK == (code = Prepare(curl, url, ss, timeout, connecttimeout)))
+		if(CURLE_OK == (code = Prepare(curl, url, ss, timeout, connecttimeout, ipresolve)))
 		{
 			code = curl_easy_perform(curl);
 		}

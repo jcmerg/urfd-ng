@@ -28,8 +28,9 @@ class CCurlGet
 public:
 	CCurlGet();
 	~CCurlGet();
-	// the contents of the URL will be appended to the stringstream.
-	CURLcode GetURL(const std::string &url, std::stringstream &ss, long timeout = 30, long connecttimeout = 10);
+	// the contents of the URL will be appended to the stringstream; ipresolve
+	// CURL_IPRESOLVE_V4 or _V6 asks over that address family only
+	CURLcode GetURL(const std::string &url, std::stringstream &ss, long timeout = 30, long connecttimeout = 10, long ipresolve = CURL_IPRESOLVE_WHATEVER);
 	// POST one url-encoded form field, the answer is appended to ss and the HTTP status put in http
 	CURLcode PostForm(const std::string &url, const std::string &field, const std::string &value, std::stringstream &ss, long &http, long timeout = 30);
 	// Call once at shutdown, after every thread that may use CCurlGet has been
@@ -37,5 +38,5 @@ public:
 	static void GlobalCleanup();
 private:
 	static size_t data_write(void* buf, size_t size, size_t nmemb, void* userp);
-	static CURLcode Prepare(CURL *curl, const std::string &url, std::stringstream &ss, long timeout, long connecttimeout);
+	static CURLcode Prepare(CURL *curl, const std::string &url, std::stringstream &ss, long timeout, long connecttimeout, long ipresolve = CURL_IPRESOLVE_WHATEVER);
 };

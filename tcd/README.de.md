@@ -88,7 +88,8 @@ Jedes transcodierte Modul braucht einen D-Star-Kanal und einen DMR/YSF-Kanal. Ei
 
 | Hardware | Codec-Plugin | Module | Hinweis |
 |---|---|---|---|
-| 1× DV3000 oder 1× DV3003 | eines für DMR (oder D-Star) | 1 | D-Star auf dem Gerät, DMR/YSF in Software |
+| 1× DV3000 | eines für DMR (oder D-Star) | 1 | D-Star auf dem Gerät, DMR/YSF in Software |
+| 1× DV3003 | eines für DMR (oder D-Star) | bis zu 3 | D-Star auf dem Gerät, DMR/YSF in Software |
 | 1× DV3003 mit `mixed` | eines für D-Star und DMR | 1 auf dem Gerät, weitere in Software | D-Star und DMR/YSF eines Moduls auf dem Gerät, siehe [unten](#einzelner-dv3003-im-mischbetrieb) |
 | DV3000 + DV3003 | — | 2 | Mischbetrieb, empfohlen |
 | 2× DV3000 | — | 1 | eines für D-Star, eines für DMR/YSF |
@@ -230,11 +231,13 @@ Ein Gerät, das sich nicht öffnen lässt oder nicht antwortet, wird mit einer W
 | Schlüssel | Vorlage | Bedeutung |
 |---|---|---|
 | `ServerAddress` | `127.0.0.1` | IP-Adresse oder Hostname des urfd-Reflektors; ein Hostname wird bei jedem Neuverbinden neu aufgelöst (seit 0.7.4) |
-| `Port` | `10100` | `[Transcoder] Port` des Reflektors |
+| `Port` | `10100` | `[Transcoder] Port` des Reflektors (1025-49000; urfd nimmt bis 40000) |
 | `Password` | — | `[Transcoder] Password` des Reflektors, nötig, wenn er eins hat (seit 0.8.0) |
 | `Modules` | `FS` | transcodierte Module; mit `[Transcoder] Modules = auto` im Reflektor (urfd 4.25.0) beliebige seiner Module, dann entscheidet allein diese Liste; sonst dieselben Buchstaben wie dort |
 | `StandbyModules` | — | Module, die dieser tcd nur übernimmt, solange kein anderer tcd sie hat (seit 0.11.0, urfd 4.26.0), siehe [Standby](#standby-ein-zweiter-tcd-für-dieselben-module); nicht zusätzlich in `Modules` |
 | `DeviceSerial` | — | zu verwendendes AMBE-Gerät, je eine Zeile (siehe [oben](#ambe-geräte-auswählen)); `mixed` hinter der Seriennummer eines DV3003 allein: D-Star und DMR eines Moduls darauf (seit 0.17.0, siehe [Einzelner DV3003 im Mischbetrieb](#einzelner-dv3003-im-mischbetrieb)) |
+| `CodecPlugin` | — | zu ladendes Codec-Plugin, je eine Zeile (siehe [Codec-Plugins](#codec-plugins)) |
+| `CodecDStar` / `CodecDMR` / `CodecP25` / `CodecM17` | — | der Vocoder für neue Streams: `dvsi`, `op25`, `codec2` oder der Name eines Plugins (siehe [Codec-Plugins](#codec-plugins)); von „Save“ gespeichert |
 | `DeviceChannels` | `fixed` | `fixed`: die AMBE-Kanäle gehören den ersten Modulen; `pool`: ein Stream nimmt einen beliebigen freien Kanal (seit 0.17.0, siehe [Kanal-Pool](#kanal-pool-devicechannels--pool)) |
 
 ### Verstärkung
@@ -268,7 +271,7 @@ Audio von DMR nach DMR/YSF läuft normalerweise als AMBE2+ durch, ohne dekodiert
 |---|---|---|
 | `DmrGainMode` | `ambe` | `ambe` |
 | `AmbeGainDb` | `0` | `0` |
-| `DmrReencodeGain` | `0` | — |
+| `DmrReencodeGain` | `0` | `0` |
 
 DMR-Funkgeräte erwarten einen niedrigeren Pegel als das AGC-Ziel (`AGCTarget`, -16 dBFS). `OutputGainDMR = -14` senkt jeden Weg nach DMR/YSF darauf ab, auf etwa -30 dBFS, den Pegel der Sprache bei BrandMeister (gemessen auf TG91: Median -29 dBFS, zwischen den Sprechern -39 bis -23; die -18 vor 0.13.1 ließen DMR/YSF rund 4 dB darunter): den DVSI-Encoder für Quellen aus D-Star, M17, P25 und USRP sowie b2 oder das Neukodieren für DMR-Quellen. `AmbeGainDb` und `DmrReencodeGain` verschieben nur DMR → DMR/YSF gegenüber den anderen Wegen und bleiben normalerweise 0. (tcd 0.2.6 legte die -18 in `AmbeGainDb`/`DmrReencodeGain`, D-Star → DMR war dadurch 18 dB zu laut.)
 
@@ -308,7 +311,8 @@ Warum nicht die Rauschunterdrückung im AMBE-Chip: Die DVSI-Geräte haben eine (
 | Schlüssel | Vorlage | Bedeutung |
 |---|---|---|
 | `Monitor` | `true` | Web-Dashboard und Statistik-Socket ein/aus |
-| `MonitorBindAddress` | `127.0.0.1` | Adresse von Web-Dashboard und Statistik-Socket; `0.0.0.0` öffnet sie ins Netz (ohne Passwort, die Seite kann Pegel ändern und speichern, also nur im vertrauenswürdigen LAN) |
+| `MonitorBindAddress` | `127.0.0.1` | Adresse von Web-Dashboard und Statistik-Socket; `0.0.0.0` öffnet sie ins Netz (dann `MonitorPassword` setzen: die Seite kann Pegel ändern und speichern) |
+| `MonitorView` | `auto` | `cards`, `compact` oder `auto` (kompakt ab fünf Modulen); von „Save“ gespeichert |
 | `MonitorPassword` | (keins) | die Seite fragt danach und hält eine Sitzung per Cookie 30 Tage (nach 5 Fehlversuchen von einer Adresse 60 s Pause für Anmeldungen von dort); `tcdmon` von anderen Rechnern als 127.0.0.1 ebenfalls (es fragt danach oder nimmt `TCD_MONITOR_PASSWORD`; `tcdmon -p <Passwort> <Host>` geht auch, zeigt das Passwort aber in der Prozessliste). Fehlversuche, die älter als 10 Minuten sind, zählen nicht. Unverschlüsseltes HTTP: von außerhalb des LANs über einen TLS-Proxy oder einen SSH-Tunnel |
 | `MonitorHttpPort` | `8080` | Web-Dashboard |
 | `MonitorStatsPort` | `8081` | Statistik-Socket (JSON, für `tcdmon`) |

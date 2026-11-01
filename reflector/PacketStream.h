@@ -111,7 +111,13 @@ private:
 	// frame cycle (-1: unknown) and how many frames this stream got filled in
 	int                 m_iNextWireIdx { -1 };
 	uint32_t            m_uiLostFrames { 0 };
+	// repeated AMBE+2 frames: the last one that came in, how often in a row, and
+	// how many of this stream were muted
+	uint8_t             m_LastAmbe2[9] {};
+	int                 m_iAmbe2Repeats { 0 };
+	uint32_t            m_uiMutedRepeats { 0 };
 
 	void PushFrame(std::unique_ptr<CPacket> packet);
 	bool FillLostFrames(const CPacket &next, double since);	// false: drop next, it came late or again
+	void MuteRepeatedFrame(CPacket &frame);
 };

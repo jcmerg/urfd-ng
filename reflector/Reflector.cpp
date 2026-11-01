@@ -24,6 +24,7 @@
 
 #include "Global.h"
 #include "Utils.h"
+#include "ExternalIp.h"
 #include "DMRMMDVMProtocol.h"
 #include "MMDVMClientProtocol.h"
 #include "SvxReflectorProtocol.h"
@@ -75,6 +76,9 @@ bool CReflector::Start(void)
 	m_Callsign.SetCallsign(cs, false);
 	m_Modules.assign(g_Configure.GetString(g_Keys.modules.modules));
 	const auto port = g_Configure.GetUnsigned(g_Keys.tc.port);
+	// the external addresses, before the protocols (G3, plugins) ask for them
+	m_ExternalIPv4 = g_Configure.GetString(g_Keys.ip.ipv4address);
+	m_ExternalIPv6 = g_Configure.GetString(g_Keys.ip.ipv6address);
 
 #ifndef NO_DHT
 	// start the dht instance
@@ -188,6 +192,10 @@ bool CReflector::Start(void)
 
 	// register in the XLX directory, if switched on
 	m_CallingHome.Start();
+
+	// follow the external addresses
+	if (g_Configure.GetUnsigned(g_Keys.ip.checkinterval) && !(g_Configure.GetBoolean(g_Keys.ip.ipv4fixed) && (g_Configure.GetBoolean(g_Keys.ip.ipv6fixed) || m_ExternalIPv6.empty())))
+		m_ExternalFuture = std::async(std::launch::async, &CReflector::ExternalIpThread, this);
 
 	// start echo thread
 	if (m_EchoModule != ' ')
@@ -347,6 +355,12 @@ void CReflector::Stop(void)
 		m_MaintenanceFuture.get();
 	}
 
+	{
+		std::lock_guard<std::mutex> lock(m_ExternalMutex);	// a wakeup between its check and its wait is not lost
+	}
+	m_ExternalWake.notify_all();
+	if (m_ExternalFuture.valid())
+		m_ExternalFuture.get();
 	m_CallingHome.Stop();
 
 	// stop echo thread
@@ -1438,6 +1452,64 @@ void CReflector::EchoThread(void)
 	std::cout << "Echo thread stopped" << std::endl;
 }
 
+std::string CReflector::GetExternalIPv4(void) const
+{
+	std::lock_guard<std::mutex> lock(m_ExternalMutex);
+	return m_ExternalIPv4;
+}
+
+std::string CReflector::GetExternalIPv6(void) const
+{
+	std::lock_guard<std::mutex> lock(m_ExternalMutex);
+	return m_ExternalIPv6;
+}
+
+// Asks the services of IPCheckUrl every IPCheckInterval seconds for the addresses
+// that are not set in the configuration. A changed one (another uplink, a fallback
+// line) is logged and goes to the XLX directory and the DHT at once; G3 and the
+// plugins take it from GetExternalIPv4/6 for the clients that come from then on.
+// A service that does not answer changes nothing.
+void CReflector::ExternalIpThread(void)
+{
+	const auto urls = ExternalIpUrls(g_Configure.GetString(g_Keys.ip.checkurl));
+	const auto interval = std::chrono::seconds(g_Configure.GetUnsigned(g_Keys.ip.checkinterval));
+	const bool v4 = !g_Configure.GetBoolean(g_Keys.ip.ipv4fixed);
+	const bool v6 = !g_Configure.GetBoolean(g_Keys.ip.ipv6fixed) && !g_Configure.GetString(g_Keys.ip.ipv6bind).empty();
+	while (keep_running)
+	{
+		{
+			std::unique_lock<std::mutex> lock(m_ExternalMutex);
+			m_ExternalWake.wait_for(lock, interval, [this] { return !keep_running; });
+		}
+		if (!keep_running)
+			break;
+		bool changed = false;
+		for (const bool six : { false, true })
+		{
+			if (six ? !v6 : !v4)
+				continue;
+			const std::string now = DetectExternalIp(six, urls);
+			if (now.empty())
+				continue;
+			std::lock_guard<std::mutex> lock(m_ExternalMutex);
+			std::string &known = six ? m_ExternalIPv6 : m_ExternalIPv4;
+			if (now != known)
+			{
+				std::cout << "External IPv" << (six ? '6' : '4') << " address changed from " << (known.empty() ? std::string("none") : known) << " to " << now << std::endl;
+				known = now;
+				changed = true;
+			}
+		}
+		if (changed)
+		{
+			m_CallingHome.PushNow();
+#ifndef NO_DHT
+			PutDHTConfig();
+#endif
+		}
+	}
+}
+
 #ifndef NO_DHT
 // DHT put() and get()
 void CReflector::PutDHTConfig()
@@ -1446,8 +1518,8 @@ void CReflector::PutDHTConfig()
 	SUrfdConfig1 cfg;
 	time(&cfg.timestamp);
 	cfg.callsign.assign(cs);
-	cfg.ipv4addr.assign(g_Configure.GetString(g_Keys.ip.ipv4address));
-	cfg.ipv6addr.assign(g_Configure.GetString(g_Keys.ip.ipv6address));
+	cfg.ipv4addr.assign(GetExternalIPv4());
+	cfg.ipv6addr.assign(GetExternalIPv6());
 	cfg.modules.assign(g_Configure.GetString(g_Keys.modules.modules));
 	if (g_Configure.GetUnsigned(g_Keys.tc.port))
 		cfg.transcodedmods.assign(GetTranscodedModules());

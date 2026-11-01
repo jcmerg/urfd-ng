@@ -68,7 +68,7 @@ endif
 SRCS = $(wildcard *.cpp)
 OBJS = $(SRCS:.cpp=.o)
 DEPS = $(SRCS:.cpp=.d)
-DBUTILOBJS = Configure.o CurlGet.o Lookup.o LookupDmr.o LookupNxdn.o LookupYsf.o YSFNode.o Callsign.o
+DBUTILOBJS = Configure.o CurlGet.o ExternalIp.o Lookup.o LookupDmr.o LookupNxdn.o LookupYsf.o YSFNode.o Callsign.o
 
 all : $(EXE) $(INICHECK) $(DBUTIL)
 
@@ -76,8 +76,8 @@ all : $(EXE) $(INICHECK) $(DBUTIL)
 $(EXE) : $(OBJS)
 	$(CXX) $^ -o $@ $(LDFLAGS) -rdynamic -ldl
 
-$(INICHECK) : Configure.cpp CurlGet.o
-	$(CXX) -DINICHECK $(CFLAGS) $< CurlGet.o -o $@ -lcurl
+$(INICHECK) : Configure.cpp CurlGet.o ExternalIp.o
+	$(CXX) -DINICHECK $(CFLAGS) $< CurlGet.o ExternalIp.o -o $@ -lcurl
 
 $(DBUTIL) : Main.cpp $(DBUTILOBJS)
 	$(CXX) -DUTILITY $(CFLAGS) $< $(DBUTILOBJS) -o $@ -pthread -lcurl

@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.34.2** | tcd 0.17.2 | Dashboard v2.14.2
+**urfd 4.35.0** | tcd 0.17.2 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -523,6 +523,17 @@ Table, cache, building and the admin commands `credentials_status` and `credenti
 
 Live events for the dashboard: clients, peers and talking stations (with the operator's name from the ID database) as they change, the bridges of each module (TG mappings, autolinks, connectors to other reflectors) and their changes, and the whole state when a client connects, without IP addresses. Read only and without a password, so it listens on loopback (`127.0.0.1:10102`) and the dashboard's nginx passes `/ws` through. Always built in (needs `libwebsockets-dev`), off until `[WebSocket] Enable = true`, which `setup.sh` sets on install and on `setup.sh update`; changes need a restart. Based on the notifier by Jason Kendall (coolacid), whose live dashboard the Docker image serves at `/live/`, next to this dashboard. Messages and setup: [docs/WEBSOCKET.md](docs/WEBSOCKET.md).
 
+### External address (NAT, fallback line)
+
+Clients and directories need the address urfd is reached at on the internet, which behind NAT is not the bound one. `[IP Addresses] IPv4External` / `IPv6External` set it by hand, and then it stays as it is. Without them urfd asks a list of services that answer with the caller's address (`IPCheckUrl`, by default icanhazip.com, ifconfig.me, ipify.org and ident.me, each over IPv4 or IPv6; the first well-formed answer wins), at start and, since 4.35.0, every `IPCheckInterval` seconds (default 300, 0 = only at start) while it runs. A changed address, e.g. after a switch to a fallback line with a DNS change, is logged (`External IPv4 address changed from ... to ...`), goes to the XLX directory at once and is published in the DHT; G3 (without `address` in `urfd.terminal`) and the plugins tell it to their clients from then on. A check that gets no answer changes nothing.
+
+```ini
+[IP Addresses]
+IPv4Binding = 0.0.0.0
+# IPv4External = 203.0.113.10     # fixed: not detected
+IPCheckInterval = 60              # check every minute
+```
+
 ### SIGHUP Configuration Reload
 
 The reflector supports hot-reloading configuration without dropping client sessions. Send `SIGHUP` to the urfd process to trigger a reload.
@@ -531,10 +542,11 @@ The reflector supports hot-reloading configuration without dropping client sessi
 - TG mappings (MMDVMClient, SvxReflector and SVXServer) — dynamic TGs are preserved
 - Whitelist, blacklist, and interlink files
 - Transcoded modules (`[Transcoder] Modules`, also to and from `auto`, since 4.25.1); a tcd connection for a module no longer listed is closed
-- Reflector metadata (callsign, sponsor, country, URLs)
-- Database refresh parameters
+- Reflector metadata (sponsor, country, URLs; the callsign only for the XML file and the admin page)
 
 **Requires full restart:**
+- Callsign, database settings (Mode, URL, RefreshMin)
+- `[MMDVM]` talkgroups and users (users can be changed at runtime via the admin interface)
 - Module list changes (adding/removing modules)
 - Protocol enable/disable or port changes
 - IP address binding changes
@@ -625,7 +637,7 @@ M17 listen-only clients (LSTN packets) are accepted and registered on the reques
 - **META**: The META bytes reach other M17 clients with a TYPE that says what they carry (text, GNSS or ECD) and the source's CAN, so a GNSS position is no longer shown as text. A GNSS position is decoded into a Maidenhead locator, shown in the last-heard list (linked to OpenStreetMap) and in `/json/stations`.
 
 ### Protocol Enable Flags
-All protocols can now be individually enabled/disabled. Default is `true` (backwards-compatible).
+All protocols can be enabled/disabled individually. Without `Enable`, DCS, DExtra, DPlus, DMRPlus, M17, YSF and URF are on (NXDN and P25 when they have a `Port`); MMDVM, SvxReflector, SVXServer, Echo, Admin and the client connectors are off; XLXPeer, G3 and USRP need the line. A disabled protocol still needs its `Port`.
 
 ```ini
 [DPlus]
@@ -936,6 +948,9 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **The external address followed (4.35.0)**: without `IPv4External` / `IPv6External` urfd asks a list of services (`IPCheckUrl`, icanhazip.com, ifconfig.me, ipify.org, ident.me; before only icanhazip.com) at start and every `IPCheckInterval` seconds while it runs; a changed address is logged, goes to the XLX directory at once and to the DHT, and G3 and the plugins tell it to their clients. G3 without `address` in `urfd.terminal` tells the terminals the external IPv4 (it told them the bound one, wrong behind NAT). A set external address is no longer compared with a detected one. See [External address](#external-address-nat-fallback-line)
+- **Templates and README checked against the code (4.35.0)**: which protocols are on without `Enable`, what SIGHUP reloads, case-sensitive keys, ranges and required keys in `urfd.ini`; in `tcd.ini` the comments of the lines the monitor's Save rewrites stand on lines of their own
+- **Repeated AMBE+2 frames muted (4.35.0)**: some radios and hotspots end a DMR, YSF or NXDN transmission with the same AMBE+2 frame again and again, 6 to 30 times (on BrandMeister TG 262 and 91 a third of the transmissions, from a third of the stations); every decoder played it as the last sound once more. Speech never has the same frame twice in a row, beyond the silence frame, so from the third one in a row urfd sends AMBE+2 silence instead, for every target; the log counts them per stream
 - **Frames the transcoder lost are skipped (4.34.0)**: urfd matched each answer of tcd to the head of its queue by the sequence; one frame tcd never answered (held by an AMBE device that hung) made every later answer miss, and the rest of the transmission was dropped. Now the frames before an answer are skipped, an answer older than the head is dropped, and the transmission goes on
 - **No protocol in the D-Star text (4.33.2)**: the D-Star slow data text no longer names the protocol (`DMR`, `YSF`, `SVX`, ...), which the radio already shows as the suffix of the callsign since 4.33.0: `Max TG262` instead of `Max DMR TG262`, `Max DG15` instead of `YSF DG15`. That leaves room for longer names and TGs in the 20 characters. A caller with a suffix of their own keeps the protocol in the text. D-Star to D-Star is unchanged: the radio's own slow data and suffix pass through
 - **The source as D-Star suffix only towards D-Star (4.33.1)**: the suffix of 4.33.0 (`DMR`, `YSF`, ...) is added only to the header that goes to D-Star radios and links (DExtra, DPlus, DCS, G3 and their clients) and to the copy in the D-Star slow data; the stream itself keeps the callsign as it came in. So the dashboard, the logs and the other modes show the callsign alone again, as before 4.33.0 (it showed `N0CALL / DMR`). A plugin's suffix is its type (`GetType()` in `Plugin.h`, e.g. three letters). Interlinks no longer pass on the source as a suffix; D-Star callers keep their own as before. M17 callers no longer carry `M17` in the dashboard either (it came from upstream), D-Star radios get it as for the other modes

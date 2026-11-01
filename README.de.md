@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.34.2** | tcd 0.17.2 | Dashboard v2.14.2
+**urfd 4.35.0** | tcd 0.17.2 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -207,7 +207,7 @@ Port = 5300                         # TCP and UDP port (same)
 
 **Nutzerverwaltung**: Nutzer lassen sich zur Laufzeit über die Admin-Oberfläche hinzufügen und entfernen oder fest in `urfd.ini` eintragen. Jeder Nutzer meldet sich mit Rufzeichen und Passwort per HMAC-SHA1 an.
 
-**TG-Zuordnung**: Die Module müssen transcodiert sein. Mehrere TGs pro Modul sind möglich. Dynamische TGs lassen sich über die Admin-Oberfläche mit einstellbarer Laufzeit (TTL) hinzufügen.
+**TG-Zuordnung**: Die Module müssen transcodiert sein. Mehrere TGs pro Modul sind möglich. Seit 4.29.0 bindet `TGs = auto` jedes (transcodierte) Modul mit Talkgroup (`[Modules] TG<M>`) ein; `TG`-Zeilen gehen vor. Dynamische TGs lassen sich über die Admin-Oberfläche mit einstellbarer Laufzeit (TTL) hinzufügen.
 
 **TG-Auswahl wie beim SvxReflector**: Ein Knoten hat genau eine ausgewählte TG, `MsgSelectTG` ersetzt sie; `MsgTgMonitor` legt fest, von welchen TGs er Sprecherbeginn und -ende bekommt. Eine TG hat jeweils einen Sprecher. Die anderen Knoten auf der TG bekommen dessen OPUS-Pakete unverändert (ohne Transcoding), auch auf TGs ohne Modul; zugeordnete TGs gehen außerdem zu ihrem urfd-Modul und kommen von dort. Die Knoten müssen Protokoll 2.0 sprechen. SvxLink mit `AUTH_KEY` tut das, auch aktuelle Versionen (getestet mit SvxLink 1.9.99.36 / 25.05, 15.10.2026); ein Knoten, der nur für Zertifikate eingerichtet ist, nutzt Protokoll 3 (TLS), das urfd nicht unterstützt: Er wird um einen Downgrade gebeten und loggt, dass er das nicht kann.
 
@@ -303,7 +303,7 @@ TG9 = A,TS2                        # Common hotspot default
 
 **Nutzer-Anmeldung**: Nutzer melden sich mit DMR-ID (7-9 Ziffern) oder Rufzeichen an. Rufzeichen werden beim Start über die DMR-ID-Datenbank in DMR-IDs übersetzt. Sind keine Nutzer eingetragen, werden alle Anmeldungen abgelehnt. Einzelne Nutzer können mit leerem Passwort eingetragen werden, dann ist jedes Passwort gültig (nützlich für einfache Hotspots). Mit `RequireAuth = false` entfällt die Anmeldung ganz und alle Verbindungen werden angenommen (früheres Verhalten). Nutzer lassen sich zur Laufzeit über die Admin-Oberfläche verwalten.
 
-**TG-Zuordnung**: Wie beim MMDVMClient: Die erste TG pro Modul ist primär (TX+RX), weitere TGs sind sekundär (nur RX). Dynamische TGs lassen sich über die Admin-Oberfläche mit einstellbarer Laufzeit hinzufügen.
+**TG-Zuordnung**: Wie beim MMDVMClient: Die erste TG pro Modul ist primär (TX+RX), weitere TGs sind sekundär (nur RX). Seit 4.29.0 binden `TS1 = <Module>` / `TS2 = <Module>` die Modul-Talkgroups (`[Modules] TG<M>`) auf diesem Zeitschlitz ein, und `TGs = auto` jedes weitere Modul mit Talkgroup (auf TS2, mit `TGs = auto,TS1` auf TS1), so erreichen Hotspots jedes Modul; `TG`-Zeilen gehen vor. Dynamische TGs lassen sich über die Admin-Oberfläche mit einstellbarer Laufzeit hinzufügen.
 
 **Dual-Slot**: Jeder Timeslot verbindet sich unabhängig. Sendet ein Hotspot auf TS1 mit TG 4019 (Modul S) und auf TS2 mit TG 4004 (Modul D), empfängt er beide Module gleichzeitig, Modul S auf dem Timeslot, der für dessen TG eingetragen ist, Modul D auf dem anderen. Dafür müssen TGs verschiedener Module auf verschiedenen Timeslots liegen. Das Dashboard zeigt beide verbundenen Module (z.B. "S (TS1), D (TS2)").
 
@@ -523,6 +523,17 @@ Tabelle, Cache, Bauen und die Admin-Befehle `credentials_status` und `credential
 
 Live-Ereignisse für das Dashboard: Clients, Peers und sprechende Stationen (mit dem Namen des Funkers aus der ID-Datenbank), sobald sie sich ändern, die Bridges jedes Moduls (TG-Mappings, Autolinks, Connectoren zu anderen Reflektoren) und ihre Änderungen, und beim Verbinden der komplette Stand, ohne IP-Adressen. Nur lesend und ohne Passwort, daher lauscht es auf Loopback (`127.0.0.1:10102`), und das nginx des Dashboards reicht `/ws` durch. Immer eingebaut (braucht `libwebsockets-dev`), aus, bis `[WebSocket] Enable = true` gesetzt ist, was `setup.sh` bei der Installation und bei `setup.sh update` tut; Änderungen brauchen einen Neustart. Basiert auf dem Notifier von Jason Kendall (coolacid), dessen Live-Dashboard das Docker-Image unter `/live/` ausliefert, neben diesem Dashboard. Nachrichten und Einrichtung: [docs/WEBSOCKET.md](docs/WEBSOCKET.md) (englisch).
 
+### Externe Adresse (NAT, Ersatzleitung)
+
+Clients und Verzeichnisse brauchen die Adresse, unter der urfd im Internet erreichbar ist; hinter NAT ist das nicht die gebundene. `[IP Addresses] IPv4External` / `IPv6External` legen sie von Hand fest, dann bleibt sie so. Ohne sie fragt urfd eine Liste von Diensten, die die Adresse des Fragenden zurückgeben (`IPCheckUrl`, standardmäßig icanhazip.com, ifconfig.me, ipify.org und ident.me, jeweils über IPv4 bzw. IPv6; die erste gültige Antwort gilt), beim Start und seit 4.35.0 alle `IPCheckInterval` Sekunden (Standard 300, 0 = nur beim Start) im laufenden Betrieb. Eine geänderte Adresse, etwa nach dem Umschalten auf eine Ersatzleitung mit DNS-Änderung, wird geloggt (`External IPv4 address changed from ... to ...`), sofort an das XLX-Verzeichnis gemeldet und im DHT veröffentlicht; G3 (ohne `address` in `urfd.terminal`) und die Plugins nennen sie ihren Clients ab dann. Eine Prüfung ohne Antwort ändert nichts.
+
+```ini
+[IP Addresses]
+IPv4Binding = 0.0.0.0
+# IPv4External = 203.0.113.10     # fest: wird nicht ermittelt
+IPCheckInterval = 60              # jede Minute prüfen
+```
+
 ### Konfiguration per SIGHUP neu laden
 
 Der Reflektor kann seine Konfiguration im laufenden Betrieb neu laden, ohne Verbindungen zu trennen. Dazu `SIGHUP` an den urfd-Prozess schicken.
@@ -531,10 +542,11 @@ Der Reflektor kann seine Konfiguration im laufenden Betrieb neu laden, ohne Verb
 - TG-Zuordnungen (MMDVMClient, SvxReflector und SVXServer), dynamische TGs bleiben erhalten
 - Whitelist, Blacklist und Interlink-Datei
 - Transcodierte Module (`[Transcoder] Modules`, auch von und zu `auto`, seit 4.25.1); die tcd-Verbindung eines Moduls, das nicht mehr in der Liste steht, wird getrennt
-- Reflektor-Angaben (Rufzeichen, Sponsor, Land, URLs)
-- Parameter für die Datenbank-Aktualisierung
+- Reflektor-Angaben (Sponsor, Land, URLs; das Rufzeichen nur für die XML-Datei und die Admin-Seite)
 
 **Braucht einen vollständigen Neustart:**
+- Rufzeichen, Datenbank-Einstellungen (Mode, URL, RefreshMin)
+- Talkgroups und Benutzer von `[MMDVM]` (Benutzer lassen sich im Betrieb über die Admin-Oberfläche ändern)
 - Änderungen der Modulliste (Module hinzufügen oder entfernen)
 - Protokolle ein- oder ausschalten, Ports ändern
 - Änderungen der IP-Bindung
@@ -625,7 +637,7 @@ Reine Hör-Clients (LSTN-Pakete) werden angenommen und auf dem gewünschten Modu
 - **META**: Die META-Bytes erreichen andere M17-Clients mit einem TYPE, der angibt, was sie enthalten (Text, GPS oder ECD), und mit der CAN der Quelle, eine GPS-Position erscheint also nicht mehr als Text. Eine GPS-Position wird in einen Maidenhead-Locator umgerechnet und in der Last-Heard-Liste (mit Link auf OpenStreetMap) und in `/json/stations` angezeigt.
 
 ### Protokolle ein- und ausschalten
-Jedes Protokoll lässt sich einzeln ein- und ausschalten. Standard ist `true` (wie bisher).
+Jedes Protokoll lässt sich einzeln ein- und ausschalten. Ohne `Enable` sind DCS, DExtra, DPlus, DMRPlus, M17, YSF und URF an (NXDN und P25, wenn sie einen `Port` haben); MMDVM, SvxReflector, SVXServer, Echo, Admin und die Client-Connectoren sind aus; XLXPeer, G3 und USRP brauchen die Zeile. Ein abgeschaltetes Protokoll braucht trotzdem seinen `Port`.
 
 ```ini
 [DPlus]
@@ -914,6 +926,9 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **Die externe Adresse wird verfolgt (4.35.0)**: Ohne `IPv4External` / `IPv6External` fragt urfd eine Liste von Diensten (`IPCheckUrl`, icanhazip.com, ifconfig.me, ipify.org, ident.me; vorher nur icanhazip.com) beim Start und alle `IPCheckInterval` Sekunden im Betrieb; eine geänderte Adresse wird geloggt, sofort an das XLX-Verzeichnis und das DHT gemeldet, und G3 und die Plugins nennen sie ihren Clients. G3 ohne `address` in `urfd.terminal` nennt den Terminals die externe IPv4 (vorher die gebundene, hinter NAT falsch). Eine gesetzte externe Adresse wird nicht mehr mit einer ermittelten verglichen. Siehe [Externe Adresse](#externe-adresse-nat-ersatzleitung)
+- **Vorlagen und README gegen den Code geprüft (4.35.0)**: welche Protokolle ohne `Enable` an sind, was SIGHUP neu lädt, Groß-/Kleinschreibung, Bereiche und Pflichtschlüssel in `urfd.ini`; in `tcd.ini` stehen die Kommentare der Zeilen, die „Save“ im Monitor neu schreibt, in eigenen Zeilen
+- **Wiederholte AMBE+2-Frames stummgeschaltet (4.35.0)**: Manche Funkgeräte und Hotspots beenden eine DMR-, YSF- oder NXDN-Durchsage mit demselben AMBE+2-Frame, 6- bis 30-mal hintereinander (auf BrandMeister TG 262 und 91 ein Drittel der Durchsagen, von einem Drittel der Stationen); jeder Decoder spielte das als letzten Laut noch einmal. Sprache hat nie zweimal denselben Frame hintereinander, außer dem Stille-Frame, deshalb schickt urfd ab dem dritten in Folge AMBE+2-Stille, für jedes Ziel; das Log zählt sie je Stream
 - **Vom Transcoder verlorene Frames werden übersprungen (4.34.0)**: urfd ordnete jede Antwort von tcd über die Sequenznummer dem Kopf seiner Warteschlange zu; ein Frame, den tcd nie beantwortete (von einem hängenden AMBE-Gerät festgehalten), ließ jede spätere Antwort danebengehen, und der Rest der Durchsage fiel weg. Jetzt werden die Frames vor einer Antwort übersprungen, eine Antwort, die älter ist als der Kopf, wird verworfen, und die Durchsage läuft weiter
 - **Kein Protokoll im D-Star-Text (4.33.2)**: Der Text der D-Star-Slow-Data nennt das Protokoll (`DMR`, `YSF`, `SVX`, ...) nicht mehr, das Funkgerät zeigt es seit 4.33.0 schon als Suffix des Rufzeichens: `Max TG262` statt `Max DMR TG262`, `Max DG15` statt `YSF DG15`. Das lässt in den 20 Zeichen Platz für längere Namen und TGs. Ein Anrufer mit eigenem Suffix behält das Protokoll im Text. D-Star zu D-Star bleibt unverändert: Slow Data und Suffix des Funkgeräts gehen durch
 - **Die Quelle als D-Star-Suffix nur Richtung D-Star (4.33.1)**: Der Suffix aus 4.33.0 (`DMR`, `YSF`, ...) kommt nur in den Header, der an D-Star-Funkgeräte und -Links geht (DExtra, DPlus, DCS, G3 und ihre Clients), und in dessen Kopie in den D-Star-Slow-Data; der Stream selbst behält das Rufzeichen, wie es kam. Dashboard, Logs und die anderen Betriebsarten zeigen das Rufzeichen also wieder allein, wie vor 4.33.0 (dort stand `N0CALL / DMR`). Der Suffix eines Plugins ist sein Typ (`GetType()` in `Plugin.h`, z. B. drei Buchstaben). Interlinks reichen die Quelle nicht mehr als Suffix weiter; D-Star-Anrufer behalten ihren eigenen wie bisher. M17-Anrufer tragen im Dashboard auch kein `M17` mehr (das kam von upstream), D-Star-Funkgeräte bekommen es wie bei den anderen Betriebsarten
