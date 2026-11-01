@@ -963,10 +963,9 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 
 	std::ostringstream out;
 	std::string line;
-	// the codec choice: replaced where it stands, else written at the end when there is a choice;
-	// the module view likewise, written when it is not auto
 	// the vocoder choices: a line of tcd.ini is rewritten when there is a choice
-	// (a device's codec: any), and appended when there was none and there are two
+	// (a device's codec: any), and appended when there was none and there are two;
+	// the module view is replaced where it stands, else written when it is not auto
 	bool codecWritten[kNumChoices] = {};
 	auto codecLine = [](int k) { return g_Stats.codec_options[k][g_Stats.config.codec_choice[k].load()]; };
 	bool viewWritten = false;

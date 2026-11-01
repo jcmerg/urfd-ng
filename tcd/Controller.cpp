@@ -384,7 +384,10 @@ static int BuiltinStats(const char *name, const char *codec)
 	return g_Stats.num_sw++;
 }
 
-CController::CController() : keep_running(true), ambe_in_num(256), ambe_out_num(256), dmr_reencode_num(256), outgain_dstar_num(256), outgain_dmr_num(256), outgain_usrp_num(256), outgain_imbe_num(256), outgain_m17_num(256) {}
+CController::CController() : keep_running(true), ambe_in_num(256), ambe_out_num(256), dmr_reencode_num(256), outgain_dstar_num(256), outgain_dmr_num(256), outgain_usrp_num(256), outgain_imbe_num(256), outgain_m17_num(256)
+{
+	std::fill(std::begin(own_stats), std::end(own_stats), -1);
+}
 
 bool CController::Start()
 {
@@ -804,19 +807,19 @@ bool CController::InitVocoders()
 	// the modules beyond the devices' channels go to a plugin
 	for (int k : { kChoiceDStar, kChoiceDMR })
 	{
-		const std::string *hw = &hw_modules[k];
-		const auto *choices = &this->choices[k];
+		const std::string &hw = hw_modules[k];
+		const auto &list = choices[k];
 		const char *label = g_CodecChoices[k].label;
 		std::string rest;
 		for (char m : modules)
-			if (std::string::npos == hw->find(m))
+			if (std::string::npos == hw.find(m))
 				rest += m;
-		const bool plugin = std::count(choices->begin(), choices->end(), nullptr) < (long)choices->size();
-		if (!hw->empty() && !rest.empty())
-			std::cout << label << ": modules " << *hw << " on the devices, " << rest << (plugin ? " on a codec plugin" : "") << std::endl;
+		const bool plugin = std::count(list.begin(), list.end(), nullptr) < (long)list.size();
+		if (!hw.empty() && !rest.empty())
+			std::cout << label << ": modules " << hw << " on the devices, " << rest << (plugin ? " on a codec plugin" : "") << std::endl;
 		if (!rest.empty() && !plugin)
 		{
-			std::cerr << "ERROR: the devices do " << label << " for " << (hw->empty() ? std::string("no module") : "modules " + *hw) << " only; modules " << rest
+			std::cerr << "ERROR: the devices do " << label << " for " << (hw.empty() ? std::string("no module") : "modules " + hw) << " only; modules " << rest
 			          << " need a codec plugin for " << label << " (CodecPlugin = ...) or fewer Modules" << std::endl;
 			return true;
 		}
@@ -1398,28 +1401,28 @@ void CController::ProcessSWDStarThread()
 
 // the choice of a stream, made at its first packet: the one for new streams, but a
 // module the devices do not serve always goes to a plugin (the chosen one, else the first)
-int CController::Pick(uint32_t codec, uint16_t streamid, char module)
+int CController::Pick(int k, size_t list_size, uint16_t streamid, char module)
 {
-	auto &choices = Choices(codec);
-	const int k = ChoiceOfCodec(codec);
-	auto &pinned = this->pinned[k];
+	const auto &list = choices[k];	// M17 1600's list runs alongside, of the same size
+	auto &pins = pinned[k];
 	std::lock_guard<std::mutex> lock(pinned_mux);
 	const auto now = std::chrono::steady_clock::now();
-	auto it = pinned.find(streamid);
-	if (it == pinned.end())
+	auto it = pins.find(streamid);
+	if (it == pins.end())
 	{
 		int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
-		if (c < 0 || c >= int(choices.size()))
+		if (c < 0 || c >= int(list_size))
 			c = 0;
-		// tcd's own vocoders do every module; the devices only theirs
-		if (!choices[c] && !g_CodecChoices[k].own && std::string::npos == hw_modules[k].find(module))
-			for (size_t i = 0; i < choices.size(); i++)
-				if (choices[i])
+		// tcd's own vocoders do every module; the devices only theirs (D-Star and
+		// DMR, whose list is the one asked for)
+		if (!list[c] && !g_CodecChoices[k].own && std::string::npos == hw_modules[k].find(module))
+			for (size_t i = 0; i < list.size(); i++)
+				if (list[i])
 				{
 					c = int(i);
 					break;
 				}
-		it = pinned.emplace(streamid, SPinned{ c, now }).first;
+		it = pins.emplace(streamid, SPinned{ c, now }).first;
 	}
 	it->second.last = now;
 	return it->second.choice;

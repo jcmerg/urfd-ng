@@ -17,6 +17,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+#include <cassert>
 #include <unordered_map>
 #include <chrono>
 #include <vector>
@@ -91,16 +92,16 @@ protected:
 	// the modules the devices do D-Star and DMR for; the other modules go to a
 	// plugin (empty for the choices with an own vocoder, which does every module)
 	std::string hw_modules[kNumChoices];
-	std::vector<class CSoftCodec *> &Choices(uint32_t codec)
-	{
-		return codec == TCD_CODEC_M17_1600 ? m17_1600_choices : choices[ChoiceOfCodec(codec)];
-	}
+	// the index of a stream's choice k (CodecChoice.h) into a list of
+	// list_size, pinned for the stream
+	int Pick(int k, size_t list_size, uint16_t streamid, char module);
 	// codec: TCD_CODEC_DSTAR, _DMR, _P25, _M17 or _M17_1600 (the two M17 share the choice)
-	int Pick(uint32_t codec, uint16_t streamid, char module);
 	class CSoftCodec *SwCodec(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet)
 	{
-		auto &c = Choices(codec);
-		return c.empty() ? nullptr : c[Pick(codec, packet->GetStreamId(), packet->GetModule())];
+		const int k = ChoiceOfCodec(codec);
+		assert(k >= 0);
+		const auto &list = codec == TCD_CODEC_M17_1600 ? m17_1600_choices : choices[k];
+		return list.empty() ? nullptr : list[Pick(k, list.size(), packet->GetStreamId(), packet->GetModule())];
 	}
 	// P25 with the stream's choice: OP25 or a plugin. A plugin's error gives IMBE
 	// silence (encode) or silent samples (decode)
@@ -115,7 +116,7 @@ protected:
 	// the DMR plugin for DmrGainMode = reencode, nullptr without one
 	class CSoftCodec *dmr_sw = nullptr;
 	// the monitor's entries of tcd's own vocoders (OP25, Codec2), -1 without one
-	int own_stats[kNumChoices] = { -1, -1, -1, -1 };
+	int own_stats[kNumChoices];	// set to -1 in the constructor
 	int32_t dstar_in_num = 256, dstar_out_num = 256;	// DStarGainIn/Out for a D-Star plugin
 	int32_t ambe_in_num, ambe_out_num, dmr_reencode_num;
 	int32_t outgain_dstar_num, outgain_dmr_num, outgain_usrp_num, outgain_imbe_num, outgain_m17_num;

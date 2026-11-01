@@ -244,8 +244,8 @@ bool CConfigure::ReadData(const std::string &path)
 			statslog_retain = std::stoi(value);
 		else if (0 == key.compare(CODECPLUGIN))
 			codec_plugins.push_back(value);
-		else if (ChoiceOfIni(key) >= 0)
-			codec_choice[ChoiceOfIni(key)] = value;
+		else if (const int k = ChoiceOfIni(key); k >= 0)
+			codec_choice[k] = value;
 		else
 			unknown_lines.emplace_back(key, value);	// perhaps a codec plugin's, see CodecPlugins.cpp
 	}
