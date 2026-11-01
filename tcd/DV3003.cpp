@@ -114,6 +114,13 @@ uint8_t CDV3003::MapPacketToChannel(const std::shared_ptr<CTranscoderPacket> &pa
 		}
 	}
 
+	// A device of one codec (no mixed mode, so no channel maps): the module's own
+	// channel, as CDVDevice does; only the first modules of Modules come here. The
+	// fallback below would decode no D-Star on a D-Star device (it looks for a DMR
+	// channel) and would put every module's stream on the first channel.
+	if (dstar_channel_map.empty() && dmr_channel_map.empty())
+		return CDVDevice::MapPacketToChannel(packet);
+
 	// Fallback: route to the channel for the codec that is NOT yet set
 	bool use_dstar = !packet->DStarIsSet();
 
