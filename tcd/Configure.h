@@ -43,6 +43,12 @@ public:
 	const std::string &GetPassword(void) const { return password; }
 	unsigned GetPort(void) const { return port; }
 	const std::vector<std::string> &GetDeviceSerials(void) const { return device_serials; }
+	// the DeviceSerial lines with "mixed" after the serial: a DV3003 alone does D-Star
+	// and DMR for one module (channel 0 and 1) instead of D-Star for three
+	const std::vector<std::string> &GetMixedSerials(void) const { return mixed_serials; }
+	// DeviceChannels = pool: a stream takes any free AMBE channel, whatever its
+	// module, instead of the channels of the first modules
+	bool GetDevicePool(void) const { return device_pool; }
 
 	// DMR/YSF gain mode: off, ambe (bitstream b2), reencode (PCM through a codec plugin)
 	enum class EDmrGainMode { off, ambe, reencode };
@@ -94,7 +100,8 @@ public:
 
 private:
 	std::string tcmods, standbymods, address, password, ini_path;
-	std::vector<std::string> device_serials;
+	std::vector<std::string> device_serials, mixed_serials;
+	bool device_pool = false;
 	std::vector<std::string> codec_plugins;
 	std::string codec_choice[kNumChoices];
 	std::vector<std::pair<std::string, std::string>> unknown_lines;

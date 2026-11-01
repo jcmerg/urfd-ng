@@ -17,6 +17,7 @@
 
 #include <unistd.h>
 #include <algorithm>
+#include <csignal>
 #include <climits>
 #include <cstdlib>
 #include <libgen.h>
@@ -408,9 +409,6 @@ bool CController::Start()
 		keep_running = false;
 		return true;
 	}
-	if (dstar_device) dstar_device->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
-	if (dmrsf_device) dmrsf_device->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
-
 	reflectorFuture = std::async(std::launch::async, &CController::ReadReflectorThread, this);
 	c2Future        = std::async(std::launch::async, &CController::ProcessC2Thread,     this);
 	imbeFuture      = std::async(std::launch::async, &CController::ProcessIMBEThread,   this);
@@ -458,8 +456,10 @@ void CController::ReconfigureAGC()
 	outgain_usrp_num = calcNumerator(g_Stats.config.outgain_usrp.load());
 	outgain_imbe_num = calcNumerator(g_Stats.config.outgain_imbe.load());
 	outgain_m17_num = calcNumerator(g_Stats.config.outgain_m17.load());
-	if (dstar_device) dstar_device->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
-	if (dmrsf_device) dmrsf_device->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
+	std::lock_guard<std::mutex> lock(pinned_mux);
+	for (auto &s : slots)
+		if (s->dev)
+			s->dev->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
 }
 
 void CController::Stop()
@@ -472,15 +472,18 @@ void CController::Stop()
 	usrp_queue.Shutdown();
 	swambe2_queue.Shutdown();
 	swdstar_queue.Shutdown();
-	for (auto *f : { &reflectorFuture, &c2Future, &imbeFuture, &usrpFuture, &swambe2Future, &swdstarFuture })
+	for (auto *f : { &reflectorFuture, &c2Future, &imbeFuture, &usrpFuture, &swambe2Future, &swdstarFuture, &watchFuture })
 		if (f->valid())
 			f->get();
 
 	tcClient.Close();
-	if (dstar_device) dstar_device->CloseDevice();
-	if (dmrsf_device) dmrsf_device->CloseDevice();
-	dstar_device.reset();
-	dmrsf_device.reset();
+	// all closed before any is dropped: a reader still running routes to the others
+	for (auto &s : slots)
+		if (s->dev && !s->closed)
+			s->dev->CloseDevice();
+	std::lock_guard<std::mutex> lock(pinned_mux);
+	for (auto &s : slots)
+		s->dev.reset();
 }
 
 void CController::ListDevices()
@@ -540,8 +543,11 @@ bool CController::DiscoverFtdiDevices(std::list<std::pair<std::string, std::stri
 		const std::string sn = dev.serial.empty() ? "(none)" : dev.serial;
 		if (whitelist.empty() ? IsAmbeDevice(dev.desc) : IsWhitelisted(dev, whitelist))
 		{
-			std::cout << "Found AMBE device" << (whitelist.empty() ? "" : " (whitelisted)") << ": " << dev.desc << " (SN=" << sn << ") -> " << dev.devnode << std::endl;
+			const bool mixed = IsWhitelisted(dev, g_Conf.GetMixedSerials());
+			std::cout << "Found AMBE device" << (whitelist.empty() ? "" : " (whitelisted)") << ": " << dev.desc << " (SN=" << sn << ") -> " << dev.devnode << (mixed ? ", mixed" : "") << std::endl;
 			found.emplace_back(std::make_pair(dev.devnode, dev.desc));
+			if (mixed)
+				mixed_nodes.push_back(dev.devnode);
 		}
 		else
 		{
@@ -609,14 +615,29 @@ bool CController::InitVocoders()
 	std::list<SAmbeDevice> deviceset;
 	IdentifyDevices(found, deviceset);
 
-	// the devices in use, for the monitor: device node, description, role
-	std::vector<std::tuple<std::string, std::string, CDVDevice *, const char *>> used;
+	// "mixed" is for a DV3003 alone; anywhere else it changes nothing
+	auto is_mixed = [&](const SAmbeDevice &d) { return std::find(mixed_nodes.begin(), mixed_nodes.end(), d.node) != mixed_nodes.end(); };
+	const bool lone_mixed = deviceset.size() == 1 && Edvtype::dv3003 == deviceset.front().type && is_mixed(deviceset.front());
+	for (const auto &d : deviceset)
+		if (is_mixed(d) && !(lone_mixed && !dstar_forced && !dmr_forced))
+			std::cerr << "WARNING: 'mixed' is for a DV3003 alone, with CodecDStar and CodecDMR on dvsi: ignored for " << d.desc << std::endl;
 
 	if (dstar_forced && dmr_forced)
 	{
 		// everything in software, no device
 		if (!deviceset.empty())
 			std::cout << "CodecDStar and CodecDMR are set: the AMBE devices stay unused" << std::endl;
+	}
+	else if (lone_mixed && !dstar_forced && !dmr_forced)
+	{
+		// a DV3003 alone in mixed mode: D-Star on channel 0 and DMR on channel 1 for
+		// one module, channel 2 stays free; the other modules go to the codec plugins
+		const auto &dev = deviceset.front();
+		const Encoding ch_enc[3] { Encoding::dstar, Encoding::dmrsf, Encoding::dmrsf };
+		AddSlot(dev.node, dev.desc, dev.type, dev.baud, Encoding::dmrsf, "mixed", ch_enc);
+		AddChannels(kChoiceDStar, 0, { 0 });
+		AddChannels(kChoiceDMR, 0, { 1 });
+		std::cout << "Mixed mode: " << dev.desc << " (" << dev.node << "), D-Star on channel 0, DMR on channel 1, channel 2 free" << std::endl;
 	}
 	else if (dstar_forced || dmr_forced || deviceset.size() == 1)
 	{
@@ -637,28 +658,18 @@ bool CController::InitVocoders()
 			return true;
 		}
 		const auto &dev = deviceset.front();
-		const Edvtype dvtype = dev.type;
-		const Encoding enc = device_does_dmr ? Encoding::dmrsf : Encoding::dstar;
-		auto &device = device_does_dmr ? dmrsf_device : dstar_device;
-		if (Edvtype::dv3000 == dvtype)
-			device = std::unique_ptr<CDVDevice>(new CDV3000(enc));
-		else
-			device = std::unique_ptr<CDVDevice>(new CDV3003(enc));
-		if (device_does_dmr)
-		{
-			if (device->OpenDevice(dev.node, dev.desc, dvtype, dev.baud, int8_t(g_Conf.GetGain(EGainType::dmrin)), int8_t(g_Conf.GetGain(EGainType::dmrout))))
-				return true;
-		}
-		else
+		if (!device_does_dmr)
 		{
 			// the DMR plugin gets DmrGainIn/Out in software
 			ambe_in_num = calcNumerator(g_Conf.GetGain(EGainType::dmrin));
 			ambe_out_num = calcNumerator(g_Conf.GetGain(EGainType::dmrout));
-			if (device->OpenDevice(dev.node, dev.desc, dvtype, dev.baud, int8_t(g_Conf.GetGain(EGainType::dstarin)), int8_t(g_Conf.GetGain(EGainType::dstarout))))
-				return true;
 		}
-		used.emplace_back(dev.node, dev.desc, device.get(), device_does_dmr ? "dmr" : "dstar");
-		hw_modules[device_does_dmr ? kChoiceDMR : kChoiceDStar] = modules.substr(0, Edvtype::dv3000 == dvtype ? 1 : 3);
+		AddSlot(dev.node, dev.desc, dev.type, dev.baud, device_does_dmr ? Encoding::dmrsf : Encoding::dstar, device_does_dmr ? "dmr" : "dstar");
+		const int k = device_does_dmr ? kChoiceDMR : kChoiceDStar;
+		if (Edvtype::dv3000 == dev.type)
+			AddChannels(k, 0, { 0 });
+		else
+			AddChannels(k, 0, { 0, 1, 2 });
 		std::cout << "Using " << dev.desc << " for " << (device_does_dmr ? "DMR" : "D-Star") << std::endl;
 	}
 	else if (deviceset.size() >= 2)
@@ -678,43 +689,14 @@ bool CController::InitVocoders()
 		{
 			std::cout << "Mixed mode: " << dv3000_dev.desc << " (" << dv3000_dev.node << ") + "
 			          << dv3003_dev.desc << " (" << dv3003_dev.node << ")" << std::endl;
-
-			// DV3000: D-Star vocoder for module A (first module)
-			dstar_device = std::unique_ptr<CDVDevice>(new CDV3000(Encoding::dstar));
-			if (dstar_device->OpenDevice(dv3000_dev.node, dv3000_dev.desc, Edvtype::dv3000, dv3000_dev.baud,
-					int8_t(g_Conf.GetGain(EGainType::dstarin)), int8_t(g_Conf.GetGain(EGainType::dstarout))))
-				return true;
-
-			// DV3003: ch0=D-Star (module B), ch1=DMR (module A), ch2=DMR (module B)
-			auto *dv3003 = new CDV3003(Encoding::dmrsf);
-			dmrsf_device = std::unique_ptr<CDVDevice>(dv3003);
-
-			// Set per-channel encoding BEFORE OpenDevice so ConfigureVocoder uses the right codec
-			dv3003->SetChannelEncoding(0, Encoding::dstar);
-			dv3003->SetChannelEncoding(1, Encoding::dmrsf);
-			dv3003->SetChannelEncoding(2, Encoding::dmrsf);
-
-			// Open with DMR gains (ConfigureVocoder will use per-channel encoding)
-			if (dmrsf_device->OpenDevice(dv3003_dev.node, dv3003_dev.desc, Edvtype::dv3003, dv3003_dev.baud,
-					int8_t(g_Conf.GetGain(EGainType::dmrin)), int8_t(g_Conf.GetGain(EGainType::dmrout))))
-				return true;
-
-			// Map modules to DV3003 channels
-			if (modules.size() >= 2)
-			{
-				char modA = modules[0], modB = modules[1];
-				dv3003->SetModuleDStarChannel(modB, 0);  // D-Star module B → ch0
-				dv3003->SetModuleDMRChannel(modA, 1);    // DMR module A → ch1
-				dv3003->SetModuleDMRChannel(modB, 2);    // DMR module B → ch2
-				mixed_mode = true;
-				mixed_dstar_module = modB;
-				mixed_dv3003 = dv3003;
-				std::cout << "  Module " << modA << ": D-Star(DV3000) + DMR(DV3003 ch1)" << std::endl;
-				std::cout << "  Module " << modB << ": D-Star(DV3003 ch0) + DMR(DV3003 ch2)" << std::endl;
-			}
-			used.emplace_back(dv3000_dev.node, dv3000_dev.desc, dstar_device.get(), "dstar");
-			used.emplace_back(dv3003_dev.node, dv3003_dev.desc, dmrsf_device.get(), mixed_mode ? "mixed" : "dmr");
-			hw_modules[kChoiceDStar] = hw_modules[kChoiceDMR] = modules.substr(0, 2);
+			// DV3000: D-Star of the first module; DV3003: ch0 D-Star of the second,
+			// ch1 and ch2 DMR of the first and the second
+			const Encoding ch_enc[3] { Encoding::dstar, Encoding::dmrsf, Encoding::dmrsf };
+			AddSlot(dv3000_dev.node, dv3000_dev.desc, Edvtype::dv3000, dv3000_dev.baud, Encoding::dstar, "dstar");
+			AddSlot(dv3003_dev.node, dv3003_dev.desc, Edvtype::dv3003, dv3003_dev.baud, Encoding::dmrsf, "mixed", ch_enc);
+			AddChannels(kChoiceDStar, 0, { 0 });
+			AddChannels(kChoiceDStar, 1, { 0 });
+			AddChannels(kChoiceDMR, 1, { 1, 2 });
 		}
 		// Two same-type devices
 		else
@@ -723,24 +705,18 @@ bool CController::InitVocoders()
 			deviceset.pop_front();
 			const auto dev2 = deviceset.front();
 			const Edvtype dvtype = dev1.type;
-
-			if (Edvtype::dv3000 == dvtype) {
-				dstar_device = std::unique_ptr<CDVDevice>(new CDV3000(Encoding::dstar));
-				dmrsf_device = std::unique_ptr<CDVDevice>(new CDV3000(Encoding::dmrsf));
-			} else {
-				dstar_device = std::unique_ptr<CDVDevice>(new CDV3003(Encoding::dstar));
-				dmrsf_device = std::unique_ptr<CDVDevice>(new CDV3003(Encoding::dmrsf));
+			AddSlot(dev1.node, dev1.desc, dvtype, dev1.baud, Encoding::dstar, "dstar");
+			AddSlot(dev2.node, dev2.desc, dvtype, dev2.baud, Encoding::dmrsf, "dmr");
+			if (Edvtype::dv3000 == dvtype)
+			{
+				AddChannels(kChoiceDStar, 0, { 0 });
+				AddChannels(kChoiceDMR, 1, { 0 });
 			}
-
-			if (dstar_device->OpenDevice(dev1.node, dev1.desc, dvtype, dev1.baud,
-					int8_t(g_Conf.GetGain(EGainType::dstarin)), int8_t(g_Conf.GetGain(EGainType::dstarout))))
-				return true;
-			if (dmrsf_device->OpenDevice(dev2.node, dev2.desc, dvtype, dev2.baud,
-					int8_t(g_Conf.GetGain(EGainType::dmrin)), int8_t(g_Conf.GetGain(EGainType::dmrout))))
-				return true;
-			used.emplace_back(dev1.node, dev1.desc, dstar_device.get(), "dstar");
-			used.emplace_back(dev2.node, dev2.desc, dmrsf_device.get(), "dmr");
-			hw_modules[kChoiceDStar] = hw_modules[kChoiceDMR] = modules.substr(0, Edvtype::dv3000 == dvtype ? 1 : 3);
+			else
+			{
+				AddChannels(kChoiceDStar, 0, { 0, 1, 2 });
+				AddChannels(kChoiceDMR, 1, { 0, 1, 2 });
+			}
 		}
 	}
 	else if (dstar_plugin && dmr_sw)
@@ -756,6 +732,51 @@ bool CController::InitVocoders()
 		return true;
 	}
 
+	// the devices in the monitor, then open them
+	for (size_t i = 0; i < slots.size() && int(i) < CTcdStats::MAX_DEVICES; i++)
+	{
+		auto &s = *slots[i];
+		const std::string usb = GetUsbSerialForDevnode(s.node);
+		g_Stats.devices[i].serial = usb.empty() ? s.node : usb;
+		g_Stats.devices[i].type = Edvtype::dv3000 == s.type ? "DV3000" : "DV3003";
+		g_Stats.devices[i].role = s.role;
+		s.stats = int(i);
+		g_Stats.num_devices = int(i) + 1;
+	}
+	for (size_t i = 0; i < slots.size(); i++)
+	{
+		auto &s = *slots[i];
+		s.dev = OpenSlot(int(i), s.node);
+		if (!s.dev)
+			return true;
+	}
+	for (int k : { kChoiceDStar, kChoiceDMR })
+		hw_modules[k] = modules.substr(0, std::min(hw_channels[k].size(), modules.size()));
+	pool = g_Conf.GetDevicePool() && (HwAny(kChoiceDStar) || HwAny(kChoiceDMR));
+	if (pool)
+	{
+		for (int k : { kChoiceDStar, kChoiceDMR })
+			if (HwAny(k))
+			{
+				std::cout << g_CodecChoices[k].label << ": a pool of " << hw_channels[k].size() << " AMBE channel" << (hw_channels[k].size() > 1 ? "s" : "") << " (";
+				for (size_t c = 0; c < hw_channels[k].size(); c++)
+					std::cout << (c ? ", " : "") << ChannelName(k, c);
+				std::cout << ") for the streams of any module" << std::endl;
+			}
+	}
+	else
+	{
+		for (size_t m = 0; m < modules.size(); m++)
+		{
+			std::string line;
+			for (int k : { kChoiceDStar, kChoiceDMR })
+				if (m < hw_channels[k].size())
+					line += std::string(line.empty() ? "" : " + ") + g_CodecChoices[k].label + "(" + ChannelName(k, m) + ")";
+			if (!line.empty())
+				std::cout << "  Module " << modules[m] << ": " << line << std::endl;
+		}
+	}
+
 	// what may do D-Star and DMR: the device first, then every plugin that has the
 	// codec; P25 and M17: tcd's own OP25 vocoder or Codec2 first. The monitor
 	// switches between them, CodecDStar/CodecDMR/CodecP25/CodecM17 is the start
@@ -765,7 +786,7 @@ bool CController::InitVocoders()
 	{
 		const auto &ch = g_CodecChoices[k];
 		auto &options = g_Stats.codec_options[k];
-		const bool device = (k == kChoiceDStar && dstar_device) || (k == kChoiceDMR && dmrsf_device);
+		const bool device = (k == kChoiceDStar || k == kChoiceDMR) && HwAny(k);
 		if (ch.own || device)
 		{
 			choices[k].push_back(nullptr);
@@ -815,8 +836,10 @@ bool CController::InitVocoders()
 			if (std::string::npos == hw.find(m))
 				rest += m;
 		const bool plugin = std::count(list.begin(), list.end(), nullptr) < (long)list.size();
-		if (!hw.empty() && !rest.empty())
+		if (!hw.empty() && !rest.empty() && !pool)
 			std::cout << label << ": modules " << hw << " on the devices, " << rest << (plugin ? " on a codec plugin" : "") << std::endl;
+		if (!hw.empty() && pool && plugin)
+			std::cout << label << ": a stream that finds no free AMBE channel goes to a codec plugin" << std::endl;
 		if (!rest.empty() && !plugin)
 		{
 			std::cerr << "ERROR: the devices do " << label << " for " << (hw.empty() ? std::string("no module") : "modules " + hw) << " only; modules " << rest
@@ -824,38 +847,25 @@ bool CController::InitVocoders()
 			return true;
 		}
 	}
-	if (dmr_sw && dmrsf_device)
-		std::cout << "Codec plugin " << dmr_sw->GetName() << " re-encodes DMR with DmrGainMode = reencode" << std::endl;
-	g_Stats.reencode_available.store(dmr_sw && dmrsf_device, std::memory_order_relaxed);
+	if (dmr_sw && HwAny(kChoiceDMR))
+		std::cout << "Codec plugin " << dmr_sw->GetName() << " can re-encode DMR (DmrGainMode = reencode)" << std::endl;
+	g_Stats.reencode_available.store(dmr_sw && HwAny(kChoiceDMR), std::memory_order_relaxed);
 	if (!dmr_sw && g_Stats.config.dmr_gain_mode.load(std::memory_order_relaxed) == 2)
 	{
 		std::cerr << "WARNING: DmrGainMode=reencode needs a codec plugin for DMR. Falling back to ambe." << std::endl;
 		g_Stats.config.dmr_gain_mode.store(1, std::memory_order_relaxed);
 	}
 
-	if (dstar_device)
-		dstar_device->Start();
-	if (dmrsf_device)
-		dmrsf_device->Start();
-
-	// Register DVSI devices in monitoring stats
+	for (auto &s : slots)
 	{
-		int di = 0;
-		for (const auto &[node, desc, device, role] : used)
-		{
-			if (di >= CTcdStats::MAX_DEVICES)
-				break;
-			// node is the device node, show the USB serial number
-			const std::string usb = GetUsbSerialForDevnode(node);
-			g_Stats.devices[di].serial = usb.empty() ? node : usb;
-			g_Stats.devices[di].type = Edvtype::dv3000 == device->GetType() ? "DV3000" : "DV3003";
-			g_Stats.devices[di].role = role;
-			g_Stats.devices[di].online.store(true);
-			device->SetStatsIndex(di);
-			di++;
-		}
-		g_Stats.num_devices = di;
+		s->dev->Start();
+		s->up = true;
+		if (s->stats >= 0)
+			g_Stats.devices[s->stats].online.store(true);
 	}
+	// a lost device comes back here while tcd runs
+	if (!slots.empty())
+		watchFuture = std::async(std::launch::async, &CController::DeviceWatchThread, this);
 
 	return false;
 }
@@ -915,21 +925,17 @@ void CController::ReadReflectorThread()
 							ds.ch_module[ch].store(' ', std::memory_order_relaxed);
 					}
 				}
-				int di = 0;
-				auto syncDev = [&](CDVDevice *dev) {
-					if (!dev || di >= CTcdStats::MAX_DEVICES) return;
-					g_Stats.devices[di].buf_depth.store(dev->GetBufferDepth(), std::memory_order_relaxed);
-					di++;
-				};
-				if (dstar_device) syncDev(dstar_device.get());
-				if (dmrsf_device) syncDev(dmrsf_device.get());
+				std::lock_guard<std::mutex> lock(pinned_mux);
+				for (auto &s : slots)
+					if (s->dev && s->stats >= 0)
+						g_Stats.devices[s->stats].buf_depth.store(s->up ? s->dev->GetBufferDepth() : 0, std::memory_order_relaxed);
 			}
 
 			// Sync the stats of the codec plugins
 			{
 				auto now_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
 					std::chrono::steady_clock::now().time_since_epoch()).count();
-				const bool reencode = dmr_sw && dmrsf_device &&
+				const bool reencode = dmr_sw && HwAny(kChoiceDMR) &&
 					(g_Stats.config.dmr_gain_mode.load(std::memory_order_relaxed) == 2) &&
 					(m_agcDigital.IsEnabled() || outgain_dmr_num != 256 || dmr_reencode_num != 256);
 				for (int i = 0; i < g_Stats.num_sw; i++)
@@ -1401,65 +1407,317 @@ void CController::ProcessSWDStarThread()
 
 // the choice of a stream, made at its first packet: the one for new streams, but a
 // module the devices do not serve always goes to a plugin (the chosen one, else the first)
-int CController::Pick(int k, size_t list_size, uint16_t streamid, char module)
+int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev, uint8_t *ch)
 {
 	const auto &list = choices[k];	// M17 1600's list runs alongside, of the same size
 	auto &pins = pinned[k];
+	const uint16_t streamid = packet->GetStreamId();
+	const char module = packet->GetModule();
 	std::lock_guard<std::mutex> lock(pinned_mux);
 	const auto now = std::chrono::steady_clock::now();
+	// the first plugin, for a stream no AMBE channel takes; c without one
+	auto plugin = [&](int c) {
+		for (size_t i = 0; i < list.size(); i++)
+			if (list[i])
+				return int(i);
+		return c;
+	};
+	// tcd's own vocoders do every module; the devices only the streams they have a
+	// channel for (D-Star and DMR, whose list is the one asked for)
+	auto device = [&](int c) { return !list[c] && !g_CodecChoices[k].own; };
 	auto it = pins.find(streamid);
 	if (it == pins.end())
 	{
 		int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
 		if (c < 0 || c >= int(list_size))
 			c = 0;
-		// tcd's own vocoders do every module; the devices only theirs (D-Star and
-		// DMR, whose list is the one asked for)
-		if (!list[c] && !g_CodecChoices[k].own && std::string::npos == hw_modules[k].find(module))
-			for (size_t i = 0; i < list.size(); i++)
-				if (list[i])
-				{
-					c = int(i);
-					break;
-				}
-		it = pins.emplace(streamid, SPinned{ c, now }).first;
+		int hw = -1;
+		if (device(c))
+		{
+			hw = TakeChannel(k, module, streamid);
+			if (hw < 0)
+				c = plugin(c);
+		}
+		it = pins.emplace(streamid, SPinned{ c, hw, now }).first;
 	}
-	it->second.last = now;
-	return it->second.choice;
+	else if (device(it->second.choice) && !HasChannel(k, it->second.hw, module, streamid))
+	{
+		// its channel is gone: the device was lost, or the pool gave it away after
+		// a pause; another channel, else a plugin for the rest of the stream
+		it->second.hw = TakeChannel(k, module, streamid);
+		if (it->second.hw < 0)
+			it->second.choice = plugin(it->second.choice);
+	}
+	auto &pin = it->second;
+	pin.last = now;
+	if (device(pin.choice) && pin.hw >= 0)
+	{
+		auto &c = hw_channels[k][pin.hw];
+		c.last = now;
+		if (dev)
+		{
+			*dev = slots[c.slot]->dev;
+			*ch = c.ch;
+		}
+		// pool: the channel is free after the stream's last frame (the device
+		// answers its frames in order, a new stream's come after them)
+		if (pool && packet->IsLast())
+			c.busy = false;
+	}
+	return pin.choice;
 }
 
-// streams quiet for 30 s are forgotten
+// streams quiet for 30 s are forgotten; a pool channel quiet for 1.5 s is free
+// again (a stream whose last frame was lost)
 void CController::PurgePinned(void)
 {
 	std::lock_guard<std::mutex> lock(pinned_mux);
-	const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(30);
+	const auto now = std::chrono::steady_clock::now();
+	const auto cutoff = now - std::chrono::seconds(30);
 	for (auto &p : pinned)
 		for (auto it = p.begin(); it != p.end(); )
 			it = it->second.last < cutoff ? p.erase(it) : std::next(it);
+	if (pool)
+		for (auto &list : hw_channels)
+			for (auto &c : list)
+				if (c.busy && now - c.last > std::chrono::milliseconds(1500))
+					c.busy = false;
+}
+
+int CController::TakeChannel(int k, char module, uint16_t streamid)
+{
+	auto &list = hw_channels[k];
+	if (!pool)
+	{
+		// fixed: the i-th channel belongs to the i-th module of Modules
+		const auto i = g_Conf.GetTCMods().find(module);
+		return (i < list.size() && slots[list[i].slot]->up) ? int(i) : -1;
+	}
+	int take = -1;
+	for (size_t i = 0; i < list.size(); i++)
+	{
+		const auto &c = list[i];
+		if (!slots[c.slot]->up)
+			continue;
+		if (c.busy && c.module == module)
+		{
+			take = int(i);	// the module's stream before, which lost its last frame
+			break;
+		}
+		if (!c.busy && take < 0)
+			take = int(i);
+	}
+	if (take >= 0)
+	{
+		auto &c = list[take];
+		c.busy = true;
+		c.module = module;
+		c.streamid = streamid;
+		c.last = std::chrono::steady_clock::now();
+	}
+	return take;
+}
+
+bool CController::HasChannel(int k, int hw, char module, uint16_t streamid) const
+{
+	if (hw < 0 || hw >= int(hw_channels[k].size()))
+		return false;
+	const auto &c = hw_channels[k][hw];
+	return slots[c.slot]->up && (!pool || (c.busy && c.module == module && c.streamid == streamid));
+}
+
+std::string CController::ChannelName(int k, size_t c) const
+{
+	const auto &h = hw_channels[k][c];
+	const auto &s = *slots[h.slot];
+	return std::string(Edvtype::dv3000 == s.type ? "DV3000" : "DV3003") + (Edvtype::dv3000 == s.type ? "" : " ch" + std::to_string(h.ch));
+}
+
+void CController::AddSlot(const std::string &node, const std::string &desc, Edvtype type, unsigned long baud, Encoding enc, const char *role, const Encoding *ch_enc)
+{
+	auto s = std::make_unique<SDeviceSlot>();
+	s->node = node;
+	s->desc = desc;
+	s->type = type;
+	s->baud = baud;
+	s->enc = enc;
+	s->per_channel = ch_enc != nullptr;
+	for (int c = 0; c < 3; c++)
+		s->ch_enc[c] = ch_enc ? ch_enc[c] : enc;
+	const bool dmr = Encoding::dmrsf == enc;
+	s->in_gain = int8_t(g_Conf.GetGain(dmr ? EGainType::dmrin : EGainType::dstarin));
+	s->out_gain = int8_t(g_Conf.GetGain(dmr ? EGainType::dmrout : EGainType::dstarout));
+	s->role = role;
+	slots.push_back(std::move(s));
+}
+
+void CController::AddChannels(int k, int slot, std::initializer_list<uint8_t> channels)
+{
+	for (auto c : channels)
+	{
+		SHwChannel h;
+		h.slot = slot;
+		h.ch = c;
+		hw_channels[k].push_back(h);
+	}
+}
+
+std::shared_ptr<CDVDevice> CController::OpenSlot(int i, const std::string &node)
+{
+	auto &s = *slots[i];
+	std::shared_ptr<CDVDevice> dev;
+	if (Edvtype::dv3000 == s.type)
+		dev = std::make_shared<CDV3000>(s.enc);
+	else
+	{
+		auto dv3003 = std::make_shared<CDV3003>(s.enc);
+		if (s.per_channel)
+			for (uint8_t c = 0; c < 3; c++)
+				dv3003->SetChannelEncoding(c, s.ch_enc[c]);
+		dev = dv3003;
+	}
+	if (dev->OpenDevice(node, s.desc, s.type, s.baud, s.in_gain, s.out_gain))
+		return nullptr;
+	dev->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
+	dev->SetStatsIndex(s.stats);
+	const CDVDevice *raw = dev.get();
+	dev->SetLostHandler([this, i, raw] { DeviceLost(i, raw); });
+	return dev;
+}
+
+// from the lost device's reader thread: its channels go to the codec plugins until
+// DeviceWatchThread has it back. Without a plugin for one of its codecs tcd stops,
+// as before, and its service restarts it (or a standby tcd takes the modules)
+void CController::DeviceLost(int i, const CDVDevice *dev)
+{
+	if (!keep_running)
+		return;
+	auto &s = *slots[i];
+	{
+		std::lock_guard<std::mutex> lock(pinned_mux);
+		if (s.dev.get() != dev || !s.up)
+			return;	// an older device of the slot, or already out
+	}
+	for (int k : { kChoiceDStar, kChoiceDMR })
+	{
+		bool uses = false;
+		for (const auto &c : hw_channels[k])
+			uses = uses || c.slot == i;
+		const auto &list = choices[k];
+		if (uses && std::count(list.begin(), list.end(), nullptr) == (long)list.size())
+		{
+			std::cerr << "No codec plugin does " << g_CodecChoices[k].label << " in place of " << s.desc << ": shutting down" << std::endl;
+			kill(getpid(), SIGINT);
+			return;
+		}
+	}
+	{
+		std::lock_guard<std::mutex> lock(pinned_mux);
+		s.next_try = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+		s.up = false;
+		for (auto &list : hw_channels)
+			for (auto &c : list)
+				if (c.slot == i)
+					c.busy = false;
+	}
+	if (s.stats >= 0)
+		g_Stats.devices[s.stats].online.store(false);
+	std::cerr << s.desc << " is out: its streams go to a codec plugin until it is back" << std::endl;
+}
+
+// opens a lost device again when it is there: by its by-id name, as a replug can
+// give it another node; a hung one is reset by the opening
+void CController::DeviceWatchThread()
+{
+	while (keep_running)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		const auto now = std::chrono::steady_clock::now();
+		for (size_t i = 0; i < slots.size() && keep_running; i++)
+		{
+			auto &s = *slots[i];
+			if (s.up || now < s.next_try)
+				continue;
+			s.next_try = now + std::chrono::seconds(5);
+			if (s.dev && !s.closed)
+			{
+				s.dev->CloseDevice();	// its reader has returned, this joins the feeder
+				s.closed = true;
+			}
+			// by its by-id name, never the node of another slot
+			std::string node;
+			std::vector<SSerialDevice> list;
+			if (ListSerialDevices(list))
+				for (const auto &d : list)
+				{
+					bool other = false;
+					for (size_t j = 0; j < slots.size(); j++)
+						other = other || (j != i && slots[j]->up && slots[j]->node == d.devnode);
+					if (d.desc == s.desc && !other)
+						node = d.devnode;
+				}
+			if (node.empty())
+			{
+				if (!s.told)
+					std::cout << s.desc << " is not plugged in, waiting for it" << std::endl;
+				s.told = true;
+				continue;
+			}
+			auto dev = OpenSlot(int(i), node);
+			if (!dev)
+			{
+				if (!s.told)
+					std::cerr << s.desc << " (" << node << ") does not open or answer, trying again every 5 s" << std::endl;
+				s.told = true;
+				continue;
+			}
+			// in the slot before its reader runs: a reader that fails at once finds it there
+			{
+				std::lock_guard<std::mutex> lock(pinned_mux);
+				s.dev = dev;
+				s.node = node;
+				s.closed = false;
+				s.told = false;
+				s.up = true;
+			}
+			if (s.stats >= 0)
+				g_Stats.devices[s.stats].online.store(true);
+			std::cout << s.desc << " is back on " << node << ": new streams use it again" << std::endl;
+			dev->Start();
+		}
+	}
+}
+
+// a stream without a plugin and without a channel (none can be free then) loses the frame
+static void NoChannel(const char *codec, char module)
+{
+	static std::atomic<int> told{0};
+	if (told++ < 5)
+		std::cerr << "No AMBE channel and no codec plugin for " << codec << " on module " << module << ", frame dropped" << std::endl;
 }
 
 void CController::ToDStar(std::shared_ptr<CTranscoderPacket> packet)
 {
-	if (SwCodec(TCD_CODEC_DSTAR, packet))
+	std::shared_ptr<CDVDevice> dev;
+	uint8_t ch = 0;
+	if (SwCodec(TCD_CODEC_DSTAR, packet, &dev, &ch))
 		swdstar_queue.push(packet);
-	else if (mixed_mode && packet->GetModule() == mixed_dstar_module)
-		mixed_dv3003->AddPacketToChannel(packet, 0);	// ch0 = D-Star
+	else if (dev)
+		dev->AddPacketToChannel(packet, ch);
 	else
-		dstar_device->AddPacket(packet);
+		NoChannel("D-Star", packet->GetModule());
 }
 
 void CController::ToDmr(std::shared_ptr<CTranscoderPacket> packet)
 {
-	if (SwCodec(TCD_CODEC_DMR, packet))
+	std::shared_ptr<CDVDevice> dev;
+	uint8_t ch = 0;
+	if (SwCodec(TCD_CODEC_DMR, packet, &dev, &ch))
 		swambe2_queue.push(packet);
-	else if (mixed_mode)
-	{
-		const auto pos = std::string(g_Conf.GetTCMods()).find(packet->GetModule());
-		if (pos != std::string::npos)
-			mixed_dv3003->AddPacketToChannel(packet, (pos == 0) ? 1 : 2);	// ch1/ch2 = DMR of module A/B
-	}
+	else if (dev)
+		dev->AddPacketToChannel(packet, ch);
 	else
-		dmrsf_device->AddPacket(packet);
+		NoChannel("DMR", packet->GetModule());
 }
 
 // IMBE silence, as MMDVMHost and P25Gateway (and urfd's P25Protocol) fill a lost frame with
