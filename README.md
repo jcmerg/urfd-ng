@@ -531,10 +531,11 @@ The reflector supports hot-reloading configuration without dropping client sessi
 - TG mappings (MMDVMClient, SvxReflector and SVXServer) — dynamic TGs are preserved
 - Whitelist, blacklist, and interlink files
 - Transcoded modules (`[Transcoder] Modules`, also to and from `auto`, since 4.25.1); a tcd connection for a module no longer listed is closed
-- Reflector metadata (callsign, sponsor, country, URLs)
-- Database refresh parameters
+- Reflector metadata (sponsor, country, URLs; the callsign only for the XML file and the admin page)
 
 **Requires full restart:**
+- Callsign, database settings (Mode, URL, RefreshMin)
+- `[MMDVM]` talkgroups and users (users can be changed at runtime via the admin interface)
 - Module list changes (adding/removing modules)
 - Protocol enable/disable or port changes
 - IP address binding changes
@@ -625,7 +626,7 @@ M17 listen-only clients (LSTN packets) are accepted and registered on the reques
 - **META**: The META bytes reach other M17 clients with a TYPE that says what they carry (text, GNSS or ECD) and the source's CAN, so a GNSS position is no longer shown as text. A GNSS position is decoded into a Maidenhead locator, shown in the last-heard list (linked to OpenStreetMap) and in `/json/stations`.
 
 ### Protocol Enable Flags
-All protocols can now be individually enabled/disabled. Default is `true` (backwards-compatible).
+All protocols can be enabled/disabled individually. Without `Enable`, DCS, DExtra, DPlus, DMRPlus, M17, YSF and URF are on (NXDN and P25 when they have a `Port`); MMDVM, SvxReflector, SVXServer, Echo, Admin and the client connectors are off; XLXPeer, G3 and USRP need the line. A disabled protocol still needs its `Port`.
 
 ```ini
 [DPlus]

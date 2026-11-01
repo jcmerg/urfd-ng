@@ -207,7 +207,7 @@ Port = 5300                         # TCP and UDP port (same)
 
 **Nutzerverwaltung**: Nutzer lassen sich zur Laufzeit über die Admin-Oberfläche hinzufügen und entfernen oder fest in `urfd.ini` eintragen. Jeder Nutzer meldet sich mit Rufzeichen und Passwort per HMAC-SHA1 an.
 
-**TG-Zuordnung**: Die Module müssen transcodiert sein. Mehrere TGs pro Modul sind möglich. Dynamische TGs lassen sich über die Admin-Oberfläche mit einstellbarer Laufzeit (TTL) hinzufügen.
+**TG-Zuordnung**: Die Module müssen transcodiert sein. Mehrere TGs pro Modul sind möglich. Seit 4.29.0 bindet `TGs = auto` jedes (transcodierte) Modul mit Talkgroup (`[Modules] TG<M>`) ein; `TG`-Zeilen gehen vor. Dynamische TGs lassen sich über die Admin-Oberfläche mit einstellbarer Laufzeit (TTL) hinzufügen.
 
 **TG-Auswahl wie beim SvxReflector**: Ein Knoten hat genau eine ausgewählte TG, `MsgSelectTG` ersetzt sie; `MsgTgMonitor` legt fest, von welchen TGs er Sprecherbeginn und -ende bekommt. Eine TG hat jeweils einen Sprecher. Die anderen Knoten auf der TG bekommen dessen OPUS-Pakete unverändert (ohne Transcoding), auch auf TGs ohne Modul; zugeordnete TGs gehen außerdem zu ihrem urfd-Modul und kommen von dort. Die Knoten müssen Protokoll 2.0 sprechen. SvxLink mit `AUTH_KEY` tut das, auch aktuelle Versionen (getestet mit SvxLink 1.9.99.36 / 25.05, 15.10.2026); ein Knoten, der nur für Zertifikate eingerichtet ist, nutzt Protokoll 3 (TLS), das urfd nicht unterstützt: Er wird um einen Downgrade gebeten und loggt, dass er das nicht kann.
 
@@ -303,7 +303,7 @@ TG9 = A,TS2                        # Common hotspot default
 
 **Nutzer-Anmeldung**: Nutzer melden sich mit DMR-ID (7-9 Ziffern) oder Rufzeichen an. Rufzeichen werden beim Start über die DMR-ID-Datenbank in DMR-IDs übersetzt. Sind keine Nutzer eingetragen, werden alle Anmeldungen abgelehnt. Einzelne Nutzer können mit leerem Passwort eingetragen werden, dann ist jedes Passwort gültig (nützlich für einfache Hotspots). Mit `RequireAuth = false` entfällt die Anmeldung ganz und alle Verbindungen werden angenommen (früheres Verhalten). Nutzer lassen sich zur Laufzeit über die Admin-Oberfläche verwalten.
 
-**TG-Zuordnung**: Wie beim MMDVMClient: Die erste TG pro Modul ist primär (TX+RX), weitere TGs sind sekundär (nur RX). Dynamische TGs lassen sich über die Admin-Oberfläche mit einstellbarer Laufzeit hinzufügen.
+**TG-Zuordnung**: Wie beim MMDVMClient: Die erste TG pro Modul ist primär (TX+RX), weitere TGs sind sekundär (nur RX). Seit 4.29.0 binden `TS1 = <Module>` / `TS2 = <Module>` die Modul-Talkgroups (`[Modules] TG<M>`) auf diesem Zeitschlitz ein, und `TGs = auto` jedes weitere Modul mit Talkgroup (auf TS2, mit `TGs = auto,TS1` auf TS1), so erreichen Hotspots jedes Modul; `TG`-Zeilen gehen vor. Dynamische TGs lassen sich über die Admin-Oberfläche mit einstellbarer Laufzeit hinzufügen.
 
 **Dual-Slot**: Jeder Timeslot verbindet sich unabhängig. Sendet ein Hotspot auf TS1 mit TG 4019 (Modul S) und auf TS2 mit TG 4004 (Modul D), empfängt er beide Module gleichzeitig, Modul S auf dem Timeslot, der für dessen TG eingetragen ist, Modul D auf dem anderen. Dafür müssen TGs verschiedener Module auf verschiedenen Timeslots liegen. Das Dashboard zeigt beide verbundenen Module (z.B. "S (TS1), D (TS2)").
 
@@ -531,10 +531,11 @@ Der Reflektor kann seine Konfiguration im laufenden Betrieb neu laden, ohne Verb
 - TG-Zuordnungen (MMDVMClient, SvxReflector und SVXServer), dynamische TGs bleiben erhalten
 - Whitelist, Blacklist und Interlink-Datei
 - Transcodierte Module (`[Transcoder] Modules`, auch von und zu `auto`, seit 4.25.1); die tcd-Verbindung eines Moduls, das nicht mehr in der Liste steht, wird getrennt
-- Reflektor-Angaben (Rufzeichen, Sponsor, Land, URLs)
-- Parameter für die Datenbank-Aktualisierung
+- Reflektor-Angaben (Sponsor, Land, URLs; das Rufzeichen nur für die XML-Datei und die Admin-Seite)
 
 **Braucht einen vollständigen Neustart:**
+- Rufzeichen, Datenbank-Einstellungen (Mode, URL, RefreshMin)
+- Talkgroups und Benutzer von `[MMDVM]` (Benutzer lassen sich im Betrieb über die Admin-Oberfläche ändern)
 - Änderungen der Modulliste (Module hinzufügen oder entfernen)
 - Protokolle ein- oder ausschalten, Ports ändern
 - Änderungen der IP-Bindung
@@ -625,7 +626,7 @@ Reine Hör-Clients (LSTN-Pakete) werden angenommen und auf dem gewünschten Modu
 - **META**: Die META-Bytes erreichen andere M17-Clients mit einem TYPE, der angibt, was sie enthalten (Text, GPS oder ECD), und mit der CAN der Quelle, eine GPS-Position erscheint also nicht mehr als Text. Eine GPS-Position wird in einen Maidenhead-Locator umgerechnet und in der Last-Heard-Liste (mit Link auf OpenStreetMap) und in `/json/stations` angezeigt.
 
 ### Protokolle ein- und ausschalten
-Jedes Protokoll lässt sich einzeln ein- und ausschalten. Standard ist `true` (wie bisher).
+Jedes Protokoll lässt sich einzeln ein- und ausschalten. Ohne `Enable` sind DCS, DExtra, DPlus, DMRPlus, M17, YSF und URF an (NXDN und P25, wenn sie einen `Port` haben); MMDVM, SvxReflector, SVXServer, Echo, Admin und die Client-Connectoren sind aus; XLXPeer, G3 und USRP brauchen die Zeile. Ein abgeschaltetes Protokoll braucht trotzdem seinen `Port`.
 
 ```ini
 [DPlus]
