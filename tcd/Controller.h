@@ -58,6 +58,13 @@ protected:
 	std::unordered_map<char, uint8_t[8]> data_store;
 	CTCClient tcClient;
 	std::unordered_map<char, std::unique_ptr<CCodec2>> c2_16, c2_32;
+	// the stream and frame tcd's own Codec2 and IMBE encoder and decoder last did
+	// per module: a new stream id or a lower count is a new transmission, which
+	// starts the vocoder afresh (Begin: true when it did)
+	struct SStreamPos { bool known; uint16_t streamid; uint32_t sequence; };
+	std::unordered_map<char, SStreamPos> c2_stream, imbe_enc_stream, imbe_dec_stream;
+	static bool Begin(std::unordered_map<char, SStreamPos> &pos, const std::shared_ptr<CTranscoderPacket> &packet);
+	void Codec2Begin(const std::shared_ptr<CTranscoderPacket> &packet);
 	std::unique_ptr<CDVDevice> dstar_device, dmrsf_device;
 	bool mixed_mode = false;
 	char mixed_dstar_module = ' ';

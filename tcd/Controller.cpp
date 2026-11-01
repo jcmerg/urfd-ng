@@ -1076,6 +1076,24 @@ void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 // Codec2 3200 silence, what a plugin that fails to encode gives instead
 static const uint8_t C2_3200_SILENCE[8] = { 0x01U, 0x00U, 0x09U, 0x43U, 0x9CU, 0xE4U, 0x21U, 0x08U };
 
+bool CController::Begin(std::unordered_map<char, SStreamPos> &pos, const std::shared_ptr<CTranscoderPacket> &packet)
+{
+	auto &s = pos[packet->GetModule()];
+	const bool begin = !s.known || s.streamid != packet->GetStreamId() || packet->GetSequence() < s.sequence;
+	s = SStreamPos{ true, packet->GetStreamId(), packet->GetSequence() };
+	return begin;
+}
+
+void CController::Codec2Begin(const std::shared_ptr<CTranscoderPacket> &packet)
+{
+	const char m = packet->GetModule();
+	if (Begin(c2_stream, packet))
+	{
+		c2_16[m] = std::unique_ptr<CCodec2>(new CCodec2(false));
+		c2_32[m] = std::unique_ptr<CCodec2>(new CCodec2(true));
+	}
+}
+
 void CController::EncodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *bits)
 {
 	if (auto *sw = SwCodec(TCD_CODEC_M17, packet))
@@ -1085,6 +1103,7 @@ void CController::EncodeM17(const std::shared_ptr<CTranscoderPacket> &packet, co
 		SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 		return;
 	}
+	Codec2Begin(packet);
 	c2_32[packet->GetModule()]->codec2_encode(bits, gained);
 	Stat(codec2_stats, packet->GetModule(), &SwVocoderStats::encodes);
 }
@@ -1099,6 +1118,7 @@ void CController::DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, co
 		SwDecodeStat(sw, packet->GetModule(), info);
 		return;
 	}
+	Codec2Begin(packet);
 	(is1600 ? c2_16 : c2_32)[packet->GetModule()]->codec2_decode(pcm, bits);
 	Stat(codec2_stats, packet->GetModule(), &SwVocoderStats::decodes);
 }
@@ -1447,6 +1467,8 @@ void CController::EncodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, c
 	int16_t pcm[160];	// encode_4400 takes a non-const buffer
 	memcpy(pcm, gained, sizeof(pcm));
 	std::lock_guard<std::mutex> lock(p25vocoder_mux);
+	if (Begin(imbe_enc_stream, packet))
+		imbe_enc[packet->GetModule()] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
 	imbe_enc[packet->GetModule()]->encode_4400(pcm, imbe);
 	Stat(op25_stats, packet->GetModule(), &SwVocoderStats::encodes);
 }
@@ -1462,6 +1484,8 @@ void CController::DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, i
 		return;
 	}
 	std::lock_guard<std::mutex> lock(p25vocoder_mux);
+	if (Begin(imbe_dec_stream, packet))
+		imbe_dec[packet->GetModule()] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
 	imbe_dec[packet->GetModule()]->decode_4400(pcm, (uint8_t *)packet->GetP25Data());
 	Stat(op25_stats, packet->GetModule(), &SwVocoderStats::decodes);
 }

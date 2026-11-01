@@ -93,6 +93,7 @@ private:
 	Cnlp nlp;
 	CQuantize qt;
 	CODEC2 c2;
+	uint32_t rng = 1;	// the noise generator of the synthesis, one per codec
 };
 
 #endif
