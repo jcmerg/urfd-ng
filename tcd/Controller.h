@@ -62,9 +62,10 @@ protected:
 	// per module: a new stream id or a lower count is a new transmission, which
 	// starts the vocoder afresh (Begin: true when it did)
 	struct SStreamPos { bool known; uint16_t streamid; uint32_t sequence; };
-	std::unordered_map<char, SStreamPos> c2_stream, imbe_enc_stream, imbe_dec_stream;
+	std::unordered_map<char, SStreamPos> c2_16_stream, c2_32_stream, imbe_enc_stream, imbe_dec_stream;
 	static bool Begin(std::unordered_map<char, SStreamPos> &pos, const std::shared_ptr<CTranscoderPacket> &packet);
-	void Codec2Begin(const std::shared_ptr<CTranscoderPacket> &packet);
+	// the module's Codec2 of the mode the packet needs, afresh for a new transmission
+	CCodec2 &Codec2For(const std::shared_ptr<CTranscoderPacket> &packet, bool is1600);
 	std::unique_ptr<CDVDevice> dstar_device, dmrsf_device;
 	bool mixed_mode = false;
 	char mixed_dstar_module = ' ';

@@ -33,8 +33,16 @@ public:
 	// info, when not nullptr, gets how the frame was decoded (a plugin before
 	// api 3 reports nothing: errors 0, no flags)
 	bool Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm, tcd_frame_info *info = nullptr);
+	// the transmission of a stream ended after a frame that did not reach this
+	// codec (M17 1600 decodes the first packet of a payload, urfd marks the
+	// second as the last): stop its state
+	void End(uint16_t streamid, bool encode);
 	// the streams it codes right now (a frame in the last 2 s)
 	int Streams(void);
+	// urfd counts the frames of a transmission from 0: a lower count than the
+	// last on the same stream id is a new transmission (the last frame of the
+	// one before got lost). tcd's own vocoders tell transmissions apart the same way
+	static bool NewTransmission(uint32_t last_sequence, uint32_t sequence) { return sequence < last_sequence; }
 	// its entry in g_Stats.sw, -1 for none
 	int stats = -1;
 

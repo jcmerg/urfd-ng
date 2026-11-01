@@ -933,12 +933,15 @@ void CController::ReadReflectorThread()
 						st.active_module.store(' ', std::memory_order_relaxed);
 				}
 				for (auto *choices : { &dstar_choices, &dmr_choices, &p25_choices, &m17_choices })
-					for (auto *sw : *choices)
+					for (size_t i = 0; i < choices->size(); i++)
 					{
+						auto *sw = (*choices)[i];
 						if (!sw || sw->stats < 0)
 							continue;
 						auto &st = g_Stats.sw[sw->stats];
-						st.cached_streams.store(sw->Streams(), std::memory_order_relaxed);
+						// a plugin's M17 entry counts its M17 1600 streams as well
+						auto *sw1600 = choices == &m17_choices ? m17_1600_choices[i] : nullptr;
+						st.cached_streams.store(sw->Streams() + (sw1600 ? sw1600->Streams() : 0), std::memory_order_relaxed);
 						st.reencode_active.store(reencode && sw == dmr_sw, std::memory_order_relaxed);
 					}
 				PurgePinned();
@@ -1042,6 +1045,10 @@ void CController::HighPass(char module, uint16_t streamid, int16_t *samples)
 // This is only called when codec_in was not M17. Obviously, the incoming
 // packet was already decoded to audio.
 // This might complete the packet. If so, send it back to the reflector
+// Codec2 3200 silence: the second half of a payload not encoded yet, and what
+// a plugin that fails to encode gives instead
+static const uint8_t C2_3200_SILENCE[8] = { 0x01U, 0x00U, 0x09U, 0x43U, 0x9CU, 0xE4U, 0x21U, 0x08U };
+
 void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t gained[160];
@@ -1050,8 +1057,8 @@ void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 	if (ECodecType::p25 == packet->GetCodecIn())
 		HighPass(packet->GetModule(), packet->GetStreamId(), gained);
 
-	uint8_t m17data[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0x01, 0x00, 0x09, 0x43, 0x9C, 0xE4, 0x21, 0x08 };	// second half: Codec2 3200 silence
-	const auto m = packet->GetModule();
+	uint8_t m17data[16] = {};
+	memcpy(m17data + 8, C2_3200_SILENCE, sizeof(C2_3200_SILENCE));
 	if (packet->IsSecond())
 	{
 		memcpy(m17data, data_store[packet->GetModule()], 8);
@@ -1071,27 +1078,20 @@ void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 	send_mux.unlock();
 }
 
-// The original incoming coded was M17, so we will calculate the audio and then
-// push the packet onto both the dstar and the dmr queue.
-// Codec2 3200 silence, what a plugin that fails to encode gives instead
-static const uint8_t C2_3200_SILENCE[8] = { 0x01U, 0x00U, 0x09U, 0x43U, 0x9CU, 0xE4U, 0x21U, 0x08U };
-
 bool CController::Begin(std::unordered_map<char, SStreamPos> &pos, const std::shared_ptr<CTranscoderPacket> &packet)
 {
 	auto &s = pos[packet->GetModule()];
-	const bool begin = !s.known || s.streamid != packet->GetStreamId() || packet->GetSequence() < s.sequence;
+	const bool begin = !s.known || s.streamid != packet->GetStreamId() || CSoftCodec::NewTransmission(s.sequence, packet->GetSequence());
 	s = SStreamPos{ true, packet->GetStreamId(), packet->GetSequence() };
 	return begin;
 }
 
-void CController::Codec2Begin(const std::shared_ptr<CTranscoderPacket> &packet)
+CCodec2 &CController::Codec2For(const std::shared_ptr<CTranscoderPacket> &packet, bool is1600)
 {
-	const char m = packet->GetModule();
-	if (Begin(c2_stream, packet))
-	{
-		c2_16[m] = std::unique_ptr<CCodec2>(new CCodec2(false));
-		c2_32[m] = std::unique_ptr<CCodec2>(new CCodec2(true));
-	}
+	auto &codec = (is1600 ? c2_16 : c2_32)[packet->GetModule()];
+	if (Begin(is1600 ? c2_16_stream : c2_32_stream, packet))
+		codec = std::unique_ptr<CCodec2>(new CCodec2(!is1600));
+	return *codec;
 }
 
 void CController::EncodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *bits)
@@ -1103,8 +1103,7 @@ void CController::EncodeM17(const std::shared_ptr<CTranscoderPacket> &packet, co
 		SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 		return;
 	}
-	Codec2Begin(packet);
-	c2_32[packet->GetModule()]->codec2_encode(bits, gained);
+	Codec2For(packet, false).codec2_encode(bits, gained);
 	Stat(codec2_stats, packet->GetModule(), &SwVocoderStats::encodes);
 }
 
@@ -1118,11 +1117,12 @@ void CController::DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, co
 		SwDecodeStat(sw, packet->GetModule(), info);
 		return;
 	}
-	Codec2Begin(packet);
-	(is1600 ? c2_16 : c2_32)[packet->GetModule()]->codec2_decode(pcm, bits);
+	Codec2For(packet, is1600).codec2_decode(pcm, bits);
 	Stat(codec2_stats, packet->GetModule(), &SwVocoderStats::decodes);
 }
 
+// The original incoming coded was M17, so we will calculate the audio and then
+// push the packet onto both the dstar and the dmr queue.
 void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
 	uint8_t imbe[11];
@@ -1131,6 +1131,11 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	{
 		if (packet->GetCodecIn() == ECodecType::c2_1600)
 		{
+			// the payload was decoded with the first packet; a plugin's state
+			// learns here that the transmission ended
+			if (packet->IsLast())
+				if (auto *sw = SwCodec(TCD_CODEC_M17_1600, packet))
+					sw->End(packet->GetStreamId(), false);
 			int16_t tmp[160];
 			memcpy(tmp, audio_store[packet->GetModule()], sizeof(tmp));
 			g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
@@ -1152,7 +1157,6 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	}
 	else /* it's a "first packet" */
 	{
-		const auto m = packet->GetModule();
 		if (packet->GetCodecIn() == ECodecType::c2_1600)
 		{
 			int16_t tmp[320];

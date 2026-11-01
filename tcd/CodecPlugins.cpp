@@ -58,9 +58,7 @@ CSoftCodec::SState *CSoftCodec::State(uint32_t key, uint32_t sequence)
 		}
 		it = m_States.emplace(key, SState{ state, now, sequence, false }).first;
 	}
-	// urfd counts the frames of a transmission from 0: a lower count is the same
-	// stream id again, after a transmission whose last frame got lost
-	if (it->second.running && sequence < it->second.sequence)
+	if (it->second.running && NewTransmission(it->second.sequence, sequence))
 		it->second.running = false;
 	if (!it->second.running)
 	{
@@ -105,6 +103,14 @@ bool CSoftCodec::Decode(uint16_t streamid, uint32_t sequence, bool last, const u
 		ok = 0 == (m_Plugin->api >= 3 && m_Plugin->decode_info ? m_Plugin->decode_info(s->state, frame, pcm, info) : m_Plugin->decode(s->state, frame, pcm));
 	Stop(s, last);
 	return ok;
+}
+
+void CSoftCodec::End(uint16_t streamid, bool encode)
+{
+	std::lock_guard<std::mutex> lock(*m_Mutex);
+	auto it = m_States.find(Key(streamid, encode));
+	if (it != m_States.end())
+		Stop(&it->second, true);
 }
 
 int CSoftCodec::Streams(void)
