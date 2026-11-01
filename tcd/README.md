@@ -88,7 +88,8 @@ Each transcoded module needs a D-Star channel and a DMR/YSF channel. A DV3000 (T
 
 | Hardware | Codec plugin | Modules | Notes |
 |---|---|---|---|
-| 1× DV3000 or 1× DV3003 | one for DMR (or D-Star) | 1 | D-Star on the device, DMR/YSF in software |
+| 1× DV3000 | one for DMR (or D-Star) | 1 | D-Star on the device, DMR/YSF in software |
+| 1× DV3003 | one for DMR (or D-Star) | up to 3 | D-Star on the device, DMR/YSF in software |
 | 1× DV3003 with `mixed` | one for D-Star and DMR | 1 on the device, more in software | D-Star and DMR/YSF of one module on the device, see [below](#single-dv3003-in-mixed-mode) |
 | DV3000 + DV3003 | — | 2 | mixed mode, recommended |
 | 2× DV3000 | — | 1 | one for D-Star, one for DMR/YSF |
@@ -230,11 +231,13 @@ A device that cannot be opened or does not answer is left out with a warning, an
 | Key | Template | Meaning |
 |---|---|---|
 | `ServerAddress` | `127.0.0.1` | IP address or host name of the urfd reflector; a host name is resolved again on every reconnect (since 0.7.4) |
-| `Port` | `10100` | the reflector's `[Transcoder] Port` |
+| `Port` | `10100` | the reflector's `[Transcoder] Port` (1025-49000; urfd takes up to 40000) |
 | `Password` | — | the reflector's `[Transcoder] Password`, needed when it has one (since 0.8.0) |
 | `Modules` | `FS` | transcoded modules; with the reflector's `[Transcoder] Modules = auto` (urfd 4.25.0) any of its modules, this list alone decides; else the same letters as there |
 | `StandbyModules` | — | modules this tcd takes only while no other tcd has them (since 0.11.0, urfd 4.26.0), see [Standby](#standby-a-second-tcd-for-the-same-modules); not in `Modules` as well |
 | `DeviceSerial` | — | AMBE device to use, one line each (see [above](#selecting-the-ambe-devices)); `mixed` after the serial of a DV3003 alone: D-Star and DMR of one module on it (since 0.17.0, see [Single DV3003 in mixed mode](#single-dv3003-in-mixed-mode)) |
+| `CodecPlugin` | — | codec plugin to load, one line each (see [Codec plugins](#codec-plugins)) |
+| `CodecDStar` / `CodecDMR` / `CodecP25` / `CodecM17` | — | the vocoder new streams get: `dvsi`, `op25`, `codec2` or a plugin's name (see [Codec plugins](#codec-plugins)); written by Save |
 | `DeviceChannels` | `fixed` | `fixed`: the AMBE channels belong to the first modules; `pool`: a stream takes any free channel (since 0.17.0, see [Channel pool](#channel-pool-devicechannels--pool)) |
 
 ### Gains
@@ -268,7 +271,7 @@ DMR to DMR/YSF audio normally passes through as AMBE2+ without being decoded, so
 |---|---|---|
 | `DmrGainMode` | `ambe` | `ambe` |
 | `AmbeGainDb` | `0` | `0` |
-| `DmrReencodeGain` | `0` | — |
+| `DmrReencodeGain` | `0` | `0` |
 
 DMR radios expect a lower level than the AGC target (`AGCTarget`, -16 dBFS). `OutputGainDMR = -14` brings every path to DMR/YSF down to it, to about -30 dBFS, the level of speech on BrandMeister (measured on TG91: median -29 dBFS, -39 to -23 between the talkers; -18 before 0.13.1 left DMR/YSF about 4 dB below it): the DVSI encoder for D-Star, M17, P25 and USRP sources, and b2 or the re-encode for DMR sources. `AmbeGainDb` and `DmrReencodeGain` only move DMR → DMR/YSF against the other paths and normally stay 0. (tcd 0.2.6 put the -18 into `AmbeGainDb`/`DmrReencodeGain`, which left D-Star → DMR 18 dB too loud.)
 
@@ -309,6 +312,7 @@ Why not the noise suppressor in the AMBE chip: the DVSI devices have one (on by 
 |---|---|---|
 | `Monitor` | `true` | web dashboard and stats socket on/off |
 | `MonitorBindAddress` | `127.0.0.1` | address of web dashboard and stats socket; `0.0.0.0` opens them to the network (then set `MonitorPassword`: the page can change and save levels) |
+| `MonitorView` | `auto` | `cards`, `compact` or `auto` (compact from five modules on); written by Save |
 | `MonitorPassword` | (none) | the page asks for it and keeps a session cookie for 30 days (5 failed logins from one address pause logins from there for 60 s); `tcdmon` from other hosts than 127.0.0.1 too (it asks for it, or takes `TCD_MONITOR_PASSWORD`; `tcdmon -p <password> <host>` works too, but shows the password in the process list). Failed logins older than 10 minutes do not count. Plain HTTP: from outside the LAN use a TLS proxy or an ssh tunnel |
 | `MonitorHttpPort` | `8080` | web dashboard |
 | `MonitorStatsPort` | `8081` | stats socket (JSON, for `tcdmon`) |
