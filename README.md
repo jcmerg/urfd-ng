@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.33.1** | tcd 0.15.1 | Dashboard v2.14.2
+**urfd 4.33.2** | tcd 0.15.1 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -424,7 +424,7 @@ Outgoing frames carry the destination ID each client polled with, encoded per di
 
 **NXDN ID Resolution**: Incoming NXDN IDs are resolved to callsigns via the NXDN ID database. If not found, the DMR ID database is used as fallback (many operators reuse their DMR ID as NXDN ID). This enables cross-protocol callsign display and D-Star slow data name lookup. Unknown IDs are dropped unless FallbackNxdnId is configured.
 
-**D-Star Slow Data**: NXDN sources show `NXDN RAN<n>` in the D-Star text field. Operator names are looked up from both DMR and NXDN databases.
+**D-Star Slow Data**: NXDN sources show `RAN<n>` in the D-Star text field (`NXDN` is the callsign's suffix). Operator names are looked up from both DMR and NXDN databases.
 
 **Dashboard**: The NXDN RAN column is shown in the module overview when NXDN is enabled, and a separate `NXDN DST-ID` column appears next to it once `ModuleDstIdBase` is set. DMR+ and YSF DG-ID columns are hidden when their respective protocols are disabled.
 
@@ -759,33 +759,33 @@ sudo systemctl restart apache2
 ### D-Star Slow Data for Transcoded Streams
 Transcoded streams (DMR, YSF, SVX, M17, P25, USRP, client protocols -> D-Star) now include proper D-Star slow data:
 - **Header**: Caller callsign (MY), reflector callsign (RPT1/RPT2)
-- **Text message**: the operator's first name (if the caller's callsign is in the DMR or NXDN ID database) and the source: `Max DMR TG26363` (since 4.29.0; before, the name came as a second text that many radios never show)
+- **Text message**: the operator's first name (if the caller's callsign is in the DMR or NXDN ID database) and the source: `Max TG26363` (since 4.29.0; before, the name came as a second text that many radios never show). The protocol is left out since 4.33.2: the radio already shows it as the suffix of the callsign (`N0CALL / DMR`); it stays in the text only when the caller brings a suffix of their own
 
 Examples of text messages per protocol:
 
 | Source | Slow Data Text |
 |--------|---------------|
-| MMDVMClient | `Max DMR TG26363` |
-| SvxReflector | `Max SVX TG317424` |
-| YSF (server) | `YSF DG28` |
-| NXDN | `NXDN RAN6` |
-| YSFClient | `YSF DG15` |
-| M17, P25, USRP, DMR+ | `M17`, `P25`, etc. |
+| MMDVMClient | `Max TG26363` |
+| SvxReflector | `Max TG317424` |
+| YSF (server) | `Max DG28` |
+| NXDN | `Max RAN6` |
+| YSFClient | `Max DG15` |
+| M17, P25, USRP, DMR+ | `Max` (only the name) |
 
-YSFClient appends the DG-ID if configured (otherwise just `YSF`). D-Star sources, the D-Star client connectors among them, are not transcoded to D-Star: their own slow data passes through unchanged.
+YSFClient shows the DG-ID if configured. Without a name and without TG, DG-ID or RAN the text stays empty and the radio shows the header alone. D-Star sources, the D-Star client connectors among them, are not transcoded to D-Star: their own slow data passes through unchanged.
 
-The text message has 20 characters. When `<name> <source> TG<n>` is longer, the TG moves to a second text that takes turns with the first every ~5 seconds; when it is still too long, the name is shortened so the source stays whole:
+The text message has 20 characters. When `<name> <source> TG<n>` is longer (a source like `DG15` or, for a caller with a suffix of their own, `DMR`), the TG moves to a second text that takes turns with the first every ~5 seconds; when it is still too long, the name is shortened so the source stays whole:
 
 ```
-Max DMR TG262                                  (all fits)
-Maximilian DMR    <-> DMR TG263112              (the TG takes turns)
-Bartholomae YSF DG15  <-> Bartholomaeus         (the name shortened)
+Max TG262                                      (all fits)
+Maximilian TG263112                            (all fits, 4.33.2)
+Maximilian DMR    <-> DMR TG263112          (own suffix: the TG takes turns)
 ```
 
 Header and text message alternate every superframe (~420ms):
 
 ```
-[Header: N0CALL > URF999 S] → [Max DMR TG262] → [Header] → [Max DMR TG262] → ...
+[Header: N0CALL > URF999 S] → [Max TG262] → [Header] → [Max TG262] → ...
 ```
 
 Name lookup works for all protocols — any callsign with a DMR ID database entry will have its name displayed on D-Star radios.
@@ -936,6 +936,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **No protocol in the D-Star text (4.33.2)**: the D-Star slow data text no longer names the protocol (`DMR`, `YSF`, `SVX`, ...), which the radio already shows as the suffix of the callsign since 4.33.0: `Max TG262` instead of `Max DMR TG262`, `Max DG15` instead of `YSF DG15`. That leaves room for longer names and TGs in the 20 characters. A caller with a suffix of their own keeps the protocol in the text. D-Star to D-Star is unchanged: the radio's own slow data and suffix pass through
 - **The source as D-Star suffix only towards D-Star (4.33.1)**: the suffix of 4.33.0 (`DMR`, `YSF`, ...) is added only to the header that goes to D-Star radios and links (DExtra, DPlus, DCS, G3 and their clients) and to the copy in the D-Star slow data; the stream itself keeps the callsign as it came in. So the dashboard, the logs and the other modes show the callsign alone again, as before 4.33.0 (it showed `N0CALL / DMR`). A plugin's suffix is its type (`GetType()` in `Plugin.h`, e.g. three letters). Interlinks no longer pass on the source as a suffix; D-Star callers keep their own as before. M17 callers no longer carry `M17` in the dashboard either (it came from upstream), D-Star radios get it as for the other modes
 - **DCS client names the reflector (4.33.1)**: the info of the DCS connect reads `REFLECTOR <callsign> urfd <version>`, the callsign from `[Names]`, with the repeater image `hf.jpg` of the DCS status pages (they have no `repeater.jpg`, which showed as a broken image)
 - **The source as D-Star suffix (4.33.0)**: a stream from another mode carries its source as the 4 character suffix of the caller's callsign, which D-Star radios show next to it and keep in their call list: `DMR` (MMDVM, DMR+, MMDVMClient), `YSF` (also the YSF client), `NXDN`, `P25`, `M17` (as before), `USRP` and `SVX` (SVXServer and SvxReflector client), e.g. `DL4JC / DMR`. D-Star callers keep their own suffix, interlinks pass on the one of the reflector the stream came from, and a plugin can set its own. The last heard lists and the dashboard show the callsign without it as before. The copy of the header in the D-Star slow data carries the suffix too (it was always empty); the D-Star text keeps naming the source, the name and the TG
