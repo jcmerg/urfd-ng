@@ -316,6 +316,25 @@ static void IdentifyDevices(const std::list<std::pair<std::string, std::string>>
 	}
 }
 
+// the devices by name, the DV3003s first; at most CTcdStats::MAX_DEVICES (the
+// monitor's), the ones beyond are left out with a warning
+static std::vector<SAmbeDevice> SortedDevices(const std::list<SAmbeDevice> &set)
+{
+	std::vector<SAmbeDevice> devs(set.begin(), set.end());
+	std::sort(devs.begin(), devs.end(), [](const SAmbeDevice &a, const SAmbeDevice &b) {
+		if ((Edvtype::dv3003 == a.type) != (Edvtype::dv3003 == b.type))
+			return Edvtype::dv3003 == a.type;
+		return a.desc < b.desc;
+	});
+	if (devs.size() > size_t(CTcdStats::MAX_DEVICES))
+	{
+		for (size_t i = CTcdStats::MAX_DEVICES; i < devs.size(); i++)
+			std::cerr << "WARNING: more than " << CTcdStats::MAX_DEVICES << " AMBE devices, " << devs[i].desc << " is left out" << std::endl;
+		devs.resize(CTcdStats::MAX_DEVICES);
+	}
+	return devs;
+}
+
 int32_t CController::calcNumerator(int32_t db) const
 {
 	float num = 256.0f * powf(10.0f, (float(db)/20.0f));
@@ -657,20 +676,55 @@ bool CController::InitVocoders()
 			std::cerr << "       or one DV3000 + one DV3003 (mixed mode)." << std::endl;
 			return true;
 		}
-		const auto &dev = deviceset.front();
 		if (!device_does_dmr)
 		{
 			// the DMR plugin gets DmrGainIn/Out in software
 			ambe_in_num = calcNumerator(g_Conf.GetGain(EGainType::dmrin));
 			ambe_out_num = calcNumerator(g_Conf.GetGain(EGainType::dmrout));
 		}
-		AddSlot(dev.node, dev.desc, dev.type, dev.baud, device_does_dmr ? Encoding::dmrsf : Encoding::dstar, device_does_dmr ? "dmr" : "dstar");
+		// with the other codec chosen in software every device does this one, by name
 		const int k = device_does_dmr ? kChoiceDMR : kChoiceDStar;
-		if (Edvtype::dv3000 == dev.type)
-			AddChannels(k, 0, { 0 });
-		else
-			AddChannels(k, 0, { 0, 1, 2 });
-		std::cout << "Using " << dev.desc << " for " << (device_does_dmr ? "DMR" : "D-Star") << std::endl;
+		for (const auto &dev : SortedDevices(deviceset))
+		{
+			const int slot = int(slots.size());
+			AddSlot(dev.node, dev.desc, dev.type, dev.baud, device_does_dmr ? Encoding::dmrsf : Encoding::dstar, device_does_dmr ? "dmr" : "dstar");
+			for (int c = 0; c < ChannelCount(dev.type); c++)
+				AddChannels(k, slot, { uint8_t(c) });
+			std::cout << "Using " << dev.desc << " for " << (device_does_dmr ? "DMR" : "D-Star") << std::endl;
+		}
+	}
+	else if (deviceset.size() >= 3)
+	{
+		// three devices and more (several DV3003, boards of four chips like the
+		// USB-3012): every channel of every device, D-Star and DMR in turn, so a
+		// pair mostly sits on one chip; the last of an odd number does DMR. The
+		// DV3003s first, the single channel DV3000s after them
+		const auto devs = SortedDevices(deviceset);
+		size_t total = 0;
+		for (const auto &d : devs)
+			total += ChannelCount(d.type);
+		std::cout << devs.size() << " AMBE devices, " << total << " channels: " << total / 2 << " for D-Star, " << total - total / 2 << " for DMR" << std::endl;
+		size_t n = 0;
+		for (const auto &d : devs)
+		{
+			const int chans = ChannelCount(d.type);
+			Encoding ch_enc[3] { Encoding::dmrsf, Encoding::dmrsf, Encoding::dmrsf };
+			int dstars = 0;
+			for (int c = 0; c < chans; c++, n++)
+			{
+				const bool dstar = (0 == n % 2) && (n + 1 != total || 0 == total % 2);
+				ch_enc[c] = dstar ? Encoding::dstar : Encoding::dmrsf;
+				dstars += dstar ? 1 : 0;
+			}
+			const int slot = int(slots.size());
+			// a DV3003 here always has both codecs (it starts at a multiple of 3)
+			if (Edvtype::dv3000 == d.type)
+				AddSlot(d.node, d.desc, d.type, d.baud, ch_enc[0], dstars ? "dstar" : "dmr");
+			else
+				AddSlot(d.node, d.desc, d.type, d.baud, dstars >= 2 ? Encoding::dstar : Encoding::dmrsf, "mixed", ch_enc);
+			for (int c = 0; c < chans; c++)
+				AddChannels(Encoding::dstar == ch_enc[c] ? kChoiceDStar : kChoiceDMR, slot, { uint8_t(c) });
+		}
 	}
 	else if (deviceset.size() >= 2)
 	{
@@ -854,7 +908,7 @@ bool CController::InitVocoders()
 	// a device may be phased out from the monitor when a plugin does its codecs
 	for (size_t i = 0; i < slots.size(); i++)
 		if (slots[i]->stats >= 0)
-			g_Stats.devices[slots[i]->stats].can_out = UncoveredChoice(int(i)) < 0;
+			g_Stats.devices[slots[i]->stats].can_out.store(UncoveredChoice(int(i)) < 0);
 	if (!dmr_sw && g_Stats.config.dmr_gain_mode.load(std::memory_order_relaxed) == 2)
 	{
 		std::cerr << "WARNING: DmrGainMode=reencode needs a codec plugin for DMR. Falling back to ambe." << std::endl;
@@ -934,6 +988,24 @@ void CController::ReadReflectorThread()
 				for (auto &s : slots)
 					if (s->dev && s->stats >= 0)
 						g_Stats.devices[s->stats].buf_depth.store(s->up ? s->dev->GetBufferDepth() : 0, std::memory_order_relaxed);
+				// whether a device may be phased out now (a plugin or, in the pool, the
+				// other devices take its streams)
+				for (size_t i = 0; i < slots.size(); i++)
+					if (slots[i]->stats >= 0)
+						g_Stats.devices[slots[i]->stats].can_out.store(slots[i]->draining || slots[i]->out || UncoveredChoice(int(i)) < 0, std::memory_order_relaxed);
+				// the hardware channels of each codec: in service, and of them in use
+				for (int k : { kChoiceDStar, kChoiceDMR })
+				{
+					int total = 0, busy = 0;
+					for (const auto &c : hw_channels[k])
+						if (slots[c.slot]->up && !slots[c.slot]->draining)
+						{
+							total++;
+							busy += c.busy ? 1 : 0;
+						}
+					g_Stats.hw_total[k].store(total, std::memory_order_relaxed);
+					g_Stats.hw_busy[k].store(busy, std::memory_order_relaxed);
+				}
 			}
 
 			// Sync the stats of the codec plugins
@@ -1544,7 +1616,9 @@ std::string CController::ChannelName(int k, size_t c) const
 {
 	const auto &h = hw_channels[k][c];
 	const auto &s = *slots[h.slot];
-	return std::string(Edvtype::dv3000 == s.type ? "DV3000" : "DV3003") + (Edvtype::dv3000 == s.type ? "" : " ch" + std::to_string(h.ch));
+	// the device's node, the type alone does not tell several apart
+	const std::string node = s.node.substr(s.node.find_last_of('/') + 1);
+	return std::string(Edvtype::dv3000 == s.type ? "DV3000 " : "DV3003 ") + node + (Edvtype::dv3000 == s.type ? "" : " ch" + std::to_string(h.ch));
 }
 
 void CController::AddSlot(const std::string &node, const std::string &desc, Edvtype type, unsigned long baud, Encoding enc, const char *role, const Encoding *ch_enc)
@@ -1609,7 +1683,14 @@ int CController::UncoveredChoice(int i) const
 		for (const auto &c : hw_channels[k])
 			uses = uses || c.slot == i;
 		const auto &list = choices[k];
-		if (uses && std::count(list.begin(), list.end(), nullptr) == (long)list.size())
+		if (!uses || std::count(list.begin(), list.end(), nullptr) < (long)list.size())
+			continue;	// a plugin does the codec
+		// without one: in the pool the channels of the other devices take its streams
+		// (with fixed channels its modules would go silent)
+		bool others = false;
+		for (const auto &c : hw_channels[k])
+			others = others || (c.slot != i && slots[c.slot]->up && !slots[c.slot]->draining);
+		if (!Pool() || !others)
 			return k;
 	}
 	return -1;

@@ -101,3 +101,5 @@ using SDV_Packet = struct dv_packet_tag;
 
 enum class Encoding { dstar, dmrsf };
 enum class Edvtype { dv3000, dv3003 };
+// the vocoder channels of a device of that type
+inline int ChannelCount(Edvtype t) { return Edvtype::dv3000 == t ? 1 : 3; }

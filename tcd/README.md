@@ -94,6 +94,7 @@ Each transcoded module needs a D-Star channel and a DMR/YSF channel. A DV3000 (T
 | DV3000 + DV3003 | — | 2 | mixed mode, recommended |
 | 2× DV3000 | — | 1 | one for D-Star, one for DMR/YSF |
 | 2× DV3003 | — | up to 3 | one for D-Star, one for DMR/YSF |
+| 3 devices and more (e.g. USB-3012) | for the modules beyond the channels | half the channels | every channel D-Star or DMR in turn, see [below](#three-devices-and-more) |
 | none | one for D-Star and DMR | any | everything in software |
 
 A single device needs a codec plugin for the other codec; tcd refuses to start without one. With two devices no plugin is needed: since 0.2.5 `DmrGainMode = ambe` gives DMR → DMR/YSF the same AGC without re-encoding (see [`DmrGainMode`](#dmrysf--dmrysf-level-dmrgainmode)); a DMR plugin only adds `reencode` as an alternative. tcd detects the devices and picks the mode itself.
@@ -136,6 +137,12 @@ A device unplugged while tcd runs, or one that leaves a packet unanswered for 1 
 ### Single device with a codec plugin
 
 One module, D-Star on the DV3000 or DV3003 and DMR/YSF through a codec plugin. In this mode, DMR/YSF → DMR/YSF audio is **not re-encoded** after the AGC. Use the bitstream gain (`DmrGainMode = ambe`, which follows the AGC; in this mode since 0.2.5) for that path; all paths between different modes still get the full AGC. Re-encode on DMR/YSF → DMR/YSF needs a second AMBE device.
+
+### Three devices and more
+
+From three devices on (since 0.18.0; several DV3003, a DV3000 next to them, boards with four AMBE3003 chips like the USB-3012, which show up as four DV3003) tcd takes every channel of every device and gives them D-Star and DMR in turn, so a pair mostly sits on one chip; the last of an odd number does DMR. Each transmission needs one channel of each codec, so the devices take half as many at once as they have channels: 2× DV3003 or a DV3000 with 2× DV3003 three, a USB-3012 six. The DV3003s come first, by their name, so the fixed channels of the modules stay the same from start to start as long as the same devices answer (a device missing at start moves the ones after it). At most 16 devices are used, the ones beyond are left out with a warning. With `CodecDStar` or `CodecDMR` on a codec plugin every device does the other codec, all its channels. With the [pool](#channel-pool-devicechannels--pool) any module's stream takes a free pair, the ones beyond go to a codec plugin; a lost or phased out device leaves its channels to the plugins as with one or two devices. The log names the split at start (`4 AMBE devices, 12 channels: 6 for D-Star, 6 for DMR`) and each channel's codec.
+
+**Hardware and software channels**: the AMBE channels are the hardware ones, a fixed number; the codec plugins and tcd's own vocoders (OP25, Codec2) are software and take as many streams as the CPU does. The monitor shows both apart: the hardware channels of each codec in use (with fixed channels a free one belongs to its module), and the streams on the codec plugins. Without a codec plugin for a codec, a lost device stops tcd only when no other device has a channel of it in the pool.
 
 ### DV3003 notes
 
@@ -370,7 +377,7 @@ The gain limits are asymmetric on purpose: attenuating is safe, amplifying also 
 - for many modules a compact view (from five modules on, or chosen with "Compact"): a key per module with its codec and level, full cards only for the modules on the air and for the ones clicked to keep open; tcd keeps the view for every browser (`MonitorView`, written by Save), the pinned modules stay in the browser
 - signal path of the active stream with the level at each stage
 - AGC and gain controls that apply immediately, and a button to save them to `tcd.ini`
-- DVSI devices: serial, type, role, channels in use and their modules, buffer depth; "Phase out" takes a device out of service (since 0.17.1): no new streams, the ones on it run to their end, then tcd closes it and it can be unplugged; "Take back" opens it again. Only for a device whose codecs a codec plugin does; not kept by Save (a restart of tcd uses it again)
+- hardware and software apart (since 0.18.0): the AMBE channels of D-Star and DMR in use, fixed or pool, then each device: serial, type, role, channels in use and their modules, buffer depth; "Phase out" takes a device out of service (since 0.17.1): no new streams, the ones on it run to their end, then tcd closes it and it can be unplugged; "Take back" opens it again. Only for a device whose codecs a codec plugin does; not kept by Save (a restart of tcd uses it again)
 - "AMBE channels": fixed or pool (`DeviceChannels`) for the streams that start from now on (since 0.17.1), written by Save
 - codec plugins: their codec, counters and streams, and which vocoder new D-Star, DMR and P25 streams get (switchable, see [Codec plugins](#codec-plugins)); tcd's own vocoders OP25 (P25, YSF VW) and Codec2 (M17) with their counters as "Built in" (since 0.14.1); since 0.15.0 the frames a plugin of API 3 decoded with bit errors, repeated or muted
 - reflector connection and packet counters; a standby module shows "standby" while another tcd has it and "taken over" while this tcd has it
@@ -385,7 +392,7 @@ tcdmon                      # this machine, port 8081
 tcdmon 192.0.2.20 8081      # another machine
 ```
 
-Shows level bars, signal flow, AGC state, the DVSI channels with their modules, the codec plugins, tcd's own vocoders and the output gains. `q` quits.
+Shows level bars, signal flow, AGC state, the hardware (the AMBE channels of each codec in use, fixed or pool, each device with its channels and modules, phased out ones marked) and the software (the codec plugins and tcd's own vocoders), and the output gains. `q` quits.
 
 ### Stats CSV and agc-analyze
 
