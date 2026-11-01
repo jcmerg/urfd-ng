@@ -384,7 +384,10 @@ static int BuiltinStats(const char *name, const char *codec)
 	return g_Stats.num_sw++;
 }
 
-CController::CController() : keep_running(true), ambe_in_num(256), ambe_out_num(256), dmr_reencode_num(256), outgain_dstar_num(256), outgain_dmr_num(256), outgain_usrp_num(256), outgain_imbe_num(256), outgain_m17_num(256) {}
+CController::CController() : keep_running(true), ambe_in_num(256), ambe_out_num(256), dmr_reencode_num(256), outgain_dstar_num(256), outgain_dmr_num(256), outgain_usrp_num(256), outgain_imbe_num(256), outgain_m17_num(256)
+{
+	std::fill(std::begin(own_stats), std::end(own_stats), -1);
+}
 
 bool CController::Start()
 {
@@ -413,6 +416,7 @@ bool CController::Start()
 	imbeFuture      = std::async(std::launch::async, &CController::ProcessIMBEThread,   this);
 	usrpFuture      = std::async(std::launch::async, &CController::ProcessUSRPThread,   this);
 	// the threads of the codec plugins, when there is one for the codec
+	const auto &dmr_choices = choices[kChoiceDMR], &dstar_choices = choices[kChoiceDStar];
 	if (std::count(dmr_choices.begin(), dmr_choices.end(), nullptr) < (long)dmr_choices.size())
 		swambe2Future = std::async(std::launch::async, &CController::ProcessSWAMBE2Thread, this);
 	if (std::count(dstar_choices.begin(), dstar_choices.end(), nullptr) < (long)dstar_choices.size())
@@ -565,12 +569,19 @@ bool CController::InitVocoders()
 		c2_highpass[c] = SHighPass{ {{0.0f, 0.0f}, {0.0f, 0.0f}}, 0 };
 	}
 
+	// the plugin each vocoder choice names in tcd.ini, empty for the default: the
+	// device ("dvsi") or tcd's own vocoder ("op25", "codec2")
+	std::string names[kNumChoices];
+	for (int k = 0; k < kNumChoices; k++)
+	{
+		names[k] = g_Conf.GetCodecChoice(k);
+		if (names[k] == (g_CodecChoices[k].own ? g_CodecChoices[k].own : "dvsi"))
+			names[k].clear();
+	}
 	// the software vocoders of the codec plugins: CodecDStar / CodecDMR in tcd.ini
 	// put the codec in software, else the devices come first and a plugin only
 	// does what no device does (and the DMR re-encode)
-	// ("dvsi" names the device: the default)
-	const std::string dstar_name = g_Conf.GetCodecDStar() == "dvsi" ? std::string() : g_Conf.GetCodecDStar();
-	const std::string dmr_name = g_Conf.GetCodecDMR() == "dvsi" ? std::string() : g_Conf.GetCodecDMR();
+	const std::string &dstar_name = names[kChoiceDStar], &dmr_name = names[kChoiceDMR];
 	const bool dstar_forced = !dstar_name.empty();
 	const bool dmr_forced = !dmr_name.empty();
 	CSoftCodec *dstar_plugin = g_Codecs.Get(TCD_CODEC_DSTAR, dstar_name);
@@ -580,19 +591,15 @@ bool CController::InitVocoders()
 		std::cerr << "ERROR: CodecDStar/CodecDMR names no loaded codec plugin that does that codec" << std::endl;
 		return true;
 	}
-	// P25: "op25" (or no CodecP25) is tcd's own vocoder, else a plugin that does P25
-	const std::string p25_name = g_Conf.GetCodecP25() == "op25" ? std::string() : g_Conf.GetCodecP25();
-	if (!p25_name.empty() && !g_Codecs.Get(TCD_CODEC_P25, p25_name))
+	// P25 and M17: tcd's own vocoder, else a plugin that does the codec
+	for (int k = 0; k < kNumChoices; k++)
 	{
-		std::cerr << "ERROR: CodecP25 = " << p25_name << ": no loaded codec plugin of that name does P25 (op25 is tcd's own)" << std::endl;
-		return true;
-	}
-	// M17: "codec2" (or no CodecM17) is tcd's own Codec2, else a plugin that does M17
-	const std::string m17_name = g_Conf.GetCodecM17() == "codec2" ? std::string() : g_Conf.GetCodecM17();
-	if (!m17_name.empty() && !g_Codecs.Get(TCD_CODEC_M17, m17_name))
-	{
-		std::cerr << "ERROR: CodecM17 = " << m17_name << ": no loaded codec plugin of that name does M17 (codec2 is tcd's own)" << std::endl;
-		return true;
+		const auto &ch = g_CodecChoices[k];
+		if (ch.own && !names[k].empty() && !g_Codecs.Get(ch.codec, names[k]))
+		{
+			std::cerr << "ERROR: " << ch.ini << " = " << names[k] << ": no loaded codec plugin of that name does " << ch.name << " (" << ch.own << " is tcd's own)" << std::endl;
+			return true;
+		}
 	}
 
 	// the 3000 or 3003 devices that answer
@@ -651,7 +658,7 @@ bool CController::InitVocoders()
 				return true;
 		}
 		used.emplace_back(dev.node, dev.desc, device.get(), device_does_dmr ? "dmr" : "dstar");
-		(device_does_dmr ? dmr_hw_modules : dstar_hw_modules) = modules.substr(0, Edvtype::dv3000 == dvtype ? 1 : 3);
+		hw_modules[device_does_dmr ? kChoiceDMR : kChoiceDStar] = modules.substr(0, Edvtype::dv3000 == dvtype ? 1 : 3);
 		std::cout << "Using " << dev.desc << " for " << (device_does_dmr ? "DMR" : "D-Star") << std::endl;
 	}
 	else if (deviceset.size() >= 2)
@@ -707,7 +714,7 @@ bool CController::InitVocoders()
 			}
 			used.emplace_back(dv3000_dev.node, dv3000_dev.desc, dstar_device.get(), "dstar");
 			used.emplace_back(dv3003_dev.node, dv3003_dev.desc, dmrsf_device.get(), mixed_mode ? "mixed" : "dmr");
-			dstar_hw_modules = dmr_hw_modules = modules.substr(0, 2);
+			hw_modules[kChoiceDStar] = hw_modules[kChoiceDMR] = modules.substr(0, 2);
 		}
 		// Two same-type devices
 		else
@@ -733,7 +740,7 @@ bool CController::InitVocoders()
 				return true;
 			used.emplace_back(dev1.node, dev1.desc, dstar_device.get(), "dstar");
 			used.emplace_back(dev2.node, dev2.desc, dmrsf_device.get(), "dmr");
-			dstar_hw_modules = dmr_hw_modules = modules.substr(0, Edvtype::dv3000 == dvtype ? 1 : 3);
+			hw_modules[kChoiceDStar] = hw_modules[kChoiceDMR] = modules.substr(0, Edvtype::dv3000 == dvtype ? 1 : 3);
 		}
 	}
 	else if (dstar_plugin && dmr_sw)
@@ -754,46 +761,43 @@ bool CController::InitVocoders()
 	// switches between them, CodecDStar/CodecDMR/CodecP25/CodecM17 is the start
 	dstar_in_num = calcNumerator(g_Conf.GetGain(EGainType::dstarin));
 	dstar_out_num = calcNumerator(g_Conf.GetGain(EGainType::dstarout));
-	for (auto [codec, builtin, choices, options, choice, name, label] : {
-			std::make_tuple(TCD_CODEC_DSTAR, dstar_device ? "dvsi" : "", &dstar_choices, &g_Stats.dstar_options, &g_Stats.config.codec_dstar, dstar_name, "D-Star"),
-			std::make_tuple(TCD_CODEC_DMR, dmrsf_device ? "dvsi" : "", &dmr_choices, &g_Stats.dmr_options, &g_Stats.config.codec_dmr, dmr_name, "DMR"),
-			std::make_tuple(TCD_CODEC_P25, "op25", &p25_choices, &g_Stats.p25_options, &g_Stats.config.codec_p25, p25_name, "IMBE (P25, YSF VW)"),
-			std::make_tuple(TCD_CODEC_M17, "codec2", &m17_choices, &g_Stats.m17_options, &g_Stats.config.codec_m17, m17_name, "Codec2 (M17)") })
+	for (int k = 0; k < kNumChoices; k++)
 	{
-		if (*builtin)
+		const auto &ch = g_CodecChoices[k];
+		auto &options = g_Stats.codec_options[k];
+		const bool device = (k == kChoiceDStar && dstar_device) || (k == kChoiceDMR && dmrsf_device);
+		if (ch.own || device)
 		{
-			choices->push_back(nullptr);
-			options->push_back(builtin);
-			if (codec == TCD_CODEC_P25)
-				op25_stats = BuiltinStats("OP25", "p25");
-			if (codec == TCD_CODEC_M17)
-				codec2_stats = BuiltinStats("Codec2", "m17");
+			choices[k].push_back(nullptr);
+			options.push_back(ch.own ? ch.own : "dvsi");
+			if (ch.own)
+				own_stats[k] = BuiltinStats(ch.own_row, ch.key);
 		}
-		for (auto *sw : g_Codecs.All(codec))
+		for (auto *sw : g_Codecs.All(ch.codec))
 		{
-			choices->push_back(sw);
-			options->push_back(sw->GetName());
+			choices[k].push_back(sw);
+			options.push_back(sw->GetName());
 			if (g_Stats.num_sw < CTcdStats::MAX_SW)
 			{
 				auto &st = g_Stats.sw[g_Stats.num_sw];
 				st.name = sw->GetName();
-				st.codec = codec == TCD_CODEC_DSTAR ? "dstar" : codec == TCD_CODEC_DMR ? "dmr" : codec == TCD_CODEC_P25 ? "p25" : "m17";
+				st.codec = ch.key;
 				sw->stats = g_Stats.num_sw++;
 			}
 		}
 		int start = 0;
-		for (size_t i = 0; i < options->size(); i++)
-			if (!name.empty() && (*options)[i] == name)
+		for (size_t i = 0; i < options.size(); i++)
+			if (!names[k].empty() && options[i] == names[k])
 				start = int(i);
-		choice->store(start, std::memory_order_relaxed);
+		g_Stats.config.codec_choice[k].store(start, std::memory_order_relaxed);
 		std::string list;
-		for (size_t i = 0; i < options->size(); i++)
-			list += (i ? ", " : "") + (*options)[i] + (int(i) == start ? " (now)" : "");
-		std::cout << label << ": " << list << std::endl;
+		for (size_t i = 0; i < options.size(); i++)
+			list += (i ? ", " : "") + options[i] + (int(i) == start ? " (now)" : "");
+		std::cout << ch.label << ": " << list << std::endl;
 	}
 	// M17 1600 goes with the M17 choice: the plugin's 1600 codec when it has one,
 	// else tcd's own Codec2; it counts in the plugin's M17 entry
-	for (auto *sw : m17_choices)
+	for (auto *sw : choices[kChoiceM17])
 	{
 		CSoftCodec *sw1600 = sw ? g_Codecs.Get(TCD_CODEC_M17_1600, sw->GetName()) : nullptr;
 		if (sw1600)
@@ -801,18 +805,21 @@ bool CController::InitVocoders()
 		m17_1600_choices.push_back(sw1600);
 	}
 	// the modules beyond the devices' channels go to a plugin
-	for (auto [hw, choices, label] : { std::make_tuple(&dstar_hw_modules, &dstar_choices, "D-Star"), std::make_tuple(&dmr_hw_modules, &dmr_choices, "DMR") })
+	for (int k : { kChoiceDStar, kChoiceDMR })
 	{
+		const std::string &hw = hw_modules[k];
+		const auto &list = choices[k];
+		const char *label = g_CodecChoices[k].label;
 		std::string rest;
 		for (char m : modules)
-			if (std::string::npos == hw->find(m))
+			if (std::string::npos == hw.find(m))
 				rest += m;
-		const bool plugin = std::count(choices->begin(), choices->end(), nullptr) < (long)choices->size();
-		if (!hw->empty() && !rest.empty())
-			std::cout << label << ": modules " << *hw << " on the devices, " << rest << (plugin ? " on a codec plugin" : "") << std::endl;
+		const bool plugin = std::count(list.begin(), list.end(), nullptr) < (long)list.size();
+		if (!hw.empty() && !rest.empty())
+			std::cout << label << ": modules " << hw << " on the devices, " << rest << (plugin ? " on a codec plugin" : "") << std::endl;
 		if (!rest.empty() && !plugin)
 		{
-			std::cerr << "ERROR: the devices do " << label << " for " << (hw->empty() ? std::string("no module") : "modules " + *hw) << " only; modules " << rest
+			std::cerr << "ERROR: the devices do " << label << " for " << (hw.empty() ? std::string("no module") : "modules " + hw) << " only; modules " << rest
 			          << " need a codec plugin for " << label << " (CodecPlugin = ...) or fewer Modules" << std::endl;
 			return true;
 		}
@@ -932,15 +939,15 @@ void CController::ReadReflectorThread()
 					if (last > 0 && (now_ms - last) > 2000)
 						st.active_module.store(' ', std::memory_order_relaxed);
 				}
-				for (auto *choices : { &dstar_choices, &dmr_choices, &p25_choices, &m17_choices })
-					for (size_t i = 0; i < choices->size(); i++)
+				for (int k = 0; k < kNumChoices; k++)
+					for (size_t i = 0; i < choices[k].size(); i++)
 					{
-						auto *sw = (*choices)[i];
+						auto *sw = choices[k][i];
 						if (!sw || sw->stats < 0)
 							continue;
 						auto &st = g_Stats.sw[sw->stats];
 						// a plugin's M17 entry counts its M17 1600 streams as well
-						auto *sw1600 = choices == &m17_choices ? m17_1600_choices[i] : nullptr;
+						auto *sw1600 = k == kChoiceM17 ? m17_1600_choices[i] : nullptr;
 						st.cached_streams.store(sw->Streams() + (sw1600 ? sw1600->Streams() : 0), std::memory_order_relaxed);
 						st.reencode_active.store(reencode && sw == dmr_sw, std::memory_order_relaxed);
 					}
@@ -1104,7 +1111,7 @@ void CController::EncodeM17(const std::shared_ptr<CTranscoderPacket> &packet, co
 		return;
 	}
 	Codec2For(packet, false).codec2_encode(bits, gained);
-	Stat(codec2_stats, packet->GetModule(), &SwVocoderStats::encodes);
+	Stat(own_stats[kChoiceM17], packet->GetModule(), &SwVocoderStats::encodes);
 }
 
 void CController::DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const uint8_t *bits, bool is1600, int16_t *pcm)
@@ -1118,7 +1125,7 @@ void CController::DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, co
 		return;
 	}
 	Codec2For(packet, is1600).codec2_decode(pcm, bits);
-	Stat(codec2_stats, packet->GetModule(), &SwVocoderStats::decodes);
+	Stat(own_stats[kChoiceM17], packet->GetModule(), &SwVocoderStats::decodes);
 }
 
 // The original incoming coded was M17, so we will calculate the audio and then
@@ -1394,29 +1401,28 @@ void CController::ProcessSWDStarThread()
 
 // the choice of a stream, made at its first packet: the one for new streams, but a
 // module the devices do not serve always goes to a plugin (the chosen one, else the first)
-int CController::Pick(uint32_t codec, uint16_t streamid, char module)
+int CController::Pick(int k, size_t list_size, uint16_t streamid, char module)
 {
-	auto &choices = Choices(codec);
-	const bool m17 = codec == TCD_CODEC_M17 || codec == TCD_CODEC_M17_1600;
-	auto &pinned = codec == TCD_CODEC_DSTAR ? dstar_pinned : codec == TCD_CODEC_DMR ? dmr_pinned : codec == TCD_CODEC_P25 ? p25_pinned : m17_pinned;
+	const auto &list = choices[k];	// M17 1600's list runs alongside, of the same size
+	auto &pins = pinned[k];
 	std::lock_guard<std::mutex> lock(pinned_mux);
 	const auto now = std::chrono::steady_clock::now();
-	auto it = pinned.find(streamid);
-	if (it == pinned.end())
+	auto it = pins.find(streamid);
+	if (it == pins.end())
 	{
-		int c = (codec == TCD_CODEC_DSTAR ? g_Stats.config.codec_dstar : codec == TCD_CODEC_DMR ? g_Stats.config.codec_dmr
-		         : codec == TCD_CODEC_P25 ? g_Stats.config.codec_p25 : g_Stats.config.codec_m17).load(std::memory_order_relaxed);
-		if (c < 0 || c >= int(choices.size()))
+		int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
+		if (c < 0 || c >= int(list_size))
 			c = 0;
-		// OP25 does P25 and Codec2 M17 for every module; the devices only for theirs
-		if (!choices[c] && codec != TCD_CODEC_P25 && !m17 && std::string::npos == (codec == TCD_CODEC_DSTAR ? dstar_hw_modules : dmr_hw_modules).find(module))
-			for (size_t i = 0; i < choices.size(); i++)
-				if (choices[i])
+		// tcd's own vocoders do every module; the devices only theirs (D-Star and
+		// DMR, whose list is the one asked for)
+		if (!list[c] && !g_CodecChoices[k].own && std::string::npos == hw_modules[k].find(module))
+			for (size_t i = 0; i < list.size(); i++)
+				if (list[i])
 				{
 					c = int(i);
 					break;
 				}
-		it = pinned.emplace(streamid, SPinned{ c, now }).first;
+		it = pins.emplace(streamid, SPinned{ c, now }).first;
 	}
 	it->second.last = now;
 	return it->second.choice;
@@ -1427,9 +1433,9 @@ void CController::PurgePinned(void)
 {
 	std::lock_guard<std::mutex> lock(pinned_mux);
 	const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(30);
-	for (auto *pinned : { &dstar_pinned, &dmr_pinned, &p25_pinned, &m17_pinned })
-		for (auto it = pinned->begin(); it != pinned->end(); )
-			it = it->second.last < cutoff ? pinned->erase(it) : std::next(it);
+	for (auto &p : pinned)
+		for (auto it = p.begin(); it != p.end(); )
+			it = it->second.last < cutoff ? p.erase(it) : std::next(it);
 }
 
 void CController::ToDStar(std::shared_ptr<CTranscoderPacket> packet)
@@ -1474,7 +1480,7 @@ void CController::EncodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, c
 	if (Begin(imbe_enc_stream, packet))
 		imbe_enc[packet->GetModule()] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
 	imbe_enc[packet->GetModule()]->encode_4400(pcm, imbe);
-	Stat(op25_stats, packet->GetModule(), &SwVocoderStats::encodes);
+	Stat(own_stats[kChoiceP25], packet->GetModule(), &SwVocoderStats::encodes);
 }
 
 void CController::DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm)
@@ -1491,7 +1497,7 @@ void CController::DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, i
 	if (Begin(imbe_dec_stream, packet))
 		imbe_dec[packet->GetModule()] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
 	imbe_dec[packet->GetModule()]->decode_4400(pcm, (uint8_t *)packet->GetP25Data());
-	Stat(op25_stats, packet->GetModule(), &SwVocoderStats::decodes);
+	Stat(own_stats[kChoiceP25], packet->GetModule(), &SwVocoderStats::decodes);
 }
 
 void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)

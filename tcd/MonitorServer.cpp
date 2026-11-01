@@ -162,18 +162,16 @@ std::string CMonitorServer::BuildStatsJson()
 			first = false;
 		}
 	}
-	// what does D-Star, DMR, P25 and M17 for new streams, and what could
+	// what does each vocoder choice (D-Star, DMR, P25, M17) for new streams, and what could
 	js << "],\"codecs\":{";
-	for (auto [key, options, choice] : { std::make_tuple("dstar", &g_Stats.dstar_options, &g_Stats.config.codec_dstar),
-	                                     std::make_tuple("dmr", &g_Stats.dmr_options, &g_Stats.config.codec_dmr),
-	                                     std::make_tuple("p25", &g_Stats.p25_options, &g_Stats.config.codec_p25),
-	                                     std::make_tuple("m17", &g_Stats.m17_options, &g_Stats.config.codec_m17) })
+	for (int k = 0; k < kNumChoices; k++)
 	{
-		js << (std::string("dstar") == key ? "" : ",") << "\"" << key << "\":{\"options\":[";
-		for (size_t i = 0; i < options->size(); i++)
-			js << (i ? "," : "") << "\"" << (*options)[i] << "\"";
-		const int c = choice->load(std::memory_order_relaxed);
-		js << "],\"use\":\"" << (c >= 0 && c < int(options->size()) ? (*options)[c] : std::string()) << "\"}";
+		const auto &options = g_Stats.codec_options[k];
+		js << (k ? "," : "") << "\"" << g_CodecChoices[k].key << "\":{\"options\":[";
+		for (size_t i = 0; i < options.size(); i++)
+			js << (i ? "," : "") << "\"" << options[i] << "\"";
+		const int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
+		js << "],\"use\":\"" << (c >= 0 && c < int(options.size()) ? options[c] : std::string()) << "\"}";
 	}
 	js << "},\"reencode_available\":" << (g_Stats.reencode_available.load(std::memory_order_relaxed) ? "true" : "false");
 	js << ",\"reflector\":{"
@@ -351,14 +349,11 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 			return e == std::string::npos ? std::string() : body.substr(p + 1, e - p - 1);
 		};
 		const std::string codec = field("codec"), use = field("use");
-		const auto *options = codec == "dstar" ? &g_Stats.dstar_options : codec == "dmr" ? &g_Stats.dmr_options : codec == "p25" ? &g_Stats.p25_options
-		                    : codec == "m17" ? &g_Stats.m17_options : nullptr;
-		auto *choice = codec == "dstar" ? &g_Stats.config.codec_dstar : codec == "dmr" ? &g_Stats.config.codec_dmr : codec == "p25" ? &g_Stats.config.codec_p25
-		             : &g_Stats.config.codec_m17;
+		const int k = ChoiceOfKey(codec);
 		int found = -1;
-		if (options)
-			for (size_t i = 0; i < options->size(); i++)
-				if ((*options)[i] == use)
+		if (k >= 0)
+			for (size_t i = 0; i < g_Stats.codec_options[k].size(); i++)
+				if (g_Stats.codec_options[k][i] == use)
 					found = int(i);
 		if (found < 0)
 		{
@@ -367,8 +362,8 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 		}
 		else
 		{
-			choice->store(found);
-			std::cout << "Monitor: new " << (codec == "dstar" ? "D-Star" : codec == "dmr" ? "DMR" : codec == "p25" ? "IMBE (P25, YSF VW)" : "M17") << " streams go to " << use << std::endl;
+			g_Stats.config.codec_choice[k].store(found);
+			std::cout << "Monitor: new " << g_CodecChoices[k].label << " streams go to " << use << std::endl;
 			reply = "{\"status\":\"ok\"}";
 			return 200;
 		}
@@ -968,9 +963,12 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 
 	std::ostringstream out;
 	std::string line;
-	// the codec choice: replaced where it stands, else written at the end when there is a choice;
-	// the module view likewise, written when it is not auto
-	bool codecDStarWritten = false, codecDmrWritten = false, codecP25Written = false, codecM17Written = false, viewWritten = false;
+	// the vocoder choices: a line of tcd.ini is rewritten when there is a choice
+	// (a device's codec: any), and appended when there was none and there are two;
+	// the module view is replaced where it stands, else written when it is not auto
+	bool codecWritten[kNumChoices] = {};
+	auto codecLine = [](int k) { return g_Stats.codec_options[k][g_Stats.config.codec_choice[k].load()]; };
+	bool viewWritten = false;
 	static const char *views[] = { "auto", "cards", "compact" };
 	const int view = std::clamp(g_Stats.config.monitor_view.load(), 0, 2);
 	while (std::getline(in, line))
@@ -1007,10 +1005,13 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 				if (key == "DmrGainMode")      { int m = g_Stats.config.dmr_gain_mode.load(); out << key << " = " << (m==2 ? "reencode" : m==1 ? "ambe" : "off") << "\n"; continue; }
 				if (key == "AmbeGainDb")       { out << key << " = " << g_Stats.config.ambe_gain_db.load() << "\n"; continue; }
 				if (key == "MonitorView") { out << key << " = " << views[view] << "\n"; viewWritten = true; continue; }
-				if (key == "CodecDStar" && !g_Stats.dstar_options.empty()) { out << key << " = " << g_Stats.dstar_options[g_Stats.config.codec_dstar.load()] << "\n"; codecDStarWritten = true; continue; }
-				if (key == "CodecDMR" && !g_Stats.dmr_options.empty())     { out << key << " = " << g_Stats.dmr_options[g_Stats.config.codec_dmr.load()] << "\n"; codecDmrWritten = true; continue; }
-				if (key == "CodecP25" && g_Stats.p25_options.size() > 1)   { out << key << " = " << g_Stats.p25_options[g_Stats.config.codec_p25.load()] << "\n"; codecP25Written = true; continue; }
-				if (key == "CodecM17" && g_Stats.m17_options.size() > 1)   { out << key << " = " << g_Stats.m17_options[g_Stats.config.codec_m17.load()] << "\n"; codecM17Written = true; continue; }
+				const int k = ChoiceOfIni(key);
+				if (k >= 0 && g_Stats.codec_options[k].size() > (g_CodecChoices[k].own ? 1u : 0u))
+				{
+					out << key << " = " << codecLine(k) << "\n";
+					codecWritten[k] = true;
+					continue;
+				}
 				if (key == "AGC")               { out << key << " = " << (g_Stats.config.agc_enabled.load() ? "true" : "false") << "\n"; continue; }
 				if (key == "AGCTarget")         { out << key << " = " << g_Stats.config.agc_target.load() << "\n"; continue; }
 				if (key == "AGCAttack")         { out << key << " = " << g_Stats.config.agc_attack.load() << "\n"; continue; }
@@ -1034,14 +1035,9 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 	in.close();
 	for (auto &a : profile)
 		if (!a.written) out << a.key << " = " << a.value << "\n";
-	if (!codecDStarWritten && g_Stats.dstar_options.size() > 1)
-		out << "CodecDStar = " << g_Stats.dstar_options[g_Stats.config.codec_dstar.load()] << "\n";
-	if (!codecDmrWritten && g_Stats.dmr_options.size() > 1)
-		out << "CodecDMR = " << g_Stats.dmr_options[g_Stats.config.codec_dmr.load()] << "\n";
-	if (!codecP25Written && g_Stats.p25_options.size() > 1)
-		out << "CodecP25 = " << g_Stats.p25_options[g_Stats.config.codec_p25.load()] << "\n";
-	if (!codecM17Written && g_Stats.m17_options.size() > 1)
-		out << "CodecM17 = " << g_Stats.m17_options[g_Stats.config.codec_m17.load()] << "\n";
+	for (int k = 0; k < kNumChoices; k++)
+		if (!codecWritten[k] && g_Stats.codec_options[k].size() > 1)
+			out << g_CodecChoices[k].ini << " = " << codecLine(k) << "\n";
 	if (!viewWritten && view != 0)
 		out << "MonitorView = " << views[view] << "\n";
 

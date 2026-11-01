@@ -17,6 +17,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+#include <cassert>
 #include <unordered_map>
 #include <chrono>
 #include <vector>
@@ -36,6 +37,7 @@
 #include "NoiseSuppress.h"
 #include "AmbeGain.h"
 #include "CodecPlugin.h"
+#include "CodecChoice.h"
 
 class CController
 {
@@ -77,29 +79,29 @@ protected:
 	CPacketQueue usrp_queue;
 	std::mutex send_mux;
 	std::mutex p25vocoder_mux;
-	// what does D-Star, DMR, P25 and M17: nullptr = the device (P25: tcd's own OP25
-	// vocoder, M17: tcd's own Codec2), else a codec plugin's codec (CodecPlugin.h), as
-	// g_Stats.dstar_options/dmr_options/p25_options/m17_options name them; a stream
-	// keeps the one it started with (Pick), config.codec_dstar/codec_dmr/codec_p25/
-	// codec_m17 is for new streams. m17_1600_choices runs alongside m17_choices: the
-	// same plugin's M17 1600 codec, nullptr where tcd's own Codec2 decodes 1600
-	std::vector<class CSoftCodec *> dstar_choices, dmr_choices, p25_choices, m17_choices, m17_1600_choices;
+	// per vocoder choice (CodecChoice.h), what may do it: nullptr = the device or
+	// tcd's own vocoder (OP25, Codec2), else a codec plugin's codec (CodecPlugin.h),
+	// as g_Stats.codec_options names them; a stream keeps the one it started with
+	// (Pick), config.codec_choice is for new streams. m17_1600_choices runs
+	// alongside choices[kChoiceM17]: the same plugin's M17 1600 codec, nullptr
+	// where tcd's own Codec2 decodes 1600
+	std::vector<class CSoftCodec *> choices[kNumChoices], m17_1600_choices;
 	struct SPinned { int choice; std::chrono::steady_clock::time_point last; };
 	std::mutex pinned_mux;
-	std::unordered_map<uint16_t, SPinned> dstar_pinned, dmr_pinned, p25_pinned, m17_pinned;
-	// the modules the devices do D-Star and DMR for; the other modules go to a plugin
-	std::string dstar_hw_modules, dmr_hw_modules;
-	std::vector<class CSoftCodec *> &Choices(uint32_t codec)
-	{
-		return codec == TCD_CODEC_DSTAR ? dstar_choices : codec == TCD_CODEC_DMR ? dmr_choices : codec == TCD_CODEC_P25 ? p25_choices
-		     : codec == TCD_CODEC_M17 ? m17_choices : m17_1600_choices;
-	}
+	std::unordered_map<uint16_t, SPinned> pinned[kNumChoices];
+	// the modules the devices do D-Star and DMR for; the other modules go to a
+	// plugin (empty for the choices with an own vocoder, which does every module)
+	std::string hw_modules[kNumChoices];
+	// the index of a stream's choice k (CodecChoice.h) into a list of
+	// list_size, pinned for the stream
+	int Pick(int k, size_t list_size, uint16_t streamid, char module);
 	// codec: TCD_CODEC_DSTAR, _DMR, _P25, _M17 or _M17_1600 (the two M17 share the choice)
-	int Pick(uint32_t codec, uint16_t streamid, char module);
 	class CSoftCodec *SwCodec(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet)
 	{
-		auto &c = Choices(codec);
-		return c.empty() ? nullptr : c[Pick(codec, packet->GetStreamId(), packet->GetModule())];
+		const int k = ChoiceOfCodec(codec);
+		assert(k >= 0);
+		const auto &list = codec == TCD_CODEC_M17_1600 ? m17_1600_choices : choices[k];
+		return list.empty() ? nullptr : list[Pick(k, list.size(), packet->GetStreamId(), packet->GetModule())];
 	}
 	// P25 with the stream's choice: OP25 or a plugin. A plugin's error gives IMBE
 	// silence (encode) or silent samples (decode)
@@ -113,8 +115,8 @@ protected:
 	void PurgePinned(void);
 	// the DMR plugin for DmrGainMode = reencode, nullptr without one
 	class CSoftCodec *dmr_sw = nullptr;
-	// the monitor's entries of tcd's own vocoders, -1 without one
-	int op25_stats = -1, codec2_stats = -1;
+	// the monitor's entries of tcd's own vocoders (OP25, Codec2), -1 without one
+	int own_stats[kNumChoices];	// set to -1 in the constructor
 	int32_t dstar_in_num = 256, dstar_out_num = 256;	// DStarGainIn/Out for a D-Star plugin
 	int32_t ambe_in_num, ambe_out_num, dmr_reencode_num;
 	int32_t outgain_dstar_num, outgain_dmr_num, outgain_usrp_num, outgain_imbe_num, outgain_m17_num;
