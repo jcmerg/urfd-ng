@@ -543,10 +543,21 @@ int main(int argc, char *argv[])
 			if (row >= rows - 6) break;  // don't overflow terminal
 		}
 
-		// Devices
-		attron(COLOR_PAIR(7) | A_BOLD);
-		mvprintw(row, 0, "Devices");
-		attroff(COLOR_PAIR(7) | A_BOLD);
+		// Hardware: the free AMBE channels of each codec, fixed or pool, then the devices
+		{
+			auto hw = json_obj(last_json, "hw_channels");
+			auto ds = json_obj(hw, "dstar"), dm = json_obj(hw, "dmr");
+			attron(COLOR_PAIR(7) | A_BOLD);
+			mvprintw(row, 0, "Hardware");
+			attroff(COLOR_PAIR(7) | A_BOLD);
+			if (!dev_items.empty())
+				printw("  AMBE channels: D-Star %d of %d free, DMR %d of %d free, %s",
+					json_int(ds, "total") - json_int(ds, "busy"), json_int(ds, "total"),
+					json_int(dm, "total") - json_int(dm, "busy"), json_int(dm, "total"),
+					json_int(cfg_json, "device_pool") ? "pool" : "fixed");
+			else
+				printw("  no AMBE device");
+		}
 		row++;
 
 		for (auto &dj : dev_items)
@@ -570,11 +581,14 @@ int main(int argc, char *argv[])
 			}
 			int total_ch = (type == "DV3003") ? 3 : 1;
 
-			if (online && active_count > 0) attron(COLOR_PAIR(7) | A_BOLD);
+			// phased out from the monitor: going (no new streams) or out (closed)
+			const int phase = json_int(dj, "phase");
+			if (phase == 2) attron(COLOR_PAIR(5));
+			else if (online && active_count > 0) attron(COLOR_PAIR(7) | A_BOLD);
 			else if (online) attron(COLOR_PAIR(1));
 			else attron(COLOR_PAIR(3));
-			mvprintw(row, 2, "%s", online ? (active_count > 0 ? ">>" : "OK") : "!!");
-			attroff(COLOR_PAIR(1) | COLOR_PAIR(3) | COLOR_PAIR(7) | A_BOLD);
+			mvprintw(row, 2, "%s", phase == 2 ? "--" : phase == 1 ? "<-" : online ? (active_count > 0 ? ">>" : "OK") : "!!");
+			attroff(COLOR_PAIR(1) | COLOR_PAIR(3) | COLOR_PAIR(5) | COLOR_PAIR(7) | A_BOLD);
 
 			printw("  %s (%s) [%s]  slots:%d/%d  buf:%d",
 				serial.c_str(), type.c_str(), role.c_str(), active_count, total_ch, bufd);
@@ -585,10 +599,15 @@ int main(int argc, char *argv[])
 				attroff(COLOR_PAIR(7));
 			}
 			if (errs > 0) { attron(COLOR_PAIR(3)); printw("  err:%d", errs); attroff(COLOR_PAIR(3)); }
+			if (phase) printw("  %s", phase == 2 ? "phased out" : "phasing out");
 			row++;
 		}
 
-		// the codecs of codec plugins and tcd's own vocoders
+		// Software: the codecs of codec plugins and tcd's own vocoders, as many streams as the CPU takes
+		attron(COLOR_PAIR(7) | A_BOLD);
+		mvprintw(row, 0, "Software");
+		attroff(COLOR_PAIR(7) | A_BOLD);
+		row++;
 		for (const auto &sw_json : json_arr_items(json_arr(last_json, "swvocoders")))
 		{
 			std::string name = json_str(sw_json, "name");
