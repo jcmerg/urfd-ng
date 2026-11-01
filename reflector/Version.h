@@ -25,8 +25,8 @@
 // the version of urfd, g_Version (Main.cpp); a plugin (Plugin.h) is built for exactly this one.
 // The major byte should only change if the interlink packet changes! [URF] InterlinkVersion = 3 still announces 3
 #define URFD_VERSION_MAJOR    4
-#define URFD_VERSION_MINOR    33
-#define URFD_VERSION_REVISION 5
+#define URFD_VERSION_MINOR    34
+#define URFD_VERSION_REVISION 0
 
 class CVersion
 {
