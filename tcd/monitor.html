@@ -182,8 +182,12 @@ td b { font-weight: 650; font-stretch: 85%; }
 .btn { font: inherit; font-size: var(--fs-s); font-weight: 600; color: var(--panel); background: var(--ink); border: 1px solid var(--ink);
        border-bottom-width: 2px; border-radius: 3px; padding: 0.35rem 0.9rem; cursor: pointer; }
 .btn:active { transform: translateY(1px); }
-.dev-btn { font: inherit; font-size: var(--fs-xs); color: var(--ink); background: var(--panel-raised); border: 1px solid var(--rule);
-           border-radius: 3px; padding: 0.05rem 0.45rem; margin-left: 0.4rem; cursor: pointer; white-space: nowrap; }
+.dev-btn { font: inherit; font-size: var(--fs-xs); color: var(--graphite); background: none; border: 1px solid var(--rule);
+           border-radius: 3px; padding: 0.1rem 0.55rem; cursor: pointer; white-space: nowrap; min-width: 5.6rem; }
+.dev-btn:hover { color: var(--ink); border-color: var(--graphite); }
+.dev-btn[data-out="0"] { color: var(--panel); background: var(--ink); border-color: var(--ink); }
+td.act, th.act { width: 1%; text-align: right; white-space: nowrap; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .save-state { font-size: var(--fs-s); }
 
 /* login, with MonitorPassword */
@@ -256,8 +260,8 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
         <header><h2 id="h-dev">Vocoders</h2></header>
         <div class="scroll">
           <table>
-            <thead><tr><th>Device</th><th>Type</th><th>State</th><th>Channels</th><th class="r opt">Queue</th><th class="r">Errors</th></tr></thead>
-            <tbody id="devices"><tr><td colspan="6" class="empty">No report yet</td></tr></tbody>
+            <thead><tr><th>Device</th><th>Type</th><th>State</th><th>Channels</th><th class="r opt">Queue</th><th class="r">Errors</th><th class="act"><span class="sr">Action</span></th></tr></thead>
+            <tbody id="devices"><tr><td colspan="7" class="empty">No report yet</td></tr></tbody>
           </table>
         </div>
       </section>
@@ -538,12 +542,14 @@ function render() {
       d.phase === 1 ? '<span class="state-use">phasing out</span>' :
       !d.online ? '<span class="state-bad">offline</span>' : used.length ? '<span class="state-use">in use</span>' : '<span class="state-ok">ready</span>';
     // phase out: no new streams, closed when its streams are done; a codec plugin takes over
-    if (d.can_out)
-      state += '<button type="button" class="dev-btn" data-dev="' + i + '" data-out="' + (d.want_out ? 0 : 1) + '">' + (d.want_out ? 'Take back' : 'Phase out') + '</button>';
+    var act = d.can_out ? '<button type="button" class="dev-btn" data-dev="' + i + '" data-out="' + (d.want_out ? 0 : 1) + '" title="' +
+      (d.want_out ? 'Open the device again for new streams' : 'No new streams; closed when the ones on it are done, then it can be unplugged') + '">' +
+      (d.want_out ? 'Take back' : 'Phase out') + '</button>' : '';
     rows += '<tr><td><b>' + esc(d.serial) + '</b></td><td>' + esc(d.type) + (d.role ? ' <span class="muted">' + esc(d.role) + '</span>' : '') + '</td>' +
       '<td>' + state + '</td><td>' + used.map(function (u) { return '<span class="mod-tag">' + esc(u) + '</span>'; }).join('') +
       '<span class="muted">' + used.length + ' of ' + total + '</span></td>' +
-      '<td class="r opt">' + d.buf_depth + '</td><td class="r">' + (d.errors > 0 ? '<span class="state-bad">' + d.errors + '</span>' : '0') + '</td></tr>';
+      '<td class="r opt">' + d.buf_depth + '</td><td class="r">' + (d.errors > 0 ? '<span class="state-bad">' + d.errors + '</span>' : '0') + '</td>' +
+      '<td class="act">' + act + '</td></tr>';
   });
   (data.swvocoders || []).forEach(function (x) {
     var act = x.active_module && x.active_module.length > 0;
@@ -554,9 +560,9 @@ function render() {
       // how the decoded frames came out (plugins of codec API 3 report it)
       (x.error_frames ? ', ' + x.error_frames + ' with bit errors' : '') + (x.repeats ? ', ' + x.repeats + ' repeated' : '') +
       (x.mutes ? ', ' + x.mutes + ' muted' : '') + '</span></td>' +
-      '<td class="r opt muted">-</td><td class="r muted">-</td></tr>';
+      '<td class="r opt muted">-</td><td class="r muted">-</td><td class="act"></td></tr>';
   });
-  $('devices').innerHTML = rows || '<tr><td colspan="6" class="empty">No vocoder found. Check the DeviceSerial lines in tcd.ini.</td></tr>';
+  $('devices').innerHTML = rows || '<tr><td colspan="7" class="empty">No vocoder found. Check the DeviceSerial lines in tcd.ini.</td></tr>';
 
   var r = data.reflector;
   $('reflector').innerHTML =
