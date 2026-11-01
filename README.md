@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.35.1** | tcd 0.17.3 | Dashboard v2.14.2
+**urfd 4.35.2** | tcd 0.18.0 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1049,6 +1049,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.18.0**: three AMBE devices and more (several DV3003, a DV3000 next to them, boards like the USB-3012 with four chips): every channel of every device is used, D-Star and DMR in turn, half as many transmissions at once as channels (before, from the third device on one was left unused without a word); the monitor shows hardware and software apart, with the free AMBE channels of each codec; it lists up to 16 devices (was 4)
 - **tcd 0.17.3**: review fixes of the monitor's pool switch and phasing out: a phased out device is closed only when its channels have been quiet for a second and it has answered every frame (the last frames of a transmission could be lost); Save leaves `DeviceChannels` as it is when tcd started without devices (it wrote `fixed`); the buttons react to every click (the table was rebuilt five times a second); the pool switch shows what tcd does; after a switch from pool to fixed a module whose channel a pool stream still holds takes a free one; "Take back" opens the device at once
 - **tcd 0.17.2**: the web dashboard's "Phase out" and "Take back" sit in a column of their own at the end of a device's row, in the style of the other buttons, instead of under its state
 - **tcd 0.17.1**: the web dashboard switches the AMBE channels between fixed and pool (`DeviceChannels`) at run time, for the streams that start from then on, and Save writes it; "Phase out" next to a device takes it out of service (no new streams, the ones on it run to their end, then it is closed and can be unplugged) and "Take back" opens it again, for a device whose codecs a codec plugin does. A channel is now held by its stream in the fixed mode too, so a switch between the modes never puts two streams on one channel

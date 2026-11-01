@@ -672,6 +672,44 @@ bool CController::InitVocoders()
 			AddChannels(k, 0, { 0, 1, 2 });
 		std::cout << "Using " << dev.desc << " for " << (device_does_dmr ? "DMR" : "D-Star") << std::endl;
 	}
+	else if (deviceset.size() >= 3)
+	{
+		// three devices and more (several DV3003, boards of four chips like the
+		// USB-3012): every channel of every device, D-Star and DMR in turn, so a
+		// pair mostly sits on one chip; the last of an odd number does DMR. The
+		// DV3003s first, the single channel DV3000s after them
+		std::vector<SAmbeDevice> devs(deviceset.begin(), deviceset.end());
+		// by name, so the fixed channels of the modules stay the same from start to start
+		std::sort(devs.begin(), devs.end(), [](const SAmbeDevice &a, const SAmbeDevice &b) {
+			if ((Edvtype::dv3003 == a.type) != (Edvtype::dv3003 == b.type))
+				return Edvtype::dv3003 == a.type;
+			return a.desc < b.desc;
+		});
+		size_t total = 0;
+		for (const auto &d : devs)
+			total += (Edvtype::dv3000 == d.type) ? 1 : 3;
+		std::cout << devs.size() << " AMBE devices, " << total << " channels: " << total / 2 << " for D-Star, " << total - total / 2 << " for DMR" << std::endl;
+		size_t n = 0;
+		for (const auto &d : devs)
+		{
+			const int chans = (Edvtype::dv3000 == d.type) ? 1 : 3;
+			Encoding ch_enc[3] { Encoding::dmrsf, Encoding::dmrsf, Encoding::dmrsf };
+			int dstars = 0;
+			for (int c = 0; c < chans; c++, n++)
+			{
+				const bool dstar = (0 == n % 2) && (n + 1 != total || 0 == total % 2);
+				ch_enc[c] = dstar ? Encoding::dstar : Encoding::dmrsf;
+				dstars += dstar ? 1 : 0;
+			}
+			const int slot = int(slots.size());
+			if (Edvtype::dv3000 == d.type)
+				AddSlot(d.node, d.desc, d.type, d.baud, ch_enc[0], dstars ? "dstar" : "dmr");
+			else
+				AddSlot(d.node, d.desc, d.type, d.baud, dstars >= 2 ? Encoding::dstar : Encoding::dmrsf, 3 == dstars ? "dstar" : 0 == dstars ? "dmr" : "mixed", ch_enc);
+			for (int c = 0; c < chans; c++)
+				AddChannels(Encoding::dstar == ch_enc[c] ? kChoiceDStar : kChoiceDMR, slot, { uint8_t(c) });
+		}
+	}
 	else if (deviceset.size() >= 2)
 	{
 		// Classify each device by type
@@ -934,6 +972,19 @@ void CController::ReadReflectorThread()
 				for (auto &s : slots)
 					if (s->dev && s->stats >= 0)
 						g_Stats.devices[s->stats].buf_depth.store(s->up ? s->dev->GetBufferDepth() : 0, std::memory_order_relaxed);
+				// the hardware channels of each codec: in service, and of them in use
+				for (int k : { kChoiceDStar, kChoiceDMR })
+				{
+					int total = 0, busy = 0;
+					for (const auto &c : hw_channels[k])
+						if (slots[c.slot]->up && !slots[c.slot]->draining)
+						{
+							total++;
+							busy += c.busy ? 1 : 0;
+						}
+					g_Stats.hw_total[k].store(total, std::memory_order_relaxed);
+					g_Stats.hw_busy[k].store(busy, std::memory_order_relaxed);
+				}
 			}
 
 			// Sync the stats of the codec plugins

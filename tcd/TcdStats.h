@@ -96,7 +96,7 @@ class CTcdStats
 {
 public:
 	static constexpr int MAX_MODULES = 26;
-	static constexpr int MAX_DEVICES = 4;
+	static constexpr int MAX_DEVICES = 16;	// boards of four DV3003 chips, more than one
 
 	ModuleStats    modules[MAX_MODULES];    // indexed by module - 'A'
 	DeviceStats    devices[MAX_DEVICES];
@@ -109,6 +109,9 @@ public:
 	std::vector<std::string> codec_options[kNumChoices];
 	std::atomic<bool> reencode_available{false};	// a codec plugin for DmrGainMode = reencode
 	std::atomic<bool> pool_available{false};	// AMBE channels, so DeviceChannels means something
+	// the hardware (AMBE) channels of D-Star and DMR (kChoiceDStar, kChoiceDMR):
+	// in service, and of them in use by a stream
+	std::atomic<int> hw_total[kNumChoices] {}, hw_busy[kNumChoices] {};
 	int            num_devices{0};
 	ReflectorStats reflector;
 

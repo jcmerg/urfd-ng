@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.35.1** | tcd 0.17.3 | Dashboard v2.14.2
+**urfd 4.35.2** | tcd 0.18.0 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -1027,6 +1027,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.18.0**: Drei AMBE-Geräte und mehr (mehrere DV3003, ein DV3000 dazu, Platinen wie die USB-3012 mit vier Chips): Jeder Kanal jedes Geräts wird genutzt, abwechselnd D-Star und DMR, halb so viele Durchsagen gleichzeitig wie Kanäle (vorher blieb ab dem dritten Gerät eins wortlos ungenutzt); der Monitor zeigt Hardware und Software getrennt, mit den freien AMBE-Kanälen je Codec; er führt bis zu 16 Geräte (vorher 4)
 - **tcd 0.17.3**: Korrekturen aus dem Review am Pool-Schalter und am Ausphasen: Ein ausgephastes Gerät wird erst geschlossen, wenn seine Kanäle eine Sekunde ruhig sind und es jeden Frame beantwortet hat (die letzten Frames einer Durchsage konnten verloren gehen); „Save“ lässt `DeviceChannels` stehen, wenn tcd ohne Geräte gestartet ist (es schrieb `fixed`); die Knöpfe reagieren auf jeden Klick (die Tabelle wurde fünfmal pro Sekunde neu gebaut); der Pool-Schalter zeigt, was tcd tut; nach dem Wechsel von Pool auf fest nimmt ein Modul, dessen Kanal ein Pool-Stream noch hält, einen freien; „Take back“ öffnet das Gerät sofort
 - **tcd 0.17.2**: „Phase out“ und „Take back“ im Web-Dashboard stehen in einer eigenen Spalte am Ende der Gerätezeile, im Stil der übrigen Knöpfe, statt unter dem Zustand
 - **tcd 0.17.1**: Das Web-Dashboard schaltet die AMBE-Kanäle im Betrieb zwischen fest und Pool um (`DeviceChannels`), für die Streams, die danach beginnen, und „Save“ speichert es; „Phase out“ neben einem Gerät nimmt es außer Betrieb (keine neuen Streams, die laufenden enden noch darauf, dann wird es geschlossen und kann abgezogen werden), „Take back“ öffnet es wieder, für ein Gerät, dessen Codecs ein Codec-Plugin kann. Ein Kanal gehört jetzt auch bei fester Zuordnung seinem Stream, so landen beim Umschalten nie zwei Streams auf einem Kanal

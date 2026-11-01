@@ -178,6 +178,8 @@ std::string CMonitorServer::BuildStatsJson()
 	}
 	js << "},\"reencode_available\":" << (g_Stats.reencode_available.load(std::memory_order_relaxed) ? "true" : "false");
 	js << ",\"pool_available\":" << (g_Stats.pool_available.load(std::memory_order_relaxed) ? "true" : "false");
+	js << ",\"hw_channels\":{\"dstar\":{\"total\":" << g_Stats.hw_total[kChoiceDStar].load() << ",\"busy\":" << g_Stats.hw_busy[kChoiceDStar].load()
+	   << "},\"dmr\":{\"total\":" << g_Stats.hw_total[kChoiceDMR].load() << ",\"busy\":" << g_Stats.hw_busy[kChoiceDMR].load() << "}}";
 	js << ",\"reflector\":{"
 	   << "\"connected\":" << (g_Stats.reflector.connected.load(std::memory_order_relaxed) ? "true" : "false")
 	   << ",\"pkts_rx\":" << g_Stats.reflector.packets_rx.load(std::memory_order_relaxed)
