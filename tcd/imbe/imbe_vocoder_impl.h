@@ -80,6 +80,7 @@ private:
 	void uv_synt(IMBE_PARAM *imbe_param, Word16 *snd);
 	void v_synt_init(void);
 	void v_synt(IMBE_PARAM *imbe_param, Word16 *snd);
+	Word16 rand_gen(void);	// pseudo-random numbers in -1...1 (Q1.16) from seed
 	void pitch_ref_init(void);
 	Word16 voiced_sa_calc(Word32 num, Word16 den);
 	Word16 unvoiced_sa_calc(Word32 num, Word16 den);

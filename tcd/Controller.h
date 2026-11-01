@@ -58,6 +58,14 @@ protected:
 	std::unordered_map<char, uint8_t[8]> data_store;
 	CTCClient tcClient;
 	std::unordered_map<char, std::unique_ptr<CCodec2>> c2_16, c2_32;
+	// the stream and frame tcd's own Codec2 and IMBE encoder and decoder last did
+	// per module: a new stream id or a lower count is a new transmission, which
+	// starts the vocoder afresh (Begin: true when it did)
+	struct SStreamPos { bool known; uint16_t streamid; uint32_t sequence; };
+	std::unordered_map<char, SStreamPos> c2_16_stream, c2_32_stream, imbe_enc_stream, imbe_dec_stream;
+	static bool Begin(std::unordered_map<char, SStreamPos> &pos, const std::shared_ptr<CTranscoderPacket> &packet);
+	// the module's Codec2 of the mode the packet needs, afresh for a new transmission
+	CCodec2 &Codec2For(const std::shared_ptr<CTranscoderPacket> &packet, bool is1600);
 	std::unique_ptr<CDVDevice> dstar_device, dmrsf_device;
 	bool mixed_mode = false;
 	char mixed_dstar_module = ' ';
@@ -69,21 +77,24 @@ protected:
 	CPacketQueue usrp_queue;
 	std::mutex send_mux;
 	std::mutex p25vocoder_mux;
-	// what does D-Star, DMR and P25: nullptr = the device (P25: tcd's own OP25 vocoder),
-	// else a codec plugin's codec (CodecPlugin.h), as g_Stats.dstar_options/dmr_options/
-	// p25_options name them; a stream keeps the one it started with (Pick),
-	// config.codec_dstar/codec_dmr/codec_p25 is for new streams
-	std::vector<class CSoftCodec *> dstar_choices, dmr_choices, p25_choices;
+	// what does D-Star, DMR, P25 and M17: nullptr = the device (P25: tcd's own OP25
+	// vocoder, M17: tcd's own Codec2), else a codec plugin's codec (CodecPlugin.h), as
+	// g_Stats.dstar_options/dmr_options/p25_options/m17_options name them; a stream
+	// keeps the one it started with (Pick), config.codec_dstar/codec_dmr/codec_p25/
+	// codec_m17 is for new streams. m17_1600_choices runs alongside m17_choices: the
+	// same plugin's M17 1600 codec, nullptr where tcd's own Codec2 decodes 1600
+	std::vector<class CSoftCodec *> dstar_choices, dmr_choices, p25_choices, m17_choices, m17_1600_choices;
 	struct SPinned { int choice; std::chrono::steady_clock::time_point last; };
 	std::mutex pinned_mux;
-	std::unordered_map<uint16_t, SPinned> dstar_pinned, dmr_pinned, p25_pinned;
+	std::unordered_map<uint16_t, SPinned> dstar_pinned, dmr_pinned, p25_pinned, m17_pinned;
 	// the modules the devices do D-Star and DMR for; the other modules go to a plugin
 	std::string dstar_hw_modules, dmr_hw_modules;
 	std::vector<class CSoftCodec *> &Choices(uint32_t codec)
 	{
-		return codec == TCD_CODEC_DSTAR ? dstar_choices : codec == TCD_CODEC_DMR ? dmr_choices : p25_choices;
+		return codec == TCD_CODEC_DSTAR ? dstar_choices : codec == TCD_CODEC_DMR ? dmr_choices : codec == TCD_CODEC_P25 ? p25_choices
+		     : codec == TCD_CODEC_M17 ? m17_choices : m17_1600_choices;
 	}
-	// codec: TCD_CODEC_DSTAR, _DMR or _P25
+	// codec: TCD_CODEC_DSTAR, _DMR, _P25, _M17 or _M17_1600 (the two M17 share the choice)
 	int Pick(uint32_t codec, uint16_t streamid, char module);
 	class CSoftCodec *SwCodec(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet)
 	{
@@ -94,6 +105,11 @@ protected:
 	// silence (encode) or silent samples (decode)
 	void EncodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *imbe);
 	void DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm);
+	// M17 with the stream's choice: tcd's own Codec2 or a plugin. Encode: 3200,
+	// 160 samples into 8 bytes; decode: 8 bytes into 160 samples (3200) or 320
+	// (1600). A plugin's error gives Codec2 silence or silent samples
+	void EncodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *bits);
+	void DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const uint8_t *bits, bool is1600, int16_t *pcm);
 	void PurgePinned(void);
 	// the DMR plugin for DmrGainMode = reencode, nullptr without one
 	class CSoftCodec *dmr_sw = nullptr;

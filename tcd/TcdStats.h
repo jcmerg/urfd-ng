@@ -97,9 +97,10 @@ public:
 	SwVocoderStats sw[MAX_SW];              // the codecs of the codec plugins and tcd's own vocoders
 	int            num_sw{0};
 	// what may do D-Star and DMR: "dvsi" (a device) or a codec plugin's name; P25:
-	// "op25" (tcd's own) or a plugin's name. Set once at start;
-	// config.codec_dstar/codec_dmr/codec_p25 is the one new streams get
-	std::vector<std::string> dstar_options, dmr_options, p25_options;
+	// "op25" (tcd's own) or a plugin's name; M17: "codec2" (tcd's own) or a
+	// plugin's name. Set once at start; config.codec_dstar/codec_dmr/codec_p25/
+	// codec_m17 is the one new streams get
+	std::vector<std::string> dstar_options, dmr_options, p25_options, m17_options;
 	std::atomic<bool> reencode_available{false};	// a codec plugin for DmrGainMode = reencode
 	int            num_devices{0};
 	ReflectorStats reflector;
@@ -135,6 +136,7 @@ public:
 		std::atomic<int>   codec_dstar{0};     // index into dstar_options
 		std::atomic<int>   codec_dmr{0};       // index into dmr_options
 		std::atomic<int>   codec_p25{0};       // index into p25_options
+		std::atomic<int>   codec_m17{0};       // index into m17_options
 		std::atomic<int>   monitor_view{0};    // 0 auto, 1 cards, 2 compact
 	} config;
 

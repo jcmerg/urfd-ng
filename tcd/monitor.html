@@ -273,11 +273,12 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
       <div class="settings">
         <div class="group codecs" id="codec_group" hidden>
           <h3>Vocoder</h3>
-          <p>Who codes AMBE for the streams that start from now on; modules beyond the AMBE devices always use a codec plugin</p>
+          <p>Who codes AMBE, IMBE and Codec2 for the streams that start from now on; modules beyond the AMBE devices always use a codec plugin</p>
           <div class="codec-rows">
             <div class="row" id="codec_dstar_row"><label for="codec_dstar">D-Star</label><select id="codec_dstar"></select></div>
             <div class="row" id="codec_dmr_row"><label for="codec_dmr">DMR and YSF</label><select id="codec_dmr"></select></div>
             <div class="row" id="codec_p25_row"><label for="codec_p25">IMBE (P25, YSF VW)</label><select id="codec_p25"></select></div>
+            <div class="row" id="codec_m17_row"><label for="codec_m17">Codec2 (M17)</label><select id="codec_m17"></select></div>
           </div>
         </div>
         <div class="group">
@@ -610,20 +611,20 @@ $('logout-btn').addEventListener('click', function () {
   fetch('api/logout', { method: 'POST' }).then(function () { if (ws) ws.close(); showLogin(); });
 });
 
-// the vocoder choice: shown when there is one, "dvsi" is the hardware, "op25" tcd's own P25 vocoder
+// the vocoder choice: shown when there is one, "dvsi" is the hardware, "op25" and "codec2" tcd's own vocoders
 function loadCodecs(codecs) {
   var any = false;
-  ['dstar', 'dmr', 'p25'].forEach(function (k) {
+  ['dstar', 'dmr', 'p25', 'm17'].forEach(function (k) {
     var c = (codecs || {})[k] || { options: [], use: '' }, sel = $('codec_' + k);
     sel.innerHTML = c.options.map(function (o) {
-      return '<option value="' + esc(o) + '"' + (o === c.use ? ' selected' : '') + '>' + esc(o === 'dvsi' ? 'DVSI hardware' : o === 'op25' ? 'OP25 (built in)' : o) + '</option>';
+      return '<option value="' + esc(o) + '"' + (o === c.use ? ' selected' : '') + '>' + esc(o === 'dvsi' ? 'DVSI hardware' : o === 'op25' ? 'OP25 (built in)' : o === 'codec2' ? 'Codec2 (built in)' : o) + '</option>';
     }).join('');
     $('codec_' + k + '_row').hidden = c.options.length < 2;
     any = any || c.options.length > 1;
   });
   $('codec_group').hidden = !any;
 }
-['dstar', 'dmr', 'p25'].forEach(function (k) {
+['dstar', 'dmr', 'p25', 'm17'].forEach(function (k) {
   $('codec_' + k).addEventListener('change', function (e) { post('api/codec', { codec: k, use: e.target.value }); });
 });
 

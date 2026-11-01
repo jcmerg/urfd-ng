@@ -1512,11 +1512,12 @@ void CCodec2::synthesise(
 			Sn_[i] += sw_[j]*Pn[i];
 }
 
+// per codec, not shared by every module: the same sequence as Codec 2's, as
+// the result takes only bits 16..30 of the product
 int CCodec2::codec2_rand(void)
 {
-	static unsigned long next = 1;
-	next = next * 1103515245 + 12345;
-	return((unsigned)(next/65536) % 32768);
+	rng = rng * 1103515245u + 12345u;
+	return int((rng/65536u) % 32768u);
 }
 
 /*---------------------------------------------------------------------------*\

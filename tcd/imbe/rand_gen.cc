@@ -23,8 +23,10 @@
 
 #include "typedef.h"
 #include "basic_op.h"
+#include "imbe_vocoder_impl.h"
 
-static UWord32 seed = 1;
+// The generator state is the vocoder's own seed (imbe_vocoder_impl), not a
+// global one: every module's vocoder runs its own sequence.
 
 
 //-----------------------------------------------------------------------------
@@ -42,7 +44,7 @@ static UWord32 seed = 1;
 //		        Pseudo-random number in signed Q1.16 format
 //
 //-----------------------------------------------------------------------------
-Word16 rand_gen(void)
+Word16 imbe_vocoder_impl::rand_gen(void)
 {
 	UWord32 hi, lo;
 

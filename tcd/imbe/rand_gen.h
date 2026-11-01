@@ -39,6 +39,6 @@
 //		        Pseudo-random number in signed Q1.16 format
 //
 //-----------------------------------------------------------------------------
-Word16 rand_gen(void);
+// rand_gen() is a member of imbe_vocoder_impl, with the vocoder's own seed
 
 #endif
