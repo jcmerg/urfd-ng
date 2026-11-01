@@ -825,7 +825,7 @@ bool CController::InitVocoders()
 		}
 	}
 	if (dmr_sw && dmrsf_device)
-		std::cout << "Codec plugin " << dmr_sw->GetName() << " re-encodes DMR with DmrGainMode = reencode" << std::endl;
+		std::cout << "Codec plugin " << dmr_sw->GetName() << " can re-encode DMR (DmrGainMode = reencode)" << std::endl;
 	g_Stats.reencode_available.store(dmr_sw && dmrsf_device, std::memory_order_relaxed);
 	if (!dmr_sw && g_Stats.config.dmr_gain_mode.load(std::memory_order_relaxed) == 2)
 	{
