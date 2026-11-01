@@ -392,7 +392,7 @@ tcdmon                      # this machine, port 8081
 tcdmon 192.0.2.20 8081      # another machine
 ```
 
-Zeigt Pegelbalken, Signalweg, AGC-Zustand, die DVSI-Kanäle mit ihren Modulen, die Codec-Plugins, die eigenen Vocoder von tcd und die Ausgangsverstärkungen. `q` beendet.
+Zeigt Pegelbalken, Signalweg, AGC-Zustand, die Hardware (die freien AMBE-Kanäle je Codec, fest oder Pool, jedes Gerät mit seinen Kanälen und Modulen, ausgephaste markiert) und die Software (die Codec-Plugins und die eigenen Vocoder von tcd) sowie die Ausgangsverstärkungen. `q` beendet.
 
 ### Statistik-CSV und agc-analyze
 

@@ -392,7 +392,7 @@ tcdmon                      # this machine, port 8081
 tcdmon 192.0.2.20 8081      # another machine
 ```
 
-Shows level bars, signal flow, AGC state, the DVSI channels with their modules, the codec plugins, tcd's own vocoders and the output gains. `q` quits.
+Shows level bars, signal flow, AGC state, the hardware (the free AMBE channels of each codec, fixed or pool, each device with its channels and modules, phased out ones marked) and the software (the codec plugins and tcd's own vocoders), and the output gains. `q` quits.
 
 ### Stats CSV and agc-analyze
 
