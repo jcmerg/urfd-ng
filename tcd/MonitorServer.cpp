@@ -129,6 +129,9 @@ std::string CMonitorServer::BuildStatsJson()
 		   << ",\"buf_depth\":" << d.buf_depth.load(std::memory_order_relaxed)
 		   << ",\"errors\":" << d.errors.load(std::memory_order_relaxed)
 		   << ",\"online\":" << (d.online.load(std::memory_order_relaxed) ? "true" : "false")
+		   << ",\"phase\":" << d.phase.load(std::memory_order_relaxed)
+		   << ",\"want_out\":" << (d.want_out.load(std::memory_order_relaxed) ? "true" : "false")
+		   << ",\"can_out\":" << (d.can_out ? "true" : "false")
 		   << ",\"channels\":[";
 		for (int ch = 0; ch < DeviceStats::MAX_CHANNELS; ch++)
 		{
@@ -174,6 +177,7 @@ std::string CMonitorServer::BuildStatsJson()
 		js << "],\"use\":\"" << (c >= 0 && c < int(options.size()) ? options[c] : std::string()) << "\"}";
 	}
 	js << "},\"reencode_available\":" << (g_Stats.reencode_available.load(std::memory_order_relaxed) ? "true" : "false");
+	js << ",\"pool_available\":" << (g_Stats.pool_available.load(std::memory_order_relaxed) ? "true" : "false");
 	js << ",\"reflector\":{"
 	   << "\"connected\":" << (g_Stats.reflector.connected.load(std::memory_order_relaxed) ? "true" : "false")
 	   << ",\"pkts_rx\":" << g_Stats.reflector.packets_rx.load(std::memory_order_relaxed)
@@ -205,6 +209,7 @@ std::string CMonitorServer::BuildStatsJson()
 	   << ",\"outgain_m17\":" << g_Stats.config.outgain_m17.load()
 	   << ",\"dmr_gain_mode\":" << g_Stats.config.dmr_gain_mode.load()
 	   << ",\"ambe_gain_db\":" << g_Stats.config.ambe_gain_db.load()
+	   << ",\"device_pool\":" << g_Stats.config.device_pool.load()
 	   << "}}";
 
 	return js.str();
@@ -367,6 +372,42 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 			reply = "{\"status\":\"ok\"}";
 			return 200;
 		}
+	}
+	else if (uri == "/api/pool" && !body.empty())
+	{
+		// POST {"pool": true|false}: DeviceChannels for the streams that start from now on; Save keeps it
+		bool on;
+		if (!g_Stats.pool_available.load() || !json_get_bool(body.c_str(), body.size(), "pool", on))
+		{
+			reply = "{\"status\":\"error\",\"message\":\"no AMBE channels\"}";
+			return 400;
+		}
+		g_Stats.config.device_pool.store(on ? 1 : 0);
+		std::cout << "Monitor: new streams take " << (on ? "any free AMBE channel (pool)" : "the AMBE channels of their module (fixed)") << std::endl;
+		reply = "{\"status\":\"ok\"}";
+		return 200;
+	}
+	else if (uri == "/api/device" && !body.empty())
+	{
+		// POST {"device": <index in devices>, "out": true|false}: phase a device out (no new
+		// streams, closed when its streams are done) or take it back; not kept by Save
+		int i;
+		bool out;
+		if (!json_get_int(body.c_str(), body.size(), "device", i) || !json_get_bool(body.c_str(), body.size(), "out", out)
+		    || i < 0 || i >= g_Stats.num_devices)
+		{
+			reply = "{\"status\":\"error\",\"message\":\"no such device\"}";
+			return 400;
+		}
+		if (out && !g_Stats.devices[i].can_out)
+		{
+			reply = "{\"status\":\"error\",\"message\":\"no codec plugin takes its streams\"}";
+			return 400;
+		}
+		g_Stats.devices[i].want_out.store(out);
+		std::cout << "Monitor: " << g_Stats.devices[i].serial << (out ? " is to be phased out" : " is to be taken back") << std::endl;
+		reply = "{\"status\":\"ok\"}";
+		return 200;
 	}
 	else if (uri == "/api/view" && !body.empty())
 	{
@@ -968,7 +1009,8 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 	// the module view is replaced where it stands, else written when it is not auto
 	bool codecWritten[kNumChoices] = {};
 	auto codecLine = [](int k) { return g_Stats.codec_options[k][g_Stats.config.codec_choice[k].load()]; };
-	bool viewWritten = false;
+	bool viewWritten = false, poolWritten = false;
+	const int pool = g_Stats.config.device_pool.load();
 	static const char *views[] = { "auto", "cards", "compact" };
 	const int view = std::clamp(g_Stats.config.monitor_view.load(), 0, 2);
 	while (std::getline(in, line))
@@ -1005,6 +1047,7 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 				if (key == "DmrGainMode")      { int m = g_Stats.config.dmr_gain_mode.load(); out << key << " = " << (m==2 ? "reencode" : m==1 ? "ambe" : "off") << "\n"; continue; }
 				if (key == "AmbeGainDb")       { out << key << " = " << g_Stats.config.ambe_gain_db.load() << "\n"; continue; }
 				if (key == "MonitorView") { out << key << " = " << views[view] << "\n"; viewWritten = true; continue; }
+				if (key == "DeviceChannels") { out << key << " = " << (pool ? "pool" : "fixed") << "\n"; poolWritten = true; continue; }
 				const int k = ChoiceOfIni(key);
 				if (k >= 0 && g_Stats.codec_options[k].size() > (g_CodecChoices[k].own ? 1u : 0u))
 				{
@@ -1040,6 +1083,8 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 			out << g_CodecChoices[k].ini << " = " << codecLine(k) << "\n";
 	if (!viewWritten && view != 0)
 		out << "MonitorView = " << views[view] << "\n";
+	if (!poolWritten && pool)
+		out << "DeviceChannels = pool\n";
 
 	std::ofstream of(ini_path);
 	if (!of.is_open()) return false;

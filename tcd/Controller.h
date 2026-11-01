@@ -38,6 +38,7 @@
 #include "AmbeGain.h"
 #include "CodecPlugin.h"
 #include "CodecChoice.h"
+#include "TcdStats.h"
 
 class CController
 {
@@ -83,6 +84,8 @@ protected:
 		const char *role;		// for the monitor: dstar, dmr, mixed
 		std::shared_ptr<CDVDevice> dev;
 		std::atomic<bool> up{false};
+		std::atomic<bool> draining{false};	// phased out from the monitor: no new streams
+		std::atomic<bool> out{false};		// phased out and closed, not opened again
 		bool closed = false;		// the lost device's threads are joined
 		int stats = -1;			// g_Stats.devices
 		std::chrono::steady_clock::time_point next_try;
@@ -96,13 +99,14 @@ protected:
 	{
 		int slot;
 		uint8_t ch;
-		bool busy = false;		// pool: a stream has it
+		bool busy = false;		// a stream has it
 		char module = ' ';
 		uint16_t streamid = 0;
 		std::chrono::steady_clock::time_point last;
 	};
 	std::vector<SHwChannel> hw_channels[kNumChoices];
-	bool pool = false;
+	// DeviceChannels for the streams that start from now on (the monitor switches it)
+	static bool Pool(void) { return g_Stats.config.device_pool.load(std::memory_order_relaxed) != 0; }
 	std::future<void> watchFuture;
 	// the device nodes with "mixed" after their DeviceSerial
 	std::vector<std::string> mixed_nodes;
@@ -113,6 +117,7 @@ protected:
 	// dev: the lost device, ignored when it is no longer the slot's
 	void DeviceLost(int slot, const CDVDevice *dev);
 	void DeviceWatchThread();
+	void PhaseOut(int slot);
 	// the channel of codec k for a stream, -1 for none (under pinned_mux)
 	int TakeChannel(int k, char module, uint16_t streamid);
 	bool HasChannel(int k, int hw, char module, uint16_t streamid) const;

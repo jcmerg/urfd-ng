@@ -56,6 +56,12 @@ struct DeviceStats
 	std::atomic<unsigned int> buf_depth{0};
 	std::atomic<uint32_t> errors{0};
 	std::atomic<bool> online{false};
+	// phase out from the monitor: want_out asks for it; phase 0 in service, 1 taking
+	// no new streams (its own still run), 2 closed, can be unplugged. can_out: a codec
+	// plugin does its codecs, so it may go (set once at start)
+	std::atomic<bool> want_out{false};
+	std::atomic<int> phase{0};
+	bool can_out = false;
 	// Per-channel activity: module letter + timestamp (ms since epoch)
 	std::atomic<char> ch_module[MAX_CHANNELS] = {' ', ' ', ' '};
 	std::atomic<uint64_t> ch_last_ms[MAX_CHANNELS] = {0, 0, 0};
@@ -102,6 +108,7 @@ public:
 	// start; config.codec_choice is the one new streams get
 	std::vector<std::string> codec_options[kNumChoices];
 	std::atomic<bool> reencode_available{false};	// a codec plugin for DmrGainMode = reencode
+	std::atomic<bool> pool_available{false};	// AMBE channels, so DeviceChannels means something
 	int            num_devices{0};
 	ReflectorStats reflector;
 
@@ -135,6 +142,7 @@ public:
 		std::atomic<int>   ambe_gain_db{-2};
 		std::atomic<int>   codec_choice[kNumChoices]{};   // index into codec_options
 		std::atomic<int>   monitor_view{0};    // 0 auto, 1 cards, 2 compact
+		std::atomic<int>   device_pool{0};     // DeviceChannels: 0 fixed, 1 pool, for the streams that start from now on
 	} config;
 
 	// Module name list (set at startup)
