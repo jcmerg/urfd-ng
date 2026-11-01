@@ -117,8 +117,11 @@ void CCodecStream::ResetStats(uint16_t streamid, ECodecType type)
 		CCallsign rpt2 = g_Reflector.GetCallsign();
 		rpt2.SetCSModule('G');
 
-		// the source: "<Protocol> <TG/info>" (the name goes in front, ComposeSlowData)
-		std::string msg;
+		// the source: "<Protocol> <TG/info>" (the name goes in front, ComposeSlowData);
+		// the protocol is left out when the radio already shows it as the suffix
+		// of MY ("N0CALL / DMR"), which leaves "Max TG262" in the 20 characters
+		std::string msg, info;
+		const bool suffixed = my.HasSuffix() && !m_PacketStream->GetUserCallsign().HasSuffix();
 		if (owner)
 		{
 			EProtocol proto = owner->GetProtocol();
@@ -141,24 +144,25 @@ void CCodecStream::ResetStats(uint16_t streamid, ECodecType type)
 				case EProtocol::ysfclient:   shortName = "YSF"; break;
 				default:                     shortName = owner->GetProtocolName(); break;
 			}
-			msg = shortName;
+			if (!suffixed)
+				msg = shortName;
 
 			// For TG-based protocols, TG is appended later via UpdateSlowDataTG()
 			// because the source TG is not yet known at stream-open time
 			if (proto == EProtocol::svxreflector || proto == EProtocol::svx || proto == EProtocol::mmdvmclient || proto == EProtocol::dmrmmdvm)
 			{
-				// msg stays "DMR" or "SVX", the TG comes with UpdateSlowDataTG
+				// msg stays "DMR" or "SVX" (or empty with the suffix), the TG comes with UpdateSlowDataTG
 			}
 			else if (proto == EProtocol::ysf)
 			{
 				int dgid = 10 + (m_CSModule - 'A');
-				msg += " DG" + std::to_string(dgid);
+				info = "DG" + std::to_string(dgid);
 			}
 			else if (proto == EProtocol::nxdn)
 			{
 				uint8_t ran = CNXDNProtocol::ModuleToRAN(m_CSModule);
 				if (ran != 0)
-					msg += " RAN" + std::to_string(ran);
+					info = "RAN" + std::to_string(ran);
 			}
 			else if (proto == EProtocol::ysfclient)
 			{
@@ -167,8 +171,10 @@ void CCodecStream::ResetStats(uint16_t streamid, ECodecType type)
 				// its mappings before the clients
 				auto peer = std::dynamic_pointer_cast<CYSFClientPeer>(owner);
 				if (peer && peer->GetDgId() > 0)
-					msg += " DG" + std::to_string(peer->GetDgId());
+					info = "DG" + std::to_string(peer->GetDgId());
 			}
+			if (!info.empty())
+				msg = msg.empty() ? info : msg + " " + info;
 		}
 
 		// the operator's first name from the DMR or NXDN ID database, in front of
@@ -179,6 +185,7 @@ void CCodecStream::ResetStats(uint16_t streamid, ECodecType type)
 		m_SlowDataName = AsciiName((std::string::npos == first) ? std::string() : name.substr(first, name.find(' ', first) - first));
 		m_SlowDataVia = msg;
 		m_SlowDataTG = 0;
+		m_SlowDataOwner = (owner != nullptr);
 		ComposeSlowData();
 		m_SlowData.Init(my, rpt1, rpt2, m_SlowDataMsg1);
 	}
@@ -237,23 +244,26 @@ std::string CCodecStream::AsciiName(const std::string &utf8)
 }
 
 // the D-Star text: "<first name> <source> TG<n>" in the 20 characters a radio
-// shows. When it is too long, the TG goes to the second text, which takes turns
-// with the first; then the name is shortened so the source stays whole.
+// shows, the source without the protocol when MY carries it as suffix. When it
+// is too long, the TG goes to the second text, which takes turns with the first;
+// then the name is shortened so the source stays whole.
 // Call with m_SlowDataMutex held.
 void CCodecStream::ComposeSlowData(void)
 {
-	const std::string tg = m_SlowDataTG ? " TG" + std::to_string(m_SlowDataTG) : std::string();
 	auto joined = [](const std::string &a, const std::string &b) { return a.empty() ? b : (b.empty() ? a : a + " " + b); };
-	std::string msg1 = joined(m_SlowDataName, m_SlowDataVia + (m_SlowDataVia.empty() ? std::string() : tg)), msg2;
+	const std::string tg = m_SlowDataTG ? "TG" + std::to_string(m_SlowDataTG) : std::string();
+	std::string src = joined(m_SlowDataVia, tg);
+	std::string msg1 = joined(m_SlowDataName, src), msg2;
 	if (msg1.size() > 20 && !tg.empty() && !m_SlowDataVia.empty())
 	{
-		msg2 = m_SlowDataVia + tg;
-		msg1 = joined(m_SlowDataName, m_SlowDataVia);
+		msg2 = src;
+		src = m_SlowDataVia;
+		msg1 = joined(m_SlowDataName, src);
 	}
-	if (msg1.size() > 20 && !m_SlowDataName.empty())
+	if (msg1.size() > 20 && !m_SlowDataName.empty() && !src.empty())
 	{
-		const size_t room = (m_SlowDataVia.size() + 1 < 20) ? 20 - m_SlowDataVia.size() - 1 : 0;
-		msg1 = (room >= 3) ? m_SlowDataName.substr(0, room) + " " + m_SlowDataVia : m_SlowDataVia;
+		const size_t room = (src.size() + 1 < 20) ? 20 - src.size() - 1 : 0;
+		msg1 = (room >= 3) ? m_SlowDataName.substr(0, room) + " " + src : src;
 		if (msg2.empty())
 			msg2 = m_SlowDataName;
 	}
@@ -267,10 +277,10 @@ void CCodecStream::ComposeSlowData(void)
 
 void CCodecStream::UpdateSlowDataTG(uint32_t tg)
 {
-	// the TG of a DMR or SVX stream, known once it runs ("Max DMR TG2625"); this is
+	// the TG of a DMR or SVX stream, known once it runs ("Max TG2625"); this is
 	// the protocol's thread, the codec thread sends the texts
 	std::lock_guard<std::mutex> lock(m_SlowDataMutex);
-	if (tg == 0 || m_SlowDataVia.empty())
+	if (tg == 0 || !m_SlowDataOwner)
 		return;
 	m_SlowDataTG = tg;
 	ComposeSlowData();

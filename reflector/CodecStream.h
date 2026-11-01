@@ -99,10 +99,11 @@ protected:
 	CDStarSlowData m_SlowData;
 	uint32_t     m_uiSuperframeCount;
 	std::mutex   m_SlowDataMutex;  // the slow data below: the protocol thread sets the TG (UpdateSlowDataTG), the codec thread sends them
-	std::string  m_SlowDataMsg1;   // "Max DMR TG26363", what fits in 20 characters
+	std::string  m_SlowDataMsg1;   // "Max TG26363", what fits in 20 characters
 	std::string  m_SlowDataMsg2;   // the part that did not fit, in turn with Msg1; empty when all fits
 	std::string  m_SlowDataName;   // the operator's first name from the ID databases, in ASCII
-	std::string  m_SlowDataVia;    // the source: "DMR", "DCS002 A", ...; empty without an owner
+	std::string  m_SlowDataVia;    // the source: "DG15", "RAN6", or "DMR+" for a caller with a suffix of their own; empty when the suffix says it all
+	bool         m_SlowDataOwner = false; // the stream has an owner, so a TG can follow
 	uint32_t     m_SlowDataTG = 0; // the source TG, known once the stream runs
 	void ComposeSlowData(void);
 	static std::string AsciiName(const std::string &utf8);
