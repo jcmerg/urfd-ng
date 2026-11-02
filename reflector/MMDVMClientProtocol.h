@@ -203,20 +203,22 @@ private:
 	static constexpr uint16_t STREAM_ECHO_WAIT = 1;	// may be an echo, held
 	static constexpr uint16_t STREAM_ECHO = 2;		// an echo, dropped
 	std::unordered_map<uint32_t, uint16_t> m_IncomingStreams;
-	// the last call on each module from the master: its source and last frames
+	// the calls on each module from the master in the last MMDVMCLI_ECHO_WINDOW
+	// seconds, by module and source (another ID may key up between a call and
+	// its echo): their last frames
 	struct SRecentCall
 	{
-		uint32_t srcId = 0;
 		CTimer   last;
 		std::deque<std::array<uint8_t, 9>> frames;
 	};
-	std::unordered_map<char, SRecentCall> m_RecentCalls;
+	std::unordered_map<uint64_t, SRecentCall> m_RecentCalls;
+	static uint64_t CallKey(char module, uint32_t srcId) { return (uint64_t(uint8_t(module)) << 32) | srcId; }
 	// the bursts of a held stream (STREAM_ECHO_WAIT)
 	std::unordered_map<uint32_t, std::vector<CBuffer>> m_EchoWait;
 	bool MayBeEcho(char module, uint32_t srcId);
 	// 1: the held bursts are the end of the call before, 0: not, -1: not known
 	// yet (too few voice frames; decide: no -1)
-	int IsEcho(char module, const std::vector<CBuffer> &bursts, bool decide);
+	int IsEcho(char module, uint32_t srcId, const std::vector<CBuffer> &bursts, bool decide);
 	void EndEchoWait(uint32_t streamId, uint32_t srcId, uint32_t dstId, bool force);
 	// master streamId -> source ID and its talker alias, for unknown IDs only
 	std::unordered_map<uint32_t, std::pair<uint32_t, CDmrTalkerAliasIn>> m_UnknownTA;
