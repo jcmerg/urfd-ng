@@ -143,7 +143,7 @@ section > header { display: flex; flex-wrap: wrap; justify-content: space-betwee
 .flow .pkts { margin-left: auto; }
 
 /* tables */
-.cols { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 2rem; align-items: start; }
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(15rem, max-content); gap: 2.5rem; align-items: start; }
 .cols > * { min-width: 0; }
 .scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: var(--fs-s); }
@@ -156,6 +156,15 @@ td b { font-weight: 650; font-stretch: 85%; }
 .state-ok { color: var(--ok); font-weight: 600; }
 .state-use { color: var(--ink); font-weight: 600; }
 .state-bad { color: var(--tx); font-weight: 600; }
+/* counters of the vocoder table: a number with a small label, red when it counts trouble */
+.cnt { white-space: nowrap; display: inline-block; }
+.cnt + .cnt { margin-left: 0.55rem; }
+td.cnts { text-align: right; white-space: nowrap; }
+.nowrap { white-space: nowrap; }
+.tbl { overflow-x: auto; }
+.legend { margin: 0.5rem 0 0; font-size: var(--fs-xs); color: var(--graphite); }
+.cnt .lbl { font-size: var(--fs-xs); color: var(--graphite); margin-left: 0.15rem; }
+.cnt.bad, .cnt.bad .lbl { color: var(--tx); font-weight: 600; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1.5rem; margin: 0; font-size: var(--fs-s); }
 .kv dt { color: var(--graphite); }
 .kv dd { margin: 0; }
@@ -189,6 +198,7 @@ td b { font-weight: 650; font-stretch: 85%; }
 td.act, th.act { width: 1%; text-align: right; white-space: nowrap; }
 .state-ok, .state-use, .state-bad { white-space: nowrap; }
 tr.grp th { font-size: var(--fs-xs); color: var(--graphite); font-weight: 600; padding-top: 0.9rem; border-bottom: 1px solid var(--rule); }
+tr.grp th { white-space: normal; }
 tr.grp th span { font-weight: 500; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .save-state { font-size: var(--fs-s); }
@@ -206,6 +216,7 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
 
 @media (max-width: 860px) {
   .cols { grid-template-columns: minmax(0, 1fr); }
+  td.cnts { white-space: normal; }
 }
 @media (max-width: 520px) {
   .bar .ver { display: none; }
@@ -262,10 +273,11 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
       <section aria-labelledby="h-dev">
         <header><h2 id="h-dev">Vocoders</h2></header>
         <div class="scroll">
-          <table>
-            <thead><tr><th>Device</th><th>Type</th><th>State</th><th>Channels</th><th class="r opt">Queue</th><th class="r">Errors</th><th class="act"><span class="sr">Action</span></th></tr></thead>
+          <div class="tbl"><table>
+            <thead><tr><th>Vocoder</th><th class="opt">Type</th><th>State</th><th>Channels</th><th class="r opt">Frames</th><th class="r">Errors</th><th class="act"><span class="sr">Action</span></th></tr></thead>
             <tbody id="devices"><tr><td colspan="7" class="empty">No report yet</td></tr></tbody>
-          </table>
+          </table></div>
+          <p class="legend">Frames: decoded and encoded. Errors: fec = decoded frames with bit errors the FEC corrected; unc = uncorrectable, an AMBE device repeats its last frame; bad = encoded by an AMBE device but failing their FEC (the device gives no AMBE frames, the radios mute the stream); rep / mute = repeated / muted by a codec plugin.</p>
         </div>
       </section>
       <section aria-labelledby="h-ref">
@@ -540,6 +552,9 @@ function render() {
   // hardware: the AMBE devices and their channels; software: codec plugins and tcd's own vocoders
   var rows = '';
   var hw = data.hw_channels || {};
+  // a counter with its label; bad: red when it is not zero. counts(): several in one cell
+  var cnt = function (n, lbl, bad) { return '<span class="cnt' + (bad && n > 0 ? ' bad' : '') + '">' + (n || 0) + '<span class="lbl">' + lbl + '</span></span>'; };
+  var counts = function (list) { return list.map(function (c) { return cnt(c[0], c[1], c[2]); }).join(''); };
   // in use, not free: with fixed channels a free one belongs to its module
   var use = function (c) { return c ? c.busy + ' of ' + c.total + ' in use' : '-'; };
   if (data.devices.length)
@@ -548,20 +563,19 @@ function render() {
   data.devices.forEach(function (d, i) {
     var used = d.channels ? d.channels.filter(function (c) { return c.module; }).map(function (c) { return c.module; }) : [];
     var total = d.type === 'DV3003' ? 3 : 1;
-    var state = d.phase === 2 ? '<span class="muted">phased out, can be unplugged</span>' :
+    var state = d.phase === 2 ? '<span class="muted" title="closed; it can be unplugged">phased out</span>' :
       d.phase === 1 ? '<span class="state-use">phasing out</span>' :
       !d.online ? '<span class="state-bad">offline</span>' : used.length ? '<span class="state-use">in use</span>' : '<span class="state-ok">ready</span>';
     // phase out: no new streams, closed when its streams are done; a codec plugin takes over
     var act = d.can_out ? '<button type="button" class="dev-btn" data-dev="' + i + '" data-out="' + (d.want_out ? 0 : 1) + '" title="' +
       (d.want_out ? 'Open the device again for new streams' : 'No new streams; closed when the ones on it are done, then it can be unplugged') + '">' +
       (d.want_out ? 'Take back' : 'Phase out') + '</button>' : '';
-    rows += '<tr><td><b>' + esc(d.serial) + '</b></td><td>' + esc(d.type) + (d.role ? ' <span class="muted">' + esc(d.role) + '</span>' : '') + '</td>' +
+    rows += '<tr><td><b>' + esc(d.serial) + '</b></td><td class="opt">' + esc(d.type) + (d.role ? ' <span class="muted">' + esc(d.role) + '</span>' : '') + '</td>' +
       '<td>' + state + '</td><td>' + used.map(function (u) { return '<span class="mod-tag">' + esc(u) + '</span>'; }).join('') +
-      '<span class="muted">' + used.length + ' of ' + total + '</span></td>' +
-      '<td class="r opt">' + d.buf_depth + '</td><td class="r">' + (d.errors > 0 ? '<span class="state-bad">' + d.errors + '</span>' : '0') +
-      // its frames by their FEC: decoded (with corrected errors / uncorrectable), encoded (failing their FEC)
-      (d.decodes !== undefined ? ' <span class="muted" title="frames decoded / encoded; fec: decoded with corrected errors, unc: uncorrectable (repeated), bad: encoded failing their FEC">dec ' + d.decodes + ' enc ' + d.encodes +
-        ((d.error_frames || d.uncorrectable || d.bad_out) ? ' <span class="state-bad">fec ' + d.error_frames + ' unc ' + d.uncorrectable + ' bad ' + d.bad_out + '</span>' : '') + '</span>' : '') + '</td>' +
+      '<span class="muted nowrap">' + used.length + ' of ' + total + '</span>' + (d.buf_depth > 0 ? ' <span class="muted nowrap">queue ' + d.buf_depth + '</span>' : '') + '</td>' +
+      // its frames, and how they came out by their FEC (AmbeFrameCheck.h)
+      '<td class="cnts opt">' + counts([[d.decodes, 'dec'], [d.encodes, 'enc']]) + '</td>' +
+      '<td class="cnts">' + counts([[d.error_frames, 'fec', true], [d.uncorrectable, 'unc', true], [d.bad_out, 'bad', true]]) + '</td>' +
       '<td class="act">' + act + '</td></tr>';
   });
   var swStreams = (data.swvocoders || []).reduce(function (n, x) { return n + (x.builtin ? 0 : x.cached_streams); }, 0);
@@ -569,14 +583,16 @@ function render() {
     rows += '<tr class="grp"><th colspan="7">Software <span>- codec plugins and built-in vocoders, as many streams as the CPU takes; on codec plugins now: ' + swStreams + '</span></th></tr>';
   (data.swvocoders || []).forEach(function (x) {
     var act = x.active_module && x.active_module.length > 0;
-    rows += '<tr><td><b>' + esc(x.name) + '</b></td><td>' + (x.builtin ? 'Built in' : 'Codec plugin') + ' <span class="muted">' + esc(x.codec) + '</span></td>' +
+    var frames = [[x.decodes, 'dec'], [x.encodes, 'enc']];
+    if (x.reencodes || x.reencode_active) frames.push([x.reencodes, 're-enc']);
+    rows += '<tr><td><b>' + esc(x.name) + '</b></td><td class="opt">' + (x.builtin ? 'Built in' : 'Plugin') + ' <span class="muted">' + esc(x.codec) + '</span></td>' +
       '<td>' + (act ? '<span class="state-use">in use</span>' : '<span class="state-ok">ready</span>') + '</td>' +
-      '<td>' + (act ? '<span class="mod-tag">' + esc(x.active_module) + '</span>' : '') + '<span class="muted">' + (x.builtin ? '' : x.cached_streams + ' active, ') +
-      x.encodes + ' encoded, ' + x.decodes + ' decoded' + (x.reencodes || x.reencode_active ? ', ' + x.reencodes + ' re-encoded' : '') +
+      '<td>' + (act ? '<span class="mod-tag">' + esc(x.active_module) + '</span>' : '') +
+      '<span class="muted nowrap">' + (x.builtin ? 'every module' : x.cached_streams + ' stream' + (x.cached_streams === 1 ? '' : 's')) + '</span></td>' +
+      '<td class="cnts opt">' + counts(frames) + '</td>' +
       // how the decoded frames came out (plugins of codec API 3 report it)
-      (x.error_frames ? ', ' + x.error_frames + ' with bit errors' : '') + (x.repeats ? ', ' + x.repeats + ' repeated' : '') +
-      (x.mutes ? ', ' + x.mutes + ' muted' : '') + '</span></td>' +
-      '<td class="r opt muted">-</td><td class="r muted">-</td><td class="act"></td></tr>';
+      '<td class="cnts">' + counts([[x.error_frames, 'fec', true], [x.repeats, 'rep', true], [x.mutes, 'mute', true]]) + '</td>' +
+      '<td class="act"></td></tr>';
   });
   // only when it changed: a rebuilt row swallows a click on its button
   rows = rows || '<tr><td colspan="7" class="empty">No vocoder found. Check the DeviceSerial lines in tcd.ini.</td></tr>';

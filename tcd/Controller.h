@@ -140,21 +140,21 @@ protected:
 	// where tcd's own Codec2 decodes 1600
 	std::vector<class CSoftCodec *> choices[kNumChoices], m17_1600_choices;
 	// hw: the stream's AMBE channel (hw_channels[k]), -1 for none
-	// and, on an AMBE channel, the FEC counts of its frames (AmbeFrameCheck.h):
-	// the frames the device decoded, those with corrected errors and those
-	// with an uncorrectable first partition; the frames it encoded and those
-	// that fail their FEC
-	struct SPinned
-	{
-		int choice;
-		int hw;
-		std::chrono::steady_clock::time_point last;
-		uint32_t frames_in = 0, errors_in = 0, uncorrectable = 0, frames_out = 0, bad_out = 0;
-	};
-	// StreamLog: the vocoder a new stream gets, and at its end the FEC counts of
-	// the frames an AMBE device decoded (from Pick) or encoded (from the routing)
-	void LogStreamStart(int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw) const;
-	void DeviceFrameIn(int k, SPinned &pin, const std::shared_ptr<CTranscoderPacket> &packet) const;
+	struct SPinned { int choice; int hw; std::chrono::steady_clock::time_point last; };
+	// StreamLog: one line per stream at its end with the vocoder of every codec
+	// it used and, on an AMBE device, how its frames fared by their FEC
+	// (AmbeFrameCheck.h): decoded frames with corrected errors (fec) or an
+	// uncorrectable first partition (unc), encoded frames that fail their FEC
+	// (bad). A part is done at the stream's last frame, on a device that
+	// encodes at the device's answer to it; the line goes out when every part
+	// is done, or when the stream has been quiet for 5 s (its last frame lost)
+	struct SStreamPart { int k; std::string by; bool device, decode, done; uint32_t frames, fec, unc, bad; };
+	struct SStreamLog { char module; std::chrono::steady_clock::time_point first, last; std::vector<SStreamPart> parts; };
+	std::unordered_map<uint16_t, SStreamLog> stream_log;	// under pinned_mux
+	SStreamPart *StreamLogPart(int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw, bool note);
+	void StreamLogCount(int k, const std::shared_ptr<CTranscoderPacket> &packet);
+	void StreamLogFlush(uint16_t streamid);
+	void DeviceFrameIn(int k, int hw, const std::shared_ptr<CTranscoderPacket> &packet);
 	void DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket> &packet);
 	std::mutex pinned_mux;
 	std::unordered_map<uint16_t, SPinned> pinned[kNumChoices];

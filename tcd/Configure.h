@@ -84,7 +84,7 @@ public:
 	// the part of OutputGainDMR (dB) that non-DMR sources get through b2 in the AMBE2+ frame after the encoder
 	int GetOutputGainDMRBitstream(void) const { return outgain_dmr_bitstream; }
 
-	// one log line per stream and codec with its vocoder, and the FEC counts of an AMBE device's frames at its end
+	// one log line per stream at its end: the vocoder of every codec, and the FEC counts of an AMBE device's frames
 	bool               GetStreamLog(void) const        { return streamlog; }
 	// Stats logging
 	bool               GetStatsLogEnabled(void) const { return statslog_enabled; }
