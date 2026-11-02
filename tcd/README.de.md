@@ -2,7 +2,7 @@
 
 [English](README.md) | **Deutsch**
 
-**Version 0.19.2** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.19.3** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF/NXDN (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25 (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF/NXDN in Software ergänzen, seit 0.14.0 auch P25 als Wahl neben dem eingebauten IMBE-Vocoder. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
@@ -90,7 +90,7 @@ Jedes transcodierte Modul braucht einen D-Star-Kanal und einen DMR/YSF-Kanal. Ei
 |---|---|---|---|
 | 1× DV3000 | eines für DMR (oder D-Star) | 1 | D-Star auf dem Gerät, DMR/YSF in Software |
 | 1× DV3003 | eines für DMR (oder D-Star) | bis zu 3 | D-Star auf dem Gerät, DMR/YSF in Software |
-| 1× DV3003 mit `mixed` | eines für D-Star und DMR | 1 auf dem Gerät, weitere in Software | D-Star und DMR/YSF eines Moduls auf dem Gerät, siehe [unten](#einzelner-dv3003-im-mischbetrieb) |
+| 1× DV3003 mit `mixed` | eines für D-Star und DMR | 1 auf dem Gerät (dazu das DMR eines 2.), weitere in Software | D-Star und DMR/YSF eines Moduls auf dem Gerät, das DMR/YSF eines zweiten auch (seit 0.19.3), siehe [unten](#einzelner-dv3003-im-mischbetrieb) |
 | DV3000 + DV3003 | — | 2 | Mischbetrieb, empfohlen |
 | 2× DV3000 | — | 1 | eines für D-Star, eines für DMR/YSF |
 | 2× DV3003 | — | bis zu 3 | eines für D-Star, eines für DMR/YSF |
@@ -118,11 +118,11 @@ DeviceSerial = DKB7FXGE # DV3003
 
 ### Einzelner DV3003 im Mischbetrieb
 
-`mixed` hinter der Seriennummer eines DV3003, der das einzige Gerät ist (seit 0.17.0), richtet seine Kanäle wie im Mischbetrieb ein: Kanal 0 D-Star, Kanal 1 DMR/YSF, beide für das erste Modul, Kanal 2 bleibt frei. Dieses Modul wird in beide Richtungen auf dem Gerät transcodiert, die übrigen Module von den Codec-Plugins (dafür ist eines für D-Star und DMR nötig). Ohne `mixed` macht ein einzelner DV3003 wie bisher D-Star für drei Module. `mixed` gilt für einen DV3003 allein mit `CodecDStar`/`CodecDMR` auf `dvsi`; sonst warnt tcd und übergeht es.
+`mixed` hinter der Seriennummer eines DV3003, der das einzige Gerät ist (seit 0.17.0), richtet seine Kanäle wie im Mischbetrieb ein: Kanal 0 D-Star, Kanäle 1 und 2 DMR/YSF. Das erste Modul (mit dem [Pool](#kanal-pool-devicechannels--pool): der erste Stream) wird in beide Richtungen auf dem Gerät transcodiert, ein zweites bekommt sein DMR auf Kanal 2 und sein D-Star vom Codec-Plugin (seit 0.19.3; vorher blieb Kanal 2 frei), die übrigen Module gehen an die Codec-Plugins (dafür ist eines für D-Star und DMR nötig). Ohne `mixed` macht ein einzelner DV3003 wie bisher D-Star für drei Module. `mixed` gilt für einen DV3003 allein mit `CodecDStar`/`CodecDMR` auf `dvsi`; sonst warnt tcd und übergeht es.
 
 ```ini
 Modules = FSA
-DeviceSerial = DKB7FXGE mixed   # F auf dem DV3003, S und A über das Plugin
+DeviceSerial = DKB7FXGE mixed   # F auf dem DV3003, das DMR von S auch, der Rest über das Plugin
 CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so
 ```
 
@@ -161,7 +161,7 @@ Ab drei Geräten (seit 0.18.0; mehrere DV3003, ein DV3000 dazu, Platinen mit vie
 
 ### Hinweise zum DV3003
 
-- **Companding wie eingestellt**: Bei jedem DV3003-Kanal wird Companding so gesetzt, wie `DeviceCompand` es sagt, voreingestellt aus (linear). Der DV3003 startet mit eingeschaltetem Companding (Pull-up an CP_ENABLE), der DV3000 mit ausgeschaltetem; ohne das Setzen bekamen die DMR/YSF-Kanäle µ-law-PCM, das als linear gelesen wurde, und das Audio war verzerrt. Ein DV3000 bekommt es nur bei `ulaw` oder `alaw` (seit 0.19.2, siehe [Verlorene Antworten](#verlorene-antworten-devicecompand)).
+- **Companding wie eingestellt**: Bei jedem Kanal jedes Geräts wird Companding so gesetzt, wie `DeviceCompand` es sagt, voreingestellt aus (linear), und seine Antwort geprüft. Nach einem Reset folgt ein Chip dem CP_ENABLE-Pin seiner Platine: Der DVstick-33 zieht ihn hoch (µ-law), der hier getestete DV3000 startet mit ausgeschaltetem; ohne das Setzen bekamen die DMR/YSF-Kanäle eines DV3003 µ-law-PCM, das als linear gelesen wurde, und das Audio war verzerrt. Vor 0.19.3 bekam es nur ein DV3003 (und seit 0.19.2 ein DV3000 bei `ulaw` oder `alaw`), ein DV3000 auf einer Platine mit hochgezogenem Pin wäre also falsch gelesen worden (siehe [Verlorene Antworten](#verlorene-antworten-devicecompand)).
 - **Seriellen Puffer leeren**: Vor dem Soft-Reset leeren 350 Null-Bytes einen hängengebliebenen seriellen Zustand.
 - **Codec pro Kanal**: Ein DV3003 kann gleichzeitig D-Star- und DMR/YSF-Kanäle betreiben (Mischbetrieb).
 
@@ -257,11 +257,11 @@ Ein Gerät, das sich nicht öffnen lässt oder nicht antwortet, wird mit einer W
 | `Password` | — | `[Transcoder] Password` des Reflektors, nötig, wenn er eins hat (seit 0.8.0) |
 | `Modules` | `FS` | transcodierte Module; mit `[Transcoder] Modules = auto` im Reflektor (urfd 4.25.0) beliebige seiner Module, dann entscheidet allein diese Liste; sonst dieselben Buchstaben wie dort |
 | `StandbyModules` | — | Module, die dieser tcd nur übernimmt, solange kein anderer tcd sie hat (seit 0.11.0, urfd 4.26.0), siehe [Standby](#standby-ein-zweiter-tcd-für-dieselben-module); nicht zusätzlich in `Modules` |
-| `DeviceSerial` | — | zu verwendendes AMBE-Gerät, je eine Zeile (siehe [oben](#ambe-geräte-auswählen)); `mixed` hinter der Seriennummer eines DV3003 allein: D-Star und DMR eines Moduls darauf (seit 0.17.0, siehe [Einzelner DV3003 im Mischbetrieb](#einzelner-dv3003-im-mischbetrieb)) |
+| `DeviceSerial` | — | zu verwendendes AMBE-Gerät, je eine Zeile (siehe [oben](#ambe-geräte-auswählen)); `mixed` hinter der Seriennummer eines DV3003 allein: D-Star und DMR eines Moduls darauf, seit 0.19.3 dazu das DMR eines zweiten (seit 0.17.0, siehe [Einzelner DV3003 im Mischbetrieb](#einzelner-dv3003-im-mischbetrieb)) |
 | `CodecPlugin` | — | zu ladendes Codec-Plugin, je eine Zeile (siehe [Codec-Plugins](#codec-plugins)) |
 | `CodecDStar` / `CodecDMR` / `CodecP25` / `CodecM17` | — | der Vocoder für neue Streams: `dvsi`, `op25`, `codec2` oder der Name eines Plugins (siehe [Codec-Plugins](#codec-plugins)); von „Save“ gespeichert |
-| `DeviceChannels` | `fixed` | `fixed`: die AMBE-Kanäle gehören den ersten Modulen; `pool`: ein Stream nimmt einen beliebigen freien Kanal (seit 0.17.0, siehe [Kanal-Pool](#kanal-pool-devicechannels--pool)) |
-| `DeviceCompand` | `linear` | das Audio zu und von den AMBE-Geräten: `linear` (16 Bit), `ulaw` oder `alaw` (8-Bit-G.711, halb so viele Bytes auf der seriellen Leitung, keine Empfangsüberläufe; seit 0.19.2, siehe [Verlorene Antworten](#verlorene-antworten-devicecompand)); im Web-Dashboard im Betrieb umschaltbar, von „Save“ gespeichert |
+| `DeviceChannels` | — (Standard `fixed`) | `fixed`: die AMBE-Kanäle gehören den ersten Modulen; `pool`: ein Stream nimmt einen beliebigen freien Kanal (seit 0.17.0, siehe [Kanal-Pool](#kanal-pool-devicechannels--pool)) |
+| `DeviceCompand` | — (Standard `linear`) | das Audio zu und von den AMBE-Geräten: `linear` (16 Bit), `ulaw` oder `alaw` (8-Bit-G.711, halb so viele Bytes auf der seriellen Leitung, keine Empfangsüberläufe; seit 0.19.2, siehe [Verlorene Antworten](#verlorene-antworten-devicecompand)); im Web-Dashboard im Betrieb umschaltbar, von „Save“ gespeichert |
 
 ### Verstärkung
 
@@ -457,8 +457,8 @@ journalctl -u tcd -f
 - **macOS**: baut mit clang und läuft nativ mit den AMBE-Geräten, siehe [macOS](#macos)
 - **Stream-Protokoll und Frame-Prüfung** (0.19.0): `StreamLog` schreibt je Stream eine Zeile mit dem Vocoder jedes Codecs, und tcd prüft die FEC jedes AMBE-Frames, das ein Gerät decodiert oder codiert (Golay der ersten beiden Partitionen, wie ein Decoder), gezählt je Stream in dieser Zeile und je Gerät im Monitor; `tools/ambecheck` tut dasselbe für eine Datei mit Frames
 - **Mischbetrieb DV3000 + DV3003**: zwei Module gleichzeitig mit Codec-Einstellung pro Kanal
-- **Einzelner DV3003 im Mischbetrieb, Kanal-Pool, Ausfall im Betrieb** (0.17.0): `DeviceSerial = ... mixed` legt D-Star und DMR eines Moduls auf einen einzelnen DV3003; mit `DeviceChannels = pool` nimmt ein Stream jedes Moduls einen freien Kanal; ein im Betrieb verlorenes Gerät geht an die Codec-Plugins und wird wieder geöffnet, sobald es da ist, statt tcd zu beenden
-- **D-Star auf dem DV3003**: Companding aus, seriellen Puffer leeren, Kodierung pro Kanal
+- **Einzelner DV3003 im Mischbetrieb, Kanal-Pool, Ausfall im Betrieb** (0.17.0): `DeviceSerial = ... mixed` legt D-Star und DMR eines Moduls auf einen einzelnen DV3003 (seit 0.19.3 auch das DMR eines zweiten, auf Kanal 2); mit `DeviceChannels = pool` nimmt ein Stream jedes Moduls einen freien Kanal; ein im Betrieb verlorenes Gerät geht an die Codec-Plugins und wird wieder geöffnet, sobald es da ist, statt tcd zu beenden
+- **D-Star auf dem DV3003**: Companding, wie `DeviceCompand` es setzt (voreingestellt linear; seit 0.19.3 an jedem Gerät), seriellen Puffer leeren, Kodierung pro Kanal
 - **SVX-Codec-Pfad**: eigener `ECodecType::svx` für SVX-Audio
 
 ### Audio

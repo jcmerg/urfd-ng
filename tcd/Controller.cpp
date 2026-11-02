@@ -651,14 +651,15 @@ bool CController::InitVocoders()
 	}
 	else if (lone_mixed && !dstar_forced && !dmr_forced)
 	{
-		// a DV3003 alone in mixed mode: D-Star on channel 0 and DMR on channel 1 for
-		// one module, channel 2 stays free; the other modules go to the codec plugins
+		// a DV3003 alone in mixed mode: D-Star on channel 0 and DMR on channels 1 and 2:
+		// one module (with the pool: one stream) both ways on the device, a second one
+		// its DMR (its D-Star on the plugin, as the D-Star and DMR of the others)
 		const auto &dev = deviceset.front();
 		const Encoding ch_enc[3] { Encoding::dstar, Encoding::dmrsf, Encoding::dmrsf };
 		AddSlot(dev.node, dev.desc, dev.type, dev.baud, Encoding::dmrsf, "mixed", ch_enc);
 		AddChannels(kChoiceDStar, 0, { 0 });
-		AddChannels(kChoiceDMR, 0, { 1 });
-		std::cout << "Mixed mode: " << dev.desc << " (" << dev.node << "), D-Star on channel 0, DMR on channel 1, channel 2 free" << std::endl;
+		AddChannels(kChoiceDMR, 0, { 1, 2 });
+		std::cout << "Mixed mode: " << dev.desc << " (" << dev.node << "), D-Star on channel 0, DMR on channels 1 and 2" << std::endl;
 	}
 	else if (dstar_forced || dmr_forced || deviceset.size() == 1)
 	{

@@ -1,6 +1,4 @@
-# Protocol Plugins (draft)
-
-> Work in progress.
+# Protocol Plugins
 
 ## Goal
 
