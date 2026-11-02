@@ -21,6 +21,8 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <mutex>
+#include <set>
 
 class PosixDevice : public IDeviceIO {
 public:
@@ -320,17 +322,25 @@ private:
         std::string tty(real);
         tty = tty.substr(tty.rfind('/') + 1);
         const std::string timer = "/sys/bus/usb-serial/devices/" + tty + "/latency_timer";
+        // set on every open (a device plugged in again has the default again),
+        // logged once per device and when it changes: the detection opens each
+        // device once before tcd opens it for good
+        auto read_ms = [&timer]() { std::ifstream in(timer); int v = -1; return (in >> v) ? v : -1; };
+        const int before = read_ms();
         {
             std::ofstream out(timer);
             if (out)
                 out << "1";
         }
-        std::ifstream in(timer);
-        int ms = -1;
-        if (in >> ms) {
-            if (ms > 1)
-                std::cerr << "WARNING: " << tty << " USB latency timer is " << ms << " ms, expect audio timing problems; run tcd as root or set " << timer << " to 1" << std::endl;
-            else
+        const int ms = read_ms();
+        if (ms > 1)
+            std::cerr << "WARNING: " << tty << " USB latency timer is " << ms << " ms, expect audio timing problems; run tcd as root or set " << timer << " to 1" << std::endl;
+        else if (ms == 1)
+        {
+            // detection and the device watch open devices from other threads
+            static std::mutex m;
+            std::lock_guard<std::mutex> lock(m);
+            if (logged_.insert(tty).second || before != 1)
                 std::cout << tty << " USB latency timer: " << ms << " ms" << std::endl;
         }
 #else
@@ -340,6 +350,7 @@ private:
 
     int fd_;
     int read_timeout_tenths_;
+    static inline std::set<std::string> logged_;	// the ttys whose timer was logged
 };
 
 // Factory helper (user can instantiate PosixDevice directly later)
