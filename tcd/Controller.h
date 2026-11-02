@@ -140,7 +140,22 @@ protected:
 	// where tcd's own Codec2 decodes 1600
 	std::vector<class CSoftCodec *> choices[kNumChoices], m17_1600_choices;
 	// hw: the stream's AMBE channel (hw_channels[k]), -1 for none
-	struct SPinned { int choice; int hw; std::chrono::steady_clock::time_point last; };
+	// and, on an AMBE channel, the FEC counts of its frames (AmbeFrameCheck.h):
+	// the frames the device decoded, those with corrected errors and those
+	// with an uncorrectable first partition; the frames it encoded and those
+	// that fail their FEC
+	struct SPinned
+	{
+		int choice;
+		int hw;
+		std::chrono::steady_clock::time_point last;
+		uint32_t frames_in = 0, errors_in = 0, uncorrectable = 0, frames_out = 0, bad_out = 0;
+	};
+	// StreamLog: the vocoder a new stream gets, and at its end the FEC counts of
+	// the frames an AMBE device decoded (from Pick) or encoded (from the routing)
+	void LogStreamStart(int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw) const;
+	void DeviceFrameIn(int k, SPinned &pin, const std::shared_ptr<CTranscoderPacket> &packet) const;
+	void DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket> &packet);
 	std::mutex pinned_mux;
 	std::unordered_map<uint16_t, SPinned> pinned[kNumChoices];
 	// the modules the devices do D-Star and DMR for; the other modules go to a

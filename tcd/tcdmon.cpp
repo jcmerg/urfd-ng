@@ -598,6 +598,21 @@ int main(int argc, char *argv[])
 				attroff(COLOR_PAIR(7));
 			}
 			if (errs > 0) { attron(COLOR_PAIR(3)); printw("  err:%d", errs); attroff(COLOR_PAIR(3)); }
+			// its frames by their FEC, like the software rows: decoded with corrected
+			// errors / uncorrectable (repeated), encoded that fail their FEC
+			{
+				const int dec = json_int(dj, "decodes"), enc = json_int(dj, "encodes");
+				const int fec = json_int(dj, "error_frames"), unc = json_int(dj, "uncorrectable"), bad = json_int(dj, "bad_out");
+				attron(COLOR_PAIR(5));
+				printw("  dec:%d enc:%d", dec, enc);
+				attroff(COLOR_PAIR(5));
+				if (fec || unc || bad)
+				{
+					attron(COLOR_PAIR(3));
+					printw("  fec:%d unc:%d bad:%d", fec, unc, bad);
+					attroff(COLOR_PAIR(3));
+				}
+			}
 			if (phase) printw("  %s", phase == 2 ? "phased out" : "phasing out");
 			row++;
 		}

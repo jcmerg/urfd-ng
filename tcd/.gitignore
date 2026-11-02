@@ -42,3 +42,4 @@ monitor_html.cpp
 tools/codectest
 tools/decode
 tools/dvsitest
+tools/ambecheck
