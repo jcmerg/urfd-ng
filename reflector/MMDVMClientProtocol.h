@@ -17,8 +17,11 @@
 #include "DMREmbeddedLC.h"
 #include "BrandMeisterApi.h"
 #include "MmdvmClientConfig.h"
+#include <array>
 #include <chrono>
+#include <deque>
 #include <set>
+#include <vector>
 
 // MMDVM protocol constants
 #define MMDVMCLI_RETRY_PERIOD       10  // seconds between retransmissions
@@ -26,6 +29,16 @@
 #define MMDVMCLI_PING_PERIOD        10  // seconds between keepalive pings
 #define MMDVMCLI_OPTIONS_WAIT        2  // seconds to wait for an ACK of the options; BrandMeister sends none
 #define MMDVMCLI_OPTIONS_RESENDS     3  // times the options go out again, every MMDVMCLI_RETRY_PERIOD, until the master answers
+
+// A master's echo of a call's end (seen on BrandMeister): right after a call, a
+// new stream from the same ID with the call's last second again, as from a second
+// way in with a delay. Such a stream waits for its first voice frames: when they
+// are (nearly) frames of the call just before, it is dropped
+#define MMDVMCLI_ECHO_WINDOW        3.0 // seconds after the call's last frame
+#define MMDVMCLI_ECHO_TAIL          150 // frames of the call kept to compare (3 s)
+#define MMDVMCLI_ECHO_VOICE         3   // voice frames that decide
+#define MMDVMCLI_ECHO_BURSTS        6   // or this many bursts (360 ms) at most
+#define MMDVMCLI_ECHO_BITS          6   // bits a frame of the echo may differ by
 
 // MMDVM data packet size
 #define MMDVMCLI_DATA_PACKET_LENGTH 55
@@ -113,7 +126,8 @@ protected:
 
 	// DMRD incoming: Master -> Reflector
 	void OnDMRDPacketIn(const CBuffer &Buffer);
-	void OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t srcId, uint32_t dstId, uint32_t streamId);
+	// echoChecked: the stream was held as a possible echo, and is none
+	void OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t srcId, uint32_t dstId, uint32_t streamId, bool echoChecked = false);
 	void OnDMRDVoiceFrameIn(const CBuffer &Buffer, uint32_t srcId, uint32_t dstId, uint32_t streamId);
 	void OnDMRDTerminatorIn(const CBuffer &Buffer, uint32_t srcId, uint32_t dstId, uint32_t streamId);
 
@@ -183,8 +197,27 @@ private:
 	// TG mapping
 	CTGModuleMap    m_TGMap;
 
-	// Incoming stream tracking: master streamId -> URFD streamId
+	// Incoming stream tracking: master streamId -> URFD streamId, or one of
+	// these (an URFD streamId is a multiple of 0x100)
+	static constexpr uint16_t STREAM_REJECTED = 0;	// the module was busy
+	static constexpr uint16_t STREAM_ECHO_WAIT = 1;	// may be an echo, held
+	static constexpr uint16_t STREAM_ECHO = 2;		// an echo, dropped
 	std::unordered_map<uint32_t, uint16_t> m_IncomingStreams;
+	// the last call on each module from the master: its source and last frames
+	struct SRecentCall
+	{
+		uint32_t srcId = 0;
+		CTimer   last;
+		std::deque<std::array<uint8_t, 9>> frames;
+	};
+	std::unordered_map<char, SRecentCall> m_RecentCalls;
+	// the bursts of a held stream (STREAM_ECHO_WAIT)
+	std::unordered_map<uint32_t, std::vector<CBuffer>> m_EchoWait;
+	bool MayBeEcho(char module, uint32_t srcId);
+	// 1: the held bursts are the end of the call before, 0: not, -1: not known
+	// yet (too few voice frames; decide: no -1)
+	int IsEcho(char module, const std::vector<CBuffer> &bursts, bool decide);
+	void EndEchoWait(uint32_t streamId, uint32_t srcId, uint32_t dstId, bool force);
 	// master streamId -> source ID and its talker alias, for unknown IDs only
 	std::unordered_map<uint32_t, std::pair<uint32_t, CDmrTalkerAliasIn>> m_UnknownTA;
 
