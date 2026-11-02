@@ -815,8 +815,10 @@ void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t s
 	else
 	{
 		stream->SetSourceTG(dstId);
-		auto &recent = m_RecentCalls[module];
-		recent.srcId = srcId;
+		// calls out of the window are of no use any more
+		for (auto it = m_RecentCalls.begin(); it != m_RecentCalls.end();)
+			it = it->second.last.time() >= MMDVMCLI_ECHO_WINDOW ? m_RecentCalls.erase(it) : std::next(it);
+		auto &recent = m_RecentCalls[CallKey(module, srcId)];
 		recent.last.start();
 		recent.frames.clear();
 	}
@@ -834,12 +836,11 @@ static void BurstAmbe(const uint8_t *dmrframe, uint8_t *dmr3ambe)
 
 bool CMMDVMClientProtocol::MayBeEcho(char module, uint32_t srcId)
 {
-	auto it = m_RecentCalls.find(module);
-	return it != m_RecentCalls.end() && it->second.srcId == srcId && !it->second.frames.empty()
-		&& it->second.last.time() < MMDVMCLI_ECHO_WINDOW;
+	auto it = m_RecentCalls.find(CallKey(module, srcId));
+	return it != m_RecentCalls.end() && !it->second.frames.empty() && it->second.last.time() < MMDVMCLI_ECHO_WINDOW;
 }
 
-int CMMDVMClientProtocol::IsEcho(char module, const std::vector<CBuffer> &bursts, bool decide)
+int CMMDVMClientProtocol::IsEcho(char module, uint32_t srcId, const std::vector<CBuffer> &bursts, bool decide)
 {
 	std::vector<std::array<uint8_t, 9>> frames;
 	int voice = 0;
@@ -860,7 +861,7 @@ int CMMDVMClientProtocol::IsEcho(char module, const std::vector<CBuffer> &bursts
 	// silence and erasures alone (a kerchunk) are no proof
 	if (voice == 0)
 		return 0;
-	const auto &tail = m_RecentCalls[module].frames;
+	const auto &tail = m_RecentCalls[CallKey(module, srcId)].frames;
 	for (size_t off = 0; off + frames.size() <= tail.size(); off++)
 	{
 		size_t i = 0;
@@ -884,7 +885,7 @@ void CMMDVMClientProtocol::EndEchoWait(uint32_t streamId, uint32_t srcId, uint32
 	if (w == m_EchoWait.end())
 		return;
 	const char module = m_TGMap.TGToModule(dstId);
-	const int echo = w->second.empty() ? (force ? 0 : -1) : IsEcho(module, w->second, force);
+	const int echo = w->second.empty() ? (force ? 0 : -1) : IsEcho(module, srcId, w->second, force);
 	if (echo < 0)
 		return;
 	auto bursts = std::move(w->second);
@@ -972,7 +973,7 @@ void CMMDVMClientProtocol::OnDMRDVoiceFrameIn(const CBuffer &Buffer, uint32_t sr
 		return;
 
 	// the call's last frames, to know its echo
-	auto &recent = m_RecentCalls[stream->GetOwnerClient()->GetReflectorModule()];
+	auto &recent = m_RecentCalls[CallKey(stream->GetOwnerClient()->GetReflectorModule(), srcId)];
 	recent.last.start();
 	for (int i = 0; i < 3; i++)
 	{
