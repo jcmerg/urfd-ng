@@ -32,10 +32,12 @@
 #include <iomanip>
 #include <cerrno>
 #include <thread>
+#include <algorithm>
 
 #include "DVSIDevice.h"
 #include "Configure.h"
 #include "TcdStats.h"
+#include "Controller.h"
 
 // a device that leaves a packet unanswered for this long is taken as lost, like an
 // unplugged one: a codec plugin takes its streams (or tcd stops, without one). An
@@ -43,12 +45,22 @@
 // end the transmission for the pause (some after 1.5-2 s)
 #define DEVICE_SILENCE_MS 1000
 
+// a packet unanswered for this long lost its answer (bytes of it dropped on the
+// serial line, an FTDI receive overrun, and with them the channel it was for); a
+// channel answers in order, the busiest within some 60 ms
+#define LOST_ANSWER_MS 300
+
+// what goes on for a lost answer: the silence frames of the vocoders, silent audio
+static const uint8_t DSTAR_SILENCE[9] { 0x9EU, 0x8DU, 0x32U, 0x88U, 0x26U, 0x1AU, 0x3FU, 0x61U, 0xE8U };
+static const uint8_t DMR_SILENCE[9]   { 0xB9U, 0xE8U, 0x81U, 0x52U, 0x61U, 0x73U, 0x00U, 0x2AU, 0x6BU };
+
 static int64_t SteadyMs()
 {
 	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 extern CConfigure g_Conf;
+extern CController g_Cont;
 
 CDVDevice::CDVDevice(Encoding t) : type(t), devtype(Edvtype::dv3000), buffer_depth(0), keep_running(true)
 {
@@ -469,8 +481,9 @@ bool CDVDevice::ConfigureVocoder(uint8_t pkt_ch, Encoding type, int8_t in_gain, 
 		return true;
 	};
 
-	// DV3003 defaults to companding ON (CP_ENABLE pullup) — force linear PCM for all channels
-	if (Edvtype::dv3003 == devtype)
+	// DV3003 defaults to companding ON (CP_ENABLE pullup), a DV3000 to off: set it as
+	// DeviceCompand says (linear by default)
+	if (Edvtype::dv3003 == devtype || COMPAND_LINEAR != compand)
 	{
 		SDV_Packet compandPkt, compandResp;
 		compandPkt.start_byte = PKT_HEADER;
@@ -478,14 +491,23 @@ bool CDVDevice::ConfigureVocoder(uint8_t pkt_ch, Encoding type, int8_t in_gain, 
 		compandPkt.header.packet_type = PKT_CONTROL;
 		compandPkt.field_id = pkt_ch;
 		compandPkt.payload.ctrl.data.paritymode[0] = PKT_COMPAND;
-		compandPkt.payload.ctrl.data.paritymode[1] = 0x0;  // companding OFF
+		compandPkt.payload.ctrl.data.paritymode[1] = uint8_t(compand);
 		if (device->Write(&compandPkt, 7) < 0)
 			FTDI_Error("writing PKT_COMPAND", errno);
-		if (GetResponse(compandResp))
-			std::cerr << "Warning: no response to PKT_COMPAND on channel " << (unsigned int)(pkt_ch - PKT_CHANNEL0) << std::endl;
+		// the answer as to the codec config: the channel, its status, then the field and its status (40 00 32 00)
+		const bool ok = !GetResponse(compandResp) && compandResp.field_id == pkt_ch && 0 == compandResp.payload.ctrl.data.paritymode[0]
+			&& PKT_COMPAND == compandResp.payload.ctrl.data.paritymode[1] && 0 == compandResp.payload.ctrl.data.paritymode[2];
+		if (!ok)
+		{
+			std::cerr << (COMPAND_LINEAR == compand ? "Warning: " : "") << "no valid response to PKT_COMPAND on channel " << (unsigned int)(pkt_ch - PKT_CHANNEL0) << std::endl;
+			// a device that kept other packets than tcd reads would give silence for good
+			if (COMPAND_LINEAR != compand)
+				return true;
+		}
 	}
 
-	std::cout << description << " channel " << (unsigned int)(pkt_ch - PKT_CHANNEL0) << " is now configured for " << ((Encoding::dstar == type) ? "D-Star" : "DMR/YSF") << std::endl;
+	std::cout << description << " channel " << (unsigned int)(pkt_ch - PKT_CHANNEL0) << " is now configured for " << ((Encoding::dstar == type) ? "D-Star" : "DMR/YSF")
+		<< (COMPAND_LINEAR != compand ? std::string(", speech in ") + CompandName(compand) : std::string()) << std::endl;
 
 	return false;
 }
@@ -569,6 +591,9 @@ void CDVDevice::AddPacket(const std::shared_ptr<CTranscoderPacket> packet)
 void CDVDevice::dump(const char *title, const void *pointer, int length) const
 {
 	const uint8_t *data = (const uint8_t *)pointer;
+	// hex and a fill of 0 only here: the next "Opened ... at 921600 baud" in decimal
+	const std::ios_base::fmtflags flags(std::cout.flags());
+	const char fill = std::cout.fill();
 
 	std::cout << title << std::endl;
 
@@ -607,6 +632,8 @@ void CDVDevice::dump(const char *title, const void *pointer, int length) const
 		else
 			length = 0;
 	}
+	std::cout.flags(flags);
+	std::cout.fill(fill);
 }
 
 void CDVDevice::FeedDevice()
@@ -636,7 +663,9 @@ void CDVDevice::FeedDevice()
 				}
 				else
 				{
-					PushWaitingPacket(index, packet);
+					Encoding ch_enc = GetChannelEncoding(index);
+					const bool needs_audio = (Encoding::dstar==ch_enc) ? packet->DStarIsSet() : packet->DMRIsSet();
+					PushWaiting(index, packet, needs_audio);
 
 					// Track channel activity in stats
 					if (m_statsIndex >= 0 && m_statsIndex < CTcdStats::MAX_DEVICES
@@ -652,8 +681,6 @@ void CDVDevice::FeedDevice()
 					// stamped before it goes out, so its answer cannot come first
 					int64_t none = 0;
 					m_unanswered.compare_exchange_strong(none, SteadyMs());
-					Encoding ch_enc = GetChannelEncoding(index);
-					const bool needs_audio = (Encoding::dstar==ch_enc) ? packet->DStarIsSet() : packet->DMRIsSet();
 
 					if (needs_audio)
 					{
@@ -677,7 +704,6 @@ void CDVDevice::FeedDevice()
 						else
 							SendAudio(index, packet->GetAudioSamples());
 					}
-					buffer_depth++;
 				}
 			}
 		}
@@ -686,59 +712,383 @@ void CDVDevice::FeedDevice()
 
 void CDVDevice::ReadDevice()
 {
+	int64_t resynced = 0;
 	while (keep_running)
 	{
-		// Wait for incoming data, then let the bytes of a packet accumulate
-		int RxBytes = device->BytesAvailable();
-
-		while (RxBytes >= 0 && RxBytes < 5 && keep_running)  // minimum packet = 5 bytes (header)
+		// lost answers: per channel, also while the other channels are busy
+		if (SteadyMs() - resynced >= 50)
 		{
-			if (device->WaitReadable((buffer_depth > 0) ? 50 : 500) < 0)
-				RxBytes = -1;
-
-			if (!keep_running)
-				return;
-
-			if (RxBytes >= 0)
-				RxBytes = device->BytesAvailable();
-
-			// After event, let remaining bytes of packet arrive
-			if (RxBytes > 0 && RxBytes < 5)
-				std::this_thread::sleep_for(std::chrono::microseconds(500));
-
-			// Timeout recovery
-			if (0 == RxBytes && buffer_depth > 0)
+			Resync();
+			resynced = SteadyMs();
+		}
+		// a device that is still there but gives no answer (a hung chip, or one that
+		// sends what is no answer) would hold the modules forever: give up as for a
+		// lost one, so tcd restarts without it and a codec plugin or a standby tcd
+		// takes over. Frames still going to it and none answered for DEVICE_SILENCE_MS
+		const int64_t unanswered = m_unanswered.load();
+		if (unanswered && SteadyMs() - unanswered > DEVICE_SILENCE_MS)
+		{
+			std::cerr << "The AMBE device " << description << " has not answered for " << DEVICE_SILENCE_MS << " ms" << std::endl;
+			Lost();
+			return;
+		}
+		// wait for the next answer
+		while (rx.empty() && keep_running)
+		{
+			const int ready = device->WaitReadable((buffer_depth > 0) ? 50 : 500);
+			if (ready < 0)
 			{
-				buffer_depth = 0;
-				buffer_cv.notify_one();
-			}
-
-			// a device that is still there but answers nothing (a hung chip) would hold
-			// the modules forever: give up as for a lost one, so tcd restarts without it
-			// and a codec plugin or a standby tcd takes over
-			const int64_t unanswered = m_unanswered.load();
-			if (0 == RxBytes && unanswered && SteadyMs() - unanswered > DEVICE_SILENCE_MS)
-			{
-				std::cerr << "The AMBE device " << description << " has not answered for " << DEVICE_SILENCE_MS << " ms" << std::endl;
+				// unplugged or reset: a codec plugin takes over until it is back, or tcd
+				// stops and its service restarts it
+				std::cerr << "Lost the AMBE device " << description << std::endl;
 				Lost();
 				return;
 			}
-		}
+			if (ready > 0 || !keep_running)
+				break;
 
-		if (RxBytes < 0)
+			Resync();
+			resynced = SteadyMs();
+			const int64_t unanswered = m_unanswered.load();
+			if (unanswered && SteadyMs() - unanswered > DEVICE_SILENCE_MS)
+				break;	// to the check above
+		}
+		if (!keep_running)
+			return;
+
+		std::vector<SDV_Packet> answers;
+		const bool ok = ReadAnswers(answers);
+		for (const auto &p : answers)
+			ProcessPacket(p);
+		if (!ok && rx_error && keep_running)
 		{
-			// unplugged or reset: a codec plugin takes over until it is back, or tcd
-			// stops and its service restarts it
 			std::cerr << "Lost the AMBE device " << description << std::endl;
 			Lost();
 			return;
 		}
+	}
+}
 
-		SDV_Packet p;
-		if (! GetResponse(p))
+void CDVDevice::SpeechIn(const void *samples, int16_t *pcm) const
+{
+	if (COMPAND_LINEAR == compand)
+	{
+		const uint8_t *b = (const uint8_t *)samples;
+		for (int i = 0; i < 160; i++)
+			pcm[i] = int16_t((b[2 * i] << 8) | b[2 * i + 1]);
+	}
+	else
+	{
+		const uint8_t *b = (const uint8_t *)samples;
+		for (int i = 0; i < 160; i++)
+			pcm[i] = CompandToLinear(compand, b[i]);
+	}
+}
+
+size_t CDVDevice::SpeechOut(const int16_t *audio, void *samples) const
+{
+	uint8_t *b = (uint8_t *)samples;
+	if (COMPAND_LINEAR == compand)
+	{
+		for (int i = 0; i < 160; i++)
 		{
-			m_unanswered.store(0);
-			ProcessPacket(p);
+			b[2 * i] = uint8_t(uint16_t(audio[i]) >> 8);
+			b[2 * i + 1] = uint8_t(audio[i]);
+		}
+		return 320;
+	}
+	for (int i = 0; i < 160; i++)
+		b[i] = LinearToCompand(compand, audio[i]);
+	return 160;
+}
+
+void CDVDevice::PushWaiting(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, bool decode)
+{
+	std::lock_guard<std::mutex> lock(waiting_mx);
+	waiting[channel].push_back(SWaiting{ packet, SteadyMs(), decode });
+	buffer_depth++;
+}
+
+std::shared_ptr<CTranscoderPacket> CDVDevice::PopWaiting(uint8_t channel, bool *decode)
+{
+	std::shared_ptr<CTranscoderPacket> packet;
+	{
+		std::lock_guard<std::mutex> lock(waiting_mx);
+		if (channel < 3 && !waiting[channel].empty())
+		{
+			packet = waiting[channel].front().packet;
+			if (decode)
+				*decode = waiting[channel].front().decode;
+			waiting[channel].pop_front();
+			buffer_depth--;
 		}
 	}
+	{	// FeedDevice may send the next one (taken, so it cannot miss the wake-up)
+		std::lock_guard<std::mutex> lk(buffer_mutex);
+	}
+	buffer_cv.notify_one();
+	return packet;
+}
+
+void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc)
+{
+	if (Encoding::dstar == ch_enc)
+	{
+		std::lock_guard<std::mutex> lock(g_Cont.dstar_mux);
+		g_Cont.RouteDstPacket(packet);
+	}
+	else
+	{
+		std::lock_guard<std::mutex> lock(g_Cont.dmrst_mux);
+		g_Cont.RouteDmrPacket(packet);
+	}
+}
+
+void CDVDevice::LostAnswer(uint8_t channel, const char *why)
+{
+	if (m_statsIndex >= 0 && m_statsIndex < CTcdStats::MAX_DEVICES)
+		g_Stats.devices[m_statsIndex].errors++;
+	bool decode = false;
+	auto packet = PopWaiting(channel, &decode);
+	char line[192];
+	if (!packet)
+	{
+		snprintf(line, sizeof(line), " channel %u: an answer was lost (%s), no packet waited for it", unsigned(channel), why);
+		if (LogLost())
+			std::cerr << description << line << std::endl;
+		return;
+	}
+	snprintf(line, sizeof(line), " channel %u: the answer for module %c stream 0x%04x frame %u was lost (%s), a silent frame instead",
+		unsigned(channel), packet->GetModule(), unsigned(packet->GetStreamId()), unsigned(packet->GetSequence()), why);
+	if (LogLost())
+		std::cerr << description << line << std::endl;
+	const Encoding ch_enc = GetChannelEncoding(channel);
+	if (decode)
+	{
+		const int16_t silence[160] = {};
+		packet->SetAudioSamples(silence, false);
+	}
+	else if (Encoding::dstar == ch_enc)
+		packet->SetDStarData(DSTAR_SILENCE);
+	else
+		packet->SetDMRData(DMR_SILENCE);
+	Deliver(packet, ch_enc);
+}
+
+bool CDVDevice::LogLost(void)
+{
+	const int64_t now = SteadyMs();
+	if (now - m_logWindow >= 60000)
+	{
+		if (m_suppressed)
+			std::cerr << description << ": " << m_suppressed << " more lost answers in the minute before, not logged" << std::endl;
+		m_logWindow = now;
+		m_logged = 0;
+		m_suppressed = 0;
+	}
+	if (m_logged < 5)
+	{
+		m_logged++;
+		return true;
+	}
+	m_suppressed++;
+	return false;
+}
+
+void CDVDevice::Resync(void)
+{
+	const int64_t now = SteadyMs();
+	for (uint8_t ch = 0; ch < 3; ch++)
+	{
+		for (;;)
+		{
+			{
+				std::lock_guard<std::mutex> lock(waiting_mx);
+				if (waiting[ch].empty() || now - waiting[ch].front().sent < LOST_ANSWER_MS)
+					break;
+			}
+			LostAnswer(ch, "no answer came");
+		}
+	}
+	// the last frames of a stream whose answers were lost: nothing waits any more, so
+	// this is no hung device (one keeps getting frames, which then wait)
+	{
+		std::lock_guard<std::mutex> lock(waiting_mx);
+		if (0 == buffer_depth)
+			m_unanswered.store(0);
+	}
+}
+
+bool CDVDevice::ReadBytes(uint8_t *dst, size_t n)
+{
+	while (n && !rx.empty())
+	{
+		*dst++ = rx.front();
+		rx.pop_front();
+		n--;
+	}
+	while (n)
+	{
+		const ssize_t got = device->Read(dst, n);
+		if (got < 0)
+		{
+			if (keep_running)	// not CloseDevice's Abort()
+			{
+				FTDI_Error("Reading an answer", errno);
+				rx_error = true;
+			}
+			return false;
+		}
+		if (0 == got)
+			return false;	// the read timeout
+		dst += got;
+		n -= size_t(got);
+	}
+	return true;
+}
+
+bool CDVDevice::ReadAhead(size_t n, int wait_ms)
+{
+	while (rx.size() < n)
+	{
+		if (device->WaitReadable(wait_ms) <= 0)
+			return false;
+		uint8_t buf[16];
+		const ssize_t got = device->Read(buf, std::min(sizeof(buf), n - rx.size()));
+		if (got <= 0)
+			return false;
+		rx.insert(rx.end(), buf, buf + got);
+	}
+	return true;
+}
+
+// The answers come one after the other, each from a start byte. An FTDI receive
+// overrun drops a byte: then a start byte is missing, or a packet is one byte short
+// and takes the start byte of the next. Without care the reader skips an answer, and
+// from then on every answer of that channel went to the packet before its own (+20 ms
+// each time, a stream's last frames held until the next stream). So a start byte
+// counts only with the header of an answer this device sends; the bytes skipped to
+// it are an answer without its start byte (taken) or a lost one (LostAnswer)
+bool CDVDevice::ReadAnswers(std::vector<SDV_Packet> &answers)
+{
+	std::vector<uint8_t> skipped;
+	auto settle = [&]() {
+		if (skipped.empty())
+			return;
+		int ch = -1;
+		size_t length = 0;
+		if (skipped.size() >= 4)
+		{
+			length = (size_t(skipped[0]) << 8) | skipped[1];
+			ch = AnswerChannel(uint16_t(length), skipped[2], skipped[3]);
+		}
+		if (ch >= 0 && skipped.size() == length + 3)
+		{
+			SDV_Packet p;
+			p.start_byte = PKT_HEADER;
+			memcpy(&p.header, skipped.data(), skipped.size());
+			answers.push_back(p);
+			m_unanswered.store(0);
+			if (LogLost())
+				std::cerr << description << " channel " << ch << ": an answer without its start byte, taken" << std::endl;
+		}
+		else if (ch >= 0)
+			LostAnswer(uint8_t(ch), "bytes of it were lost");
+		else if (Edvtype::dv3000 == devtype && skipped.size() >= 8)
+			LostAnswer(0, "bytes of it were lost");	// one channel: the bytes were its answer
+		else if (LogLost())
+			std::cerr << description << ": " << skipped.size() << " bytes that are no answer skipped" << std::endl;
+		skipped.clear();
+	};
+
+	uint8_t h[4];	// the payload length, packet type and field id after a start byte
+	int ch = -1;
+	size_t scanned = 0;
+	for (;;)
+	{
+		// a device that sends nothing but what is no answer: back to ReadDevice, whose
+		// checks (lost answers, a device that gives no answer) run between the reads
+		if (++scanned > 2 * sizeof(SDV_Packet))
+		{
+			settle();
+			return false;
+		}
+		uint8_t b;
+		if (!ReadBytes(&b, 1))
+		{
+			settle();
+			return false;
+		}
+		if (PKT_HEADER == b)
+		{
+			if (!ReadBytes(h, 4))
+			{
+				settle();
+				return false;
+			}
+			ch = AnswerChannel(uint16_t((h[0] << 8) | h[1]), h[2], h[3]);
+			if (ch >= 0)
+			{
+				m_unanswered.store(0);	// it answers
+				break;
+			}
+			rx.insert(rx.begin(), h, h + 4);	// a 0x61 in the data: look on after it
+		}
+		skipped.push_back(b);
+		if (skipped.size() > 2 * sizeof(SDV_Packet))
+			skipped.erase(skipped.begin());
+	}
+	settle();
+
+	SDV_Packet p;
+	p.start_byte = PKT_HEADER;
+	memcpy(&p.header, h, sizeof(h));	// the header and the field id
+	const size_t length = (size_t(h[0]) << 8) | h[1];
+	if (!ReadBytes(&p.field_id + 1, length - 1))
+	{
+		LostAnswer(uint8_t(ch), "the rest of it did not come");
+		return false;
+	}
+
+	// a packet with a start byte and the header of an answer in its last bytes is
+	// short: bytes of it were lost and it took the start of the next answer
+	const uint8_t *bytes = &p.start_byte;
+	const size_t size = 4 + length;
+	for (size_t j = (size > 69) ? size - 64 : 5; j < size; j++)
+	{
+		if (PKT_HEADER != bytes[j])
+			continue;
+		uint8_t n[4];
+		const size_t inside = std::min<size_t>(4, size - j - 1);
+		memcpy(n, bytes + j + 1, inside);
+		if (inside < 4)
+		{
+			if (!ReadAhead(4 - inside, 20))
+				continue;
+			for (size_t t = inside; t < 4; t++)
+				n[t] = rx[t - inside];
+		}
+		if (AnswerChannel(uint16_t((n[0] << 8) | n[1]), n[2], n[3]) < 0)
+			continue;
+		// and the whole answer that starts there, then a start byte or nothing yet: the
+		// audio of a good answer can hold what looks like the header of a short one
+		const size_t end = j + 4 + ((size_t(n[0]) << 8) | n[1]);	// where it ends, from bytes[0]
+		if (end < size)
+		{
+			if (PKT_HEADER != bytes[end])
+				continue;	// it lies in this packet, the next start byte too
+		}
+		else
+		{
+			const size_t rest = end - size;	// its bytes still to come
+			ReadAhead(rest + 1, 20);	// a DV3000 at 460800 baud takes 7 ms for an audio answer
+			if (rx.size() < rest || (rx.size() > rest && PKT_HEADER != rx[rest]))
+				continue;
+		}
+		rx.insert(rx.begin(), bytes + j, bytes + size);
+		LostAnswer(uint8_t(ch), "bytes of it were lost");
+		return true;
+	}
+	answers.push_back(p);
+	return true;
 }

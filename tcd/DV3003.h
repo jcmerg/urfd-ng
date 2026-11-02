@@ -28,8 +28,7 @@ public:
 	void SetChannelEncoding(uint8_t channel, Encoding enc);
 
 protected:
-	void PushWaitingPacket(unsigned int channel, std::shared_ptr<CTranscoderPacket> packet) override;
-	std::shared_ptr<CTranscoderPacket> PopWaitingPacket(unsigned int channel) override;
+	int AnswerChannel(uint16_t length, uint8_t type, uint8_t field) const override;
 	void ProcessPacket(const SDV_Packet &p) override;
 	bool SendAudio(const uint8_t channel, const int16_t *audio) const override;
 	bool SendData(const uint8_t channel, const uint8_t *data) const override;
@@ -38,6 +37,5 @@ protected:
 	Encoding GetChannelEncoding(uint8_t channel) const override;
 
 private:
-	CPacketQueue waiting_packet[3];
 	Encoding channel_enc[3];
 };

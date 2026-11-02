@@ -7,14 +7,14 @@
 
 #include "Defines.h"
 #include "Timer.h"
+#include "LinkRetry.h"
 #include "Protocol.h"
 #include "DVHeaderPacket.h"
 #include "DVFramePacket.h"
 
 // DExtra client constants (aligned with ircDDBGateway)
 #define DEXTRACLI_KEEPALIVE_PERIOD    3   // seconds
-#define DEXTRACLI_KEEPALIVE_TIMEOUT   30  // seconds
-#define DEXTRACLI_RECONNECT_PERIOD    5   // seconds
+#define DEXTRACLI_KEEPALIVE_TIMEOUT   60  // seconds (ircDDBGateway: 60)
 
 // A single DExtra module mapping
 struct SDExtraClientMapping
@@ -28,6 +28,7 @@ struct SDExtraClientMapping
 	bool        connected;
 	CTimer      keepaliveTimer;
 	CTimer      timeoutTimer;
+	unsigned    tries = 0;      // link attempts since the last link (LinkRetry.h)
 
 	SDExtraClientMapping() : port(30001), remoteModule('A'), localModule('A'), connected(false) {}
 };

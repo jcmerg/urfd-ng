@@ -49,6 +49,9 @@ public:
 	// DeviceChannels = pool: a stream takes any free AMBE channel, whatever its
 	// module, instead of the channels of the first modules
 	bool GetDevicePool(void) const { return device_pool; }
+	// DeviceCompand: the speech packets of the AMBE devices as 16-bit linear (0), 8-bit
+	// µ-law (1) or A-law (3), the values of PKT_COMPAND (G711.h)
+	int GetDeviceCompand(void) const { return device_compand; }
 
 	// DMR/YSF gain mode: off, ambe (bitstream b2), reencode (PCM through a codec plugin)
 	enum class EDmrGainMode { off, ambe, reencode };
@@ -104,6 +107,7 @@ private:
 	std::string tcmods, standbymods, address, password, ini_path;
 	std::vector<std::string> device_serials, mixed_serials;
 	bool device_pool = false;
+	int device_compand = 0;
 	std::vector<std::string> codec_plugins;
 	std::string codec_choice[kNumChoices];
 	std::vector<std::pair<std::string, std::string>> unknown_lines;

@@ -597,7 +597,8 @@ int main(int argc, char *argv[])
 				printw("  %s", active_mods.c_str());
 				attroff(COLOR_PAIR(7));
 			}
-			if (errs > 0) { attron(COLOR_PAIR(3)); printw("  err:%d", errs); attroff(COLOR_PAIR(3)); }
+			// answers lost on the serial line, a silent frame instead
+			if (errs > 0) { attron(COLOR_PAIR(3)); printw("  lost:%d", errs); attroff(COLOR_PAIR(3)); }
 			// its frames by their FEC, like the software rows: decoded with corrected
 			// errors / uncorrectable (repeated), encoded that fail their FEC
 			{

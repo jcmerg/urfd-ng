@@ -8,6 +8,7 @@
 
 #include "Defines.h"
 #include "Timer.h"
+#include "LinkRetry.h"
 #include "Protocol.h"
 #include "DVHeaderPacket.h"
 #include "DVFramePacket.h"
@@ -15,7 +16,6 @@
 // DCS client protocol constants (aligned with ircDDBGateway timings)
 #define DCSCLI_KEEPALIVE_PERIOD     5   // seconds between keepalives (g4klx: 5s)
 #define DCSCLI_KEEPALIVE_TIMEOUT    60  // seconds before connection is considered dead (g4klx: 60s)
-#define DCSCLI_RECONNECT_PERIOD     5   // seconds between reconnection attempts
 
 // A single module mapping: remote DCS reflector module <-> local reflector module
 struct SDcsClientMapping
@@ -29,6 +29,7 @@ struct SDcsClientMapping
 	bool        connected;
 	CTimer      keepaliveTimer;
 	CTimer      reconnectTimer;
+	unsigned    tries = 0;      // link attempts since the last link (LinkRetry.h)
 
 	SDcsClientMapping() : port(30051), remoteModule('A'), localModule('A'), connected(false) {}
 };
@@ -78,9 +79,17 @@ protected:
 	bool IsValidKeepAlivePacket(const CBuffer &, CCallsign *);
 
 	// packet encoding
-	void EncodeConnectPacket(CBuffer *, char localModule, char remoteModule);
-	void EncodeDisconnectPacket(CBuffer *);
-	void EncodeKeepAlivePacket(CBuffer *);
+	void EncodeConnectPacket(CBuffer *, const SDcsClientMapping &);
+	void EncodeDisconnectPacket(CBuffer *, const SDcsClientMapping &);
+	// a poll as ircDDBGateway sends it: our callsign with the module we link, 0x00, the
+	// reflector with its module; reflector: its first 8 bytes as the reflector sent them
+	void EncodeKeepAlivePacket(CBuffer *, const SDcsClientMapping &, const uint8_t *reflector = nullptr);
+	// the reflector's callsign, 7 characters: as it sent it, else from the host name
+	// (dcs001.xreflector.net -> DCS001, xlx262 -> DCS262 as ircDDBGateway does)
+	std::string ReflectorName(const SDcsClientMapping &) const;
+	// stream id 0 (a reflector's broken loop sends nothing else): dropped, logged once a minute
+	unsigned m_ZeroSid = 0;
+	CTimer   m_ZeroSidTimer;
 	void EncodeDCSPacket(const CDvHeaderPacket &, const CDvFramePacket &, uint32_t seq, CBuffer *) const;
 	void EncodeLastDCSPacket(const CDvHeaderPacket &, const CDvFramePacket &, uint32_t seq, CBuffer *) const;
 

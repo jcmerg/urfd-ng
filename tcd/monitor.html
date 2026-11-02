@@ -163,6 +163,8 @@ td.cnts { text-align: right; white-space: nowrap; }
 .nowrap { white-space: nowrap; }
 .tbl { overflow-x: auto; }
 .legend { margin: 0.5rem 0 0; font-size: var(--fs-xs); color: var(--graphite); }
+/* narrow: the counters of a cell in two columns, so three and four take two lines alike */
+.cnts-in { display: inline; }
 .cnt .lbl { font-size: var(--fs-xs); color: var(--graphite); margin-left: 0.15rem; }
 .cnt.bad, .cnt.bad .lbl { color: var(--tx); font-weight: 600; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1.5rem; margin: 0; font-size: var(--fs-s); }
@@ -214,9 +216,15 @@ tr.grp th span { font-weight: 500; }
 footer { border-top: 1px solid var(--rule); }
 footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphite); }
 
+@media (max-width: 1240px) {
+  /* the vocoder table is narrower than its rows of counters (from here down to the phone) */
+  td.cnts { white-space: normal; }
+  .cnts-in { display: inline-grid; grid-template-columns: auto auto; column-gap: 0.55rem; justify-items: end; }
+  .cnts-in.one { grid-template-columns: auto; }
+  .cnts-in .cnt + .cnt { margin-left: 0; }
+}
 @media (max-width: 860px) {
   .cols { grid-template-columns: minmax(0, 1fr); }
-  td.cnts { white-space: normal; }
 }
 @media (max-width: 520px) {
   .bar .ver { display: none; }
@@ -226,6 +234,18 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
   .meter { grid-template-columns: 2.8rem minmax(0, 1fr) 3.6rem; }
   .scale { margin: 0 4.2rem 0 3.4rem; }
   .opt { display: none; }
+  /* a phone upright: no Phase out (on its side it is there), so the vocoder table fits */
+  td.act, th.act { display: none; }
+}
+@media (max-width: 960px) {
+  /* a phone, also on its side, and a tablet with the side column: the vocoder table closer together, so it fits without scrolling */
+  td { padding: 0.45rem 0.3rem; }
+  .cnts-in { column-gap: 0.35rem; }
+}
+@media (max-width: 400px) {
+  /* the narrowest phones (360 px) */
+  td { padding: 0.45rem 0.15rem; }
+  .cnts-in { column-gap: 0.25rem; }
 }
 @media (prefers-reduced-motion: reduce) {
   .btn:active { transform: none; }
@@ -277,7 +297,7 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
             <thead><tr><th>Vocoder</th><th class="opt">Type</th><th>State</th><th>Channels</th><th class="r opt">Frames</th><th class="r">Errors</th><th class="act"><span class="sr">Action</span></th></tr></thead>
             <tbody id="devices"><tr><td colspan="7" class="empty">No report yet</td></tr></tbody>
           </table></div>
-          <p class="legend">Frames: decoded and encoded. Errors: fec = decoded frames with bit errors the FEC corrected; unc = uncorrectable, an AMBE device repeats its last frame; bad = encoded by an AMBE device but failing their FEC (the device gives no AMBE frames, the radios mute the stream); rep / mute = repeated / muted by a codec plugin.</p>
+          <p class="legend">Frames: decoded and encoded. Errors: fec = decoded frames with bit errors the FEC corrected; unc = uncorrectable, an AMBE device repeats its last frame; bad = encoded by an AMBE device but failing their FEC (the device gives no AMBE frames, the radios mute the stream); rep / mute = repeated / muted by a codec plugin; lost = answers of an AMBE device lost on the serial line (a receive overrun of its USB adapter), a silent frame went out instead.</p>
         </div>
       </section>
       <section aria-labelledby="h-ref">
@@ -301,6 +321,7 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
             <div class="row" id="codec_p25_row"><label for="codec_p25">IMBE (P25, YSF VW)</label><select id="codec_p25"></select></div>
             <div class="row" id="codec_m17_row"><label for="codec_m17">Codec2 (M17)</label><select id="codec_m17"></select></div>
             <div class="row" id="pool_row" hidden><label for="device_pool">AMBE channels</label><select id="device_pool"><option value="0">Fixed: the first modules</option><option value="1">Pool: any module, first come</option></select></div>
+            <div class="row" id="compand_row" hidden><label for="device_compand">AMBE speech</label><select id="device_compand"><option value="0">Linear, 16 bits</option><option value="1">µ-law, 8 bits</option><option value="3">A-law, 8 bits</option></select></div>
           </div>
         </div>
         <div class="group">
@@ -554,7 +575,8 @@ function render() {
   var hw = data.hw_channels || {};
   // a counter with its label; bad: red when it is not zero. counts(): several in one cell
   var cnt = function (n, lbl, bad) { return '<span class="cnt' + (bad && n > 0 ? ' bad' : '') + '">' + (n || 0) + '<span class="lbl">' + lbl + '</span></span>'; };
-  var counts = function (list) { return list.map(function (c) { return cnt(c[0], c[1], c[2]); }).join(''); };
+  // narrow: frames (two) one below the other, errors (three or four) in two columns, two lines both
+  var counts = function (list) { return '<span class="cnts-in' + (list.length > 2 ? '' : ' one') + '">' + list.map(function (c) { return cnt(c[0], c[1], c[2]); }).join('') + '</span>'; };
   // in use, not free: with fixed channels a free one belongs to its module
   var use = function (c) { return c ? c.busy + ' of ' + c.total + ' in use' : '-'; };
   if (data.devices.length)
@@ -572,10 +594,10 @@ function render() {
       (d.want_out ? 'Take back' : 'Phase out') + '</button>' : '';
     rows += '<tr><td><b>' + esc(d.serial) + '</b></td><td class="opt">' + esc(d.type) + (d.role ? ' <span class="muted">' + esc(d.role) + '</span>' : '') + '</td>' +
       '<td>' + state + '</td><td>' + used.map(function (u) { return '<span class="mod-tag">' + esc(u) + '</span>'; }).join('') +
-      '<span class="muted nowrap">' + used.length + ' of ' + total + '</span>' + (d.buf_depth > 0 ? ' <span class="muted nowrap">queue ' + d.buf_depth + '</span>' : '') + '</td>' +
+      '<span class="muted nowrap" title="' + (d.buf_depth || 0) + ' frame' + (d.buf_depth === 1 ? '' : 's') + ' on the device, not answered yet">' + used.length + ' of ' + total + '</span></td>' +
       // its frames, and how they came out by their FEC (AmbeFrameCheck.h)
       '<td class="cnts opt">' + counts([[d.decodes, 'dec'], [d.encodes, 'enc']]) + '</td>' +
-      '<td class="cnts">' + counts([[d.error_frames, 'fec', true], [d.uncorrectable, 'unc', true], [d.bad_out, 'bad', true]]) + '</td>' +
+      '<td class="cnts">' + counts([[d.error_frames, 'fec', true], [d.uncorrectable, 'unc', true], [d.bad_out, 'bad', true], [d.errors, 'lost', true]]) + '</td>' +
       '<td class="act">' + act + '</td></tr>';
   });
   var swStreams = (data.swvocoders || []).reduce(function (n, x) { return n + (x.builtin ? 0 : x.cached_streams); }, 0);
@@ -599,6 +621,7 @@ function render() {
   if (rows !== lastDeviceRows) { $('devices').innerHTML = rows; lastDeviceRows = rows; }
   // the pool switch follows tcd (another browser, a refused request), not while it is used
   if (document.activeElement !== $('device_pool')) $('device_pool').value = String(data.config.device_pool || 0);
+  if (document.activeElement !== $('device_compand')) $('device_compand').value = String(data.config.device_compand || 0);
 
   var r = data.reflector;
   $('reflector').innerHTML =
@@ -675,9 +698,13 @@ function loadCodecs(codecs) {
   });
   $('pool_row').hidden = !data.pool_available;
   $('device_pool').value = String(data.config.device_pool || 0);
+  $('compand_row').hidden = !data.pool_available;
+  $('device_compand').value = String(data.config.device_compand || 0);
   $('codec_group').hidden = !any && !data.pool_available;
 }
 $('device_pool').addEventListener('change', function (e) { post('api/pool', { pool: e.target.value === '1' }); });
+// the speech packets of the AMBE devices: each is opened again for it when its streams are done
+$('device_compand').addEventListener('change', function (e) { post('api/compand', { compand: { '0': 'linear', '1': 'ulaw', '3': 'alaw' }[e.target.value] }); });
 $('devices').addEventListener('click', function (e) {
   var b = e.target.closest('.dev-btn'); if (!b) return;
   post('api/device', { device: Number(b.dataset.dev), out: b.dataset.out === '1' });

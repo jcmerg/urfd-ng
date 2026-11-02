@@ -54,7 +54,7 @@ struct DeviceStats
 	std::string type;       // "DV3000" or "DV3003"
 	std::string role;       // "dstar", "dmr", "mixed"
 	std::atomic<unsigned int> buf_depth{0};
-	std::atomic<uint32_t> errors{0};
+	std::atomic<uint32_t> errors{0};	// answers lost on the serial line (DVSIDevice LostAnswer)
 	std::atomic<bool> online{false};
 	// phase out from the monitor: want_out asks for it; phase 0 in service, 1 taking
 	// no new streams (its own still run), 2 closed, can be unplugged. can_out: a codec
@@ -152,6 +152,7 @@ public:
 		std::atomic<int>   codec_choice[kNumChoices]{};   // index into codec_options
 		std::atomic<int>   monitor_view{0};    // 0 auto, 1 cards, 2 compact
 		std::atomic<int>   device_pool{0};     // DeviceChannels: 0 fixed, 1 pool, for the streams that start from now on
+		std::atomic<int>   device_compand{0};  // DeviceCompand: 0 linear, 1 µ-law, 3 A-law; a device takes it when it is opened again
 	} config;
 
 	// Module name list (set at startup)
