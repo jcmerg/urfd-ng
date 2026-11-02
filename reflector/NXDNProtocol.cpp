@@ -334,7 +334,7 @@ void CNXDNProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header,
 		g_Reflector.ReleaseClients();
 
 		// update last heard
-		if ( g_Reflector.IsValidModule(rpt2.GetCSModule()) )
+		if ( g_Reflector.IsValidModule(rpt2.GetCSModule()) && (stream || g_Reflector.ShowsHeard(rpt2.GetCSModule(), client)) )
 		{
 			g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "NXDN");
 			g_Reflector.ReleaseUsers();

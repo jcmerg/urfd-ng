@@ -35,6 +35,7 @@
 #include "CurlGet.h"
 #include "ExternalIp.h"
 #include "MmdvmClientConfig.h"
+#include "ProtocolNames.h"
 
 // ini file keywords
 #define JAUTOLINKMODULE          "AutoLinkModule"
@@ -484,6 +485,16 @@ bool CConfigure::ReadData(const std::string &path)
 				}
 				else if (3 == key.size() && 0 == key.compare(0, 2, "TG") && isupper(key[2]))
 					data[ModuleTGKey(key[2])] = getUnsigned(value, key, 1, 16777215, 0);	// the module's talkgroup
+				else if (0 == key.compare("HideUnlisted"))
+				{
+					std::string m;
+					for (char c : value)
+						if (isalpha((unsigned char)c))
+							m += char(toupper((unsigned char)c));
+					data[ModuleHideUnlistedKey] = m;
+				}
+				else if (10 == key.size() && 0 == key.compare(0, 9, "Protocols") && isupper(key[9]))
+					data[ModuleProtocolsKey(key[9])] = value;	// the protocols the module is open to, checked at the end
 				else
 					badParam(key);
 				break;
@@ -1863,6 +1874,59 @@ bool CConfigure::ReadData(const std::string &path)
 	{
 		for (const auto &sec : extra)
 			std::cout << "NOTE: [" << sec.first << "] is no section of urfd, perhaps one of a plugin: not checked here" << std::endl;
+	}
+
+	// [Modules] Protocols<M>: after the plugins, whose names count too
+	if (data.contains(g_Keys.modules.modules))
+	{
+		const auto mods(data[g_Keys.modules.modules].get<std::string>());
+		if (data.contains(ModuleHideUnlistedKey))
+		{
+			std::string kept;
+			for (char m : data[ModuleHideUnlistedKey].get<std::string>())
+			{
+				if (std::string::npos == mods.find(m))
+					std::cout << "WARNING: [" << JMODULES << "] HideUnlisted: " << m << " is no configured module, ignored" << std::endl;
+				else if (std::string::npos == kept.find(m))
+					kept += m;
+			}
+			data[ModuleHideUnlistedKey] = kept;
+		}
+		for (char m = 'A'; m <= 'Z'; m++)
+		{
+			const std::string key = ModuleProtocolsKey(m);
+			if (!data.contains(key))
+				continue;
+			if (std::string::npos == mods.find(m))
+			{
+				std::cout << "WARNING: [" << JMODULES << "] Protocols" << m << " is for an unconfigured module. Deleting..." << std::endl;
+				data.erase(key);
+				continue;
+			}
+			const auto names = SplitProtocolList(data[key].get<std::string>());
+			if (names.empty())
+			{
+				std::cerr << "ERROR: [" << JMODULES << "] Protocols" << m << " names no protocol" << std::endl;
+				rval = true;
+			}
+			for (const auto &n : names)
+			{
+				if (ProtocolNames().count(n))
+					continue;
+				if (n.size() > 11 && 0 == n.compare(0, 11, "MMDVMClient") && isdigit((unsigned char)n[11]))
+				{
+					std::cerr << "ERROR: [" << JMODULES << "] Protocols" << m << ": " << n << " is one MMDVMClient connection, here only MMDVMClient (all of them) is known" << std::endl;
+					rval = true;
+				}
+				else if (PluginHook)
+				{
+					std::cerr << "ERROR: [" << JMODULES << "] Protocols" << m << ": unknown protocol " << n << std::endl;
+					rval = true;
+				}
+				else
+					std::cout << "NOTE: [" << JMODULES << "] Protocols" << m << ": " << n << " is no protocol of urfd, perhaps one of a plugin: not checked here" << std::endl;
+			}
+		}
 	}
 
 	return rval;

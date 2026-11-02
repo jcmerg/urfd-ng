@@ -100,7 +100,7 @@ void CDextraProtocol::Task(void)
 			if ( g_GateKeeper.MayLink(Callsign, Ip, EProtocol::dextra) )
 			{
 				// valid module ?
-				if ( g_Reflector.IsValidModule(ToLinkModule) )
+				if ( g_Reflector.MayLinkModule(ToLinkModule, EProtocol::dextra) )
 				{
 					// acknowledge the request
 					EncodeConnectAckPacket(&Buffer, ProtRev);
@@ -364,8 +364,11 @@ void CDextraProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Heade
 		g_Reflector.ReleaseClients();
 
 		// update last heard
-		g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "DExtra");
-		g_Reflector.ReleaseUsers();
+		if ( stream || g_Reflector.ShowsHeard(rpt2.GetCSModule(), client) )
+		{
+			g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "DExtra");
+			g_Reflector.ReleaseUsers();
+		}
 	}
 }
 

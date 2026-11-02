@@ -388,6 +388,7 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 		{
 			auto *mmdvm = static_cast<CDmrmmdvmClient*>(client.get());
 			char targetMod = rpt2.GetCSModule();
+			bool closedTarget = false;	// the dialled module is closed to MMDVM
 			char slotMod = mmdvm->GetSlotModule(slot);
 
 			if ( slotMod == ' ' )
@@ -395,7 +396,7 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 				// slot not linked yet
 				if ( cmd == CMD_LINK )
 				{
-					if ( g_Reflector.IsValidModule(targetMod) )
+					if ( g_Reflector.MayLinkModule(targetMod, EProtocol::dmrmmdvm) )
 					{
 						std::cout << "MMDVM: " << client->GetCallsign() << " TS" << (int)slot << " linking on module " << targetMod << " (TG" << sourceTG << ")" << std::endl;
 						mmdvm->SetSlotModule(slot, targetMod);
@@ -403,10 +404,10 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 					}
 					else
 					{
-						std::cout << "MMDVM: " << rpt1 << " TS" << (int)slot << " link attempt on non-existing module" << std::endl;
+						std::cout << "MMDVM: " << rpt1 << " TS" << (int)slot << " link attempt on " << (g_Reflector.IsValidModule(targetMod) ? "a closed" : "a non-existing") << " module" << std::endl;
 					}
 				}
-				else if ( cmd == CMD_NONE && targetMod != ' ' && g_Reflector.IsValidModule(targetMod) )
+				else if ( cmd == CMD_NONE && targetMod != ' ' && g_Reflector.MayLinkModule(targetMod, EProtocol::dmrmmdvm) )
 				{
 					// TG mapping resolved to a valid module — auto-link this slot
 					std::cout << "MMDVM: " << client->GetCallsign() << " TS" << (int)slot << " linking on module " << targetMod << " (TG" << sourceTG << ")" << std::endl;
@@ -416,8 +417,15 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 			}
 			else
 			{
-				// slot already linked — switch module if TG maps to a different one
-				if ( targetMod != ' ' && targetMod != slotMod && g_Reflector.IsValidModule(targetMod) )
+				// slot already linked — switch module if TG maps to a different one;
+				// a module closed to MMDVM ([Modules] Protocols<M>) drops the call, it
+				// does not go out on the slot's module instead
+				if ( targetMod != ' ' && targetMod != slotMod && g_Reflector.IsValidModule(targetMod) && !g_Reflector.IsModuleOpenTo(targetMod, EProtocol::dmrmmdvm) )
+				{
+					closedTarget = true;
+					g_Reflector.MayLinkModule(targetMod, EProtocol::dmrmmdvm);	// logs the refusal
+				}
+				else if ( targetMod != ' ' && targetMod != slotMod && g_Reflector.MayLinkModule(targetMod, EProtocol::dmrmmdvm) )
 				{
 					std::cout << "MMDVM: " << client->GetCallsign() << " TS" << (int)slot << " switching to module " << targetMod << " (TG" << sourceTG << ")" << std::endl;
 					mmdvm->SetSlotModule(slot, targetMod);
@@ -445,7 +453,7 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 			}
 
 			// and now, re-check module is valid && that it's not a private call
-			if ( g_Reflector.IsValidModule(rpt2.GetCSModule()) && (CallType == DMR_GROUP_CALL) )
+			if ( !closedTarget && g_Reflector.IsValidModule(rpt2.GetCSModule()) && (CallType == DMR_GROUP_CALL) )
 			{
 				// yes, try to open the stream
 				if ( (stream = g_Reflector.OpenStream(Header, client)) != nullptr )

@@ -125,10 +125,10 @@ void CM17Protocol::Task(void)
 			std::cout << "M17 " << (isListen ? "listen " : "") << "connect packet for module " << ToLinkModule << " from " << Callsign << " at " << Ip << std::endl;
 
 			// callsign authorized?
-			if ( g_GateKeeper.MayLink(Callsign, Ip, EProtocol::m17) && g_Reflector.IsValidModule(ToLinkModule) )
+			if ( g_GateKeeper.MayLink(Callsign, Ip, EProtocol::m17) && g_Reflector.MayLinkModule(ToLinkModule, EProtocol::m17) )
 			{
 				// valid module ?
-				if ( g_Reflector.IsValidModule(ToLinkModule) )
+				if ( g_Reflector.MayLinkModule(ToLinkModule, EProtocol::m17) )
 				{
 					// acknowledge the request
 					Send("ACKN", Ip);
@@ -307,8 +307,11 @@ void CM17Protocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, 
 		g_Reflector.ReleaseClients();
 
 		// update last heard
-		g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "M17");
-		g_Reflector.ReleaseUsers();
+		if ( stream || g_Reflector.ShowsHeard(rpt2.GetCSModule(), client) )
+		{
+			g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "M17");
+			g_Reflector.ReleaseUsers();
+		}
 	}
 }
 

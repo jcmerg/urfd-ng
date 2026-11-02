@@ -93,10 +93,10 @@ void CDcsProtocol::Task(void)
 			std::cout << "DCS connect packet for module " << ToLinkModule << " from " << Callsign << " at " << Ip << std::endl;
 
 			// callsign authorized?
-			if ( g_GateKeeper.MayLink(Callsign, Ip, EProtocol::dcs) && g_Reflector.IsValidModule(ToLinkModule) )
+			if ( g_GateKeeper.MayLink(Callsign, Ip, EProtocol::dcs) && g_Reflector.MayLinkModule(ToLinkModule, EProtocol::dcs) )
 			{
 				// valid module ?
-				if ( g_Reflector.IsValidModule(ToLinkModule) )
+				if ( g_Reflector.MayLinkModule(ToLinkModule, EProtocol::dcs) )
 				{
 					// acknowledge the request
 					EncodeConnectAckPacket(Callsign, ToLinkModule, &Buffer);
@@ -278,8 +278,11 @@ void CDcsProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, 
 		g_Reflector.ReleaseClients();
 
 		// update last heard
-		g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "DCS");
-		g_Reflector.ReleaseUsers();
+		if ( stream || g_Reflector.ShowsHeard(rpt2.GetCSModule(), client) )
+		{
+			g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "DCS");
+			g_Reflector.ReleaseUsers();
+		}
 	}
 }
 

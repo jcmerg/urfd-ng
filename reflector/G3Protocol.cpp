@@ -257,7 +257,7 @@ void CG3Protocol::ConfigTask(void)
 
 			if (isRepeaterCall)
 			{
-				if (MatchesReflectorOrAlias(Call) && (g_Reflector.IsValidModule(Call.GetCSModule())))
+				if (MatchesReflectorOrAlias(Call) && (g_Reflector.MayLinkModule(Call.GetCSModule(), EProtocol::g3)))
 				{
 					Buffer.data()[3] = 0x00; // ok
 				}
@@ -578,8 +578,11 @@ void CG3Protocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, c
 				}
 
 				// update last heard
-				g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "G3");
-				g_Reflector.ReleaseUsers();
+				if ( stream || g_Reflector.ShowsHeard(rpt2.GetCSModule(), client) )
+				{
+					g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "G3");
+					g_Reflector.ReleaseUsers();
+				}
 			}
 		}
 		// release

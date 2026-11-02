@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.36.1** | tcd 0.19.1 | Dashboard v2.14.2
+**urfd 4.37.0** | tcd 0.19.1 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -542,6 +542,7 @@ Der Reflektor kann seine Konfiguration im laufenden Betrieb neu laden, ohne Verb
 - TG-Zuordnungen (MMDVMClient, SvxReflector und SVXServer), dynamische TGs bleiben erhalten
 - Whitelist, Blacklist und Interlink-Datei
 - Transcodierte Module (`[Transcoder] Modules`, auch von und zu `auto`, seit 4.25.1); die tcd-Verbindung eines Moduls, das nicht mehr in der Liste steht, wird getrennt
+- Modulzugang je Protokoll und ausgeblendete Sprecher (`[Modules] Protocols<M>`, `HideUnlisted`, seit 4.37.0)
 - Reflektor-Angaben (Sponsor, Land, URLs; das Rufzeichen nur für die XML-Datei und die Admin-Seite)
 
 **Braucht einen vollständigen Neustart:**
@@ -647,6 +648,31 @@ Port = 20001
 [P25]
 Enable = false
 Port = 41000
+```
+
+### Modulzugang je Protokoll (4.37.0)
+`[Modules] Protocols<M> = <Protokolle>` öffnet Modul M für die genannten Protokolle und schließt es für alle anderen, etwa ein Modul abseits des Amateurfunknetzes, das nur die Protokolle einer geschlossenen Nutzergruppe verwenden. Ein Modul ohne die Zeile bleibt für jedes Protokoll offen.
+
+```ini
+[Modules]
+Modules = ADP
+DescriptionP = Geschlossene Gruppe
+ProtocolsP = MMDVM,M17     # Modul P: nur diese Protokolle
+```
+
+- **Namen**: wie in `BlockProtocols` (`DExtra`, `DPlus`, `DCS`, `G3`, `MMDVM`, `DMRPlus`, `YSF`, `NXDN`, `P25`, `M17`, `USRP`, `SVXServer`, `SvxReflector`, `URF`, `XLXPeer`, `MMDVMClient`, die Client-Connectoren) und die Namen geladener Plugins, getrennt durch Komma oder Leerzeichen. `MMDVMClient` steht für alle seine Verbindungen, eine einzelne lässt sich hier nicht nennen. Ein unbekannter Name hält urfd an wie ein Fehler in der `urfd.ini`.
+- **Linken**: Ein DExtra-, DCS-, M17- oder G3-Link auf das Modul, ein Wires-X-Connect und ein MMDVM-Modulwechsel per TG werden abgelehnt (`Module P is closed to DCS, link refused`).
+- **Senden**: Ein Stream aus einem Protokoll, für das das Modul geschlossen ist, wird nicht angenommen (`Module P is closed to DPlus, rejecting stream from ...`), gleich wie er adressiert war (TG, DG-ID, Connector).
+- **Empfangen**: Die Streams des Moduls gehen nur an die offenen Protokolle; die anderen bekommen nichts, auch Interlinks nicht, solange `URF` oder `XLXPeer` nicht in der Liste steht.
+- **Connectoren**: Ein Client-Connector (`DCSClient`, `DExtraClient`, `DPlusClient`, `YSFClient`, `MMDVMClient`, `SvxReflector`) oder ein Autolink auf einem geschlossenen Modul bleibt verbunden, transportiert aber nichts; dort sein Protokoll in die Liste aufnehmen.
+- **Last Heard**: Eine Station, deren Stream ein geschlossenes Modul abgelehnt hat, erscheint nicht in Last Heard (eine, die an einem belegten Modul abprallt, wie bisher schon).
+- **Reload**: SIGHUP liest die Zeilen neu; eine vorher gelinkte Station behält ihren Link, hört und sendet auf einem nun für sie geschlossenen Modul aber nichts.
+
+`[Modules] HideUnlisted = <Module>` hält Sprecher auf diesen Modulen, die in keiner ID-Datenbank (DMR, NXDN) stehen, aus dem Dashboard heraus: kein Last-Heard-Eintrag, kein On Air, keine Position, in XML, JSON und WebSocket gleichermaßen, als wäre das Modul ruhig. Sprecher aus den Datenbanken erscheinen wie bisher. Das gilt für diesen Reflektor: Ein Peer, für den das Modul offen ist (`URF`, `XLXPeer` in `Protocols<M>`), bekommt die Streams und zeigt sie auf seinem eigenen Dashboard, deshalb Interlinks von so einem Modul fernhalten. Gedacht für ein Modul abseits des Amateurfunks, dessen Nutzer kein Rufzeichen haben: Für sie gibt es ohnehin nichts nachzuschlagen. Die Admin-Seite zeigt weiter, wer spricht.
+
+```ini
+[Modules]
+HideUnlisted = P
 ```
 
 ### Ausfallsicheres Laden der ID-Datenbanken
@@ -926,6 +952,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **Modulzugang je Protokoll (4.37.0)**: `[Modules] Protocols<M>` öffnet ein Modul nur für die genannten Protokolle: Die anderen können nicht darauf linken, nicht darauf senden und hören es nicht; `[Modules] HideUnlisted` hält Sprecher ohne Eintrag in einer ID-Datenbank aus dem Dashboard heraus, siehe [Modulzugang je Protokoll](#modulzugang-je-protokoll-4370)
 - **Echo-Prüfung mit einer anderen ID dazwischen (4.35.4)**: Der MMDVMClient kannte nur den letzten Durchgang je Modul; tastete zwischen einem Durchgang und seinem Echo kurz eine andere ID, zählte das Echo nicht als solches. Er behält jetzt die Durchgänge jeder ID der letzten 3 s auf einem Modul und vergleicht einen neuen Stream mit dem Durchgang seiner eigenen ID. Geprüft an einer Stunde BrandMeister TG 262: alle 33 Echos verworfen, kein anderer Stream
 - **Echo des Durchgangsendes vom Master verworfen (4.35.3)**: BrandMeister (TG 262, von vielen Stationen) schickt nach den meisten Durchgängen einen zweiten Stream derselben ID, 0,6 bis 1,2 s später, mit den letzten 36 bis 66 Frames des Durchgangs noch einmal (ein, zwei Bits je Frame anders), wie von einem zweiten, verzögerten Zugang, den der Master zurückhält, solange der Durchgang läuft; alle hörten die letzte Sekunde doppelt. Der MMDVMClient hält einen neuen Stream der ID, die in den 3 s davor auf dem Modul sprach, bis zu seinen ersten Sprach-Frames an (meist 60 ms, höchstens 360 ms): Sind es Frames aus den letzten 3 Sekunden jenes Durchgangs, verwirft er den Stream und meldet `echo of the end of the call from ... dropped`. Ein neuer Durchgang dieser ID mit anderer Sprache und jede andere ID gehen durch wie bisher. Das Stummschalten wiederholter Frames (4.35.0) bleibt: Es gilt etwas anderem, demselben Sprach-Frame viele Male am Ende eines Durchgangs
 - **Korrekturen aus dem Review (4.35.1)**: Das Stummschalten wiederholter AMBE+2-Frames lässt Ton-Frames (DTMF, Pieps; b0 126-127), Stille und Löschungen stehen, nur wiederholte Sprach-Frames gehen; G3 ohne `address` nennt einem Terminal im Internet die externe IPv4 nur hinter NAT und einem im LAN die lokale Adresse (4.35.0 nannte jedem die externe); ein Stopp wartet nicht mehr auf die Adressdienste, ein SIGHUP-Reload fragt sie nicht erneut (er behält die verfolgte Adresse), eine neue Adresse zählt erst, wenn eine zweite Prüfung 10 s später sie bestätigt, `IPCheckInterval` ist mindestens 30 s, das DHT aktualisiert nur ein Thread zur Zeit

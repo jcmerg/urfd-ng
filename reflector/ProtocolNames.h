@@ -9,6 +9,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 #include "Defines.h"
 
 inline std::map<std::string, EProtocol> &ProtocolNameTable(void)
@@ -34,6 +35,25 @@ inline std::map<std::string, EProtocol> &ProtocolNameTable(void)
 inline const std::map<std::string, EProtocol> &ProtocolNames(void)
 {
 	return ProtocolNameTable();
+}
+
+// "DExtra, DCS,M17" -> {"DExtra", "DCS", "M17"}
+inline std::vector<std::string> SplitProtocolList(const std::string &list)
+{
+	std::vector<std::string> out;
+	std::string cur;
+	for (char c : list + ",")
+	{
+		if (c == ',' || c == ' ' || c == '\t')
+		{
+			if (!cur.empty())
+				out.push_back(cur);
+			cur.clear();
+		}
+		else
+			cur += c;
+	}
+	return out;
 }
 
 inline void RegisterProtocolName(const std::string &name, EProtocol p)
