@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.19.2** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.19.3** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF/NXDN (AMBE2+), and software vocoders for M17 (Codec2) and P25 (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF/NXDN in software, and since 0.14.0 P25 as a choice next to the built-in IMBE vocoder. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -90,7 +90,7 @@ Each transcoded module needs a D-Star channel and a DMR/YSF channel. A DV3000 (T
 |---|---|---|---|
 | 1× DV3000 | one for DMR (or D-Star) | 1 | D-Star on the device, DMR/YSF in software |
 | 1× DV3003 | one for DMR (or D-Star) | up to 3 | D-Star on the device, DMR/YSF in software |
-| 1× DV3003 with `mixed` | one for D-Star and DMR | 1 on the device, more in software | D-Star and DMR/YSF of one module on the device, see [below](#single-dv3003-in-mixed-mode) |
+| 1× DV3003 with `mixed` | one for D-Star and DMR | 1 on the device (and the DMR of a 2nd), more in software | D-Star and DMR/YSF of one module on the device, the DMR/YSF of a second one too (since 0.19.3), see [below](#single-dv3003-in-mixed-mode) |
 | DV3000 + DV3003 | — | 2 | mixed mode, recommended |
 | 2× DV3000 | — | 1 | one for D-Star, one for DMR/YSF |
 | 2× DV3003 | — | up to 3 | one for D-Star, one for DMR/YSF |
@@ -118,11 +118,11 @@ DeviceSerial = DKB7FXGE # DV3003
 
 ### Single DV3003 in mixed mode
 
-`mixed` after the serial of a DV3003 that is the only device (since 0.17.0) sets its channels up as in mixed mode: channel 0 D-Star, channel 1 DMR/YSF, both for the first module, channel 2 stays free. That module is transcoded on the device in both directions, the other modules by the codec plugins (one for D-Star and DMR is needed then). Without `mixed` a DV3003 alone does D-Star for three modules, as before. `mixed` is for a DV3003 alone with `CodecDStar`/`CodecDMR` on `dvsi`; anywhere else tcd warns and ignores it.
+`mixed` after the serial of a DV3003 that is the only device (since 0.17.0) sets its channels up as in mixed mode: channel 0 D-Star, channels 1 and 2 DMR/YSF. The first module (with the [pool](#channel-pool-devicechannels--pool): the first stream) is transcoded on the device in both directions, a second one gets its DMR on channel 2 and its D-Star on the codec plugin (since 0.19.3; channel 2 stayed free before), the other modules go to the codec plugins (one for D-Star and DMR is needed then). Without `mixed` a DV3003 alone does D-Star for three modules, as before. `mixed` is for a DV3003 alone with `CodecDStar`/`CodecDMR` on `dvsi`; anywhere else tcd warns and ignores it.
 
 ```ini
 Modules = FSA
-DeviceSerial = DKB7FXGE mixed   # F on the DV3003, S and A on the plugin
+DeviceSerial = DKB7FXGE mixed   # F on the DV3003, the DMR of S on it too, the rest on the plugin
 CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so
 ```
 
@@ -161,7 +161,7 @@ From three devices on (since 0.18.0; several DV3003, a DV3000 next to them, boar
 
 ### DV3003 notes
 
-- **Companding as set**: every DV3003 channel gets companding set as `DeviceCompand` says, off by default (linear). The DV3003 defaults to companding on (CP_ENABLE pull-up), the DV3000 to off; without setting it, the DMR/YSF channels got µ-law PCM read as linear, which distorts the audio. A DV3000 gets it only for `ulaw` or `alaw` (since 0.19.2, see [Lost answers](#lost-answers-devicecompand)).
+- **Companding as set**: every channel of every device gets companding set as `DeviceCompand` says, off by default (linear), and its answer is checked. After a reset a chip follows its board's CP_ENABLE pin: the DVstick-33 pulls it up (µ-law), the DV3000 tested here starts with it off; without setting it, the DMR/YSF channels of a DV3003 got µ-law PCM read as linear, which distorts the audio. Before 0.19.3 only a DV3003 got it (and a DV3000 since 0.19.2 for `ulaw` or `alaw`), so a DV3000 on a board with the pin pulled up would have been read wrong (see [Lost answers](#lost-answers-devicecompand)).
 - **Serial flush**: before the soft reset, 350 zero bytes clear any stale serial state.
 - **Per-channel codec**: one DV3003 can run D-Star and DMR/YSF channels at the same time (mixed mode).
 
@@ -257,11 +257,11 @@ A device that cannot be opened or does not answer is left out with a warning, an
 | `Password` | — | the reflector's `[Transcoder] Password`, needed when it has one (since 0.8.0) |
 | `Modules` | `FS` | transcoded modules; with the reflector's `[Transcoder] Modules = auto` (urfd 4.25.0) any of its modules, this list alone decides; else the same letters as there |
 | `StandbyModules` | — | modules this tcd takes only while no other tcd has them (since 0.11.0, urfd 4.26.0), see [Standby](#standby-a-second-tcd-for-the-same-modules); not in `Modules` as well |
-| `DeviceSerial` | — | AMBE device to use, one line each (see [above](#selecting-the-ambe-devices)); `mixed` after the serial of a DV3003 alone: D-Star and DMR of one module on it (since 0.17.0, see [Single DV3003 in mixed mode](#single-dv3003-in-mixed-mode)) |
+| `DeviceSerial` | — | AMBE device to use, one line each (see [above](#selecting-the-ambe-devices)); `mixed` after the serial of a DV3003 alone: D-Star and DMR of one module on it, since 0.19.3 also the DMR of a second one (since 0.17.0, see [Single DV3003 in mixed mode](#single-dv3003-in-mixed-mode)) |
 | `CodecPlugin` | — | codec plugin to load, one line each (see [Codec plugins](#codec-plugins)) |
 | `CodecDStar` / `CodecDMR` / `CodecP25` / `CodecM17` | — | the vocoder new streams get: `dvsi`, `op25`, `codec2` or a plugin's name (see [Codec plugins](#codec-plugins)); written by Save |
-| `DeviceChannels` | `fixed` | `fixed`: the AMBE channels belong to the first modules; `pool`: a stream takes any free channel (since 0.17.0, see [Channel pool](#channel-pool-devicechannels--pool)) |
-| `DeviceCompand` | `linear` | the audio to and from the AMBE devices: `linear` (16 bits), `ulaw` or `alaw` (8-bit G.711, half the bytes on the serial line, no receive overruns; since 0.19.2, see [Lost answers](#lost-answers-devicecompand)); switched at run time in the web dashboard, written by Save |
+| `DeviceChannels` | — (default `fixed`) | `fixed`: the AMBE channels belong to the first modules; `pool`: a stream takes any free channel (since 0.17.0, see [Channel pool](#channel-pool-devicechannels--pool)) |
+| `DeviceCompand` | — (default `linear`) | the audio to and from the AMBE devices: `linear` (16 bits), `ulaw` or `alaw` (8-bit G.711, half the bytes on the serial line, no receive overruns; since 0.19.2, see [Lost answers](#lost-answers-devicecompand)); switched at run time in the web dashboard, written by Save |
 
 ### Gains
 
@@ -456,8 +456,8 @@ journalctl -u tcd -f
 - **Device type from the chip**: DV3000 or DV3003 by the product ID, a device that does not answer is left out instead of stopping tcd, a second reset try, the serial flush zeros leave before the input is flushed, exclusive open
 - **macOS**: builds with clang and runs natively with the AMBE devices, see [macOS](#macos)
 - **Mixed mode DV3000 + DV3003**: two modules at once with per-channel codec setup
-- **A DV3003 alone in mixed mode, channel pool, lost devices** (0.17.0): `DeviceSerial = ... mixed` puts D-Star and DMR of one module on a lone DV3003; `DeviceChannels = pool` lets a stream of any module take a free channel; a device lost while tcd runs goes to the codec plugins and is opened again when it is back, instead of stopping tcd
-- **DV3003 D-Star**: companding off, serial flush, per-channel encoding
+- **A DV3003 alone in mixed mode, channel pool, lost devices** (0.17.0): `DeviceSerial = ... mixed` puts D-Star and DMR of one module on a lone DV3003 (since 0.19.3 also the DMR of a second one, on channel 2); `DeviceChannels = pool` lets a stream of any module take a free channel; a device lost while tcd runs goes to the codec plugins and is opened again when it is back, instead of stopping tcd
+- **DV3003 D-Star**: companding as `DeviceCompand` sets it (linear by default; on every device since 0.19.3), serial flush, per-channel encoding
 - **Stream log and frame check** (0.19.0): `StreamLog` writes one line per stream with the vocoder of every codec, and tcd checks the FEC of every AMBE frame a device decodes or encodes (Golay of the first two partitions, as a decoder does), counted per stream in that line and per device in the monitor; `tools/ambecheck` does the same for a file of frames
 - **SVX codec path**: its own `ECodecType::svx` for SVX audio
 

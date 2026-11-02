@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.37.1** | tcd 0.19.2 | Dashboard v2.14.2
+**urfd 4.37.1** | tcd 0.19.3 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -296,7 +296,7 @@ TG9 = A,TS2                        # Common hotspot default
 # Password may be empty to allow any password (useful for compat hotspots).
 # 1234567 = changeme               # 7-digit base DMR ID
 # N0CALL = changeme                 # Callsign (resolved to DMR ID at startup)
-# 2632545 =                        # Open access (no password required)
+# 1234568 =                        # Open access (no password required)
 ```
 
 **Extended DMR IDs**: BrandMeister-style hotspots append a 2-digit suffix to the 7-digit base DMR ID (e.g. `123456701` = base `1234567` + suffix `01`). urfd strips the suffix automatically — one user entry with a base id covers all extensions.
@@ -317,7 +317,7 @@ TG9 = A,TS2                        # Common hotspot default
 ```json
 {"cmd": "mmdvm_user_add", "token": "...", "dmrid": 1234567, "password": "secret"}
 {"cmd": "mmdvm_user_add", "token": "...", "callsign": "N0CALL", "password": "secret"}
-{"cmd": "mmdvm_user_add", "token": "...", "dmrid": 2632545}
+{"cmd": "mmdvm_user_add", "token": "...", "dmrid": 1234568}
 {"cmd": "mmdvm_user_remove", "token": "...", "dmrid": 1234567}
 {"cmd": "mmdvm_user_list", "token": "..."}
 {"cmd": "mmdvm_tg_add", "token": "...", "tg": 26363, "module": "F", "ts": 2, "ttl": 900}
@@ -373,8 +373,8 @@ Connect to external YSF reflectors as a client node. Supports optional DG-ID for
 [YSFClient]
 Enable = true
 Callsign = N0CALL
-Map1 = 90.187.72.177,42099,A             # YSF reflector -> local module A
-Map2 = 85.215.138.68,42000,F,15          # YSF reflector -> local module F, DG-ID 15
+Map1 = 203.0.113.20,42099,A             # YSF reflector -> local module A
+Map2 = 198.51.100.30,42000,F,15          # YSF reflector -> local module F, DG-ID 15
 # BlockProtocols = MMDVMClient            # Optional
 ```
 
@@ -384,7 +384,7 @@ Map2 = 85.215.138.68,42000,F,15          # YSF reflector -> local module F, DG-I
 
 **Dynamic mappings**:
 ```json
-{"cmd": "ysf_map_add", "token": "...", "host": "90.187.72.177", "port": 42099, "local_module": "A", "dgid": 0}
+{"cmd": "ysf_map_add", "token": "...", "host": "203.0.113.20", "port": 42099, "local_module": "A", "dgid": 0}
 {"cmd": "ysf_map_remove", "token": "...", "local_module": "A"}
 {"cmd": "ysf_map_list", "token": "..."}
 ```
@@ -488,7 +488,7 @@ $Admin['Port']     = 10101;
 {"cmd": "dcs_map_add", "token": "...", "host": "dcs002.xreflector.net", "port": 30051, "remote_module": "A", "local_module": "S"}
 {"cmd": "dcs_map_remove", "token": "...", "local_module": "S"}
 {"cmd": "dcs_map_list", "token": "..."}
-{"cmd": "ysf_map_add", "token": "...", "host": "90.187.72.177", "port": 42099, "local_module": "A", "dgid": 15}
+{"cmd": "ysf_map_add", "token": "...", "host": "203.0.113.20", "port": 42099, "local_module": "A", "dgid": 15}
 {"cmd": "ysf_map_list", "token": "..."}
 {"cmd": "svxs_user_add", "token": "...", "callsign": "N0CALL-HS", "password": "secret"}
 {"cmd": "svxs_user_remove", "token": "...", "callsign": "N0CALL-HS"}
@@ -496,7 +496,7 @@ $Admin['Port']     = 10101;
 {"cmd": "svxs_peer_list", "token": "..."}
 {"cmd": "mmdvm_user_add", "token": "...", "dmrid": 1234567, "password": "secret"}
 {"cmd": "mmdvm_user_add", "token": "...", "callsign": "N0CALL", "password": "secret"}
-{"cmd": "mmdvm_user_add", "token": "...", "dmrid": 2632545}
+{"cmd": "mmdvm_user_add", "token": "...", "dmrid": 1234568}
 {"cmd": "mmdvm_user_remove", "token": "...", "dmrid": 1234567}
 {"cmd": "mmdvm_user_list", "token": "..."}
 {"cmd": "mmdvm_tg_add", "token": "...", "tg": 26363, "module": "F", "ts": 2, "ttl": 900}
@@ -976,6 +976,8 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **D-Star client links kept (4.37.1)**: DCSClient answers the reflector's polls as ircDDBGateway does and names the reflector in link and unlink (a DCS reflector dropped the link some 40 s after each relink); DCSClient, DExtraClient and DPlusClient retry after 5, 10, 20, 40 and every 60 s; a link is lost after 60 s without a poll (DPlus 30 s); DCS packets with stream id 0 are dropped, see [Keeping the link](#d-star-client-connectors-dcs-dextra-dplus)
+- **No log floods from a broken stream** (4.37.1): a header with stream id 0 is logged once a minute with a count instead of once per packet
 - **Module access by protocol (4.37.0)**: `[Modules] Protocols<M>` opens a module to the protocols listed only: the others cannot link to it, send to it or hear it; `[Modules] HideUnlisted` keeps talkers without an ID database entry off the dashboard, see [Module Access by Protocol](#module-access-by-protocol-4370)
 - **Echo check with another ID in between (4.35.4)**: the MMDVMClient knew only the last call on each module, so an echo did not count as one when another ID keyed up briefly between the call and its echo. It keeps the calls of every ID of the last 3 s on a module now and compares a new stream with its own ID's call. Checked against an hour of BrandMeister TG 262: all 33 echoes dropped, no other stream
 - **A master's echo of a call's end dropped (4.35.3)**: BrandMeister (TG 262, from many stations) sends after most calls a second stream from the same ID, 0.6 to 1.2 s later, with the call's last 36 to 66 frames again (a bit or two different per frame), as from a second way in with a delay that the master holds back while the call runs; everyone heard the last second twice. The MMDVMClient holds a new stream from the ID that spoke on the module in the 3 s before until its first voice frames (60 ms mostly, at most 360 ms): when they are frames of that call's last 3 seconds, it drops the stream and logs `echo of the end of the call from ... dropped`. A new call from that ID with other speech, and every other ID, go through as before. The muting of repeated frames (4.35.0) stays: it is for another thing, the same voice frame many times at a call's end
@@ -987,7 +989,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **No protocol in the D-Star text (4.33.2)**: the D-Star slow data text no longer names the protocol (`DMR`, `YSF`, `SVX`, ...), which the radio already shows as the suffix of the callsign since 4.33.0: `Max TG262` instead of `Max DMR TG262`, `Max DG15` instead of `YSF DG15`. That leaves room for longer names and TGs in the 20 characters. A caller with a suffix of their own keeps the protocol in the text. D-Star to D-Star is unchanged: the radio's own slow data and suffix pass through
 - **The source as D-Star suffix only towards D-Star (4.33.1)**: the suffix of 4.33.0 (`DMR`, `YSF`, ...) is added only to the header that goes to D-Star radios and links (DExtra, DPlus, DCS, G3 and their clients) and to the copy in the D-Star slow data; the stream itself keeps the callsign as it came in. So the dashboard, the logs and the other modes show the callsign alone again, as before 4.33.0 (it showed `N0CALL / DMR`). A plugin's suffix is its type (`GetType()` in `Plugin.h`, e.g. three letters). Interlinks no longer pass on the source as a suffix; D-Star callers keep their own as before. M17 callers no longer carry `M17` in the dashboard either (it came from upstream), D-Star radios get it as for the other modes
 - **DCS client names the reflector (4.33.1)**: the info of the DCS connect reads `REFLECTOR <callsign> urfd <version>`, the callsign from `[Names]`, with the repeater image `hf.jpg` of the DCS status pages (they have no `repeater.jpg`, which showed as a broken image)
-- **The source as D-Star suffix (4.33.0)**: a stream from another mode carries its source as the 4 character suffix of the caller's callsign, which D-Star radios show next to it and keep in their call list: `DMR` (MMDVM, DMR+, MMDVMClient), `YSF` (also the YSF client), `NXDN`, `P25`, `M17` (as before), `USRP` and `SVX` (SVXServer and SvxReflector client), e.g. `DL4JC / DMR`. D-Star callers keep their own suffix, interlinks pass on the one of the reflector the stream came from, and a plugin can set its own. The last heard lists and the dashboard show the callsign without it as before. The copy of the header in the D-Star slow data carries the suffix too (it was always empty); the D-Star text keeps naming the source, the name and the TG
+- **The source as D-Star suffix (4.33.0)**: a stream from another mode carries its source as the 4 character suffix of the caller's callsign, which D-Star radios show next to it and keep in their call list: `DMR` (MMDVM, DMR+, MMDVMClient), `YSF` (also the YSF client), `NXDN`, `P25`, `M17` (as before), `USRP` and `SVX` (SVXServer and SvxReflector client), e.g. `N0CALL / DMR`. D-Star callers keep their own suffix, interlinks pass on the one of the reflector the stream came from, and a plugin can set its own. The last heard lists and the dashboard show the callsign without it as before. The copy of the header in the D-Star slow data carries the suffix too (it was always empty); the D-Star text keeps naming the source, the name and the TG
 - **DCS client shows up as reflector (4.32.2)**: the info the DCS client sends with its connect, which DCS dashboards show next to the link, said DONGLE with a dongle image; it now says `REFLECTOR urfd <version>` and `Link of module C`, with the repeater image. The band column of those dashboards still comes from the module letter (A 23 cm, B 70 cm, C 2 m), the letter names the link at the reflector and stays
 - **Codec frames between the connectors (4.32.2)**: a review of every place where urfd takes codec frames apart or puts them together fixed: MMDVMClient's EMB of bursts B..F kept the colour code of the burst before instead of the reflector's, and its kerchunk (the short transmission after a connect) built the burst from wrongly placed frames, both now as in every other burst; the DMR hotspot and YSF client connectors ended a stream with a frame of zero bits, which decodes as a short noise, now with AMBE+2 silence, and the YSF client no longer passes on the two empty frames of the header as voice (as the YSF master); NXDN no longer sets a bit of the last AMBE+2 frame a second time in the padding of the VCH; DMR+ uses its own colour code constant (both 1, no change on the air); URF carries the USRP samples little endian on every host (no change on the wire for x86 and ARM)
 - **MMDVMClient: middle AMBE frame of every burst (4.32.1)**: urfd built the middle of the three AMBE+2 frames of each burst it received from the master with four bits (32..35) taken from uninitialized memory instead of the burst, mostly zeros. The FEC corrected most of it, so it was hardly audible, but about a quarter of all frames from BrandMeister reached tcd and DMR clients with bit errors (the master's own bursts have none), and frames with other errors on top were repeated or muted. tcd 0.15.0's new counters showed it. Sending to the master was not affected
@@ -1006,7 +1008,6 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **SVXServer**: SvxReflector V2 server — accept incoming SvxLink node connections with HMAC-SHA1 auth, OPUS audio, TG select and monitor like SvxReflector, node-to-node relay, TG-based module routing, per-user authentication, runtime user/TG management via admin API
 - **DCS interlinking**: Native DCS reflector-to-reflector peering with PeerCallsign override and protocol field in interlink file
 - **D-Star client protocols**: DCSClient, DExtraClient, DPlusClient — connect to external D-Star reflectors as a client node with module-to-module mapping, dynamic add/remove via admin API, protocol blocking, dashboard integration; since 4.37.1 they keep the link as ircDDBGateway does (DCS polls answered, reflector named in link and unlink, 60 s / DPlus 30 s without a poll, retries from 5 s growing to 60 s), see [Keeping the link](#d-star-client-connectors-dcs-dextra-dplus)
-- **No log floods from a broken stream** (4.37.1): a header with stream id 0 is logged once a minute with a count instead of once per packet
 - **YSF client protocol**: YSFClient — connect to external YSF reflectors with optional DG-ID, dynamic mapping via admin API, reflector callsign in YSF radio field
 
 ### Runtime Management
@@ -1081,6 +1082,8 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.19.3**: companding is set on every AMBE device, a DV3000 too, as `DeviceCompand` says (before, a DV3000 kept what its board's CP_ENABLE pin gave it with `linear`); a DV3003 alone with `mixed` does the DMR of a second module or stream on channel 2, which stayed free, see [tcd/README.md](tcd/README.md#single-dv3003-in-mixed-mode)
+- **tcd 0.19.2**: a byte of an AMBE device's answer dropped on the serial line (an FTDI receive overrun at 921600 baud) costs at most one frame instead of shifting the channel until tcd restarts (+20 ms each, the last frame of every stream held back); `DeviceCompand = ulaw | alaw` sends the audio as 8-bit G.711, half the bytes, no overruns, switched at run time in the web dashboard; lost answers counted per device; the vocoder table of the web dashboard keeps one row height and fits from 360 px, see [tcd/README.md](tcd/README.md#lost-answers-devicecompand)
 - **tcd 0.19.1**: `StreamLog` writes one line per stream instead of one per codec and direction (0.19.0), and the vocoder table of the dashboard fits the page again: its Frames and Errors columns are the same for AMBE devices and plugins, with a legend below
 - **tcd 0.19.0**: `StreamLog` (on by default) writes one line per stream at its end with its frames and duration and, for every codec, the vocoder it got (AMBE device and channel, codec plugin or built-in vocoder); tcd checks the FEC of every AMBE frame a device decodes or encodes and counts it there and per device in the monitor (columns Frames and Errors for devices and plugins alike), so a device that answers with no AMBE frames (the radios mute such a stream without a word) shows; `tools/ambecheck` checks a file of frames
 - **tcd 0.18.1**: the USB latency timer of each AMBE device is logged once (it was logged twice, as the detection opens every device once before tcd opens it for good), and again when a device plugged in again had to get it anew; it is still set on every open

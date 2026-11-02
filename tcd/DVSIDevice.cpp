@@ -481,9 +481,9 @@ bool CDVDevice::ConfigureVocoder(uint8_t pkt_ch, Encoding type, int8_t in_gain, 
 		return true;
 	};
 
-	// DV3003 defaults to companding ON (CP_ENABLE pullup), a DV3000 to off: set it as
-	// DeviceCompand says (linear by default)
-	if (Edvtype::dv3003 == devtype || COMPAND_LINEAR != compand)
+	// companding as DeviceCompand says (linear by default), on every device: after a reset
+	// it follows the board's CP_ENABLE pin, which a DVstick-33 pulls up (µ-law); the DV3000
+	// tested starts with it off, nothing says how another board has it
 	{
 		SDV_Packet compandPkt, compandResp;
 		compandPkt.start_byte = PKT_HEADER;
@@ -499,10 +499,14 @@ bool CDVDevice::ConfigureVocoder(uint8_t pkt_ch, Encoding type, int8_t in_gain, 
 			&& PKT_COMPAND == compandResp.payload.ctrl.data.paritymode[1] && 0 == compandResp.payload.ctrl.data.paritymode[2];
 		if (!ok)
 		{
-			std::cerr << (COMPAND_LINEAR == compand ? "Warning: " : "") << "no valid response to PKT_COMPAND on channel " << (unsigned int)(pkt_ch - PKT_CHANNEL0) << std::endl;
+			std::cerr << (COMPAND_LINEAR == compand ? "Warning: " : "") << "no valid response to PKT_COMPAND on channel " << (unsigned int)(pkt_ch - PKT_CHANNEL0)
+				<< " of " << description << (COMPAND_LINEAR == compand ? " (if the device still compands, its audio is distorted)" : "") << std::endl;
 			// a device that kept other packets than tcd reads would give silence for good
 			if (COMPAND_LINEAR != compand)
 				return true;
+			// an answer that comes late must not wait for the reader as if it were a frame's
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			device->PurgeInput();
 		}
 	}
 
