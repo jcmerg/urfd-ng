@@ -34,6 +34,10 @@
 ////////////////////////////////////////////////////////////////////////////////////////
 // class
 
+// b0 of an AMBE+2 frame (9 bytes, DMR air order): below 120 a voice frame,
+// 120-123 an erasure, 124-125 silence, 126-127 a tone
+int Ambe2B0(const uint8_t *ambe2);
+
 class CPacketStream
 {
 public:

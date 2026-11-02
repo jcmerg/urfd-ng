@@ -13,6 +13,7 @@
 #include "Global.h"
 #include "MMDVMClientPeer.h"
 #include "MMDVMClientProtocol.h"
+#include "PacketStream.h"
 #include "BPTC19696.h"
 #include "RS129.h"
 #include "Golay2087.h"
@@ -714,7 +715,7 @@ void CMMDVMClientProtocol::OnDMRDPacketIn(const CBuffer &Buffer)
 	}
 }
 
-void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t srcId, uint32_t dstId, uint32_t streamId)
+void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t srcId, uint32_t dstId, uint32_t streamId, bool echoChecked)
 {
 	char module = m_TGMap.TGToModule(dstId);
 	if (module == ' ')
@@ -734,7 +735,9 @@ void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t s
 	auto existing = m_IncomingStreams.find(streamId);
 	if (existing != m_IncomingStreams.end())
 	{
-		if (existing->second == 0)
+		if (existing->second == STREAM_ECHO_WAIT || existing->second == STREAM_ECHO)
+			return;
+		if (existing->second == STREAM_REJECTED)
 		{
 			// rejected while the module was busy: the previous stream closes
 			// a moment after its last frame, and a talker who starts within
@@ -754,6 +757,17 @@ void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t s
 			// Stream closed - remove stale mapping so we can re-open
 			m_IncomingStreams.erase(existing);
 		}
+	}
+
+	// right after a call from this ID: held until its first voice frames tell
+	// whether it is the master's echo of that call's end
+	if (!retry && !echoChecked && MayBeEcho(module, srcId))
+	{
+		m_IncomingStreams[streamId] = STREAM_ECHO_WAIT;
+		if (m_EchoWait.size() >= 16)
+			m_EchoWait.clear();	// streams that ended without a terminator
+		m_EchoWait[streamId].clear();
+		return;
 	}
 
 	// Generate unique URFD stream ID
@@ -797,9 +811,103 @@ void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t s
 	// Check if stream was actually opened, mark as rejected if not
 	auto stream = GetStream(urfStreamId, &m_MasterIp);
 	if (!stream)
-		m_IncomingStreams[streamId] = 0; // sentinel: rejected
+		m_IncomingStreams[streamId] = STREAM_REJECTED;
 	else
+	{
 		stream->SetSourceTG(dstId);
+		auto &recent = m_RecentCalls[module];
+		recent.srcId = srcId;
+		recent.last.start();
+		recent.frames.clear();
+	}
+}
+
+// the 3 AMBE+2 frames of a DMRD voice burst
+static void BurstAmbe(const uint8_t *dmrframe, uint8_t *dmr3ambe)
+{
+	::memcpy(dmr3ambe, dmrframe, 13);
+	// the middle frame: the burst's byte 13 holds its bits 32..35 in the high
+	// nibble (the low nibble starts the sync), byte 19 its bits 36..39 in the low
+	dmr3ambe[13] = (dmrframe[13] & 0xF0) | (dmrframe[19] & 0x0F);
+	::memcpy(dmr3ambe + 14, dmrframe + 20, 13);
+}
+
+bool CMMDVMClientProtocol::MayBeEcho(char module, uint32_t srcId)
+{
+	auto it = m_RecentCalls.find(module);
+	return it != m_RecentCalls.end() && it->second.srcId == srcId && !it->second.frames.empty()
+		&& it->second.last.time() < MMDVMCLI_ECHO_WINDOW;
+}
+
+int CMMDVMClientProtocol::IsEcho(char module, const std::vector<CBuffer> &bursts, bool decide)
+{
+	std::vector<std::array<uint8_t, 9>> frames;
+	int voice = 0;
+	for (const auto &b : bursts)
+	{
+		uint8_t dmr3ambe[27];
+		BurstAmbe(b.data() + 20, dmr3ambe);
+		for (int i = 0; i < 3; i++)
+		{
+			frames.emplace_back();
+			::memcpy(frames.back().data(), dmr3ambe + i * 9, 9);
+			if (Ambe2B0(dmr3ambe + i * 9) < 120)
+				voice++;
+		}
+	}
+	if (!decide && voice < MMDVMCLI_ECHO_VOICE && bursts.size() < MMDVMCLI_ECHO_BURSTS)
+		return -1;
+	// silence and erasures alone (a kerchunk) are no proof
+	if (voice == 0)
+		return 0;
+	const auto &tail = m_RecentCalls[module].frames;
+	for (size_t off = 0; off + frames.size() <= tail.size(); off++)
+	{
+		size_t i = 0;
+		for (; i < frames.size(); i++)
+		{
+			int bits = 0;
+			for (int k = 0; k < 9; k++)
+				bits += __builtin_popcount(frames[i][k] ^ tail[off + i][k]);
+			if (bits > MMDVMCLI_ECHO_BITS)
+				break;
+		}
+		if (i == frames.size())
+			return 1;
+	}
+	return 0;
+}
+
+void CMMDVMClientProtocol::EndEchoWait(uint32_t streamId, uint32_t srcId, uint32_t dstId, bool force)
+{
+	auto w = m_EchoWait.find(streamId);
+	if (w == m_EchoWait.end())
+		return;
+	const char module = m_TGMap.TGToModule(dstId);
+	const int echo = w->second.empty() ? (force ? 0 : -1) : IsEcho(module, w->second, force);
+	if (echo < 0)
+		return;
+	auto bursts = std::move(w->second);
+	m_EchoWait.erase(w);
+	if (echo)
+	{
+		m_IncomingStreams[streamId] = STREAM_ECHO;
+		std::ostringstream who;
+		CCallsign my = DmrIdToCallsign(srcId);
+		if (my.IsValid())
+			who << my;
+		else
+			who << "unknown";
+		std::cout << m_Name << ": echo of the end of the call from " << who.str() << " (ID " << srcId << ") TG" << dstId << " dropped" << std::endl;
+		return;
+	}
+	// no echo: the stream opens now, with the bursts held so far
+	m_IncomingStreams.erase(streamId);
+	if (bursts.empty())
+		return;
+	OnDMRDVoiceHeaderIn(bursts.front(), srcId, dstId, streamId, true);
+	for (const auto &b : bursts)
+		OnDMRDVoiceFrameIn(b, srcId, dstId, streamId);
 }
 
 void CMMDVMClientProtocol::OnDMRDVoiceFrameIn(const CBuffer &Buffer, uint32_t srcId, uint32_t dstId, uint32_t streamId)
@@ -823,12 +931,21 @@ void CMMDVMClientProtocol::OnDMRDVoiceFrameIn(const CBuffer &Buffer, uint32_t sr
 			return;
 	}
 
-	if (it->second == 0)
+	if (it->second == STREAM_ECHO)
+		return;
+	if (it->second == STREAM_ECHO_WAIT)
+	{
+		m_EchoWait[streamId].push_back(Buffer);
+		EndEchoWait(streamId, srcId, dstId, false);
+		return;
+	}
+
+	if (it->second == STREAM_REJECTED)
 	{
 		// rejected so far, the module may be free by now
 		OnDMRDVoiceHeaderIn(Buffer, srcId, dstId, streamId);
 		it = m_IncomingStreams.find(streamId);
-		if (it == m_IncomingStreams.end() || it->second == 0)
+		if (it == m_IncomingStreams.end() || it->second == STREAM_REJECTED)
 			return;
 	}
 
@@ -837,11 +954,7 @@ void CMMDVMClientProtocol::OnDMRDVoiceFrameIn(const CBuffer &Buffer, uint32_t sr
 
 	// Extract 3 x 9-byte AMBE2+ from interleaved DMR frame
 	uint8_t dmr3ambe[27];
-	::memcpy(dmr3ambe, dmrframe, 13);
-	// the middle frame: the burst's byte 13 holds its bits 32..35 in the high
-	// nibble (the low nibble starts the sync), byte 19 its bits 36..39 in the low
-	dmr3ambe[13] = (dmrframe[13] & 0xF0) | (dmrframe[19] & 0x0F);
-	::memcpy(dmr3ambe + 14, dmrframe + 20, 13);
+	BurstAmbe(dmrframe, dmr3ambe);
 
 	uint8_t dmrsync[7];
 	dmrsync[0] = dmrframe[13] & 0x0F;
@@ -857,6 +970,17 @@ void CMMDVMClientProtocol::OnDMRDVoiceFrameIn(const CBuffer &Buffer, uint32_t sr
 	auto stream = GetStream(urfStreamId, &m_MasterIp);
 	if (!stream)
 		return;
+
+	// the call's last frames, to know its echo
+	auto &recent = m_RecentCalls[stream->GetOwnerClient()->GetReflectorModule()];
+	recent.last.start();
+	for (int i = 0; i < 3; i++)
+	{
+		recent.frames.emplace_back();
+		::memcpy(recent.frames.back().data(), &dmr3ambe[i * 9], 9);
+	}
+	while (recent.frames.size() > MMDVMCLI_ECHO_TAIL)
+		recent.frames.pop_front();
 
 	for (int i = 0; i < 3; i++)
 	{
@@ -874,6 +998,15 @@ void CMMDVMClientProtocol::OnDMRDTerminatorIn(const CBuffer &Buffer, uint32_t sr
 	auto it = m_IncomingStreams.find(streamId);
 	if (it == m_IncomingStreams.end())
 		return;
+	if (it->second == STREAM_ECHO_WAIT)
+	{
+		// ended before its frames told: decided with what came
+		EndEchoWait(streamId, srcId, dstId, true);
+		m_EchoWait.erase(streamId);
+		it = m_IncomingStreams.find(streamId);
+		if (it == m_IncomingStreams.end())
+			return;
+	}
 
 	uint16_t urfStreamId = it->second;
 	m_IncomingStreams.erase(it);

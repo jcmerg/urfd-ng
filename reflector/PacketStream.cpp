@@ -200,7 +200,7 @@ static const uint8_t AMBE2_SILENCE[9] = { 0xB9, 0xE8, 0x81, 0x52, 0x61, 0x73, 0x
 
 // b0 of an AMBE+2 frame in DMR air order: the A partition's 4 high bits (FEC
 // corrected) and 3 bits of the C partition (mbelib ambe3600x2450.c)
-static int Ambe2B0(const uint8_t *ambe2)
+int Ambe2B0(const uint8_t *ambe2)
 {
 	auto bit = [ambe2](unsigned i) { return (ambe2[i >> 3] & BIT_MASK_TABLE[i & 7]) != 0; };
 	unsigned a = 0;

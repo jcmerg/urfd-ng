@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.35.2** | tcd 0.18.0 | Dashboard v2.14.2
+**urfd 4.35.3** | tcd 0.18.0 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -926,6 +926,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **Echo des Durchgangsendes vom Master verworfen (4.35.3)**: BrandMeister (TG 262, von vielen Stationen) schickt nach den meisten Durchgängen einen zweiten Stream derselben ID, 0,6 bis 1,2 s später, mit den letzten 36 bis 66 Frames des Durchgangs noch einmal (ein, zwei Bits je Frame anders), wie von einem zweiten, verzögerten Zugang, den der Master zurückhält, solange der Durchgang läuft; alle hörten die letzte Sekunde doppelt. Der MMDVMClient hält einen neuen Stream der ID, die in den 3 s davor auf dem Modul sprach, bis zu seinen ersten Sprach-Frames an (meist 60 ms, höchstens 360 ms): Sind es Frames aus den letzten 3 Sekunden jenes Durchgangs, verwirft er den Stream und meldet `echo of the end of the call from ... dropped`. Ein neuer Durchgang dieser ID mit anderer Sprache und jede andere ID gehen durch wie bisher. Das Stummschalten wiederholter Frames (4.35.0) bleibt: Es gilt etwas anderem, demselben Sprach-Frame viele Male am Ende eines Durchgangs
 - **Korrekturen aus dem Review (4.35.1)**: Das Stummschalten wiederholter AMBE+2-Frames lässt Ton-Frames (DTMF, Pieps; b0 126-127), Stille und Löschungen stehen, nur wiederholte Sprach-Frames gehen; G3 ohne `address` nennt einem Terminal im Internet die externe IPv4 nur hinter NAT und einem im LAN die lokale Adresse (4.35.0 nannte jedem die externe); ein Stopp wartet nicht mehr auf die Adressdienste, ein SIGHUP-Reload fragt sie nicht erneut (er behält die verfolgte Adresse), eine neue Adresse zählt erst, wenn eine zweite Prüfung 10 s später sie bestätigt, `IPCheckInterval` ist mindestens 30 s, das DHT aktualisiert nur ein Thread zur Zeit
 - **Die externe Adresse wird verfolgt (4.35.0)**: Ohne `IPv4External` / `IPv6External` fragt urfd eine Liste von Diensten (`IPCheckUrl`, icanhazip.com, ifconfig.me, ipify.org, ident.me; vorher nur icanhazip.com) beim Start und alle `IPCheckInterval` Sekunden im Betrieb; eine geänderte Adresse wird geloggt, sofort an das XLX-Verzeichnis und das DHT gemeldet, und G3 und die Plugins nennen sie ihren Clients. G3 ohne `address` in `urfd.terminal` nennt den Terminals die externe IPv4 (vorher die gebundene, hinter NAT falsch). Eine gesetzte externe Adresse wird nicht mehr mit einer ermittelten verglichen. Siehe [Externe Adresse](#externe-adresse-nat-ersatzleitung)
 - **Vorlagen und README gegen den Code geprüft (4.35.0)**: welche Protokolle ohne `Enable` an sind, was SIGHUP neu lädt, Groß-/Kleinschreibung, Bereiche und Pflichtschlüssel in `urfd.ini`; in `tcd.ini` stehen die Kommentare der Zeilen, die „Save“ im Monitor neu schreibt, in eigenen Zeilen

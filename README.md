@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.35.2** | tcd 0.18.0 | Dashboard v2.14.2
+**urfd 4.35.3** | tcd 0.18.0 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -948,6 +948,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **A master's echo of a call's end dropped (4.35.3)**: BrandMeister (TG 262, from many stations) sends after most calls a second stream from the same ID, 0.6 to 1.2 s later, with the call's last 36 to 66 frames again (a bit or two different per frame), as from a second way in with a delay that the master holds back while the call runs; everyone heard the last second twice. The MMDVMClient holds a new stream from the ID that spoke on the module in the 3 s before until its first voice frames (60 ms mostly, at most 360 ms): when they are frames of that call's last 3 seconds, it drops the stream and logs `echo of the end of the call from ... dropped`. A new call from that ID with other speech, and every other ID, go through as before. The muting of repeated frames (4.35.0) stays: it is for another thing, the same voice frame many times at a call's end
 - **Review fixes (4.35.1)**: the muting of repeated AMBE+2 frames keeps tone frames (DTMF, beeps; b0 126-127), silence and erasures, only repeated voice frames go; G3 without `address` tells a terminal on the internet the external IPv4 only behind NAT and a terminal on the LAN the local address (4.35.0 told every terminal the external one); a stop no longer waits for the address services, a SIGHUP reload no longer asks them again (it keeps the address the reflector follows), a new address counts when a second check 10 s later tells it too, `IPCheckInterval` is at least 30 s, the DHT is updated by one thread at a time
 - **The external address followed (4.35.0)**: without `IPv4External` / `IPv6External` urfd asks a list of services (`IPCheckUrl`, icanhazip.com, ifconfig.me, ipify.org, ident.me; before only icanhazip.com) at start and every `IPCheckInterval` seconds while it runs; a changed address is logged, goes to the XLX directory at once and to the DHT, and G3 and the plugins tell it to their clients. G3 without `address` in `urfd.terminal` tells the terminals the external IPv4 (it told them the bound one, wrong behind NAT). A set external address is no longer compared with a detected one. See [External address](#external-address-nat-fallback-line)
 - **Templates and README checked against the code (4.35.0)**: which protocols are on without `Enable`, what SIGHUP reloads, case-sensitive keys, ranges and required keys in `urfd.ini`; in `tcd.ini` the comments of the lines the monitor's Save rewrites stand on lines of their own
