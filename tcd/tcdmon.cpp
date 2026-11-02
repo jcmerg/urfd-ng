@@ -653,10 +653,20 @@ int main(int argc, char *argv[])
 				attroff(COLOR_PAIR(7));
 			}
 			attron(COLOR_PAIR(5));
-			printw("  enc:%d dec:%d", enc, dec);
+			printw("  dec:%d enc:%d", dec, enc);
 			if (codec == "dmr")
 				printw(" re:%d", re);
 			attroff(COLOR_PAIR(5));
+			// how the decoded frames came out (plugins of codec API 3 report it)
+			{
+				const int fec = json_int(sw_json, "error_frames"), rep = json_int(sw_json, "repeats"), mute = json_int(sw_json, "mutes");
+				if (fec || rep || mute)
+				{
+					attron(COLOR_PAIR(3));
+					printw("  fec:%d rep:%d mute:%d", fec, rep, mute);
+					attroff(COLOR_PAIR(3));
+				}
+			}
 			row++;
 		}
 

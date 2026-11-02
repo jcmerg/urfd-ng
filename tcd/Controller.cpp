@@ -1496,43 +1496,120 @@ static bool StreamDecodes(int k, ECodecType in)
 	}
 }
 
-static std::string StreamTag(const std::shared_ptr<CTranscoderPacket> &packet)
+// StreamLog, from Pick() under pinned_mux: the codec's part of the stream's line,
+// added at the stream's first frame with the vocoder it got; `note` when the
+// vocoder was (re)chosen, so a change mid-stream is noted
+CController::SStreamPart *CController::StreamLogPart(int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw, bool note)
 {
-	char tag[40];
-	snprintf(tag, sizeof(tag), "Stream 0x%04x module %c", packet->GetStreamId(), packet->GetModule());
-	return tag;
+	if (!g_Conf.GetStreamLog())
+		return nullptr;
+	auto &log = stream_log[packet->GetStreamId()];
+	if (log.parts.empty())
+	{
+		// a stream's last frame comes by again after its line went out (the DMR
+		// re-encode picks it a second time): no line of one frame for it
+		if (packet->IsLast())
+		{
+			stream_log.erase(packet->GetStreamId());
+			return nullptr;
+		}
+		log.module = packet->GetModule();
+		log.first = std::chrono::steady_clock::now();
+	}
+	auto part = std::find_if(log.parts.begin(), log.parts.end(), [k](const SStreamPart &p) { return p.k == k; });
+	if (part != log.parts.end() && !note)
+		return &*part;
+	const auto &list = choices[k];
+	std::string by;
+	bool device = false;
+	if (choice >= 0 && choice < int(list.size()) && list[choice])
+		by = list[choice]->GetName();
+	else if (g_CodecChoices[k].own)
+		by = g_CodecChoices[k].own_row;
+	else if (hw >= 0)
+	{
+		by = ChannelName(k, size_t(hw));
+		device = true;
+	}
+	else
+		by = "nothing (no free AMBE channel, no plugin)";
+	if (part == log.parts.end())
+	{
+		log.parts.push_back(SStreamPart{ k, by, device, StreamDecodes(k, packet->GetCodecIn()), false, 0, 0, 0, 0 });
+		return &log.parts.back();
+	}
+	if (part->by != by && part->by.find(" then " + by) == std::string::npos)
+	{
+		part->by += " then " + by;	// its channel went away: another vocoder for the rest
+		part->device = device;
+	}
+	return &*part;
 }
 
-// StreamLog: one line when a stream gets its vocoder for a codec
-void CController::LogStreamStart(int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw) const
+// every packet counts; the last one completes the part, unless a device still has
+// to answer it (DeviceFrameOut); the line goes out when every part is done
+void CController::StreamLogCount(int k, const std::shared_ptr<CTranscoderPacket> &packet)
 {
 	if (!g_Conf.GetStreamLog())
 		return;
-	const auto &list = choices[k];
-	std::string by;
-	if (choice >= 0 && choice < int(list.size()) && list[choice])
-		by = std::string(list[choice]->GetName()) + " plugin";
-	else if (g_CodecChoices[k].own)
-		by = g_CodecChoices[k].own_row;
-	else
-		by = hw >= 0 ? ChannelName(k, size_t(hw)) : "nothing: no free AMBE channel and no plugin";
-	std::cout << StreamTag(packet) << ": " << g_CodecChoices[k].label
-	          << (StreamDecodes(k, packet->GetCodecIn()) ? " decode by " : " encode by ") << by << std::endl;
+	auto it = stream_log.find(packet->GetStreamId());
+	if (it == stream_log.end())
+		return;
+	auto &log = it->second;
+	log.last = std::chrono::steady_clock::now();
+	for (auto &p : log.parts)
+		if (p.k == k)
+		{
+			p.frames++;
+			if (packet->IsLast() && !(p.device && !p.decode))
+				p.done = true;
+		}
+	if (std::all_of(log.parts.begin(), log.parts.end(), [](const SStreamPart &p) { return p.done; }))
+		StreamLogFlush(packet->GetStreamId());
+}
+
+// the stream's line, under pinned_mux
+void CController::StreamLogFlush(uint16_t streamid)
+{
+	auto it = stream_log.find(streamid);
+	if (it == stream_log.end())
+		return;
+	const auto &log = it->second;
+	uint32_t frames = 0;
+	for (const auto &p : log.parts)
+		frames = std::max(frames, p.frames);
+	const double secs = std::chrono::duration<double>(log.last - log.first).count() + 0.02;
+	char head[64];
+	snprintf(head, sizeof(head), "Stream 0x%04x module %c: %u frames in %.1f s", streamid, log.module, frames, secs);
+	std::ostringstream line;
+	line << head;
+	for (const auto &p : log.parts)
+	{
+		line << "; " << g_CodecChoices[p.k].name << (p.decode ? " in " : " out ") << p.by;
+		if (p.device && p.decode)
+		{
+			if (p.fec || p.unc)
+				line << " fec " << p.fec << " unc " << p.unc;
+			else
+				line << " ok";
+		}
+		else if (p.device)
+			line << (p.bad ? " bad " : " ok") << (p.bad ? std::to_string(p.bad) : std::string());
+		if (!p.done)
+			line << " (no last frame)";
+	}
+	std::cout << line.str() << std::endl;
+	stream_log.erase(it);
 }
 
 // a frame an AMBE device decodes: its FEC as the device sees it, counted for the
-// stream (pin) and the device; the stream's last frame logs its counts
-void CController::DeviceFrameIn(int k, SPinned &pin, const std::shared_ptr<CTranscoderPacket> &packet) const
+// stream's line and the device (from Pick, under pinned_mux)
+void CController::DeviceFrameIn(int k, int hw, const std::shared_ptr<CTranscoderPacket> &packet)
 {
 	if (k != kChoiceDStar && k != kChoiceDMR)
 		return;
 	const SAmbeFec r = (k == kChoiceDStar) ? AmbeFrameCheck::DStar(packet->GetDStarData()) : AmbeFrameCheck::Dmr(packet->GetDMRData());
-	pin.frames_in++;
-	if (r.errors)
-		pin.errors_in++;
-	if (r.uncorrectable)
-		pin.uncorrectable++;
-	const int st = slots[hw_channels[k][pin.hw].slot]->stats;
+	const int st = slots[hw_channels[k][hw].slot]->stats;
 	if (st >= 0)
 	{
 		auto &d = g_Stats.devices[st];
@@ -1542,27 +1619,32 @@ void CController::DeviceFrameIn(int k, SPinned &pin, const std::shared_ptr<CTran
 		if (r.uncorrectable)
 			d.uncorrectable.fetch_add(1, std::memory_order_relaxed);
 	}
-	if (packet->IsLast() && g_Conf.GetStreamLog())
-		std::cout << StreamTag(packet) << ": " << ChannelName(k, size_t(pin.hw)) << " decoded " << pin.frames_in << " " << g_CodecChoices[k].label
-		          << " frames, " << pin.errors_in << " with corrected errors, " << pin.uncorrectable << " uncorrectable" << std::endl;
+	auto it = stream_log.find(packet->GetStreamId());
+	if (it == stream_log.end())
+		return;
+	for (auto &p : it->second.parts)
+		if (p.k == k)
+		{
+			if (r.errors)
+				p.fec++;
+			if (r.uncorrectable)
+				p.unc++;
+		}
 }
 
-// a frame an AMBE device encoded: a device that answers with no AMBE frame at all
-// shows here, as the radios mute such a stream without a word
+// a frame an AMBE device encoded, at the device's answer: a device that answers
+// with no AMBE frame at all shows here, as the radios mute such a stream without
+// a word; the answer to the stream's last frame completes its part of the line
 void CController::DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket> &packet)
 {
 	if (k != kChoiceDStar && k != kChoiceDMR)
 		return;
 	std::lock_guard<std::mutex> lock(pinned_mux);
-	auto it = pinned[k].find(packet->GetStreamId());
-	if (it == pinned[k].end() || it->second.hw < 0 || choices[k][it->second.choice])
+	auto pin = pinned[k].find(packet->GetStreamId());
+	if (pin == pinned[k].end() || pin->second.hw < 0 || choices[k][pin->second.choice])
 		return;	// not on an AMBE device
-	auto &pin = it->second;
 	const SAmbeFec r = (k == kChoiceDStar) ? AmbeFrameCheck::DStar(packet->GetDStarData()) : AmbeFrameCheck::Dmr(packet->GetDMRData());
-	pin.frames_out++;
-	if (r.errors || r.uncorrectable)
-		pin.bad_out++;
-	const int st = slots[hw_channels[k][pin.hw].slot]->stats;
+	const int st = slots[hw_channels[k][pin->second.hw].slot]->stats;
 	if (st >= 0)
 	{
 		auto &d = g_Stats.devices[st];
@@ -1570,9 +1652,21 @@ void CController::DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket>
 		if (r.errors || r.uncorrectable)
 			d.bad_out.fetch_add(1, std::memory_order_relaxed);
 	}
-	if (packet->IsLast() && g_Conf.GetStreamLog())
-		std::cout << StreamTag(packet) << ": " << ChannelName(k, size_t(pin.hw)) << " encoded " << pin.frames_out << " " << g_CodecChoices[k].label
-		          << " frames, " << pin.bad_out << " fail their FEC" << std::endl;
+	auto it = stream_log.find(packet->GetStreamId());
+	if (it == stream_log.end())
+		return;
+	auto &log = it->second;
+	log.last = std::chrono::steady_clock::now();
+	for (auto &p : log.parts)
+		if (p.k == k)
+		{
+			if (r.errors || r.uncorrectable)
+				p.bad++;
+			if (packet->IsLast())
+				p.done = true;
+		}
+	if (std::all_of(log.parts.begin(), log.parts.end(), [](const SStreamPart &p) { return p.done; }))
+		StreamLogFlush(packet->GetStreamId());
 }
 
 // the choice of a stream, made at its first packet: the one for new streams, but a
@@ -1596,8 +1690,10 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 	// channel for (D-Star and DMR, whose list is the one asked for)
 	auto device = [&](int c) { return !list[c] && !g_CodecChoices[k].own; };
 	auto it = pins.find(streamid);
+	bool fresh = false, moved = false;
 	if (it == pins.end())
 	{
+		fresh = true;
 		int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
 		if (c < 0 || c >= int(list_size))
 			c = 0;
@@ -1609,7 +1705,6 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 				c = plugin(c);
 		}
 		it = pins.emplace(streamid, SPinned{ c, hw, now }).first;
-		LogStreamStart(k, packet, c, hw);
 	}
 	else if (device(it->second.choice) && !HasChannel(k, it->second.hw, module, streamid))
 	{
@@ -1618,6 +1713,7 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 		it->second.hw = TakeChannel(k, module, streamid);
 		if (it->second.hw < 0)
 			it->second.choice = plugin(it->second.choice);
+		moved = true;
 	}
 	auto &pin = it->second;
 	pin.last = now;
@@ -1631,13 +1727,19 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 			*ch = c.ch;
 		}
 		// a frame the device is to decode: its FEC, counted for the stream and the device
+		// (the first frame's part of the stream's line first, so the count has a place)
 		if (StreamDecodes(k, packet->GetCodecIn()))
-			DeviceFrameIn(k, pin, packet);
+		{
+			StreamLogPart(k, packet, pin.choice, pin.hw, fresh || moved);
+			DeviceFrameIn(k, pin.hw, packet);
+		}
 		// the channel is free after the stream's last frame (the device answers
 		// its frames in order, a new stream's come after them)
 		if (packet->IsLast())
 			c.busy = false;
 	}
+	StreamLogPart(k, packet, pin.choice, pin.hw, fresh || moved);
+	StreamLogCount(k, packet);
 	return pin.choice;
 }
 
@@ -1655,6 +1757,14 @@ void CController::PurgePinned(void)
 		for (auto &c : list)
 			if (c.busy && now - c.last > std::chrono::milliseconds(1500))
 				c.busy = false;
+	// a stream's line whose last frame did not come: out after 5 s of quiet
+	for (auto it = stream_log.begin(); it != stream_log.end(); )
+	{
+		const uint16_t id = it->first;
+		++it;
+		if (now - stream_log[id].last > std::chrono::seconds(5))
+			StreamLogFlush(id);
+	}
 }
 
 int CController::TakeChannel(int k, char module, uint16_t streamid)
