@@ -171,7 +171,7 @@ void CWiresxCmdHandler::Task(void)
 			break;
 		case WIRESX_CMD_CONN_REQ:
 			cModule = 'A' + (char)(Cmd.GetArg() - 1);
-			if (g_Reflector.IsValidModule(cModule))
+			if (g_Reflector.MayLinkModule(cModule, EProtocol::ysf))
 			{
 				std::cout << "Wires-X CONN_REQ command to link on module " << cModule << " from " << Cmd.GetCallsign() << " at " << Cmd.GetIp() << std::endl;
 				// acknowledge

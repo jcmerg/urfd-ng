@@ -215,8 +215,11 @@ void CDmrplusProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Head
 		// release
 		g_Reflector.ReleaseClients();
 		// update last heard
-		g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "DMRplus");
-		g_Reflector.ReleaseUsers();
+		if ( stream || g_Reflector.ShowsHeard(rpt2.GetCSModule(), client) )
+		{
+			g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "DMRplus");
+			g_Reflector.ReleaseUsers();
+		}
 	}
 }
 

@@ -23,6 +23,9 @@
 #include <condition_variable>
 #include <mutex>
 #include <vector>
+#include <map>
+#include <set>
+#include <shared_mutex>
 
 #include "Users.h"
 #include "Clients.h"
@@ -86,6 +89,19 @@ public:
 
 	// check
 	bool IsValidModule(char c) const                { return m_Modules.npos!=m_Modules.find(c); }
+	// [Modules] Protocols<M>: whether a protocol may use the module (link, send,
+	// receive); a module without that line is open to every protocol
+	bool IsModuleOpenTo(char module, EProtocol p) const;
+	// a link request: the module exists and is open to the protocol (a refusal is logged)
+	bool MayLinkModule(char module, EProtocol p) const;
+	// whether a station whose stream was not opened goes into last heard: not on a
+	// module closed to its protocol (a busy module still shows it); ' ' is the client's module
+	bool ShowsHeard(char module, const std::shared_ptr<CClient> &client) const
+	{
+		if (!client)
+			return true;
+		return IsModuleOpenTo(module == ' ' ? client->GetReflectorModule() : module, client->GetProtocol());
+	}
 	char GetEchoModule(void) const                  { return m_EchoModule; }
 	// the stream id of the (last) echo playback
 	bool IsEchoStream(uint16_t sid) const           { return (0 != sid) && (sid == m_EchoStreamId); }
@@ -149,6 +165,11 @@ protected:
 	nlohmann::json m_SentMappings;	// last module_mappings sent, MaintenanceThread only
 	std::string m_Modules, m_TCmodules;
 	std::string m_ConfigPath;
+
+	// [Modules] Protocols<M>, the modules that are not open to every protocol
+	void LoadModuleProtocols(void);
+	mutable std::shared_mutex m_ModuleProtocolsMutex;
+	std::map<char, std::set<EProtocol>> m_ModuleProtocols;
 
 	// objects
 	CUsers     m_Users;            // sorted list of lastheard stations

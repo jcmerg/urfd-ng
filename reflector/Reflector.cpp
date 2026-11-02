@@ -36,6 +36,7 @@
 #include "NXDNProtocol.h"
 #include "Notifier.h"
 #include "Plugins.h"
+#include "ProtocolNames.h"
 
 CReflector::CReflector()
 {
@@ -75,6 +76,7 @@ bool CReflector::Start(void)
 	const auto cs(g_Configure.GetString(g_Keys.names.callsign));
 	m_Callsign.SetCallsign(cs, false);
 	m_Modules.assign(g_Configure.GetString(g_Keys.modules.modules));
+	LoadModuleProtocols();
 	const auto port = g_Configure.GetUnsigned(g_Keys.tc.port);
 	// the external addresses, before the protocols (G3, plugins) ask for them
 	m_ExternalIPv4 = g_Configure.GetString(g_Keys.ip.ipv4address);
@@ -276,6 +278,7 @@ void CReflector::ReloadConfig(const std::string &configPath)
 			}
 		}
 		g_Configure.SetData(fresh.GetData());
+		LoadModuleProtocols();
 
 		// Reload TG mappings (preserve dynamic entries)
 		for (auto *mmdvm : m_Protocols.MmdvmClients())
@@ -494,6 +497,19 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 		return nullptr;
 	}
 
+	// a module closed to the client's protocol ([Modules] Protocols<M>) takes nothing
+	// from it; the module as it will be used, a blank RPT2 module is the client's
+	{
+		const char target = (DvHeader->GetRpt2Module() == ' ') ? client->GetReflectorModule() : DvHeader->GetRpt2Module();
+		if (!IsModuleOpenTo(target, client->GetProtocol()))
+		{
+			if (logReject)
+				std::cout << "Module " << target << " is closed to " << g_GateKeeper.ProtocolName(client->GetProtocol()) << ", rejecting stream from " << client->GetCallsign() << std::endl;
+			lastRejectedId = DvHeader->GetStreamId();
+			return nullptr;
+		}
+	}
+
 	// check if module needs a transcoder and if it's connected; with Modules = auto
 	// a module without tcd is just not transcoded
 	char module = DvHeader->GetRpt2Module();
@@ -613,6 +629,51 @@ void CReflector::CloseStream(std::shared_ptr<CPacketStream> stream)
 		stream->ClosePacketStream();
 		StatusChanged();
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// [Modules] Protocols<M>: modules open to some protocols only
+
+void CReflector::LoadModuleProtocols(void)
+{
+	std::map<char, std::set<EProtocol>> access;
+	for (char m : m_Modules)
+	{
+		const std::string key = ModuleProtocolsKey(m);
+		if (!g_Configure.Contains(key))
+			continue;
+		std::set<EProtocol> open;
+		std::string shown;
+		for (const auto &n : SplitProtocolList(g_Configure.GetString(key)))
+		{
+			const auto it = ProtocolNames().find(n);
+			if (it == ProtocolNames().end())
+				continue;	// ReadData has said so
+			open.insert(it->second);
+			shown += (shown.empty() ? "" : ", ") + n;
+		}
+		access[m] = open;
+		std::cout << "Module " << m << " is open to " << (shown.empty() ? std::string("no protocol") : shown) << " only" << std::endl;
+	}
+	std::unique_lock<std::shared_mutex> lock(m_ModuleProtocolsMutex);
+	m_ModuleProtocols.swap(access);
+}
+
+bool CReflector::IsModuleOpenTo(char module, EProtocol p) const
+{
+	std::shared_lock<std::shared_mutex> lock(m_ModuleProtocolsMutex);
+	const auto it = m_ModuleProtocols.find(module);
+	return it == m_ModuleProtocols.end() || it->second.count(p) > 0;
+}
+
+bool CReflector::MayLinkModule(char module, EProtocol p) const
+{
+	if (!IsValidModule(module))
+		return false;
+	if (IsModuleOpenTo(module, p))
+		return true;
+	std::cout << "Module " << module << " is closed to " << g_GateKeeper.ProtocolName(p) << ", link refused" << std::endl;
+	return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -762,6 +823,9 @@ void CReflector::RouterThread(const char ThisModule)
 					std::cout << "Router: " << g_GateKeeper.ProtocolName(srcProto) << " -> " << g_GateKeeper.ProtocolName(dstProto) << " blocked on module " << ThisModule << std::endl;
 				continue;
 			}
+			// a module closed to the protocol ([Modules] Protocols<M>) sends it nothing
+			if (!IsModuleOpenTo(ThisModule, dstProto))
+				continue;
 			// without the transcoder a module carries only the source's codec: a
 			// protocol of another one would send empty frames (zeros, which decode
 			// as noise), so it gets no stream
@@ -1220,7 +1284,7 @@ void CReflector::WriteXmlFile(std::ofstream &xmlFile)
 		xmlFile << "\t<LinkedNodes>" << nodeCount << "</LinkedNodes>" << std::endl;
 		// who is transmitting on this module right now, for the dashboard
 		auto stream = GetStream(m);
-		if (stream && stream->IsOpen())
+		if (stream && stream->IsOpen() && !CUsers::IsHidden(stream->GetUserCallsign(), m))
 			xmlFile << "\t<OnAir>" << CUtils::XmlEscape(stream->GetUserCallsign().GetCS()) << "</OnAir>" << std::endl;
 		// check if transcoded
 		bool transcoded = IsTranscoded(m);

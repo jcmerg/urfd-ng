@@ -69,7 +69,7 @@ static nlohmann::json BuildInitialConnectPayload()
 		moduleEntry["mappings"] = g_Reflector.GetModuleMappings(module);
 
 		auto stream = g_Reflector.GetStream(module);
-		if (stream && stream->IsOpen())
+		if (stream && stream->IsOpen() && !CUsers::IsHidden(stream->GetUserCallsign(), module))
 		{
 			moduleEntry["on_air"] = stream->GetUserCallsign().GetCS();
 			moduleEntry["on_air_name"] = CUser::OperatorName(stream->GetUserCallsign());
@@ -181,7 +181,7 @@ static nlohmann::json BuildReflectorSnapshot()
 		if (module == ' ')
 			continue;
 		auto stream = g_Reflector.GetStream(module);
-		if (!stream || !stream->IsOpen())
+		if (!stream || !stream->IsOpen() || CUsers::IsHidden(stream->GetUserCallsign(), module))
 			continue;
 		snapshot["open_channels"].push_back({
 			{ "module", std::string(1, module) },

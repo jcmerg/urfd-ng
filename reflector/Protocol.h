@@ -99,7 +99,7 @@ public:
 	void ClearMmdvmConnectionBlocked(unsigned n)    { std::unique_lock lk(m_BlockMutex); m_BlockedMmdvm.erase(n); }
 	std::set<unsigned> GetBlockedMmdvm() const      { std::shared_lock lk(m_BlockMutex); return m_BlockedMmdvm; }
 	void ResetBlocksToDefault()               { std::unique_lock lk(m_BlockMutex); m_BlockedSources = m_ConfigBlockedSources; m_BlockedMmdvm = m_ConfigBlockedMmdvm; }
-	void SaveBlockDefaults()                  { std::shared_lock lk(m_BlockMutex); m_ConfigBlockedSources = m_BlockedSources; m_ConfigBlockedMmdvm = m_BlockedMmdvm; }
+	void SaveBlockDefaults()                  { std::unique_lock lk(m_BlockMutex); m_ConfigBlockedSources = m_BlockedSources; m_ConfigBlockedMmdvm = m_BlockedMmdvm; }
 	// the BlockProtocols list under key: protocol names, "MMDVMClient" for every
 	// MMDVMClient connection, "MMDVMClient1" ... "MMDVMClient9" for one of them
 	void ParseBlockProtocols(const std::string &key, const std::string &label);

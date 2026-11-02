@@ -1061,8 +1061,11 @@ void CSvxProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, 
 	}
 
 	g_Reflector.ReleaseClients();
-	g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "SVX");
-	g_Reflector.ReleaseUsers();
+	if ( stream || g_Reflector.ShowsHeard(rpt2.GetCSModule(), client) )
+	{
+		g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "SVX");
+		g_Reflector.ReleaseUsers();
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////

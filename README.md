@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.36.1** | tcd 0.19.1 | Dashboard v2.14.2
+**urfd 4.37.0** | tcd 0.19.1 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -542,6 +542,7 @@ The reflector supports hot-reloading configuration without dropping client sessi
 - TG mappings (MMDVMClient, SvxReflector and SVXServer) — dynamic TGs are preserved
 - Whitelist, blacklist, and interlink files
 - Transcoded modules (`[Transcoder] Modules`, also to and from `auto`, since 4.25.1); a tcd connection for a module no longer listed is closed
+- Module access by protocol and hidden talkers (`[Modules] Protocols<M>`, `HideUnlisted`, since 4.37.0)
 - Reflector metadata (sponsor, country, URLs; the callsign only for the XML file and the admin page)
 
 **Requires full restart:**
@@ -647,6 +648,31 @@ Port = 20001
 [P25]
 Enable = false
 Port = 41000
+```
+
+### Module Access by Protocol (4.37.0)
+`[Modules] Protocols<M> = <protocols>` opens module M to the protocols listed and closes it to all others, for example a module apart from the amateur radio network that only the protocols of a closed user group use. A module without the line stays open to every protocol.
+
+```ini
+[Modules]
+Modules = ADP
+DescriptionP = Closed group
+ProtocolsP = MMDVM,M17     # module P: these protocols only
+```
+
+- **Names**: as in `BlockProtocols` (`DExtra`, `DPlus`, `DCS`, `G3`, `MMDVM`, `DMRPlus`, `YSF`, `NXDN`, `P25`, `M17`, `USRP`, `SVXServer`, `SvxReflector`, `URF`, `XLXPeer`, `MMDVMClient`, the client connectors) and the names of loaded plugins; comma or space separated. `MMDVMClient` means all its connections, one connection cannot be named here. An unknown name stops urfd, as an error in `urfd.ini`.
+- **Link**: a DExtra, DCS, M17 or G3 link to the module, a Wires-X connect and an MMDVM module change by TG are refused (`Module P is closed to DCS, link refused`).
+- **Send**: a stream from a protocol the module is closed to is not taken (`Module P is closed to DPlus, rejecting stream from ...`), whichever way it was addressed (TG, DG-ID, connector).
+- **Receive**: the module's streams go to the open protocols only; the others get nothing, interlinks included unless `URF` or `XLXPeer` is listed.
+- **Connectors**: a client connector (`DCSClient`, `DExtraClient`, `DPlusClient`, `YSFClient`, `MMDVMClient`, `SvxReflector`) or an autolink on a closed module stays linked but carries nothing; list its protocol to use it there.
+- **Last heard**: a station whose stream a closed module refused does not appear in last heard (one refused because the module is busy still does, as before).
+- **Reload**: SIGHUP reads the lines again; a station linked before keeps its link but hears and sends nothing on a module that is now closed to it.
+
+`[Modules] HideUnlisted = <modules>` keeps the talkers on these modules that are in neither ID database (DMR, NXDN) off the dashboard: no last heard entry, no on air, no position, in XML, JSON and WebSocket alike, as if the module were quiet. Listed talkers are shown as before. This holds for this reflector: a peer that has the module open (`URF`, `XLXPeer` in `Protocols<M>`) gets the streams and shows them on its own dashboard, so keep interlinks off such a module. Meant for a module apart from amateur radio whose users have no callsign: there is nothing to look up for them anyway. The admin page still shows who talks.
+
+```ini
+[Modules]
+HideUnlisted = P
 ```
 
 ### Resilient ID Database Loading
@@ -948,6 +974,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **Module access by protocol (4.37.0)**: `[Modules] Protocols<M>` opens a module to the protocols listed only: the others cannot link to it, send to it or hear it; `[Modules] HideUnlisted` keeps talkers without an ID database entry off the dashboard, see [Module Access by Protocol](#module-access-by-protocol-4370)
 - **Echo check with another ID in between (4.35.4)**: the MMDVMClient knew only the last call on each module, so an echo did not count as one when another ID keyed up briefly between the call and its echo. It keeps the calls of every ID of the last 3 s on a module now and compares a new stream with its own ID's call. Checked against an hour of BrandMeister TG 262: all 33 echoes dropped, no other stream
 - **A master's echo of a call's end dropped (4.35.3)**: BrandMeister (TG 262, from many stations) sends after most calls a second stream from the same ID, 0.6 to 1.2 s later, with the call's last 36 to 66 frames again (a bit or two different per frame), as from a second way in with a delay that the master holds back while the call runs; everyone heard the last second twice. The MMDVMClient holds a new stream from the ID that spoke on the module in the 3 s before until its first voice frames (60 ms mostly, at most 360 ms): when they are frames of that call's last 3 seconds, it drops the stream and logs `echo of the end of the call from ... dropped`. A new call from that ID with other speech, and every other ID, go through as before. The muting of repeated frames (4.35.0) stays: it is for another thing, the same voice frame many times at a call's end
 - **Review fixes (4.35.1)**: the muting of repeated AMBE+2 frames keeps tone frames (DTMF, beeps; b0 126-127), silence and erasures, only repeated voice frames go; G3 without `address` tells a terminal on the internet the external IPv4 only behind NAT and a terminal on the LAN the local address (4.35.0 told every terminal the external one); a stop no longer waits for the address services, a SIGHUP reload no longer asks them again (it keeps the address the reflector follows), a new address counts when a second check 10 s later tells it too, `IPCheckInterval` is at least 30 s, the DHT is updated by one thread at a time

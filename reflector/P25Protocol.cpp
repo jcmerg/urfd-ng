@@ -237,8 +237,11 @@ void CP25Protocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, 
 		g_Reflector.ReleaseClients();
 
 		// update last heard
-		g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "P25");
-		g_Reflector.ReleaseUsers();
+		if ( stream || g_Reflector.ShowsHeard(rpt2.GetCSModule(), client) )
+		{
+			g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "P25");
+			g_Reflector.ReleaseUsers();
+		}
 	}
 }
 

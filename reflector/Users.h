@@ -58,6 +58,8 @@ public:
 	// and its last heard entry take the new callsign
 	void   StationRenamed(char module, const CCallsign &from, const CCallsign &to);
 	void   Location(const CCallsign &, double lat, double lon);
+	// [Modules] HideUnlisted: a talker on such a module the ID databases do not know is not shown
+	static bool IsHidden(const CCallsign &my, char module);
 
 protected:
 	// data

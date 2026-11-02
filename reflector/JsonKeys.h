@@ -22,6 +22,10 @@
 
 // where the configuration keeps a module's talkgroup ([Modules] TG<M> = <number>)
 inline std::string ModuleTGKey(char module) { return std::string("ModuleTG") + module; }
+// [Modules] Protocols<M>: the protocols module M is open to, as written there
+inline std::string ModuleProtocolsKey(char module) { return std::string("ModuleProtocols") + module; }
+// [Modules] HideUnlisted: the modules whose talkers without an ID database entry are not shown
+inline const std::string ModuleHideUnlistedKey = "ModuleHideUnlisted";
 
 // configuration key names
 struct SJsonKeys {

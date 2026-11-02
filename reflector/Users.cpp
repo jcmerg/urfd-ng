@@ -21,6 +21,8 @@
 #include "Users.h"
 #include "Global.h"
 #include "Notifier.h"
+#include "LookupDmr.h"
+#include "LookupNxdn.h"
 #include <nlohmann/json.hpp>
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -42,6 +44,29 @@ void CUsers::AddUser(const CUser &user)
 	{
 		m_Users.resize(m_Users.size()-1);
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// [Modules] HideUnlisted: on these modules a talker that is in neither ID database
+// (DMR, NXDN) stays out of the last heard list and the live stations, so out of
+// the dashboard, XML, JSON and WebSocket; e.g. users without a licence on a module
+// apart from amateur radio, who have no callsign to look up anyway
+
+bool CUsers::IsHidden(const CCallsign &my, char module)
+{
+	if (!g_Configure.Contains(ModuleHideUnlistedKey) || std::string::npos == g_Configure.GetString(ModuleHideUnlistedKey).find(module))
+		return false;
+	// the databases decide, not an ID the radio sent (a group's own IDs are in none)
+	const auto key = my.GetKey();
+	g_LDid.Lock();
+	const bool dmr = g_LDid.FindDmrid(key) != 0 || (my.GetDmrid() && g_LDid.FindCallsign(my.GetDmrid()));
+	g_LDid.Unlock();
+	if (dmr)
+		return false;
+	g_LNid.Lock();
+	const bool nxdn = g_LNid.FindNXDNid(key) != 0 || (my.GetNXDNid() && g_LNid.FindCallsign(my.GetNXDNid()));
+	g_LNid.Unlock();
+	return !nxdn;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -74,6 +99,8 @@ static void DispatchStationEvent(const std::string &eventType, const CUser &hear
 void CUsers::StationStarted(const CCallsign &my, const CCallsign &rpt1, const CCallsign &rpt2, const CCallsign &xlx, const std::string &proto)
 {
 	CUser heard(my, rpt1, rpt2, xlx, proto);
+	if (IsHidden(my, heard.GetOnModule()))
+		return;
 	// the locator is known from an earlier transmission (M17 GNSS, D-Star DPRS, YSF GPS), if at all
 	for (const auto &user : m_Users)
 	{
@@ -99,7 +126,13 @@ void CUsers::StationStopped(char module)
 void CUsers::StationRenamed(char module, const CCallsign &from, const CCallsign &to)
 {
 	auto active = m_ActiveStations.find(module);
-	if (active != m_ActiveStations.end() && active->second.IsCallsign(from))
+	if (active != m_ActiveStations.end() && active->second.IsCallsign(from) && IsHidden(to, module))
+	{
+		// the new talker is one HideUnlisted keeps off: the station ends here
+		DispatchStationEvent("station_stopped", active->second);
+		m_ActiveStations.erase(active);
+	}
+	else if (active != m_ActiveStations.end() && active->second.IsCallsign(from))
 	{
 		const CUser renamed(to, active->second.GetRpt1(), active->second.GetRpt2(), active->second.GetXlx(), active->second.GetProtocol());
 		const std::string was = active->second.GetCallsign();
@@ -124,6 +157,8 @@ void CUsers::StationRenamed(char module, const CCallsign &from, const CCallsign 
 void CUsers::Hearing(const CCallsign &my, const CCallsign &rpt1, const CCallsign &rpt2, const CCallsign &xlx, const std::string &proto)
 {
 	CUser heard(my, rpt1, rpt2, xlx, proto);
+	if (IsHidden(my, heard.GetOnModule()))
+		return;
 
 	// a known position stays with the callsign until it reports a new one
 	for ( auto &user : m_Users )
