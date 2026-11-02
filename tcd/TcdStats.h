@@ -62,6 +62,12 @@ struct DeviceStats
 	std::atomic<bool> want_out{false};
 	std::atomic<int> phase{0};
 	std::atomic<bool> can_out{false};
+	// the AMBE frames of the device's streams, checked by their FEC (AmbeFrameCheck.h)
+	// as the codec plugins report theirs: frames decoded and encoded, decoded frames
+	// whose FEC corrected bits, decoded frames with an uncorrectable first partition
+	// (the device repeats its last frame for them), and encoded frames that fail
+	// their own FEC (a device that gives no AMBE frames)
+	std::atomic<uint32_t> decodes{0}, encodes{0}, error_frames{0}, uncorrectable{0}, bad_out{0};
 	// Per-channel activity: module letter + timestamp (ms since epoch)
 	std::atomic<char> ch_module[MAX_CHANNELS] = {' ', ' ', ' '};
 	std::atomic<uint64_t> ch_last_ms[MAX_CHANNELS] = {0, 0, 0};

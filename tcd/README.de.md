@@ -326,6 +326,7 @@ Warum nicht die Rauschunterdrückung im AMBE-Chip: Die DVSI-Geräte haben eine (
 | `StatsLog` | `false` | CSV-Dateien pro Stream zum Einstellen der AGC |
 | `StatsLogDir` | `/tmp/tcd-stats` | Ablageort |
 | `StatsLogRetain` | `24` | Stunden, bis sie gelöscht werden |
+| `StreamLog` | `true` | je Stream und Codec eine Logzeile mit dem Vocoder, den er bekommen hat (AMBE-Gerät und Kanal, Codec-Plugin oder eingebauter Vocoder), und eine an seinem Ende mit den FEC-Zahlen der Frames, die ein AMBE-Gerät decodiert oder codiert hat (seit 0.19.0) |
 
 ## Pegel
 
@@ -377,7 +378,7 @@ Die Grenzen sind absichtlich ungleich: Absenken ist unkritisch, Anheben hebt auc
 - bei vielen Modulen eine kompakte Ansicht (ab fünf Modulen oder per „Compact“): eine Taste pro Modul mit Codec und Pegel, volle Karten nur für Module auf Sendung und für die, die per Klick offen gehalten werden; tcd merkt sich die Ansicht für alle Browser (`MonitorView`, schreibt „Speichern“), die angehefteten Module merkt sich der Browser
 - Signalweg des aktiven Streams mit dem Pegel an jeder Stufe
 - AGC- und Verstärkungsregler, die sofort wirken, und ein Knopf, um sie in `tcd.ini` zu speichern
-- Hardware und Software getrennt (seit 0.18.0): die belegten AMBE-Kanäle von D-Star und DMR, fest oder Pool, dann jedes Gerät: Seriennummer, Typ, Rolle, belegte Kanäle mit ihren Modulen, Puffertiefe; „Phase out“ nimmt ein Gerät außer Betrieb (seit 0.17.1): keine neuen Streams, die laufenden enden noch darauf, dann schließt tcd es, und es kann abgezogen werden; „Take back“ öffnet es wieder. Nur für ein Gerät, dessen Codecs ein Codec-Plugin kann; „Save“ speichert es nicht (nach einem Neustart von tcd ist es wieder dabei)
+- Hardware und Software getrennt (seit 0.18.0): die belegten AMBE-Kanäle von D-Star und DMR, fest oder Pool, dann jedes Gerät: Seriennummer, Typ, Rolle, belegte Kanäle mit ihren Modulen, Puffertiefe und seit 0.19.0 seine Frames nach ihrer FEC (decodierte und codierte, decodierte mit korrigierten Fehlern oder unkorrigierbar, codierte, die ihre FEC nicht bestehen, wie es die Codec-Plugins für ihre melden); „Phase out“ nimmt ein Gerät außer Betrieb (seit 0.17.1): keine neuen Streams, die laufenden enden noch darauf, dann schließt tcd es, und es kann abgezogen werden; „Take back“ öffnet es wieder. Nur für ein Gerät, dessen Codecs ein Codec-Plugin kann; „Save“ speichert es nicht (nach einem Neustart von tcd ist es wieder dabei)
 - „AMBE channels“: fest oder Pool (`DeviceChannels`) für die Streams, die danach beginnen (seit 0.17.1), von „Save“ gespeichert
 - Codec-Plugins: ihr Codec, Zähler und Streams, und welcher Vocoder neue D-Star-, DMR- und P25-Streams bekommt (umschaltbar, siehe [Codec-Plugins](#codec-plugins)); die eigenen Vocoder von tcd, OP25 (P25, YSF VW) und Codec2 (M17), mit ihren Zählern als „Built in“ (seit 0.14.1); seit 0.15.0 die Frames, die ein Plugin der Schnittstelle 3 mit Bitfehlern, wiederholt oder stummgeschaltet dekodiert hat
 - Verbindung zum Reflektor und Paketzähler; ein Standby-Modul zeigt „standby“, solange ein anderer tcd es hat, und „taken over“, solange dieser tcd es hat
@@ -425,6 +426,7 @@ journalctl -u tcd -f
 | `... is in use by another process` | ein anderer tcd oder `dvsitest` hält das Gerät: ihn beenden (`pgrep -a tcd`) |
 | `Lost the AMBE device ...` / `... has not answered for 1000 ms` | das Gerät wurde abgezogen, zurückgesetzt oder hängt; ein Codec-Plugin übernimmt seine Streams, und tcd öffnet es wieder, sobald es da ist (`... is back on ...`). Ohne Plugin: `shutting down`, systemd startet tcd nach 5 s neu |
 | `... does not open or answer, trying again every 5 s` | ein verlorenes Gerät ist da, antwortet aber nicht: abziehen und wieder einstecken |
+| `Stream 0x.. module .: D-Star encode by DV3000 ttyUSB1` | `StreamLog` (seit 0.19.0): der Vocoder, den jeder Stream für jeden Codec bekommen hat, bei seinem ersten Frame; `... decoded 883 D-Star frames, 12 with corrected errors, 0 uncorrectable` (für ein unkorrigierbares wiederholt das Gerät sein letztes Frame) und `... encoded 1666 D-Star frames, 0 fail their FEC` an seinem Ende sagen, wie die Frames, die ein AMBE-Gerät bekommen und geliefert hat, nach ihrer FEC aussahen. Viele Frames eines Geräts, die ihre FEC nicht bestehen: Das Gerät liefert keine AMBE-Frames, die Funkgeräte schalten den Stream stumm; Gerät ausphasen und zurücknehmen oder neu einstecken |
 | der Reflektor zeigt keinen Transcoder | `ServerAddress` und `Port` in `tcd.ini`, auf beiden Seiten dieselben `Modules`, und Port 10100/tcp vom tcd-Rechner aus erreichbar |
 
 ## Änderungen gegenüber dem Original
@@ -434,6 +436,7 @@ journalctl -u tcd -f
 - **Geräteauswahl**: `--list-devices`, `DeviceSerial` mit exaktem Vergleich
 - **Gerätetyp vom Chip**: DV3000 oder DV3003 nach der Produkt-ID, ein Gerät ohne Antwort wird weggelassen, statt tcd zu beenden, ein zweiter Reset-Versuch, die Null-Bytes zum Leeren gehen hinaus, bevor die Eingabe verworfen wird, exklusives Öffnen
 - **macOS**: baut mit clang und läuft nativ mit den AMBE-Geräten, siehe [macOS](#macos)
+- **Stream-Protokoll und Frame-Prüfung** (0.19.0): `StreamLog` nennt den Vocoder jedes Streams und Codecs, und tcd prüft die FEC jedes AMBE-Frames, das ein Gerät decodiert oder codiert (Golay der ersten beiden Partitionen, wie ein Decoder), gezählt je Stream im Log und je Gerät im Monitor; `tools/ambecheck` tut dasselbe für eine Datei mit Frames
 - **Mischbetrieb DV3000 + DV3003**: zwei Module gleichzeitig mit Codec-Einstellung pro Kanal
 - **Einzelner DV3003 im Mischbetrieb, Kanal-Pool, Ausfall im Betrieb** (0.17.0): `DeviceSerial = ... mixed` legt D-Star und DMR eines Moduls auf einen einzelnen DV3003; mit `DeviceChannels = pool` nimmt ein Stream jedes Moduls einen freien Kanal; ein im Betrieb verlorenes Gerät geht an die Codec-Plugins und wird wieder geöffnet, sobald es da ist, statt tcd zu beenden
 - **D-Star auf dem DV3003**: Companding aus, seriellen Puffer leeren, Kodierung pro Kanal

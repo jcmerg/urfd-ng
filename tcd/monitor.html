@@ -558,7 +558,10 @@ function render() {
     rows += '<tr><td><b>' + esc(d.serial) + '</b></td><td>' + esc(d.type) + (d.role ? ' <span class="muted">' + esc(d.role) + '</span>' : '') + '</td>' +
       '<td>' + state + '</td><td>' + used.map(function (u) { return '<span class="mod-tag">' + esc(u) + '</span>'; }).join('') +
       '<span class="muted">' + used.length + ' of ' + total + '</span></td>' +
-      '<td class="r opt">' + d.buf_depth + '</td><td class="r">' + (d.errors > 0 ? '<span class="state-bad">' + d.errors + '</span>' : '0') + '</td>' +
+      '<td class="r opt">' + d.buf_depth + '</td><td class="r">' + (d.errors > 0 ? '<span class="state-bad">' + d.errors + '</span>' : '0') +
+      // its frames by their FEC: decoded (with corrected errors / uncorrectable), encoded (failing their FEC)
+      (d.decodes !== undefined ? ' <span class="muted" title="frames decoded / encoded; fec: decoded with corrected errors, unc: uncorrectable (repeated), bad: encoded failing their FEC">dec ' + d.decodes + ' enc ' + d.encodes +
+        ((d.error_frames || d.uncorrectable || d.bad_out) ? ' <span class="state-bad">fec ' + d.error_frames + ' unc ' + d.uncorrectable + ' bad ' + d.bad_out + '</span>' : '') + '</span>' : '') + '</td>' +
       '<td class="act">' + act + '</td></tr>';
   });
   var swStreams = (data.swvocoders || []).reduce(function (n, x) { return n + (x.builtin ? 0 : x.cached_streams); }, 0);

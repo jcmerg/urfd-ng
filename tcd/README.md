@@ -326,6 +326,7 @@ Why not the noise suppressor in the AMBE chip: the DVSI devices have one (on by 
 | `StatsLog` | `false` | per-stream CSV files for AGC tuning |
 | `StatsLogDir` | `/tmp/tcd-stats` | where they go |
 | `StatsLogRetain` | `24` | hours before they are deleted |
+| `StreamLog` | `true` | one log line per stream and codec with the vocoder it got (AMBE device and channel, codec plugin or built-in vocoder), and one at its end with the FEC counts of the frames an AMBE device decoded or encoded (since 0.19.0) |
 
 ## Audio levels
 
@@ -377,7 +378,7 @@ The gain limits are asymmetric on purpose: attenuating is safe, amplifying also 
 - for many modules a compact view (from five modules on, or chosen with "Compact"): a key per module with its codec and level, full cards only for the modules on the air and for the ones clicked to keep open; tcd keeps the view for every browser (`MonitorView`, written by Save), the pinned modules stay in the browser
 - signal path of the active stream with the level at each stage
 - AGC and gain controls that apply immediately, and a button to save them to `tcd.ini`
-- hardware and software apart (since 0.18.0): the AMBE channels of D-Star and DMR in use, fixed or pool, then each device: serial, type, role, channels in use and their modules, buffer depth; "Phase out" takes a device out of service (since 0.17.1): no new streams, the ones on it run to their end, then tcd closes it and it can be unplugged; "Take back" opens it again. Only for a device whose codecs a codec plugin does; not kept by Save (a restart of tcd uses it again)
+- hardware and software apart (since 0.18.0): the AMBE channels of D-Star and DMR in use, fixed or pool, then each device: serial, type, role, channels in use and their modules, buffer depth, and since 0.19.0 its frames by their FEC (decoded and encoded, decoded ones with corrected errors or uncorrectable, encoded ones failing their FEC, as the codec plugins report theirs); "Phase out" takes a device out of service (since 0.17.1): no new streams, the ones on it run to their end, then tcd closes it and it can be unplugged; "Take back" opens it again. Only for a device whose codecs a codec plugin does; not kept by Save (a restart of tcd uses it again)
 - "AMBE channels": fixed or pool (`DeviceChannels`) for the streams that start from now on (since 0.17.1), written by Save
 - codec plugins: their codec, counters and streams, and which vocoder new D-Star, DMR and P25 streams get (switchable, see [Codec plugins](#codec-plugins)); tcd's own vocoders OP25 (P25, YSF VW) and Codec2 (M17) with their counters as "Built in" (since 0.14.1); since 0.15.0 the frames a plugin of API 3 decoded with bit errors, repeated or muted
 - reflector connection and packet counters; a standby module shows "standby" while another tcd has it and "taken over" while this tcd has it
@@ -425,6 +426,7 @@ journalctl -u tcd -f
 | `... is in use by another process` | another tcd or `dvsitest` holds the device: stop it (`pgrep -a tcd`) |
 | `Lost the AMBE device ...` / `... has not answered for 1000 ms` | the device was unplugged, reset or hung; a codec plugin takes its streams and tcd opens it again when it is back (`... is back on ...`). Without a plugin: `shutting down`, systemd restarts tcd after 5 s |
 | `... does not open or answer, trying again every 5 s` | a lost device is there but does not answer: unplug it and plug it in again |
+| `Stream 0x.. module .: D-Star encode by DV3000 ttyUSB1` | `StreamLog` (since 0.19.0): the vocoder each stream got for each codec, at its first frame; `... decoded 883 D-Star frames, 12 with corrected errors, 0 uncorrectable` (the device repeats its last frame for an uncorrectable one) and `... encoded 1666 D-Star frames, 0 fail their FEC` at its end tell how the frames an AMBE device took and gave fared by their FEC. Many frames of a device failing their FEC: the device gives no AMBE frames, the radios mute the stream; phase the device out and take it back, or replug it |
 | the reflector shows no transcoder | `ServerAddress` and `Port` in `tcd.ini`, the same `Modules` on both sides, and port 10100/tcp reachable from the tcd machine |
 
 ## Changes from upstream
@@ -437,6 +439,7 @@ journalctl -u tcd -f
 - **Mixed mode DV3000 + DV3003**: two modules at once with per-channel codec setup
 - **A DV3003 alone in mixed mode, channel pool, lost devices** (0.17.0): `DeviceSerial = ... mixed` puts D-Star and DMR of one module on a lone DV3003; `DeviceChannels = pool` lets a stream of any module take a free channel; a device lost while tcd runs goes to the codec plugins and is opened again when it is back, instead of stopping tcd
 - **DV3003 D-Star**: companding off, serial flush, per-channel encoding
+- **Stream log and frame check** (0.19.0): `StreamLog` names the vocoder of every stream and codec, and tcd checks the FEC of every AMBE frame a device decodes or encodes (Golay of the first two partitions, as a decoder does), counted per stream in the log and per device in the monitor; `tools/ambecheck` does the same for a file of frames
 - **SVX codec path**: its own `ECodecType::svx` for SVX audio
 
 ### Audio

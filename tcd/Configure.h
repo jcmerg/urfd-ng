@@ -84,6 +84,8 @@ public:
 	// the part of OutputGainDMR (dB) that non-DMR sources get through b2 in the AMBE2+ frame after the encoder
 	int GetOutputGainDMRBitstream(void) const { return outgain_dmr_bitstream; }
 
+	// one log line per stream and codec with its vocoder, and the FEC counts of an AMBE device's frames at its end
+	bool               GetStreamLog(void) const        { return streamlog; }
 	// Stats logging
 	bool               GetStatsLogEnabled(void) const { return statslog_enabled; }
 	const std::string &GetStatsLogDir(void) const     { return statslog_dir; }
@@ -129,6 +131,7 @@ private:
 	std::string monitor_password;
 	uint16_t monitor_http_port  = 8080;
 	uint16_t monitor_stats_port = 8081;
+	bool        streamlog        = true;
 	bool        statslog_enabled = false;
 	std::string statslog_dir     = "/tmp/tcd-stats";
 	int         statslog_retain  = 24;

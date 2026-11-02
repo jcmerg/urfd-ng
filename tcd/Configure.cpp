@@ -63,6 +63,7 @@
 #define MONITORSTATS   "MonitorStatsPort"
 #define MONITORVIEW    "MonitorView"
 #define MONITORPASS    "MonitorPassword"
+#define STREAMLOG      "StreamLog"
 #define STATSLOG       "StatsLog"
 #define STATSLOGDIR    "StatsLogDir"
 #define STATSLOGRETAIN "StatsLogRetain"
@@ -256,6 +257,8 @@ bool CConfigure::ReadData(const std::string &path)
 		}
 		else if (0 == key.compare(MONITORSTATS))
 			monitor_stats_port = (uint16_t)std::stoul(value);
+		else if (0 == key.compare(STREAMLOG))
+			streamlog = IS_TRUE(value[0]);
 		else if (0 == key.compare(STATSLOG))
 			statslog_enabled = IS_TRUE(value[0]);
 		else if (0 == key.compare(STATSLOGDIR))

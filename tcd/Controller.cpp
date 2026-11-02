@@ -38,6 +38,7 @@
 #include "TcdStats.h"
 #include "StatsLogger.h"
 #include "AmbeGain.h"
+#include "AmbeFrameCheck.h"
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
@@ -1482,6 +1483,98 @@ void CController::ProcessSWDStarThread()
 	}
 }
 
+// whether a stream whose input codec is `in` has choice k decode it (else encode)
+static bool StreamDecodes(int k, ECodecType in)
+{
+	switch (k)
+	{
+	case kChoiceDStar: return in == ECodecType::dstar;
+	case kChoiceDMR:   return in == ECodecType::dmr;
+	case kChoiceP25:   return in == ECodecType::p25;
+	case kChoiceM17:   return in == ECodecType::c2_1600 || in == ECodecType::c2_3200;
+	default:           return false;
+	}
+}
+
+static std::string StreamTag(const std::shared_ptr<CTranscoderPacket> &packet)
+{
+	char tag[40];
+	snprintf(tag, sizeof(tag), "Stream 0x%04x module %c", packet->GetStreamId(), packet->GetModule());
+	return tag;
+}
+
+// StreamLog: one line when a stream gets its vocoder for a codec
+void CController::LogStreamStart(int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw) const
+{
+	if (!g_Conf.GetStreamLog())
+		return;
+	const auto &list = choices[k];
+	std::string by;
+	if (choice >= 0 && choice < int(list.size()) && list[choice])
+		by = std::string(list[choice]->GetName()) + " plugin";
+	else if (g_CodecChoices[k].own)
+		by = g_CodecChoices[k].own_row;
+	else
+		by = hw >= 0 ? ChannelName(k, size_t(hw)) : "nothing: no free AMBE channel and no plugin";
+	std::cout << StreamTag(packet) << ": " << g_CodecChoices[k].label
+	          << (StreamDecodes(k, packet->GetCodecIn()) ? " decode by " : " encode by ") << by << std::endl;
+}
+
+// a frame an AMBE device decodes: its FEC as the device sees it, counted for the
+// stream (pin) and the device; the stream's last frame logs its counts
+void CController::DeviceFrameIn(int k, SPinned &pin, const std::shared_ptr<CTranscoderPacket> &packet) const
+{
+	if (k != kChoiceDStar && k != kChoiceDMR)
+		return;
+	const SAmbeFec r = (k == kChoiceDStar) ? AmbeFrameCheck::DStar(packet->GetDStarData()) : AmbeFrameCheck::Dmr(packet->GetDMRData());
+	pin.frames_in++;
+	if (r.errors)
+		pin.errors_in++;
+	if (r.uncorrectable)
+		pin.uncorrectable++;
+	const int st = slots[hw_channels[k][pin.hw].slot]->stats;
+	if (st >= 0)
+	{
+		auto &d = g_Stats.devices[st];
+		d.decodes.fetch_add(1, std::memory_order_relaxed);
+		if (r.errors)
+			d.error_frames.fetch_add(1, std::memory_order_relaxed);
+		if (r.uncorrectable)
+			d.uncorrectable.fetch_add(1, std::memory_order_relaxed);
+	}
+	if (packet->IsLast() && g_Conf.GetStreamLog())
+		std::cout << StreamTag(packet) << ": " << ChannelName(k, size_t(pin.hw)) << " decoded " << pin.frames_in << " " << g_CodecChoices[k].label
+		          << " frames, " << pin.errors_in << " with corrected errors, " << pin.uncorrectable << " uncorrectable" << std::endl;
+}
+
+// a frame an AMBE device encoded: a device that answers with no AMBE frame at all
+// shows here, as the radios mute such a stream without a word
+void CController::DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket> &packet)
+{
+	if (k != kChoiceDStar && k != kChoiceDMR)
+		return;
+	std::lock_guard<std::mutex> lock(pinned_mux);
+	auto it = pinned[k].find(packet->GetStreamId());
+	if (it == pinned[k].end() || it->second.hw < 0 || choices[k][it->second.choice])
+		return;	// not on an AMBE device
+	auto &pin = it->second;
+	const SAmbeFec r = (k == kChoiceDStar) ? AmbeFrameCheck::DStar(packet->GetDStarData()) : AmbeFrameCheck::Dmr(packet->GetDMRData());
+	pin.frames_out++;
+	if (r.errors || r.uncorrectable)
+		pin.bad_out++;
+	const int st = slots[hw_channels[k][pin.hw].slot]->stats;
+	if (st >= 0)
+	{
+		auto &d = g_Stats.devices[st];
+		d.encodes.fetch_add(1, std::memory_order_relaxed);
+		if (r.errors || r.uncorrectable)
+			d.bad_out.fetch_add(1, std::memory_order_relaxed);
+	}
+	if (packet->IsLast() && g_Conf.GetStreamLog())
+		std::cout << StreamTag(packet) << ": " << ChannelName(k, size_t(pin.hw)) << " encoded " << pin.frames_out << " " << g_CodecChoices[k].label
+		          << " frames, " << pin.bad_out << " fail their FEC" << std::endl;
+}
+
 // the choice of a stream, made at its first packet: the one for new streams, but a
 // module the devices do not serve always goes to a plugin (the chosen one, else the first)
 int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev, uint8_t *ch)
@@ -1516,6 +1609,7 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 				c = plugin(c);
 		}
 		it = pins.emplace(streamid, SPinned{ c, hw, now }).first;
+		LogStreamStart(k, packet, c, hw);
 	}
 	else if (device(it->second.choice) && !HasChannel(k, it->second.hw, module, streamid))
 	{
@@ -1536,6 +1630,9 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 			*dev = slots[c.slot]->dev;
 			*ch = c.ch;
 		}
+		// a frame the device is to decode: its FEC, counted for the stream and the device
+		if (StreamDecodes(k, packet->GetCodecIn()))
+			DeviceFrameIn(k, pin, packet);
 		// the channel is free after the stream's last frame (the device answers
 		// its frames in order, a new stream's come after them)
 		if (packet->IsLast())
@@ -2159,6 +2256,7 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet)
 	}
 	else
 	{
+		DeviceFrameOut(kChoiceDStar, packet);
 		send_mux.lock();
 		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
 		send_mux.unlock();
@@ -2231,6 +2329,7 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 	}
 	else
 	{
+		DeviceFrameOut(kChoiceDMR, packet);
 		// the DVSI encoded audio of another codec: OutputGainDMR in the bitstream
 		if (BitstreamDmrDb() != 0)
 		{
