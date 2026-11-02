@@ -23,6 +23,7 @@
 #include <sstream>
 #include <regex>
 #include "Configure.h"
+#include "G711.h"
 
 // ini file keywords
 #define DMRGAININ      "DmrGainIn"
@@ -45,6 +46,7 @@
 #define PORT           "Port"
 #define DEVICESERIAL   "DeviceSerial"
 #define DEVICECHANNELS "DeviceChannels"
+#define DEVICECOMPAND  "DeviceCompand"
 #define AGCENABLE      "AGC"
 #define AGCTARGET      "AGCTarget"
 #define AGCATTACK      "AGCAttack"
@@ -210,6 +212,13 @@ bool CConfigure::ReadData(const std::string &path)
 					std::cerr << "Warning: unknown option '" << option << "' of " << DEVICESERIAL << " " << serial << std::endl;
 			}
 		}
+		else if (0 == key.compare(DEVICECOMPAND))
+		{
+			if (value == "linear")    device_compand = COMPAND_LINEAR;
+			else if (value == "ulaw") device_compand = COMPAND_ULAW;
+			else if (value == "alaw") device_compand = COMPAND_ALAW;
+			else std::cerr << "Warning: unknown " << DEVICECOMPAND << " '" << value << "', using 'linear'" << std::endl;
+		}
 		else if (0 == key.compare(DEVICECHANNELS))
 		{
 			if (value == "pool")       device_pool = true;
@@ -327,6 +336,8 @@ bool CConfigure::ReadData(const std::string &path)
 	std::cout << PORT << " = " << port << std::endl;
 	if (device_pool)
 		std::cout << DEVICECHANNELS << " = pool (a stream takes a free AMBE channel, whatever its module)" << std::endl;
+	if (device_compand != COMPAND_LINEAR)
+		std::cout << DEVICECOMPAND << " = " << CompandName(device_compand) << " (speech to and from the AMBE devices in 8 bits)" << std::endl;
 	std::cout << DSTARGAININ << " = " << dstar_in << std::endl;
 	std::cout << DSTARGAINOUT << " = " << dstar_out << std::endl;
 	std::cout << DMRGAININ << " = " << dmr_in << std::endl;

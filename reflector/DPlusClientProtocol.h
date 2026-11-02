@@ -7,14 +7,14 @@
 
 #include "Defines.h"
 #include "Timer.h"
+#include "LinkRetry.h"
 #include "Protocol.h"
 #include "DVHeaderPacket.h"
 #include "DVFramePacket.h"
 
 // DPlus client constants
 #define DPLUSCLI_KEEPALIVE_PERIOD     1   // seconds (DPlus uses fast keepalive)
-#define DPLUSCLI_KEEPALIVE_TIMEOUT    10  // seconds
-#define DPLUSCLI_RECONNECT_PERIOD     5   // seconds
+#define DPLUSCLI_KEEPALIVE_TIMEOUT    30  // seconds (ircDDBGateway: 30)
 #define DPLUSCLI_HANDSHAKE_TIMEOUT    10  // seconds for connect+login handshake
 
 // DPlus client state machine
@@ -40,6 +40,7 @@ struct SDPlusClientMapping
 	CTimer      stateTimer;
 	CTimer      keepaliveTimer;
 	CTimer      timeoutTimer;
+	unsigned    tries = 0;      // link attempts since the last link (LinkRetry.h)
 
 	SDPlusClientMapping() : port(20001), remoteModule('A'), localModule('A'),
 		connected(false), state(EDPlusState::DISCONNECTED) {}

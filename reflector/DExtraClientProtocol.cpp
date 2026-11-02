@@ -102,6 +102,7 @@ void CDExtraClientProtocol::Task(void)
 				g_Reflector.ReleaseClients();
 			}
 			m.keepaliveTimer.start();
+			m.tries = 0;
 		}
 	}
 
@@ -144,11 +145,13 @@ void CDExtraClientProtocol::HandleConnections(void)
 		}
 		else
 		{
-			if (m.keepaliveTimer.time() > DEXTRACLI_RECONNECT_PERIOD)
+			// less and less often (LinkRetry.h)
+			if (m.keepaliveTimer.time() > LinkRetrySeconds(m.tries))
 			{
 				m.ip = CIp(m.host.c_str(), AF_INET, SOCK_DGRAM, m.port);
 				SendConnect(m);
 				m.keepaliveTimer.start();
+				m.tries++;
 			}
 		}
 	}
@@ -209,6 +212,7 @@ void CDExtraClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 			{
 				m.connected = true;
 				m.keepaliveTimer.start();
+				m.tries = 0;
 				m.timeoutTimer.start();
 
 				CCallsign cs(m_ClientCallsign);

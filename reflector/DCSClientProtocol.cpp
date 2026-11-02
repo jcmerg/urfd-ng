@@ -112,6 +112,7 @@ void CDcsClientProtocol::Task(void)
 				g_Reflector.ReleaseClients();
 			}
 			m.reconnectTimer.start();
+			m.tries = 0;
 		}
 	}
 
@@ -162,13 +163,14 @@ void CDcsClientProtocol::HandleConnections(void)
 		}
 		else
 		{
-			// try to connect
-			if (m.reconnectTimer.time() > DCSCLI_RECONNECT_PERIOD)
+			// try to connect, less and less often (LinkRetry.h)
+			if (m.reconnectTimer.time() > LinkRetrySeconds(m.tries))
 			{
 				// re-resolve hostname
 				m.ip = CIp(m.host.c_str(), AF_INET, SOCK_DGRAM, m.port);
 				SendConnect(m);
 				m.reconnectTimer.start();
+				m.tries++;
 			}
 		}
 	}
@@ -186,6 +188,18 @@ void CDcsClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 
 	if (IsValidDvPacket(Buffer, Header, Frame))
 	{
+		// stream id 0: no stream can be opened for it. A reflector caught in a loop sent
+		// nothing else, 120 packets a second; one line a minute says so
+		if (0U == Header->GetStreamId())
+		{
+			if (0U == m_ZeroSid++ || m_ZeroSidTimer.time() >= 60)
+			{
+				std::cout << "DCSClient: " << m_ZeroSid << " packet(s) with stream id 0 from " << Ip << " dropped" << (m_ZeroSid > 1 ? " since the last such line" : "") << std::endl;
+				m_ZeroSid = 0;
+				m_ZeroSidTimer.start();
+			}
+			return;
+		}
 		// find which mapping this belongs to: the mapping lock is never held while
 		// calling into the reflector, opening a stream reads the mappings back
 		char localModule = ' ';
@@ -231,6 +245,7 @@ void CDcsClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 				m.connected = true;
 				m.keepaliveTimer.start();
 				m.reconnectTimer.start();
+				m.tries = 0;
 
 				// create virtual client for this mapping
 				CCallsign cs;
@@ -255,7 +270,26 @@ void CDcsClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 	{
 		// keepalive from remote reflector — reset timeout
 		std::lock_guard<std::mutex> lock(m_MappingMutex);
-		SDcsClientMapping *mapping = FindMappingByIp(Ip);
+		// a poll of 22 bytes names the reflector with its module and us with the module
+		// we link (byte 16; ircDDBGateway reads 17, urfd and xlxd fill both): the mapping of that module, and it is answered at once
+		// as ircDDBGateway does; a reflector takes a link that answers no poll as gone
+		SDcsClientMapping *mapping = nullptr;
+		if (Buffer.size() == 22)
+			for (auto &m : m_Mappings)
+				if (m.ip == Ip && (m.localModule == (char)Buffer.data()[16] || m.localModule == (char)Buffer.data()[17]))
+					mapping = &m;
+		if (!mapping)
+			mapping = FindMappingByIp(Ip);
+		if (mapping && mapping->connected && Buffer.size() == 22)
+		{
+			std::string name((const char *)Buffer.data(), 7);
+			name.erase(name.find_last_not_of(' ') + 1);
+			if (!name.empty())
+				mapping->reflector = name;
+			CBuffer reply;
+			EncodeKeepAlivePacket(&reply, *mapping, Buffer.data());
+			Send(reply, Ip);
+		}
 		if (mapping)
 		{
 			mapping->reconnectTimer.start();
@@ -477,7 +511,7 @@ SDcsClientMapping *CDcsClientProtocol::FindMappingByIp(const CIp &ip)
 void CDcsClientProtocol::SendConnect(SDcsClientMapping &mapping)
 {
 	CBuffer buffer;
-	EncodeConnectPacket(&buffer, mapping.localModule, mapping.remoteModule);
+	EncodeConnectPacket(&buffer, mapping);
 	Send(buffer, mapping.ip);
 	std::cout << "DCSClient: connecting to " << mapping.host << ":" << mapping.port
 	          << " module " << mapping.remoteModule << " (local " << mapping.localModule << ")" << std::endl;
@@ -486,7 +520,7 @@ void CDcsClientProtocol::SendConnect(SDcsClientMapping &mapping)
 void CDcsClientProtocol::SendDisconnect(SDcsClientMapping &mapping)
 {
 	CBuffer buffer;
-	EncodeDisconnectPacket(&buffer);
+	EncodeDisconnectPacket(&buffer, mapping);
 	Send(buffer, mapping.ip);
 	std::cout << "DCSClient: disconnecting from " << mapping.host
 	          << " module " << mapping.remoteModule << std::endl;
@@ -495,7 +529,7 @@ void CDcsClientProtocol::SendDisconnect(SDcsClientMapping &mapping)
 void CDcsClientProtocol::SendKeepalive(SDcsClientMapping &mapping)
 {
 	CBuffer buffer;
-	EncodeKeepAlivePacket(&buffer);
+	EncodeKeepAlivePacket(&buffer, mapping);
 	Send(buffer, mapping.ip);
 }
 
@@ -575,14 +609,15 @@ bool CDcsClientProtocol::IsValidKeepAlivePacket(const CBuffer &Buffer, CCallsign
 ////////////////////////////////////////////////////////////////////////////////////////
 // packet encoding helpers
 
-void CDcsClientProtocol::EncodeConnectPacket(CBuffer *Buffer, char localModule, char remoteModule)
+void CDcsClientProtocol::EncodeConnectPacket(CBuffer *Buffer, const SDcsClientMapping &mapping)
 {
+	const char localModule = mapping.localModule, remoteModule = mapping.remoteModule;
 	// ircDDBGateway format (519 bytes):
 	// Bytes 0-7:    Repeater callsign (space-padded)
 	// Byte 8:       Repeater SSID (= our local module, identifies our "band")
 	// Byte 9:       Reflector SSID (= remote module we want to link to)
 	// Byte 10:      0x00
-	// Bytes 11-18:  Reflector callsign (space-padded, unused by most reflectors)
+	// Bytes 11-18:  Reflector callsign (7 chars and a space, as ircDDBGateway sends it)
 	// Bytes 19-518: HTML info (null-padded)
 	uint8_t cs[CALLSIGN_LEN];
 	m_ClientCallsign.GetCallsign(cs);
@@ -590,7 +625,9 @@ void CDcsClientProtocol::EncodeConnectPacket(CBuffer *Buffer, char localModule, 
 	Buffer->Append((uint8_t)localModule);       // byte 8: repeater SSID (our module)
 	Buffer->Append((uint8_t)remoteModule);      // byte 9: reflector SSID (target module)
 	Buffer->Append((uint8_t)0x00);              // byte 10: null
-	Buffer->Append((uint8_t)0x20, 8);           // bytes 11-18: reflector callsign (spaces)
+	const std::string reflector = ReflectorName(mapping);
+	Buffer->Append((const uint8_t *)reflector.data(), 7); // bytes 11-17: reflector callsign
+	Buffer->Append((uint8_t)0x20);              // byte 18
 	// bytes 19-518: HTML info (gateway type + software version, like ircDDBGateway)
 	{
 		// hf.jpg: the repeater picture of the DCS status pages (ircDDBGateway's), they have no repeater.jpg
@@ -609,34 +646,63 @@ void CDcsClientProtocol::EncodeConnectPacket(CBuffer *Buffer, char localModule, 
 	}
 }
 
-void CDcsClientProtocol::EncodeDisconnectPacket(CBuffer *Buffer)
+void CDcsClientProtocol::EncodeDisconnectPacket(CBuffer *Buffer, const SDcsClientMapping &mapping)
 {
 	// ircDDBGateway CT_UNLINK format (19 bytes):
 	// Bytes 0-7:    Repeater callsign (space-padded)
-	// Byte 8:       Repeater SSID (space = unlink all)
+	// Byte 8:       Repeater SSID (the module that was linked)
 	// Byte 9:       0x20 (space)
 	// Byte 10:      0x00
-	// Bytes 11-18:  Reflector callsign (space-padded)
+	// Bytes 11-18:  Reflector callsign (7 chars and a space)
 	uint8_t cs[CALLSIGN_LEN];
 	m_ClientCallsign.GetCallsign(cs);
 	Buffer->Set(cs, CALLSIGN_LEN);              // bytes 0-7: callsign (8 chars)
-	Buffer->Append((uint8_t)' ');               // byte 8: SSID (space = unlink all)
+	Buffer->Append((uint8_t)mapping.localModule); // byte 8: SSID
 	Buffer->Append((uint8_t)' ');               // byte 9: space
 	Buffer->Append((uint8_t)0x00);              // byte 10: null
-	Buffer->Append((uint8_t)0x20, 8);           // bytes 11-18: reflector callsign (spaces)
+	const std::string reflector = ReflectorName(mapping);
+	Buffer->Append((const uint8_t *)reflector.data(), 7); // bytes 11-17: reflector callsign
+	Buffer->Append((uint8_t)0x20);              // byte 18
 }
 
-void CDcsClientProtocol::EncodeKeepAlivePacket(CBuffer *Buffer)
+std::string CDcsClientProtocol::ReflectorName(const SDcsClientMapping &mapping) const
 {
-	// ircDDBGateway DC_POLL format (17 bytes):
-	// Bytes 0-7:  Callsign1 (space-padded)
+	std::string name = mapping.reflector;
+	if (name.empty())
+	{
+		// the host name's first label, when it is a reflector's: DCS001, XLX262
+		std::string label = mapping.host.substr(0, mapping.host.find('.'));
+		for (auto &c : label)
+			c = (char)toupper((unsigned char)c);
+		if (label.size() == 6 && (0 == label.compare(0, 3, "DCS") || 0 == label.compare(0, 3, "XLX"))
+			&& isdigit((unsigned char)label[3]) && isdigit((unsigned char)label[4]) && isdigit((unsigned char)label[5]))
+			name = label;
+	}
+	if (0 == name.compare(0, 3, "XLX"))
+		name.replace(0, 3, "DCS");	// an XLX reflector speaks DCS as DCSnnn, as ircDDBGateway links it
+	name.resize(7, ' ');
+	return name;
+}
+
+void CDcsClientProtocol::EncodeKeepAlivePacket(CBuffer *Buffer, const SDcsClientMapping &mapping, const uint8_t *reflector)
+{
+	// ircDDBGateway poll of a repeater (17 bytes), also its answer to a reflector's poll:
+	// Bytes 0-7:  repeater callsign, the module it links in byte 7 ("N0CALL C")
 	// Byte 8:     0x00
-	// Bytes 9-16: Callsign2 (space-padded)
+	// Bytes 9-16: reflector callsign with its module ("DCS001 C")
 	uint8_t cs[CALLSIGN_LEN];
 	m_ClientCallsign.GetCallsign(cs);
-	Buffer->Set(cs, CALLSIGN_LEN);              // bytes 0-7 (8 bytes callsign)
+	cs[CALLSIGN_LEN - 1] = (uint8_t)mapping.localModule;
+	Buffer->Set(cs, CALLSIGN_LEN);              // bytes 0-7
 	Buffer->Append((uint8_t)0x00);              // byte 8: null separator
-	Buffer->Append(cs, CALLSIGN_LEN);           // bytes 9-16 (repeat callsign)
+	if (reflector)
+		Buffer->Append(reflector, CALLSIGN_LEN);    // bytes 9-16: as the reflector named itself
+	else
+	{
+		const std::string name = ReflectorName(mapping);
+		Buffer->Append((const uint8_t *)name.data(), 7);
+		Buffer->Append((uint8_t)mapping.remoteModule);
+	}
 }
 
 void CDcsClientProtocol::EncodeDCSPacket(const CDvHeaderPacket &Header, const CDvFramePacket &DvFrame, uint32_t iSeq, CBuffer *Buffer) const

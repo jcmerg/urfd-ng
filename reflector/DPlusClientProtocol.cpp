@@ -108,6 +108,7 @@ void CDPlusClientProtocol::Task(void)
 				m.state = EDPlusState::DISCONNECTED;
 			}
 			m.stateTimer.start();
+			m.tries = 0;
 		}
 	}
 
@@ -128,8 +129,10 @@ void CDPlusClientProtocol::HandleConnections(void)
 		switch (m.state)
 		{
 		case EDPlusState::DISCONNECTED:
-			if (m.stateTimer.time() > DPLUSCLI_RECONNECT_PERIOD)
+			// less and less often (LinkRetry.h)
+			if (m.stateTimer.time() > LinkRetrySeconds(m.tries))
 			{
+				m.tries++;
 				m.ip = CIp(m.host.c_str(), AF_INET, SOCK_DGRAM, m.port);
 				CBuffer buf;
 				EncodeConnectPacket(&buf);
@@ -256,6 +259,7 @@ void CDPlusClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 		{
 			mapping->state = EDPlusState::CONNECTED;
 			mapping->connected = true;
+			mapping->tries = 0;
 			mapping->keepaliveTimer.start();
 			mapping->timeoutTimer.start();
 			std::cout << "DPlusClient: logged in to " << mapping->host << ":" << mapping->port

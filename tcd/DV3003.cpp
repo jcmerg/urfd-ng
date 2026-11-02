@@ -47,8 +47,6 @@ CDV3003::CDV3003(Encoding t) : CDVDevice(t)
 
 CDV3003::~CDV3003()
 {
-	for (int i=0; i<3; i++)
-		waiting_packet[i].Shutdown();
 }
 
 void CDV3003::SetChannelEncoding(uint8_t channel, Encoding enc)
@@ -62,27 +60,24 @@ Encoding CDV3003::GetChannelEncoding(uint8_t channel) const
 	return (channel < 3) ? channel_enc[channel] : type;
 }
 
-void CDV3003::PushWaitingPacket(unsigned int channel, std::shared_ptr<CTranscoderPacket> packet)
+int CDV3003::AnswerChannel(uint16_t length, uint8_t type, uint8_t field) const
 {
-	waiting_packet[channel].push(packet);
-}
-
-std::shared_ptr<CTranscoderPacket> CDV3003::PopWaitingPacket(unsigned int channel)
-{
-	return waiting_packet[channel].try_pop();
+	if (field < PKT_CHANNEL0 || field > PKT_CHANNEL2)
+		return -1;
+	if ((12 == length && PKT_CHANNEL == type) || (((COMPAND_LINEAR == compand) ? 323 : 163) == length && PKT_SPEECH == type))
+		return field - PKT_CHANNEL0;
+	return -1;
 }
 
 bool CDV3003::SendAudio(const uint8_t channel, const int16_t *audio) const
 {
 	SDV_Packet p;
 	p.start_byte = PKT_HEADER;
-	p.header.payload_length = htons(1 + sizeof(p.payload.audio));
 	p.header.packet_type = PKT_SPEECH;
 	p.field_id = channel + PKT_CHANNEL0;
 	p.payload.audio.speechd = PKT_SPEECHD;
 	p.payload.audio.num_samples = 160U;
-	for (int i=0; i<160; i++)
-		p.payload.audio.samples[i] = htons(audio[i]);
+	p.header.payload_length = htons(uint16_t(3 + SpeechOut(audio, p.payload.audio.samples)));
 
 	const ssize_t size = packet_size(p);
 	auto written = device->Write(&p, size);
@@ -133,7 +128,7 @@ void CDV3003::ProcessPacket(const SDV_Packet &p)
 		dump("ReadDevice() ERROR: a packet for no channel:", &p, packet_size(p));
 		return;
 	}
-	auto packet = PopWaitingPacket(channel);
+	auto packet = PopWaiting(uint8_t(channel));
 	if (!packet)
 	{
 		// a blocking wait here held up the reader for good: nothing that will come
@@ -148,8 +143,6 @@ void CDV3003::ProcessPacket(const SDV_Packet &p)
 		{
 			if (12!=ntohs(p.header.payload_length) || PKT_CHAND!=p.payload.ambe.chand || 72!=p.payload.ambe.num_bits)
 				dump("Improper ambe packet:", &p, packet_size(p));
-			buffer_depth--;
-			buffer_cv.notify_one();
 			if (Encoding::dstar == ch_enc)
 				packet->SetDStarData(p.payload.ambe.data);
 			else
@@ -157,11 +150,11 @@ void CDV3003::ProcessPacket(const SDV_Packet &p)
 		}
 		else if (PKT_SPEECH == p.header.packet_type)
 		{
-			if (323!=ntohs(p.header.payload_length) || PKT_SPEECHD!=p.payload.audio.speechd || 160!=p.payload.audio.num_samples)
+			if (((COMPAND_LINEAR == compand) ? 323 : 163)!=ntohs(p.header.payload_length) || PKT_SPEECHD!=p.payload.audio.speechd || 160!=p.payload.audio.num_samples)
 				dump("Improper audio packet:", &p, packet_size(p));
-			buffer_depth--;
-			buffer_cv.notify_one();
-			packet->SetAudioSamples(p.payload.audio.samples, true);
+			int16_t pcm[160];
+			SpeechIn(p.payload.audio.samples, pcm);
+			packet->SetAudioSamples(pcm, false);
 		}
 		else
 		{
@@ -170,17 +163,6 @@ void CDV3003::ProcessPacket(const SDV_Packet &p)
 		}
 
 		// Route based on per-channel encoding, not device type
-		if (Encoding::dstar == ch_enc)
-		{
-			g_Cont.dstar_mux.lock();
-			g_Cont.RouteDstPacket(packet);
-			g_Cont.dstar_mux.unlock();
-		}
-		else
-		{
-			g_Cont.dmrst_mux.lock();
-			g_Cont.RouteDmrPacket(packet);
-			g_Cont.dmrst_mux.unlock();
-		}
+		Deliver(packet, ch_enc);
 	}
 }

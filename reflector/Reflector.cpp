@@ -469,10 +469,21 @@ CCallsign CReflector::DStarMy(const CCallsign &my, EProtocol src)
 // clients MUST have bee locked by the caller so we can freely access it within the function
 std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderPacket> &DvHeader, std::shared_ptr<CClient>client)
 {
-	// check sid is not zero
+	// check sid is not zero; logged once a minute: a client caught in a loop sent
+	// a hundred such packets a second (the clients are locked, one caller at a time)
 	if ( 0U == DvHeader->GetStreamId() )
 	{
-		std::cerr << "StreamId for client " << client->GetCallsign() << " is zero!" << std::endl;
+		static unsigned zeroSids = 0;
+		static CTimer zeroSidTimer;
+		if (0U == zeroSids++ || zeroSidTimer.time() >= 60)
+		{
+			std::cerr << "StreamId for client " << client->GetCallsign() << " is zero!";
+			if (zeroSids > 1)
+				std::cerr << " (" << zeroSids << " such headers since the last such line)";
+			std::cerr << std::endl;
+			zeroSids = 0;
+			zeroSidTimer.start();
+		}
 		return nullptr;
 	}
 

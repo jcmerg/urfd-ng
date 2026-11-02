@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.15.1** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.19.2** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF/NXDN (AMBE2+), and software vocoders for M17 (Codec2) and P25 (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF/NXDN in software, and since 0.14.0 P25 as a choice next to the built-in IMBE vocoder. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -134,6 +134,21 @@ By default the AMBE channels belong to the first modules of `Modules`. With `Dev
 
 A device unplugged while tcd runs, or one that leaves a packet unanswered for 1 s (a hung chip), is taken out (since 0.17.0): its streams, also the ones on the air, go to a codec plugin, and tcd opens the device again as soon as it is there (looked for every 5 s by its `/dev/serial/by-id` name, so a replug may give it another node; the opening resets it). New streams use it again from then on. Without a plugin for one of the device's codecs tcd stops instead, as before, and its service restarts it (or a [standby tcd](#standby-a-second-tcd-for-the-same-modules) takes the modules). A device missing at the start is only used after the next start of tcd. The frames a hung device held are lost; urfd 4.34.0 skips them and goes on with the next ones (before, the rest of the transmission was dropped).
 
+### Lost answers (`DeviceCompand`)
+
+The USB adapter of a DV3003 at 921600 baud drops bytes now and then: when the computer fetches its receive buffer a few milliseconds late, the next answers of the chip overrun it (the kernel counts them as `overrun` of the tty). Measured on a Raspberry Pi 5 with a DVstick-33 (2026-11-02): one in some 30 000 to 60 000 answers, about 20 in 1.5 hours of traffic on a reflector in service; never with the DV3000 at 460800 baud. Only the answers of decoders were hit, 327 bytes of audio each; the AMBE answers of encoders are 16 bytes.
+
+A device answers the frames of a channel in order, but nothing in an answer says which frame it is for. Up to 0.19.1 tcd then lost one answer and from there on gave every answer of that channel to the frame before its own, until tcd was restarted: 20 ms more delay for each lost answer (some 150 ms after a few hours), the last frame of every stream held back until the next stream on that channel (`(no last frame)` in the stream log, then a few frames under the same stream id), and that stream's first frames missing ("lost voice frames filled in" in urfd). Since 0.19.2 tcd reads the answers with care:
+
+- a start byte counts only with the header of an answer the device sends (length, type, channel), not a `0x61` in the audio of an answer whose start byte was lost;
+- an answer without its start byte is taken as it is (`an answer without its start byte, taken`);
+- an answer that is lost goes on as a silent frame for its own frame (`... the answer for module D stream 0x4c00 frame 812 was lost (...), a silent frame instead`), the next one belongs to the next frame;
+- an answer lost with its header (the channel is not known) leaves its channel one frame behind (20 ms) until its stream ends: a frame unanswered for 300 ms is taken as lost then.
+
+So a dropped byte costs at most one frame (20 ms of silence). The monitor counts them per device (`lost`, and `lost:` in tcdmon).
+
+`DeviceCompand` takes the overruns away: with `ulaw` or `alaw` the devices send the audio as 8-bit G.711 instead of 16-bit linear, half the bytes, and tcd turns it into 16-bit linear right when it reads it (and back for the encoders). Measured: 0 overruns in 20 minutes of the load that had some 7 before; PESQ of a DMR clip decoded on the chip 2.807 with µ-law, 2.800 with A-law against 2.811 linear; through tcd (DMR in, its PCM out) 2.942 and 2.946 against 2.946, and for DMR → D-Star (decoded and encoded again on the chips) 2.180 and 2.175 against 2.207: it cannot be heard behind the AMBE codec. A byte that is still lost then shifts the samples of one frame by one sample (an eighth of a millisecond) instead of turning them into noise. The default stays `linear`, as DVSI recommends and the other programs for these devices do; turn it on when the monitor shows lost answers. The web dashboard switches it at run time (`AMBE speech`): each device stops taking new streams, is opened again with it when its streams are done (a codec plugin or another device takes the new streams meanwhile; without one, the device waits until it is idle) and is back in service; Save writes it to `tcd.ini`.
+
 ### Single device with a codec plugin
 
 One module, D-Star on the DV3000 or DV3003 and DMR/YSF through a codec plugin. In this mode, DMR/YSF → DMR/YSF audio is **not re-encoded** after the AGC. Use the bitstream gain (`DmrGainMode = ambe`, which follows the AGC; in this mode since 0.2.5) for that path; all paths between different modes still get the full AGC. Re-encode on DMR/YSF → DMR/YSF needs a second AMBE device.
@@ -146,7 +161,7 @@ From three devices on (since 0.18.0; several DV3003, a DV3000 next to them, boar
 
 ### DV3003 notes
 
-- **Companding off**: every DV3003 channel gets companding explicitly disabled. The DV3003 defaults to companding on (CP_ENABLE pull-up), the DV3000 to off; without this, the DMR/YSF channels got µ-law PCM read as linear, which distorts the audio.
+- **Companding as set**: every DV3003 channel gets companding set as `DeviceCompand` says, off by default (linear). The DV3003 defaults to companding on (CP_ENABLE pull-up), the DV3000 to off; without setting it, the DMR/YSF channels got µ-law PCM read as linear, which distorts the audio. A DV3000 gets it only for `ulaw` or `alaw` (since 0.19.2, see [Lost answers](#lost-answers-devicecompand)).
 - **Serial flush**: before the soft reset, 350 zero bytes clear any stale serial state.
 - **Per-channel codec**: one DV3003 can run D-Star and DMR/YSF channels at the same time (mixed mode).
 
@@ -246,6 +261,7 @@ A device that cannot be opened or does not answer is left out with a warning, an
 | `CodecPlugin` | — | codec plugin to load, one line each (see [Codec plugins](#codec-plugins)) |
 | `CodecDStar` / `CodecDMR` / `CodecP25` / `CodecM17` | — | the vocoder new streams get: `dvsi`, `op25`, `codec2` or a plugin's name (see [Codec plugins](#codec-plugins)); written by Save |
 | `DeviceChannels` | `fixed` | `fixed`: the AMBE channels belong to the first modules; `pool`: a stream takes any free channel (since 0.17.0, see [Channel pool](#channel-pool-devicechannels--pool)) |
+| `DeviceCompand` | `linear` | the audio to and from the AMBE devices: `linear` (16 bits), `ulaw` or `alaw` (8-bit G.711, half the bytes on the serial line, no receive overruns; since 0.19.2, see [Lost answers](#lost-answers-devicecompand)); switched at run time in the web dashboard, written by Save |
 
 ### Gains
 
@@ -378,8 +394,9 @@ The gain limits are asymmetric on purpose: attenuating is safe, amplifying also 
 - for many modules a compact view (from five modules on, or chosen with "Compact"): a key per module with its codec and level, full cards only for the modules on the air and for the ones clicked to keep open; tcd keeps the view for every browser (`MonitorView`, written by Save), the pinned modules stay in the browser
 - signal path of the active stream with the level at each stage
 - AGC and gain controls that apply immediately, and a button to save them to `tcd.ini`
-- hardware and software apart (since 0.18.0): the AMBE channels of D-Star and DMR in use, fixed or pool, then each device: serial, type, role, channels in use and their modules, and since 0.19.0 the columns Frames (decoded, encoded) and Errors for devices and plugins alike (fec: decoded with corrected errors; unc: uncorrectable, the device repeats; bad: encoded by a device but failing their FEC; rep / mute: repeated / muted by a plugin); "Phase out" takes a device out of service (since 0.17.1): no new streams, the ones on it run to their end, then tcd closes it and it can be unplugged; "Take back" opens it again. Only for a device whose codecs a codec plugin does; not kept by Save (a restart of tcd uses it again)
+- hardware and software apart (since 0.18.0): the AMBE channels of D-Star and DMR in use, fixed or pool, then each device: serial, type, role, channels in use and their modules, and since 0.19.0 the columns Frames (decoded, encoded) and Errors for devices and plugins alike (fec: decoded with corrected errors; unc: uncorrectable, the device repeats; bad: encoded by a device but failing their FEC; rep / mute: repeated / muted by a plugin; since 0.19.2 lost: answers of a device lost on the serial line, a silent frame instead); "Phase out" takes a device out of service (since 0.17.1): no new streams, the ones on it run to their end, then tcd closes it and it can be unplugged; "Take back" opens it again. Only for a device whose codecs a codec plugin does; not kept by Save (a restart of tcd uses it again). On a phone held upright the button is left out so the table fits (since 0.19.2; on its side it is there); the frames on a device, not answered yet, show when the pointer rests on its channels
 - "AMBE channels": fixed or pool (`DeviceChannels`) for the streams that start from now on (since 0.17.1), written by Save
+- "AMBE speech": `DeviceCompand` (since 0.19.2), linear, µ-law or A-law; each device is opened again for it when its streams are done, written by Save
 - codec plugins: their codec, counters and streams, and which vocoder new D-Star, DMR and P25 streams get (switchable, see [Codec plugins](#codec-plugins)); tcd's own vocoders OP25 (P25, YSF VW) and Codec2 (M17) with their counters as "Built in" (since 0.14.1); since 0.15.0 the frames a plugin of API 3 decoded with bit errors, repeated or muted
 - reflector connection and packet counters; a standby module shows "standby" while another tcd has it and "taken over" while this tcd has it
 - behind a reverse proxy under a path (since 0.11.0): the page uses relative paths, so `https://<host>/tcd/` works (see [tcd in Docker](#tcd-in-docker)); behind a proxy on the same machine the failed-login pause counts per address in the last `X-Forwarded-For` entry, and the session cookie is `Secure` when the proxy sends `X-Forwarded-Proto: https`; tcdmon shows standby modules too
@@ -427,6 +444,8 @@ journalctl -u tcd -f
 | `Lost the AMBE device ...` / `... has not answered for 1000 ms` | the device was unplugged, reset or hung; a codec plugin takes its streams and tcd opens it again when it is back (`... is back on ...`). Without a plugin: `shutting down`, systemd restarts tcd after 5 s |
 | `... does not open or answer, trying again every 5 s` | a lost device is there but does not answer: unplug it and plug it in again |
 | `Stream 0x78aa module A: 201 frames in 4.0 s; D-Star in DV3003 ttyUSB8 ch0 ok; DMR out DV3003 ttyUSB8 ch1 ok; P25 out OP25; M17 out <plugin>` | `StreamLog` (since 0.19.0), one line per stream at its end: its frames and duration, then for every codec `in` (the stream's own codec, decoded) or `out` (encoded) and the vocoder. On an AMBE device `ok`, or for decoded frames `fec 12 unc 3` (12 with bit errors the FEC corrected, 3 uncorrectable, for which the device repeats its last frame) and for encoded frames `bad 201` (frames that fail their FEC: the device gives no AMBE frames, the radios mute the stream; phase the device out and take it back, or replug it). `then ...` notes a vocoder change mid-stream (its channel went away), `(no last frame)` a part whose last frame did not come; a stream quiet for 5 s is written out as it is |
+| `... channel 1: the answer for module D stream 0x4c00 frame 812 was lost (...), a silent frame instead` | a byte of a device's answer was dropped on the serial line (an FTDI receive overrun, see [Lost answers](#lost-answers-devicecompand)); the frame went out silent. Now and then is normal with `DeviceCompand = linear` at 921600 baud; `DeviceCompand = ulaw` takes them away. At most 5 such lines a minute per device, then `N more lost answers in the minute before, not logged` |
+| `... an answer without its start byte, taken` / `... N bytes that are no answer skipped` | the same, the answer was taken all the same / bytes of an answer lost with its header: its channel is one frame behind until its stream ends |
 | the reflector shows no transcoder | `ServerAddress` and `Port` in `tcd.ini`, the same `Modules` on both sides, and port 10100/tcp reachable from the tcd machine |
 
 ## Changes from upstream
@@ -470,7 +489,8 @@ journalctl -u tcd -f
 - **No grey zone in the core** (0.10.0): the MD380 firmware is gone from tcd; without a codec plugin two AMBE devices are needed, and `ambe` covers DMR → DMR/YSF
 - **Performance**: blocking reads with a timeout instead of busy polling; built with `-O2` since 0.2.12, a transcoded stream (Codec2, IMBE and AGC in software) takes about 7 % of one core on a Raspberry Pi 4 and 3 % on a Pi 5, so a Pi 4 is plenty for two modules
 - **Thread safety**: an IMBE encoder and decoder per module (one shared state garbled P25 while two modules transcoded at once), SIGPIPE ignored for clean reconnects
-- **Error handling**: retries towards the reflector with backoff, dropping on queue overflow, timeout recovery while reading
+- **Error handling**: retries towards the reflector with backoff, dropping on queue overflow
+- **Lost answers** (0.19.2): a byte of a device's answer dropped on the serial line (an FTDI receive overrun) cost a channel 20 ms more delay for good, a held last frame per stream and the first frames of the next one; now it costs at most that one frame, see [Lost answers](#lost-answers-devicecompand). The count of frames on a device no longer goes wrong after an answer that took over 50 ms (it was set to 0 while answers were due, then ran below 0), and a device that lost an answer but still talks is no longer taken for a hung one. `DeviceCompand` (`ulaw`, `alaw`) halves the bytes of the audio on the serial line, which ends the overruns
 - **Reconnect backoff**: 0.5 s growing to 5 s while the reflector is unreachable
 - **Standby modules** (0.11.0, urfd 4.26.0): `StandbyModules` makes a second tcd take over modules while their tcd is gone, see [Standby](#standby-a-second-tcd-for-the-same-modules)
 - **Speech-driven AGC** (0.9.0): the level is tracked in dB on the upper envelope of the speech and only raised on clearly voiced frames well above a noise floor measured per stream; the boost shrinks on noisy signals, a 75 Hz high-pass cleans the audio and the analysis ignores everything below 300 Hz (CTCSS, hum). The gain no longer pumps on breath, hiss or pauses, the gate holds 240 ms across the gaps between words. Same keys and defaults in `tcd.ini`. Measured on 18 FM-Funknetz transmissions of RF stations (2026-10-23) through the analog path (noise suppression and AGC analog) against 0.8.0: the stations end up as close together (spread 1.2 dB) at about the same level (-16.4 against -15.6 dBFS), the gain moves a third as much from frame to frame (0.20 against 0.55 dB) and the speech stands 2.5 dB further above the noise in the pauses

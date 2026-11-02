@@ -26,12 +26,8 @@ public:
 	virtual ~CDV3000();
 
 protected:
-	void PushWaitingPacket(unsigned int channel, std::shared_ptr<CTranscoderPacket> packet);
-	std::shared_ptr<CTranscoderPacket> PopWaitingPacket(unsigned int channel);
+	int AnswerChannel(uint16_t length, uint8_t type, uint8_t field) const;
 	void ProcessPacket(const SDV_Packet &p);
 	bool SendAudio(const uint8_t channel, const int16_t *audio) const;
 	bool SendData(const uint8_t channel, const uint8_t *data) const;
-
-private:
-	CPacketQueue waiting_packet;	// the packet currently being processed in each vocoder
 };

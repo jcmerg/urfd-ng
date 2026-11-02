@@ -90,6 +90,8 @@ protected:
 		int stats = -1;			// g_Stats.devices
 		std::chrono::steady_clock::time_point next_try;
 		bool told = false;		// the watch said why it cannot open it yet
+		int compand = 0;		// the DeviceCompand it was opened with
+		std::atomic<bool> recompand{false};	// to be opened again for another DeviceCompand
 	};
 	std::vector<std::unique_ptr<SDeviceSlot>> slots;
 	// the AMBE channels for D-Star and for DMR (indexed by kChoiceDStar and
@@ -118,6 +120,9 @@ protected:
 	void DeviceLost(int slot, const CDVDevice *dev);
 	void DeviceWatchThread();
 	void PhaseOut(int slot);
+	// its channels in use, or quiet for less than a second, or frames still on the device
+	bool SlotBusy(int slot);
+	bool SlotBusyLocked(int slot);	// with pinned_mux
 	int UncoveredChoice(int slot) const;
 	// the channel of codec k for a stream, -1 for none (under pinned_mux)
 	int TakeChannel(int k, char module, uint16_t streamid);

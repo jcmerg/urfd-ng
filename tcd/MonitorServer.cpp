@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <cmath>
 
+#include "G711.h"
 #include "MonitorServer.h"
 #include "TcdStats.h"
 #include "Configure.h"
@@ -217,6 +218,7 @@ std::string CMonitorServer::BuildStatsJson()
 	   << ",\"dmr_gain_mode\":" << g_Stats.config.dmr_gain_mode.load()
 	   << ",\"ambe_gain_db\":" << g_Stats.config.ambe_gain_db.load()
 	   << ",\"device_pool\":" << g_Stats.config.device_pool.load()
+	   << ",\"device_compand\":" << g_Stats.config.device_compand.load()
 	   << "}}";
 
 	return js.str();
@@ -418,6 +420,27 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 		}
 		g_Stats.devices[i].want_out.store(out);
 		std::cout << "Monitor: " << g_Stats.devices[i].serial << (out ? " is to be phased out" : " is to be taken back") << std::endl;
+		reply = "{\"status\":\"ok\"}";
+		return 200;
+	}
+	else if (uri == "/api/compand" && !body.empty())
+	{
+		// POST {"compand": "linear"|"ulaw"|"alaw"}: DeviceCompand; each AMBE device is
+		// opened again for it when its streams are done. Save keeps it
+		const int c = body.find("\"ulaw\"") != std::string::npos ? COMPAND_ULAW : body.find("\"alaw\"") != std::string::npos ? COMPAND_ALAW
+			: body.find("\"linear\"") != std::string::npos ? COMPAND_LINEAR : -1;
+		if (c < 0)
+		{
+			reply = "{\"status\":\"error\",\"message\":\"compand: linear, ulaw or alaw expected\"}";
+			return 400;
+		}
+		if (!g_Stats.pool_available.load())
+		{
+			reply = "{\"status\":\"error\",\"message\":\"no AMBE channels\"}";
+			return 400;
+		}
+		if (g_Stats.config.device_compand.exchange(c) != c)
+			std::cout << "Monitor: DeviceCompand = " << CompandName(c) << ", the AMBE devices take it when their streams are done" << std::endl;
 		reply = "{\"status\":\"ok\"}";
 		return 200;
 	}
@@ -1021,8 +1044,9 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 	// the module view is replaced where it stands, else written when it is not auto
 	bool codecWritten[kNumChoices] = {};
 	auto codecLine = [](int k) { return g_Stats.codec_options[k][g_Stats.config.codec_choice[k].load()]; };
-	bool viewWritten = false, poolWritten = false;
+	bool viewWritten = false, poolWritten = false, compandWritten = false;
 	const int pool = g_Stats.config.device_pool.load();
+	const int compand = g_Stats.config.device_compand.load();
 	static const char *views[] = { "auto", "cards", "compact" };
 	const int view = std::clamp(g_Stats.config.monitor_view.load(), 0, 2);
 	while (std::getline(in, line))
@@ -1061,6 +1085,7 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 				if (key == "MonitorView") { out << key << " = " << views[view] << "\n"; viewWritten = true; continue; }
 				// without devices at this start the setting is not in use: the line stays
 				if (key == "DeviceChannels" && g_Stats.pool_available.load()) { out << key << " = " << (pool ? "pool" : "fixed") << "\n"; poolWritten = true; continue; }
+				if (key == "DeviceCompand" && g_Stats.pool_available.load()) { out << key << " = " << CompandName(compand) << "\n"; compandWritten = true; continue; }
 				const int k = ChoiceOfIni(key);
 				if (k >= 0 && g_Stats.codec_options[k].size() > (g_CodecChoices[k].own ? 1u : 0u))
 				{
@@ -1098,6 +1123,8 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 		out << "MonitorView = " << views[view] << "\n";
 	if (!poolWritten && pool)
 		out << "DeviceChannels = pool\n";
+	if (!compandWritten && compand)
+		out << "DeviceCompand = " << CompandName(compand) << "\n";
 
 	std::ofstream of(ini_path);
 	if (!of.is_open()) return false;

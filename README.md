@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.37.0** | tcd 0.19.1 | Dashboard v2.14.2
+**urfd 4.37.1** | tcd 0.19.2 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -351,6 +351,8 @@ Map1 = ref001.dstargateway.org,20001,C,A # REF001 module C -> local module A
 **Map format**: `host,port,remote_module,local_module` — each mapping creates one connection to the remote reflector on the specified module and routes audio to the local module.
 
 **Routing**: the connector addresses the reflector as a gateway linked to it does: RPT1 is `<Callsign> <local module>`, RPT2 the reflector and the remote module (`DCS002 A`), and the reflector routes by that module. The reflector's callsign is taken from the streams it sends, until then from the first part of the host name (`dcs002.xreflector.net` -> `DCS002`); with an IP address and no stream yet, the connector's own callsign stands in, which urfd and xlxd accept (they look at the module only). A DPlus reflector sends the streams of all its modules to every client: only those of the mapped remote module reach the local module.
+
+**Keeping the link** (as ircDDBGateway does, since 4.37.1): the DCS connector answers every poll of the reflector at once with `<Callsign> <local module>` and the reflector with its module (`N0CALL  S`, `DCS002 A`), and names the reflector in its link and unlink packets; a reflector takes a link that answers no poll as gone (before, the connector's own polls named neither, and dcs001 dropped the link some 40 s after each relink). A link is taken as lost after 60 s without a poll of the reflector (DCS, DExtra; DPlus 30 s), then the connector tries again after 5 s, then 10, 20, 40 and every 60 s until the reflector answers. DCS packets with stream id 0, which no stream can be opened for (a reflector caught in a loop sent 120 a second), are dropped and logged once a minute.
 
 **Callsign requirements**: DPlus reflectors require registration at [dstargateway.org](https://regist.dstargateway.org/). DExtra and DCS reflectors are typically open.
 
@@ -1003,7 +1005,8 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **SvxReflector**: TCP/UDP client for SvxLink FM servers — OPUS codec, bidirectional audio bridging, configurable RX/TX gain, one selected TG with the others monitored and selected on activity, auto-disconnect on TCP send failure with immediate reconnect
 - **SVXServer**: SvxReflector V2 server — accept incoming SvxLink node connections with HMAC-SHA1 auth, OPUS audio, TG select and monitor like SvxReflector, node-to-node relay, TG-based module routing, per-user authentication, runtime user/TG management via admin API
 - **DCS interlinking**: Native DCS reflector-to-reflector peering with PeerCallsign override and protocol field in interlink file
-- **D-Star client protocols**: DCSClient, DExtraClient, DPlusClient — connect to external D-Star reflectors as a client node with module-to-module mapping, dynamic add/remove via admin API, protocol blocking, dashboard integration
+- **D-Star client protocols**: DCSClient, DExtraClient, DPlusClient — connect to external D-Star reflectors as a client node with module-to-module mapping, dynamic add/remove via admin API, protocol blocking, dashboard integration; since 4.37.1 they keep the link as ircDDBGateway does (DCS polls answered, reflector named in link and unlink, 60 s / DPlus 30 s without a poll, retries from 5 s growing to 60 s), see [Keeping the link](#d-star-client-connectors-dcs-dextra-dplus)
+- **No log floods from a broken stream** (4.37.1): a header with stream id 0 is logged once a minute with a count instead of once per packet
 - **YSF client protocol**: YSFClient — connect to external YSF reflectors with optional DG-ID, dynamic mapping via admin API, reflector callsign in YSF radio field
 
 ### Runtime Management

@@ -33,6 +33,7 @@
 #include <vector>
 #include "TranscoderPacket.h"
 #include "CodecPlugins.h"
+#include "G711.h"
 #include "Controller.h"
 #include "Configure.h"
 #include "TcdStats.h"
@@ -788,6 +789,7 @@ bool CController::InitVocoders()
 	}
 
 	// the devices in the monitor, then open them
+	g_Stats.config.device_compand.store(g_Conf.GetDeviceCompand());
 	for (size_t i = 0; i < slots.size() && int(i) < CTcdStats::MAX_DEVICES; i++)
 	{
 		auto &s = *slots[i];
@@ -1871,8 +1873,12 @@ std::shared_ptr<CDVDevice> CController::OpenSlot(int i, const std::string &node)
 				dv3003->SetChannelEncoding(c, s.ch_enc[c]);
 		dev = dv3003;
 	}
+	const int compand = g_Stats.config.device_compand.load();
+	dev->SetCompand(compand);
 	if (dev->OpenDevice(node, s.desc, s.type, s.baud, s.in_gain, s.out_gain))
 		return nullptr;
+	s.compand = compand;
+	s.recompand = false;
 	dev->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
 	dev->SetStatsIndex(s.stats);
 	const CDVDevice *raw = dev.get();
@@ -1946,27 +1952,27 @@ void CController::PhaseOut(int i)
 	if (s.stats < 0)
 		return;
 	auto &st = g_Stats.devices[s.stats];
-	const bool want = st.want_out.load();
+	// asked from the monitor, or a new DeviceCompand: the device is opened again for it
+	// when its streams are done (not shown as phased out)
+	const bool asked = st.want_out.load();
+	const bool want = asked || s.recompand;
 	if (want && !s.out)
 	{
-		if (!s.draining)
+		// asked also while it drains for a new DeviceCompand
+		if (asked && 0 == st.phase.load())
 		{
-			s.draining = true;
 			st.phase.store(1);
 			std::cout << s.desc << " is phased out: no new streams, the ones on it run to their end" << std::endl;
 		}
-		// its streams are done when its channels are free and quiet for a second and
-		// the device has answered every frame (the last one is freed at its Pick,
-		// before the device has it)
-		bool busy = false;
+		if (!s.draining)
+		{
+			s.draining = true;
+			if (!asked)
+				std::cout << s.desc << " changes to DeviceCompand = " << CompandName(g_Stats.config.device_compand.load()) << ": no new streams, the ones on it run to their end" << std::endl;
+		}
 		{
 			std::lock_guard<std::mutex> lock(pinned_mux);
-			const auto now = std::chrono::steady_clock::now();
-			for (const auto &list : hw_channels)
-				for (const auto &c : list)
-					busy = busy || (c.slot == i && (c.busy || now - c.last < std::chrono::seconds(1)));
-			busy = busy || (s.dev && s.up && s.dev->GetBufferDepth() > 0);
-			if (!busy)
+			if (!SlotBusyLocked(i))
 			{
 				s.up = false;
 				s.out = true;
@@ -1980,8 +1986,14 @@ void CController::PhaseOut(int i)
 				s.closed = true;
 			}
 			st.online.store(false);
-			st.phase.store(2);
-			std::cout << s.desc << " is closed and can be unplugged" << std::endl;
+			s.recompand = false;	// taken back (now, or by the monitor) it is opened with it
+			if (asked)
+			{
+				st.phase.store(2);
+				std::cout << s.desc << " is closed and can be unplugged" << std::endl;
+			}
+			else
+				std::cout << s.desc << " is closed, opening it again" << std::endl;
 		}
 	}
 	else if (!want && (s.draining || s.out))
@@ -1993,10 +2005,30 @@ void CController::PhaseOut(int i)
 			s.out = false;
 			s.next_try = std::chrono::steady_clock::time_point::min();	// at this pass of the watch
 		}
-		st.phase.store(0);
 		// a device still open (taken back before it closed) is up as it was
-		std::cout << s.desc << (was_out ? " is taken back, opening it" : " is taken back") << std::endl;
+		if (st.phase.exchange(0))
+			std::cout << s.desc << (was_out ? " is taken back, opening it" : " is taken back") << std::endl;
 	}
+}
+
+// its streams are done when its channels are free and quiet for a second and the
+// device has answered every frame (the last one is freed at its Pick, before the
+// device has it); with pinned_mux
+bool CController::SlotBusyLocked(int i)
+{
+	auto &s = *slots[i];
+	const auto now = std::chrono::steady_clock::now();
+	bool busy = false;
+	for (const auto &list : hw_channels)
+		for (const auto &c : list)
+			busy = busy || (c.slot == i && (c.busy || now - c.last < std::chrono::seconds(1)));
+	return busy || (s.dev && s.up && s.dev->GetBufferDepth() > 0);
+}
+
+bool CController::SlotBusy(int i)
+{
+	std::lock_guard<std::mutex> lock(pinned_mux);
+	return SlotBusyLocked(i);
 }
 
 // opens a lost device again when it is there: by its by-id name, as a replug can
@@ -2010,6 +2042,23 @@ void CController::DeviceWatchThread()
 		for (size_t i = 0; i < slots.size() && keep_running; i++)
 		{
 			auto &s = *slots[i];
+			// a new DeviceCompand: a device opened with another one is opened again, one
+			// at a time, when a codec plugin or another device takes its streams meanwhile,
+			// else when it is idle; set back before it closed, it stays as it is
+			const int compand = g_Stats.config.device_compand.load();
+			if (s.recompand && !s.out && s.compand == compand)
+			{
+				s.recompand = false;
+				std::cout << s.desc << " keeps DeviceCompand = " << CompandName(compand) << std::endl;
+			}
+			bool other = false;
+			for (size_t j = 0; j < slots.size(); j++)
+				other = other || (j != i && (slots[j]->recompand	// draining for it, or closed and not yet open again
+					|| (slots[j]->out && slots[j]->stats >= 0 && !g_Stats.devices[slots[j]->stats].want_out.load())
+					|| (!slots[j]->up && !slots[j]->out && slots[j]->compand != compand)));	// or it did not open again
+			if (!other && s.up && !s.draining && !s.out && s.compand != compand
+				&& (UncoveredChoice(int(i)) < 0 || !SlotBusy(int(i))))
+				s.recompand = true;
 			PhaseOut(int(i));
 			if (s.up || s.out || now < s.next_try)
 				continue;

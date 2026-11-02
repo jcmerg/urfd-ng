@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.37.0** | tcd 0.19.1 | Dashboard v2.14.2
+**urfd 4.37.1** | tcd 0.19.2 | Dashboard v2.14.2
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -351,6 +351,8 @@ Map1 = ref001.dstargateway.org,20001,C,A # REF001 module C -> local module A
 **Format der Zuordnung**: `host,port,remote_module,local_module`. Jede Zuordnung baut eine Verbindung zum angegebenen Modul des fremden Reflektors auf und leitet das Audio auf das lokale Modul.
 
 **Routing**: Die Anbindung spricht den Reflektor an wie ein mit ihm verbundenes Gateway: RPT1 ist `<Callsign> <lokales Modul>`, RPT2 der Reflektor mit dem fremden Modul (`DCS002 A`), und der Reflektor leitet nach diesem Modul. Das Rufzeichen des Reflektors kommt aus den Streams, die er schickt, bis dahin aus dem ersten Teil des Hostnamens (`dcs002.xreflector.net` -> `DCS002`); bei einer IP-Adresse und noch ohne Stream steht das eigene Rufzeichen der Anbindung dort, was urfd und xlxd annehmen (sie werten nur das Modul aus). Ein DPlus-Reflektor schickt die Streams aller Module an jeden Client: nur die des zugeordneten fremden Moduls kommen auf das lokale Modul.
+
+**Verbindung halten** (wie ircDDBGateway, seit 4.37.1): Die DCS-Anbindung beantwortet jeden Poll des Reflektors sofort mit `<Callsign> <lokales Modul>` und dem Reflektor mit seinem Modul (`N0CALL  S`, `DCS002 A`) und nennt den Reflektor in ihren Verbindungs- und Trennpaketen; ein Reflektor hält eine Verbindung, die keinen Poll beantwortet, für weg (vorher nannten die eigenen Polls der Anbindung beides nicht, und dcs001 warf die Verbindung etwa 40 s nach jedem Neuaufbau hinaus). Eine Verbindung gilt nach 60 s ohne Poll des Reflektors als verloren (DCS, DExtra; DPlus 30 s), dann versucht es die Anbindung nach 5 s wieder, dann nach 10, 20, 40 und alle 60 s, bis der Reflektor antwortet. DCS-Pakete mit Stream-ID 0, für die sich kein Stream öffnen lässt (ein Reflektor in einer Schleife schickte 120 davon je Sekunde), werden verworfen und einmal je Minute gemeldet.
 
 **Rufzeichen**: DPlus-Reflektoren verlangen eine Registrierung bei [dstargateway.org](https://regist.dstargateway.org/). DExtra- und DCS-Reflektoren sind meist offen.
 
@@ -981,7 +983,8 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **SvxReflector**: TCP/UDP-Client für SvxLink-FM-Server: OPUS-Codec, Audio in beide Richtungen, einstellbare RX/TX-Verstärkung, eine gewählte TG, die übrigen überwacht und bei Aktivität gewählt, Trennung bei TCP-Sendefehler mit sofortiger Neuverbindung
 - **SVXServer**: SvxReflector-V2-Server: nimmt SvxLink-Knoten mit HMAC-SHA1-Anmeldung an, OPUS-Audio, TG-Auswahl und -Überwachung wie beim SvxReflector, Weiterleitung zwischen Knoten, Modulwahl über TGs, Anmeldung pro Nutzer, Nutzer-/TG-Verwaltung zur Laufzeit über die Admin-API
 - **DCS-Kopplung**: Native DCS-Kopplung von Reflektor zu Reflektor, mit PeerCallsign und Protokollfeld in der Interlink-Datei
-- **D-Star-Client-Protokolle**: DCSClient, DExtraClient, DPlusClient: Verbindung mit fremden D-Star-Reflektoren als Client-Knoten mit Modul-zu-Modul-Zuordnung, dynamisch über die Admin-API, Protokoll-Sperren, im Dashboard sichtbar
+- **D-Star-Client-Protokolle**: DCSClient, DExtraClient, DPlusClient: Verbindung mit fremden D-Star-Reflektoren als Client-Knoten mit Modul-zu-Modul-Zuordnung, dynamisch über die Admin-API, Protokoll-Sperren, im Dashboard sichtbar; seit 4.37.1 halten sie die Verbindung wie ircDDBGateway (DCS-Polls beantwortet, Reflektor in Verbinden und Trennen genannt, 60 s / DPlus 30 s ohne Poll, neue Versuche von 5 s wachsend bis 60 s)
+- **Keine Log-Fluten durch kaputte Streams** (4.37.1): Ein Header mit Stream-ID 0 wird einmal je Minute mit Zähler gemeldet statt einmal je Paket
 - **YSF-Client-Protokoll**: YSFClient: Verbindung mit fremden YSF-Reflektoren mit optionaler DG-ID, dynamische Zuordnung über die Admin-API, Reflektor-Rufzeichen im YSF-Feld "Radio"
 
 ### Verwaltung zur Laufzeit
