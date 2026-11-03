@@ -54,15 +54,16 @@ bool CYsfClientProtocol::Initialize(const char *type, const EProtocol ptype, con
 				host.erase(0, host.find_first_not_of(" \t"));
 				host.erase(host.find_last_not_of(" \t") + 1);
 				portStr.erase(0, portStr.find_first_not_of(" \t"));
+				portStr.erase(portStr.find_last_not_of(" \t") + 1);
 				localModStr.erase(0, localModStr.find_first_not_of(" \t"));
 				dgidStr.erase(0, dgidStr.find_first_not_of(" \t"));
 				dgidStr.erase(dgidStr.find_last_not_of(" \t") + 1);
 
-				uint16_t p = (uint16_t)std::stoul(portStr);
+				const uint16_t p = (uint16_t)CConfigure::ParseUnsigned(portStr, "YSFClient Map port", 1, 65535, 0);
 				char localMod = localModStr[0];
-				uint8_t dgid = dgidStr.empty() ? 0 : (uint8_t)std::stoul(dgidStr);
+				const uint8_t dgid = dgidStr.empty() ? 0 : (uint8_t)CConfigure::ParseUnsigned(dgidStr, "YSFClient Map DG-ID", 0, 99, 0);
 
-				if (IsLetter(localMod) && g_Reflector.IsValidModule(localMod))
+				if (p && IsLetter(localMod) && g_Reflector.IsValidModule(localMod))
 				{
 					SYsfClientMapping mapping;
 					mapping.host = host;

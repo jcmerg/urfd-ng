@@ -72,8 +72,8 @@ public:
 	};
 	std::vector<STGInfo> GetAllMappings(void) const;
 
-	// Iterators for access
-	const std::map<uint32_t, STGMapEntry> &GetTGMap(void) const { return m_TGtoEntry; }
+	// the time slot of a TG, def when it has no entry
+	uint8_t TimeslotOf(uint32_t tg, uint8_t def) const;
 
 private:
 	mutable std::mutex m_Mutex;

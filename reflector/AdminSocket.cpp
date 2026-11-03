@@ -614,11 +614,7 @@ nlohmann::json CAdminSocket::CmdTGRemove(const nlohmann::json &cmd)
 			return {{"status", "error"}, {"message", err.empty() ? std::string("MMDVMClient connection not active") : err}};
 		}
 		// Get timeslot before removing (needed for BM API)
-		uint8_t ts = 2;
-		auto &tgmap = mmdvm->GetTGMap().GetTGMap();
-		auto tgit = tgmap.find(tg);
-		if (tgit != tgmap.end())
-			ts = tgit->second.timeslot;
+		const uint8_t ts = mmdvm->GetTGMap().TimeslotOf(tg, 2);
 		bool ok = mmdvm->GetTGMap().RemoveDynamic(tg);
 		protocols.Unlock();
 

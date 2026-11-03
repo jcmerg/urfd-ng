@@ -1,7 +1,8 @@
 #pragma once
 
 // StatsLogger — writes per-frame AGC/level statistics to CSV files
-// One file per stream (named by module + streamId), auto-cleanup of old files.
+// One file per stream (named by module + streamId), closed 10 s after its last frame;
+// auto-cleanup of old files (only its own, by their name).
 // Called from audio pipeline threads, file I/O is buffered and fast.
 
 #include <cstdint>
@@ -20,7 +21,7 @@ public:
 	{
 		m_enabled = enable;
 		m_dir = dir;
-		m_retainHours = retain_hours;
+		m_retainHours = retain_hours < 1 ? 1 : retain_hours;
 	}
 
 	bool Start();
@@ -31,9 +32,6 @@ public:
 	              float rms_in, float peak_in, float rms_out, float peak_out,
 	              float agc_gain_db, bool gate);
 
-	// Called when a stream ends
-	void CloseStream(char module, uint16_t streamId);
-
 	bool IsEnabled() const { return m_enabled; }
 
 private:
@@ -42,14 +40,18 @@ private:
 		std::ofstream file;
 		std::string path;
 		uint32_t frame_count{0};
+		std::chrono::steady_clock::time_point last;	// the newest frame
 	};
 
 	// Key: module << 16 | streamId
 	uint32_t makeKey(char module, uint16_t sid) const { return ((uint32_t)module << 16) | sid; }
 
 	void CleanupThread();
+	void CloseIdle();
+	void DeleteOld();
+	static bool IsOurs(const char *name);
 
-	bool m_enabled{false};
+	std::atomic<bool> m_enabled{false};
 	std::string m_dir;
 	int m_retainHours{24};
 	std::mutex m_mutex;

@@ -50,6 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libwebsockets19t64 \
     libncurses6 \
     ca-certificates \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/tcd/tcd /build/tcd/tcdmon /usr/local/bin/

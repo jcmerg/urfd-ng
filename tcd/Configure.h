@@ -28,6 +28,13 @@
 
 enum class EGainType { dmrin, dmrout, dstarin, dstarout, dmrreencode, outgain_dstar, outgain_dmr, outgain_usrp, outgain_imbe, outgain_m17 };
 
+// the bounds of a float setting, for the ini file and the monitor's REST API alike
+struct SRange { float lo, hi; };
+namespace AgcRange
+{
+	constexpr SRange target{-60, 0}, attack{1, 1000}, release{10, 10000}, maxgain{0, 60}, gate{-90, 0}, floor{-60, 0}, noisesuppress{-40, 0};
+}
+
 #define IS_TRUE(a) ((a)=='t' || (a)=='T' || (a)=='1')
 
 class CConfigure
@@ -140,5 +147,8 @@ private:
 	std::string statslog_dir     = "/tmp/tcd-stats";
 	int         statslog_retain  = 24;
 
-	int getSigned(const std::string &key, const std::string &value) const;
+	// a number of the ini file; def, with a warning, when the value is no number
+	int getSigned(const std::string &key, const std::string &value, int def) const;
+	unsigned getUnsigned(const std::string &key, const std::string &value, unsigned lo, unsigned hi, unsigned def) const;
+	float getFloat(const std::string &key, const std::string &value, SRange range, float def) const;
 };

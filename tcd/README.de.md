@@ -2,7 +2,7 @@
 
 [English](README.md) | **Deutsch**
 
-**Version 0.19.3** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.19.4** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF/NXDN (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25 (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF/NXDN in Software ergänzen, seit 0.14.0 auch P25 als Wahl neben dem eingebauten IMBE-Vocoder. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
@@ -341,7 +341,7 @@ Warum nicht die Rauschunterdrückung im AMBE-Chip: Die DVSI-Geräte haben eine (
 | `MonitorStatsPort` | `8081` | Statistik-Socket (JSON, für `tcdmon`) |
 | `StatsLog` | `false` | CSV-Dateien pro Stream zum Einstellen der AGC |
 | `StatsLogDir` | `/tmp/tcd-stats` | Ablageort |
-| `StatsLogRetain` | `24` | Stunden, bis sie gelöscht werden |
+| `StatsLogRetain` | `24` | Stunden, bis sie gelöscht werden (1 bis 8760; nur tcds eigene CSV-Dateien, am Namen erkannt) |
 | `StreamLog` | `true` | je Stream eine Logzeile an seinem Ende: seine Frames und Dauer und für jeden Codec der Vocoder, den er bekommen hat (AMBE-Gerät und Kanal, Codec-Plugin oder eingebauter Vocoder), auf einem AMBE-Gerät dazu, wie seine Frames nach ihrer FEC aussahen (seit 0.19.0) |
 
 ## Pegel

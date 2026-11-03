@@ -10,7 +10,7 @@ export function buildSocketUrl() {
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.hostname || 'localhost';
-  return `${protocol}//${host}:8080`;
+  return `${protocol}//${host}:10102`;  // urfd's [WebSocket] Port by default
 }
 
 export function connectNotifier({ onOpen, onMessage, onClose, onError }) {

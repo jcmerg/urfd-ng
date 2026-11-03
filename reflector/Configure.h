@@ -86,6 +86,8 @@ private:
 
 	std::string getDataRefreshType(ERefreshType t) const;
 	unsigned getUnsigned(const std::string &value, const std::string &label, unsigned min, unsigned max, unsigned defaultvalue) const;
+	std::string getGain(const std::string &value, const std::string &label) const;
+	bool isDecimal(const std::string &value, const std::string &label) const;
 	void badParam(const std::string &param) const;
 	bool checkModules(std::string &m) const;
 	void checkFile(const std::string &section, const std::string &key, const std::string &filepath) const;

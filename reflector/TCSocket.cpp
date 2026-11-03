@@ -684,9 +684,15 @@ bool CTCClient::Open(const std::string &address, const std::string &modules, uin
 	// ReConnect(), so tcd starts completely (monitor included) and keeps running;
 	// a standby module that another tcd has is no news, Connect() tells about it
 	std::string missing;
+	bool silent = false;	// the host did not answer one: the others go to ReConnect() at once
 	for (char c : modules)
-		if ((Connect(c, false) || GetFD(c) < 0) && !IsStandby(c))
+	{
+		const auto before = std::chrono::steady_clock::now();
+		if ((silent || Connect(c, false) || GetFD(c) < 0) && !IsStandby(c))
 			missing += c;
+		if (std::chrono::steady_clock::now() - before >= std::chrono::milliseconds(1900))
+			silent = true;
+	}
 	if (!missing.empty())
 		std::cerr << "Module(s) " << missing << " not connected yet (reflector not reachable or refused them), tried again every few seconds" << std::endl;
 	return false;
@@ -741,17 +747,33 @@ bool CTCClient::Connect(char module, bool blocking, int *fd_out)
 	}
 	else
 	{
-		// Reconnect: non-blocking, return immediately on failure
+		// Reconnect: at most 2 s, a host that drops the SYNs would hold a blocking
+		// connect() for minutes and with it the thread that reads the reflector
+		const int flags = fcntl(fd, F_GETFL, 0);
+		fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+		int err = 0;
 		if (connect(fd, ip.GetCPointer(), ip.GetSize()))
 		{
-			if (errno != ECONNREFUSED)
+			err = errno;
+			if (EINPROGRESS == err)
 			{
-				std::cerr << "Reconnect module " << module << ": ";
-				perror("connect");
+				struct pollfd pfd = { fd, POLLOUT, 0 };
+				const int rv = poll(&pfd, 1, 2000);
+				socklen_t len = sizeof(err);
+				if (0 == rv)
+					err = ETIMEDOUT;
+				else if (rv < 0 || getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len))
+					err = errno;
 			}
+		}
+		if (err)
+		{
+			if (err != ECONNREFUSED)
+				std::cerr << "Reconnect module " << module << ": connect: " << strerror(err) << std::endl;
 			close(fd);
 			return false;
 		}
+		fcntl(fd, F_SETFL, flags);
 	}
 
 	const bool standby = IsStandby(module);
@@ -946,7 +968,10 @@ void CTCClient::ReConnect() // and sometimes ping
 				if (!IsStandby(m) && 0 > GetFD(m))
 				{
 					std::cout << "Reconnecting module " << m << "..." << std::endl;
+					const auto before = std::chrono::steady_clock::now();
 					Connect(m, false);
+					if (std::chrono::steady_clock::now() - before >= std::chrono::milliseconds(1900))
+						break;	// the host did not answer: the other modules wait for the next round
 				}
 			}
 			last_attempt = steady_now;

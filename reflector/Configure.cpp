@@ -30,6 +30,8 @@
 #include <regex>
 #include <stdexcept>
 #include <cctype>
+#include <cerrno>
+#include <cmath>
 
 #include "Global.h"
 #include "CurlGet.h"
@@ -656,9 +658,9 @@ bool CConfigure::ReadData(const std::string &path)
 				else if (0 == key.compare(JFILEPATH))
 					data[g_Keys.usrp.filepath] = value;
 				else if (0 == key.compare("RxGain"))
-					data[g_Keys.usrp.rxgain] = value;
+					data[g_Keys.usrp.rxgain] = getGain(value, "USRP RxGain");
 				else if (0 == key.compare("TxGain"))
-					data[g_Keys.usrp.txgain] = value;
+					data[g_Keys.usrp.txgain] = getGain(value, "USRP TxGain");
 				else
 					badParam(key);
 				break;
@@ -744,9 +746,15 @@ bool CConfigure::ReadData(const std::string &path)
 				else if (0 == key.compare("Callsign"))
 					data[ck.callsign] = value;
 				else if (0 == key.compare("Latitude"))
-					data[ck.latitude] = value;
+				{
+					if (isDecimal(value, "MMDVMClient Latitude"))
+						data[ck.latitude] = value;
+				}
 				else if (0 == key.compare("Longitude"))
-					data[ck.longitude] = value;
+				{
+					if (isDecimal(value, "MMDVMClient Longitude"))
+						data[ck.longitude] = value;
+				}
 				else if (0 == key.compare("Location"))
 					data[ck.location] = value;
 				else if (0 == key.compare("Description"))
@@ -796,9 +804,9 @@ bool CConfigure::ReadData(const std::string &path)
 				else if (0 == key.compare("BlockProtocols"))
 					data[g_Keys.svx.blockprotocols] = value;
 				else if (0 == key.compare("RxGain"))
-					data[g_Keys.svx.rxgain] = value;
+					data[g_Keys.svx.rxgain] = getGain(value, "SvxReflector RxGain");
 				else if (0 == key.compare("TxGain"))
-					data[g_Keys.svx.txgain] = value;
+					data[g_Keys.svx.txgain] = getGain(value, "SvxReflector TxGain");
 				else if (0 == key.compare("Software"))
 					data[g_Keys.svx.software] = value;
 				else if (0 == key.compare(0, 2, "TG"))
@@ -817,9 +825,9 @@ bool CConfigure::ReadData(const std::string &path)
 				else if (0 == key.compare("BlockProtocols"))
 					data[g_Keys.svxs.blockprotocols] = value;
 				else if (0 == key.compare("RxGain"))
-					data[g_Keys.svxs.rxgain] = value;
+					data[g_Keys.svxs.rxgain] = getGain(value, "SVXServer RxGain");
 				else if (0 == key.compare("TxGain"))
-					data[g_Keys.svxs.txgain] = value;
+					data[g_Keys.svxs.txgain] = getGain(value, "SVXServer TxGain");
 				else if (0 == key.compare("TGs"))
 					data["svxsAutoTGs"] = value;	// auto: every module with a talkgroup, resolved below
 				else if (0 == key.compare(0, 2, "TG"))
@@ -1977,13 +1985,7 @@ std::string CConfigure::getDataRefreshType(ERefreshType type) const
 
 unsigned CConfigure::getUnsigned(const std::string &valuestr, const std::string &label, unsigned min, unsigned max, unsigned def) const
 {
-	auto i = unsigned(std::stoul(valuestr.c_str()));
-	if ( i < min || i > max )
-	{
-		std::cout << "WARNING: line #" << counter << ": " << label << " is out of range. Reset to " << def << std::endl;
-		i = def;
-	}
-	return (unsigned)i;
+	return ParseUnsigned(valuestr, "line #" + std::to_string(counter) + ": " + label, min, max, def);
 }
 
 unsigned CConfigure::ParseUnsigned(const std::string &value, const std::string &label, unsigned min, unsigned max, unsigned def)
@@ -1992,6 +1994,8 @@ unsigned CConfigure::ParseUnsigned(const std::string &value, const std::string &
 	try
 	{
 		size_t used = 0;
+		if (value.empty() || !isdigit((unsigned char)value[0]))	// stoul takes " 12" and "-1" (as a huge number)
+			throw std::invalid_argument(value);
 		i = std::stoul(value, &used);
 		if (used != value.size())
 			throw std::invalid_argument(value);
@@ -2007,6 +2011,37 @@ unsigned CConfigure::ParseUnsigned(const std::string &value, const std::string &
 		return def;
 	}
 	return unsigned(i);
+}
+
+std::string CConfigure::getGain(const std::string &value, const std::string &label) const
+{
+	// a gain in dB as a string, the protocols read it with stoi
+	char *end = nullptr;
+	errno = 0;
+	const long db = strtol(value.c_str(), &end, 10);
+	if (value.empty() || isspace((unsigned char)value[0]) || *end || errno)
+	{
+		std::cout << "WARNING: line #" << counter << ": " << label << " '" << value << "' is no number. Set to 0" << std::endl;
+		return "0";
+	}
+	if (db < -40 || db > 40)
+	{
+		std::cout << "WARNING: line #" << counter << ": " << label << " is out of range (-40 to 40). Limit to " << std::clamp(db, -40L, 40L) << std::endl;
+		return std::to_string(std::clamp(db, -40L, 40L));
+	}
+	return value;
+}
+
+bool CConfigure::isDecimal(const std::string &value, const std::string &label) const
+{
+	char *end = nullptr;
+	const double d = strtod(value.c_str(), &end);
+	if (value.empty() || isspace((unsigned char)value[0]) || *end || !std::isfinite(d))
+	{
+		std::cout << "WARNING: line #" << counter << ": " << label << " '" << value << "' is no number, ignored" << std::endl;
+		return false;
+	}
+	return true;
 }
 
 void CConfigure::badParam(const std::string &key) const
