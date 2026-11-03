@@ -58,7 +58,7 @@ The script asks its questions one after another. A value in `[brackets]` is the 
 | Modules | The "rooms" of the reflector, letters A to Z. `ADMSZ` is a good start |
 | Echo/parrot module | A module that plays back what you say, ideal for testing. Usually `Z` |
 | Transcoded modules | The modules whose audio is converted between modes, as many as your AMBE hardware allows (more with a codec plugin) |
-| Admin page | Lets you manage talkgroups and see the live log in the dashboard. The script creates a password |
+| Admin page | Lets you manage talkgroups and see the live log in the dashboard. The script creates a password. Over plain `http://` the password crosses the network unencrypted: for use from outside put a TLS proxy (Caddy, nginx) in front of port 8363 |
 | Register in the XLX directory | Lists the reflector in Pi-Star, WPSD and other hotspot software. Say **no** for now and register later, once the reflector works and is reachable from the internet |
 | Install Docker | Yes, if the script offers it |
 | AMBE hardware | 1 for a single device (DV3000 or DV3003), 2 for two devices, 3 for none (a codec plugin does everything in software) |

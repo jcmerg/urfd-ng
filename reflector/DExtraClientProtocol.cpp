@@ -40,14 +40,15 @@ bool CDExtraClientProtocol::Initialize(const char *type, const EProtocol ptype, 
 				host.erase(0, host.find_first_not_of(" \t"));
 				host.erase(host.find_last_not_of(" \t") + 1);
 				portStr.erase(0, portStr.find_first_not_of(" \t"));
+				portStr.erase(portStr.find_last_not_of(" \t") + 1);
 				remoteModStr.erase(0, remoteModStr.find_first_not_of(" \t"));
 				localModStr.erase(0, localModStr.find_first_not_of(" \t"));
 
-				uint16_t p = (uint16_t)std::stoul(portStr);
+				const uint16_t p = (uint16_t)CConfigure::ParseUnsigned(portStr, "DExtraClient Map port", 1, 65535, 0);
 				char remoteMod = remoteModStr[0];
 				char localMod = localModStr[0];
 
-				if (IsLetter(remoteMod) && IsLetter(localMod) && g_Reflector.IsValidModule(localMod))
+				if (p && IsLetter(remoteMod) && IsLetter(localMod) && g_Reflector.IsValidModule(localMod))
 				{
 					SDExtraClientMapping mapping;
 					mapping.host = host;

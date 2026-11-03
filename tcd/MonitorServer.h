@@ -2,7 +2,8 @@
 
 // MonitorServer — embedded HTTP + WebSocket + plain TCP stats server
 // Uses libwebsockets for HTTP/WS, plus a separate TCP stats socket for tcdmon.
-// No authentication — designed for local/trusted networks.
+// MonitorPassword protects the page, the API and the WebSocket (session cookie, rate limit
+// per address) and the stats socket for clients from another host than 127.0.0.1.
 
 #include <atomic>
 #include <future>

@@ -531,6 +531,10 @@ summary() {
    Logs:           docker logs -f urfd
 EOF
         [ -n "$ADMIN_PASSWORD" ] && echo "   Admin page:     π symbol in the dashboard footer, password: $ADMIN_PASSWORD"
+        if [ -n "$ADMIN_PASSWORD" ] && [[ "$DASHURL" == http://* ]]; then
+            echo "   WARNING:        over plain http the admin password and its session cookie cross the"
+            echo "                   network unencrypted: put a TLS proxy (Caddy, nginx) in front of port 8363"
+        fi
         cat <<EOF
 
  Open these ports in your router / firewall (UDP unless noted):

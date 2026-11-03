@@ -51,7 +51,7 @@ bool CInterlinkMap::LoadFromFile(const std::string &filename)
 		// empty list
 		m_InterlinkMap.clear();
 		// fill with file content
-		while ( file.getline(line, sizeof(line)).good() )
+		while ( file.getline(line, sizeof(line)) )	// also the last line without a newline (eof but no fail)
 		{
 			char *token[5];
 			// remove leading & trailing spaces
@@ -184,9 +184,12 @@ bool CInterlinkMap::ReloadFromFile(void)
 {
 	bool ok = false;
 
-	if ( ! m_Filename.empty() )
+	Lock();
+	const std::string filename(m_Filename);	// LoadFromFile locks again and sets m_Filename
+	Unlock();
+	if ( ! filename.empty() )
 	{
-		ok = LoadFromFile(m_Filename);
+		ok = LoadFromFile(filename);
 	}
 	return ok;
 }
@@ -195,6 +198,8 @@ bool CInterlinkMap::NeedReload(void)
 {
 	bool needReload = false;
 
+	// ReloadLists (SIGHUP) loads on another thread than the gatekeeper's
+	std::lock_guard<std::mutex> lock(m_Mutex);
 	time_t time;
 	if ( GetLastModTime(&time) )
 	{

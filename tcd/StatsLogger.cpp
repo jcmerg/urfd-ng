@@ -4,6 +4,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cstring>
+#include <cctype>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -38,7 +39,11 @@ bool CStatsLogger::Start()
 
 void CStatsLogger::Stop()
 {
+	// the audio threads may still log while the controller stops after us: no new files
+	m_enabled = false;
 	m_running = false;
+	if (m_cleanupFuture.valid())
+		m_cleanupFuture.get();
 
 	// Close all open files
 	std::lock_guard<std::mutex> lock(m_mutex);
@@ -48,9 +53,6 @@ void CStatsLogger::Stop()
 			sl.file.close();
 	}
 	m_streams.clear();
-
-	if (m_cleanupFuture.valid())
-		m_cleanupFuture.get();
 }
 
 void CStatsLogger::LogFrame(char module, uint16_t streamId, const char *codec,
@@ -101,6 +103,7 @@ void CStatsLogger::LogFrame(char module, uint16_t streamId, const char *codec,
 
 	// Timestamp: ms since epoch
 	auto now = std::chrono::steady_clock::now();
+	sl.last = now;
 	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
 	char line[256];
@@ -114,56 +117,72 @@ void CStatsLogger::LogFrame(char module, uint16_t streamId, const char *codec,
 		sl.file.flush();
 }
 
-void CStatsLogger::CloseStream(char module, uint16_t streamId)
+void CStatsLogger::CleanupThread()
 {
-	if (!m_enabled)
-		return;
-
-	uint32_t key = makeKey(module, streamId);
-	std::lock_guard<std::mutex> lock(m_mutex);
-
-	auto it = m_streams.find(key);
-	if (it != m_streams.end())
+	unsigned seconds = 0;
+	while (m_running)
 	{
-		if (it->second.file.is_open())
-			it->second.file.close();
-		m_streams.erase(it);
+		usleep(1000000);
+		if (!m_running)
+			break;
+		seconds++;
+		if (0 == seconds % 10)
+			CloseIdle();
+		if (0 == seconds % 600)	// every 10 minutes
+			DeleteOld();
 	}
 }
 
-void CStatsLogger::CleanupThread()
+// a stream's file once no frame came for 10 s: the stream is over (the codec
+// paths of a stream all log under its key, so no single one knows its end)
+void CStatsLogger::CloseIdle()
 {
-	while (m_running)
+	const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+	std::lock_guard<std::mutex> lock(m_mutex);
+	for (auto it = m_streams.begin(); it != m_streams.end(); )
 	{
-		// Run cleanup every 10 minutes
-		for (int i = 0; i < 600 && m_running; i++)
-			usleep(1000000);
-
-		if (!m_running)
-			break;
-
-		// Delete files older than retain period
-		auto cutoff = std::chrono::system_clock::now() - std::chrono::hours(m_retainHours);
-		auto cutoff_t = std::chrono::system_clock::to_time_t(cutoff);
-
-		DIR *dir = opendir(m_dir.c_str());
-		if (!dir) continue;
-
-		struct dirent *entry;
-		while ((entry = readdir(dir)) != nullptr)
+		if (it->second.last < cutoff)
 		{
-			if (entry->d_name[0] == '.') continue;
-
-			std::string path = m_dir + "/" + entry->d_name;
-			struct stat st{};
-			if (stat(path.c_str(), &st) == 0)
-			{
-				if (st.st_mtime < cutoff_t)
-				{
-					unlink(path.c_str());
-				}
-			}
+			it->second.file.close();
+			it = m_streams.erase(it);
 		}
-		closedir(dir);
+		else
+			++it;
 	}
+}
+
+// the names LogFrame gives: <module>_YYYYMMDD_HHMMSS_<streamid>.csv
+bool CStatsLogger::IsOurs(const char *name)
+{
+	const size_t len = strlen(name);
+	if (len < 22 || !isupper((unsigned char)name[0]) || name[1] != '_' || name[10] != '_' || name[17] != '_' || strcmp(name + len - 4, ".csv"))
+		return false;
+	for (size_t i = 2; i < len - 4; i++)
+		if (i != 10 && i != 17 && !isdigit((unsigned char)name[i]))
+			return false;
+	return true;
+}
+
+// Delete our files older than the retain period, nothing else in the directory
+void CStatsLogger::DeleteOld()
+{
+	auto cutoff = std::chrono::system_clock::now() - std::chrono::hours(m_retainHours);
+	auto cutoff_t = std::chrono::system_clock::to_time_t(cutoff);
+
+	DIR *dir = opendir(m_dir.c_str());
+	if (!dir)
+		return;
+
+	struct dirent *entry;
+	while ((entry = readdir(dir)) != nullptr)
+	{
+		if (!IsOurs(entry->d_name))
+			continue;
+
+		std::string path = m_dir + "/" + entry->d_name;
+		struct stat st{};
+		if (stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode) && st.st_mtime < cutoff_t)
+			unlink(path.c_str());
+	}
+	closedir(dir);
 }

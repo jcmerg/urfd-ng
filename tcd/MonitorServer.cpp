@@ -34,6 +34,26 @@ extern const unsigned int monitor_html_len;
 
 // g_Monitor is defined in Main.cpp
 
+// a string for the stats JSON: a quote in a USB serial or a plugin's name must not break it
+static std::string jstr(const std::string &in)
+{
+	std::string out;
+	for (const unsigned char c : in)
+	{
+		if (c == '"' || c == '\\')
+			out += '\\', out += char(c);
+		else if (c < 0x20)
+		{
+			char hex[8];
+			snprintf(hex, sizeof(hex), "\\u%04x", c);
+			out += hex;
+		}
+		else
+			out += char(c);
+	}
+	return out;
+}
+
 CMonitorServer::CMonitorServer() {}
 
 CMonitorServer::~CMonitorServer()
@@ -124,9 +144,9 @@ std::string CMonitorServer::BuildStatsJson()
 	{
 		auto &d = g_Stats.devices[i];
 		if (i > 0) js << ",";
-		js << "{\"serial\":\"" << d.serial << "\""
-		   << ",\"type\":\"" << d.type << "\""
-		   << ",\"role\":\"" << d.role << "\""
+		js << "{\"serial\":\"" << jstr(d.serial) << "\""
+		   << ",\"type\":\"" << jstr(d.type) << "\""
+		   << ",\"role\":\"" << jstr(d.role) << "\""
 		   << ",\"buf_depth\":" << d.buf_depth.load(std::memory_order_relaxed)
 		   << ",\"errors\":" << d.errors.load(std::memory_order_relaxed)
 		   << ",\"decodes\":" << d.decodes.load(std::memory_order_relaxed)
@@ -156,8 +176,8 @@ std::string CMonitorServer::BuildStatsJson()
 		{
 			const auto *sw = &g_Stats.sw[i];
 			const char mod = sw->active_module.load(std::memory_order_relaxed);
-			js << (first ? "" : ",") << "{\"codec\":\"" << sw->codec << "\""
-			   << ",\"name\":\"" << sw->name << "\""
+			js << (first ? "" : ",") << "{\"codec\":\"" << jstr(sw->codec) << "\""
+			   << ",\"name\":\"" << jstr(sw->name) << "\""
 			   << ",\"builtin\":" << (sw->builtin ? "true" : "false")
 			   << ",\"reencode_active\":" << (sw->reencode_active.load(std::memory_order_relaxed) ? "true" : "false")
 			   << ",\"encodes\":" << sw->encodes.load(std::memory_order_relaxed)
@@ -178,9 +198,9 @@ std::string CMonitorServer::BuildStatsJson()
 		const auto &options = g_Stats.codec_options[k];
 		js << (k ? "," : "") << "\"" << g_CodecChoices[k].key << "\":{\"options\":[";
 		for (size_t i = 0; i < options.size(); i++)
-			js << (i ? "," : "") << "\"" << options[i] << "\"";
+			js << (i ? "," : "") << "\"" << jstr(options[i]) << "\"";
 		const int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
-		js << "],\"use\":\"" << (c >= 0 && c < int(options.size()) ? options[c] : std::string()) << "\"}";
+		js << "],\"use\":\"" << jstr(c >= 0 && c < int(options.size()) ? options[c] : std::string()) << "\"}";
 	}
 	js << "},\"reencode_available\":" << (g_Stats.reencode_available.load(std::memory_order_relaxed) ? "true" : "false");
 	js << ",\"pool_available\":" << (g_Stats.pool_available.load(std::memory_order_relaxed) ? "true" : "false");
@@ -245,8 +265,9 @@ static bool json_get_float(const char *json, size_t /*len*/, const char *key, fl
 	if (!p) return false;
 	p += strlen(search);
 	while (*p == ' ') p++;
-	val = strtof(p, nullptr);
-	return true;
+	char *end = nullptr;
+	val = strtof(p, &end);
+	return end != p && std::isfinite(val);	// no NaN or Inf into the AGC
 }
 
 static bool json_get_bool(const char *json, size_t /*len*/, const char *key, bool &val)
@@ -311,30 +332,30 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 		if (json_get_int(body.c_str(), body.size(), "outgain_dmr_bitstream", bitstream))
 			g_Stats.config.outgain_dmr_bitstream.store(std::clamp(bitstream, -24, 0));
 		if (json_get_float(body.c_str(), body.size(), "target", target))
-			g_Stats.config.agc_target.store(target);
+			g_Stats.config.agc_target.store(std::clamp(target, AgcRange::target.lo, AgcRange::target.hi));
 		if (json_get_float(body.c_str(), body.size(), "attack", attack))
-			g_Stats.config.agc_attack.store(attack);
+			g_Stats.config.agc_attack.store(std::clamp(attack, AgcRange::attack.lo, AgcRange::attack.hi));
 		if (json_get_float(body.c_str(), body.size(), "release", release))
-			g_Stats.config.agc_release.store(release);
+			g_Stats.config.agc_release.store(std::clamp(release, AgcRange::release.lo, AgcRange::release.hi));
 		float maxgain_down;
 		if (json_get_float(body.c_str(), body.size(), "maxgain_down", maxgain_down))
-			g_Stats.config.agc_maxgain_down.store(maxgain_down);
+			g_Stats.config.agc_maxgain_down.store(std::clamp(maxgain_down, AgcRange::maxgain.lo, AgcRange::maxgain.hi));
 		float digital;
 		if (json_get_float(body.c_str(), body.size(), "digital_noisegate", digital))
-			g_Stats.config.agc_digital_noisegate.store(digital);
+			g_Stats.config.agc_digital_noisegate.store(std::clamp(digital, AgcRange::gate.lo, AgcRange::gate.hi));
 		if (json_get_float(body.c_str(), body.size(), "digital_maxgain_up", digital))
-			g_Stats.config.agc_digital_maxgain_up.store(digital);
+			g_Stats.config.agc_digital_maxgain_up.store(std::clamp(digital, AgcRange::maxgain.lo, AgcRange::maxgain.hi));
 		if (json_get_float(body.c_str(), body.size(), "digital_gatefloor", digital))
-			g_Stats.config.agc_digital_gatefloor.store(std::min(digital, 0.0f));
+			g_Stats.config.agc_digital_gatefloor.store(std::clamp(digital, AgcRange::floor.lo, AgcRange::floor.hi));
 		float analog;
 		if (json_get_float(body.c_str(), body.size(), "analog_noisegate", analog))
-			g_Stats.config.agc_analog_noisegate.store(analog);
+			g_Stats.config.agc_analog_noisegate.store(std::clamp(analog, AgcRange::gate.lo, AgcRange::gate.hi));
 		if (json_get_float(body.c_str(), body.size(), "analog_maxgain_up", analog))
-			g_Stats.config.agc_analog_maxgain_up.store(analog);
+			g_Stats.config.agc_analog_maxgain_up.store(std::clamp(analog, AgcRange::maxgain.lo, AgcRange::maxgain.hi));
 		if (json_get_float(body.c_str(), body.size(), "analog_gatefloor", analog))
-			g_Stats.config.agc_analog_gatefloor.store(std::min(analog, 0.0f));
+			g_Stats.config.agc_analog_gatefloor.store(std::clamp(analog, AgcRange::floor.lo, AgcRange::floor.hi));
 		if (json_get_float(body.c_str(), body.size(), "analog_noisesuppress", analog))
-			g_Stats.config.agc_analog_noisesuppress.store(std::clamp(analog, -40.0f, 0.0f));
+			g_Stats.config.agc_analog_noisesuppress.store(std::clamp(analog, AgcRange::noisesuppress.lo, AgcRange::noisesuppress.hi));
 		float dmr_gain_mode;
 		if (json_get_float(body.c_str(), body.size(), "dmr_gain_mode", dmr_gain_mode))
 		{
@@ -891,6 +912,7 @@ void CMonitorServer::StatsThread()
 	// Track connected stats clients; with a MonitorPassword one from another host
 	// than 127.0.0.1 first gets "AUTH" and must answer "AUTH <password>" within 5 s
 	std::vector<int> clients;
+	std::unordered_map<int, std::string> unsent;	// a client's line not yet taken by its socket
 	struct SWaiting { int fd; std::string peer, line; std::chrono::steady_clock::time_point deadline; };
 	std::vector<SWaiting> waiting;
 	std::unordered_map<std::string, SFails> fails;
@@ -969,18 +991,27 @@ void CMonitorServer::StatsThread()
 		if (!clients.empty())
 		{
 			// Push stats JSON to all connected clients
+			// A slow client first gets the rest of its last line; while that is still
+			// on the way it skips this push, so it never sees half an object
 			std::string json = BuildStatsJson() + "\n";
 			auto it = clients.begin();
 			while (it != clients.end())
 			{
-				ssize_t n = send(*it, json.c_str(), json.size(), MSG_NOSIGNAL);
+				std::string &rest = unsent[*it];
+				const bool fresh = rest.empty();
+				const ssize_t n = fresh ? send(*it, json.data(), json.size(), MSG_NOSIGNAL) : send(*it, rest.data(), rest.size(), MSG_NOSIGNAL);
 				if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
 				{
 					close(*it);
+					unsent.erase(*it);
 					it = clients.erase(it);
+					continue;
 				}
-				else
-					++it;
+				if (fresh)
+					rest = n > 0 ? json.substr(size_t(n)) : std::string();	// nothing taken: this push is skipped
+				else if (n > 0)
+					rest.erase(0, size_t(n));
+				++it;
 			}
 
 			// Drain any input from clients (commands)

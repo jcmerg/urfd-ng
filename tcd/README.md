@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.19.3** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.19.4** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF/NXDN (AMBE2+), and software vocoders for M17 (Codec2) and P25 (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF/NXDN in software, and since 0.14.0 P25 as a choice next to the built-in IMBE vocoder. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -341,7 +341,7 @@ Why not the noise suppressor in the AMBE chip: the DVSI devices have one (on by 
 | `MonitorStatsPort` | `8081` | stats socket (JSON, for `tcdmon`) |
 | `StatsLog` | `false` | per-stream CSV files for AGC tuning |
 | `StatsLogDir` | `/tmp/tcd-stats` | where they go |
-| `StatsLogRetain` | `24` | hours before they are deleted |
+| `StatsLogRetain` | `24` | hours before they are deleted (1 to 8760; only tcd's own CSV files, by their name) |
 | `StreamLog` | `true` | one log line per stream at its end: its frames and duration, and for every codec the vocoder it got (AMBE device and channel, codec plugin or built-in vocoder) with, on an AMBE device, how its frames fared by their FEC (since 0.19.0) |
 
 ## Audio levels

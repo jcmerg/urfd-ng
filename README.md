@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.37.1** | tcd 0.19.3 | Dashboard v2.14.2
+**urfd 4.37.2** | tcd 0.19.4 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1028,6 +1028,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Plugins built and updated with urfd**: `make plugins` / `make plugins-install` in `reflector/` build the plugins in `plugins/<name>/` natively, the Docker image uses the same targets; `setup.sh update` pulls every plugin directory that is a git clone (also codec plugins in `tcd/plugins/`)
 - **Protocol plugins (4.24.0)**: protocols from shared objects loaded at start (`[Plugins]`), with their own ini section, protocol name, admin commands and dashboard parts, checked against the urfd they were built for
 - **SIGHUP config reload**: Hot-reload TG mappings, whitelist/blacklist/interlink, transcoder modules without dropping sessions — thread-safe via sigwait, exception-safe with rollback
+- **Config values checked (4.37.2)**: a value in `urfd.ini` that is no number (a port, `RxGain`/`TxGain`, `Latitude`, the port of a connector's `Map`) is reported with its line and the default taken, instead of ending urfd and `inicheck`; the last line of the white/black list, the interlink and the G3 terminal file counts without a newline at its end; the admin command that removes a TG reads its time slot under the map's lock
 
 ### Audio & Transcoding
 - **Modules without transcoder carry each stream only where its codec goes (4.32.2)**: on a module without tcd a stream reached every protocol, also those of another codec, whose frames were then empty (zeros, decoded as noise, for example a D-Star stream sent to DMR, P25 or M17). Such a protocol now gets no stream: D-Star goes to the D-Star protocols, AMBE+2 (DMR, NXDN, YSF DN) to DMR, NXDN and YSF, IMBE (P25, YSF VW) to P25 and YSF, Codec2 to M17, USRP and SVX audio to USRP and SVX. Interlinks and plugins keep getting every stream, and transcoded modules are unchanged
@@ -1082,6 +1083,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.19.4**: a value in `tcd.ini` that is no number (or NaN) is reported and the default kept instead of ending tcd, AGC values stay in sane ranges, from the web dashboard too; a reconnect to a reflector host that does not answer takes 2 s instead of minutes; `StatsLog` closes a stream's file 10 s after its last frame (they stayed open until tcd stopped) and deletes only its own CSV files; tcdmon's stats socket no longer sends half a line to a slow client; a quote in a USB serial no longer breaks the monitor's JSON
 - **tcd 0.19.3**: companding is set on every AMBE device, a DV3000 too, as `DeviceCompand` says (before, a DV3000 kept what its board's CP_ENABLE pin gave it with `linear`); a DV3003 alone with `mixed` does the DMR of a second module or stream on channel 2, which stayed free, see [tcd/README.md](tcd/README.md#single-dv3003-in-mixed-mode)
 - **tcd 0.19.2**: a byte of an AMBE device's answer dropped on the serial line (an FTDI receive overrun at 921600 baud) costs at most one frame instead of shifting the channel until tcd restarts (+20 ms each, the last frame of every stream held back); `DeviceCompand = ulaw | alaw` sends the audio as 8-bit G.711, half the bytes, no overruns, switched at run time in the web dashboard; lost answers counted per device; the vocoder table of the web dashboard keeps one row height and fits from 360 px, see [tcd/README.md](tcd/README.md#lost-answers-devicecompand)
 - **tcd 0.19.1**: `StreamLog` writes one line per stream instead of one per codec and direction (0.19.0), and the vocoder table of the dashboard fits the page again: its Frames and Errors columns are the same for AMBE devices and plugins, with a legend below

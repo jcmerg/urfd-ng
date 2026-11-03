@@ -731,7 +731,7 @@ void CG3Protocol::ReadOptions(void)
 		m_Modules = "*";
 		m_Aliases.clear();
 
-		while (file.getline(sz, sizeof(sz)).good())
+		while (file.getline(sz, sizeof(sz)))	// also the last line without a newline (eof but no fail)
 		{
 			char *szt = TrimWhiteSpaces(sz);
 			char *szval;

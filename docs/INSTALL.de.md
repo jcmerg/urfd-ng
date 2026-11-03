@@ -58,7 +58,7 @@ Das Script stellt seine Fragen nacheinander (auf Englisch). Ein Wert in `[eckige
 | Modules | Die "Räume" des Reflektors, Buchstaben A bis Z. `ADMSZ` ist ein guter Anfang |
 | Echo/parrot module | Ein Modul, das wiedergibt, was du sagst, ideal zum Testen. Meist `Z` |
 | Transcoded modules | Die Module, deren Audio zwischen den Betriebsarten umgewandelt wird, so viele, wie deine AMBE-Hardware schafft (mehr mit einem Codec-Plugin) |
-| Admin page | Damit verwaltest du Talkgroups und siehst das Live-Log im Dashboard. Das Script erzeugt ein Passwort |
+| Admin page | Damit verwaltest du Talkgroups und siehst das Live-Log im Dashboard. Das Script erzeugt ein Passwort. Über reines `http://` geht das Passwort unverschlüsselt übers Netz: für den Zugriff von außen einen TLS-Proxy (Caddy, nginx) vor Port 8363 setzen |
 | Register in the XLX directory | Trägt den Reflektor in Pi-Star, WPSD und andere Hotspot-Software ein. Antworte erst mal **no** und trage ihn später ein, wenn er läuft und aus dem Internet erreichbar ist |
 | Install Docker | Ja, wenn das Script es anbietet |
 | AMBE hardware | 1 für ein einzelnes Gerät (DV3000 oder DV3003), 2 für zwei Geräte, 3 für keines (ein Codec-Plugin macht alles in Software) |

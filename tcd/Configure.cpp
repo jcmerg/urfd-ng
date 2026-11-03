@@ -22,6 +22,8 @@
 #include <vector>
 #include <sstream>
 #include <regex>
+#include <cerrno>
+#include <cmath>
 #include "Configure.h"
 #include "G711.h"
 
@@ -160,30 +162,30 @@ bool CConfigure::ReadData(const std::string &path)
 		else if (0 == key.compare(STANDBYMODULES))
 			standbytmp.assign(value);
 		else if (0 == key.compare(DSTARGAININ))
-			dstar_in = getSigned(key, value);
+			dstar_in = getSigned(key, value, dstar_in);
 		else if (0 == key.compare(DSTARGAINOUT))
-			dstar_out = getSigned(key, value);
+			dstar_out = getSigned(key, value, dstar_out);
 		else if (0 == key.compare(DMRGAININ))
-			dmr_in = getSigned(key, value);
+			dmr_in = getSigned(key, value, dmr_in);
 		else if (0 == key.compare(DMRGAINOUT))
-			dmr_out = getSigned(key, value);
+			dmr_out = getSigned(key, value, dmr_out);
 		else if (0 == key.compare(DMRREENCODE))
-			dmr_reencode = getSigned(key, value);
+			dmr_reencode = getSigned(key, value, dmr_reencode);
 		else if (0 == key.compare(OUTGAIN_DSTAR))
-			outgain_dstar = getSigned(key, value);
+			outgain_dstar = getSigned(key, value, outgain_dstar);
 		else if (0 == key.compare(OUTGAIN_DMR))
 		{
-			outgain_dmr = getSigned(key, value);
+			outgain_dmr = getSigned(key, value, outgain_dmr);
 			if (outgain_dmr > 0) std::cerr << "Warning: " << OUTGAIN_DMR << " > 0 is unusual (amplifies all DMR/YSF output)" << std::endl;
 		}
 		else if (0 == key.compare(OUTGAIN_DMRBS))
-			outgain_dmr_bitstream = std::clamp(getSigned(key, value), -24, 0);
+			outgain_dmr_bitstream = std::clamp(getSigned(key, value, outgain_dmr_bitstream), -24, 0);
 		else if (0 == key.compare(OUTGAIN_USRP))
-			outgain_usrp = getSigned(key, value);
+			outgain_usrp = getSigned(key, value, outgain_usrp);
 		else if (0 == key.compare(OUTGAIN_IMBE))
-			outgain_imbe = getSigned(key, value);
+			outgain_imbe = getSigned(key, value, outgain_imbe);
 		else if (0 == key.compare(OUTGAIN_M17))
-			outgain_m17 = getSigned(key, value);
+			outgain_m17 = getSigned(key, value, outgain_m17);
 		else if (0 == key.compare(DMRGAINMODE))
 		{
 			if (value == "off")            dmr_gain_mode = EDmrGainMode::off;
@@ -193,7 +195,7 @@ bool CConfigure::ReadData(const std::string &path)
 		}
 		else if (0 == key.compare(AMBEGAIN_DB))
 		{
-			ambe_gain_db = getSigned(key, value);
+			ambe_gain_db = getSigned(key, value, ambe_gain_db);
 			if (ambe_gain_db > 10) ambe_gain_db = 10;
 			if (ambe_gain_db < -30) ambe_gain_db = -30;
 		}
@@ -228,33 +230,33 @@ bool CConfigure::ReadData(const std::string &path)
 		else if (0 == key.compare(AGCENABLE))
 			agc_enabled = IS_TRUE(value[0]);
 		else if (0 == key.compare(AGCTARGET))
-			agc_target = std::stof(value);
+			agc_target = getFloat(key, value, AgcRange::target, agc_target);
 		else if (0 == key.compare(AGCATTACK))
-			agc_attack = std::stof(value);
+			agc_attack = getFloat(key, value, AgcRange::attack, agc_attack);
 		else if (0 == key.compare(AGCRELEASE))
-			agc_release = std::stof(value);
+			agc_release = getFloat(key, value, AgcRange::release, agc_release);
 		else if (0 == key.compare(AGCMAXGAINDOWN))
-			agc_maxgain_down = std::stof(value);
+			agc_maxgain_down = getFloat(key, value, AgcRange::maxgain, agc_maxgain_down);
 		else if (0 == key.compare(AGCDIGITALGATE))
-			agc_digital_noisegate = std::stof(value);
+			agc_digital_noisegate = getFloat(key, value, AgcRange::gate, agc_digital_noisegate);
 		else if (0 == key.compare(AGCDIGITALUP))
-			agc_digital_maxgain_up = std::stof(value);
+			agc_digital_maxgain_up = getFloat(key, value, AgcRange::maxgain, agc_digital_maxgain_up);
 		else if (0 == key.compare(AGCDIGITALFLOOR))
-			agc_digital_gatefloor = std::min(std::stof(value), 0.0f);
+			agc_digital_gatefloor = getFloat(key, value, AgcRange::floor, agc_digital_gatefloor);
 		else if (0 == key.compare(AGCANALOGGATE))
-			agc_analog_noisegate = std::stof(value);
+			agc_analog_noisegate = getFloat(key, value, AgcRange::gate, agc_analog_noisegate);
 		else if (0 == key.compare(AGCANALOGUP))
-			agc_analog_maxgain_up = std::stof(value);
+			agc_analog_maxgain_up = getFloat(key, value, AgcRange::maxgain, agc_analog_maxgain_up);
 		else if (0 == key.compare(AGCANALOGFLOOR))
-			agc_analog_gatefloor = std::min(std::stof(value), 0.0f);
+			agc_analog_gatefloor = getFloat(key, value, AgcRange::floor, agc_analog_gatefloor);
 		else if (0 == key.compare(AGCANALOGNS))
-			agc_analog_noisesuppress = std::clamp(std::stof(value), -40.0f, 0.0f);
+			agc_analog_noisesuppress = getFloat(key, value, AgcRange::noisesuppress, agc_analog_noisesuppress);
 		else if (0 == key.compare(MONITORENABLE))
 			monitor_enabled = IS_TRUE(value[0]);
 		else if (0 == key.compare(MONITORBIND))
 			monitor_bind = value;
 		else if (0 == key.compare(MONITORHTTP))
-			monitor_http_port = (uint16_t)std::stoul(value);
+			monitor_http_port = (uint16_t)getUnsigned(key, value, 1, 65535, monitor_http_port);
 		else if (0 == key.compare(MONITORPASS))
 			monitor_password = value;
 		else if (0 == key.compare(MONITORVIEW))
@@ -265,7 +267,7 @@ bool CConfigure::ReadData(const std::string &path)
 			else std::cerr << "Warning: unknown " << MONITORVIEW << " '" << value << "', using 'auto'" << std::endl;
 		}
 		else if (0 == key.compare(MONITORSTATS))
-			monitor_stats_port = (uint16_t)std::stoul(value);
+			monitor_stats_port = (uint16_t)getUnsigned(key, value, 1, 65535, monitor_stats_port);
 		else if (0 == key.compare(STREAMLOG))
 			streamlog = IS_TRUE(value[0]);
 		else if (0 == key.compare(STATSLOG))
@@ -273,7 +275,7 @@ bool CConfigure::ReadData(const std::string &path)
 		else if (0 == key.compare(STATSLOGDIR))
 			statslog_dir = value;
 		else if (0 == key.compare(STATSLOGRETAIN))
-			statslog_retain = std::stoi(value);
+			statslog_retain = (int)getUnsigned(key, value, 1, 8760, statslog_retain);
 		else if (0 == key.compare(CODECPLUGIN))
 			codec_plugins.push_back(value);
 		else if (const int k = ChoiceOfIni(key); k >= 0)
@@ -374,9 +376,17 @@ bool CConfigure::ReadData(const std::string &path)
 	return false;
 }
 
-int CConfigure::getSigned(const std::string &key, const std::string &value) const
+int CConfigure::getSigned(const std::string &key, const std::string &value, int def) const
 {
-	auto i = std::stoi(value.c_str());
+	char *end = nullptr;
+	errno = 0;
+	const long l = strtol(value.c_str(), &end, 10);
+	if (*end || errno)
+	{
+		std::cout << "WARNING: " << key << " = " << value << " is no number. Keep " << def << "!" << std::endl;
+		return def;
+	}
+	int i = int(std::clamp(l, -1000L, 1000L));
 	if (i < -40)
 	{
 		std::cout << "WARNING: " << key << " = " << value << " is too low. Limit to -40!" << std::endl;
@@ -388,6 +398,42 @@ int CConfigure::getSigned(const std::string &key, const std::string &value) cons
 		i = 40;
 	}
 	return i;
+}
+
+unsigned CConfigure::getUnsigned(const std::string &key, const std::string &value, unsigned lo, unsigned hi, unsigned def) const
+{
+	char *end = nullptr;
+	errno = 0;
+	const unsigned long l = strtoul(value.c_str(), &end, 10);
+	if (!isdigit((unsigned char)value[0]) || *end || errno)
+	{
+		std::cout << "WARNING: " << key << " = " << value << " is no number. Keep " << def << "!" << std::endl;
+		return def;
+	}
+	if (l < lo || l > hi)
+	{
+		std::cout << "WARNING: " << key << " = " << value << " is out of range (" << lo << " to " << hi << "). Keep " << def << "!" << std::endl;
+		return def;
+	}
+	return unsigned(l);
+}
+
+float CConfigure::getFloat(const std::string &key, const std::string &value, SRange range, float def) const
+{
+	char *end = nullptr;
+	const float f = strtof(value.c_str(), &end);
+	if (*end || !std::isfinite(f))
+	{
+		std::cout << "WARNING: " << key << " = " << value << " is no number. Keep " << def << "!" << std::endl;
+		return def;
+	}
+	if (f < range.lo || f > range.hi)
+	{
+		const float c = std::clamp(f, range.lo, range.hi);
+		std::cout << "WARNING: " << key << " = " << value << " is out of range (" << range.lo << " to " << range.hi << "). Limit to " << c << "!" << std::endl;
+		return c;
+	}
+	return f;
 }
 
 

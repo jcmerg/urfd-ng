@@ -193,6 +193,13 @@ bool CTGModuleMap::IsTGMapped(uint32_t tg) const
 	return m_TGtoEntry.find(tg) != m_TGtoEntry.end();
 }
 
+uint8_t CTGModuleMap::TimeslotOf(uint32_t tg, uint8_t def) const
+{
+	std::lock_guard<std::mutex> lock(m_Mutex);
+	const auto it = m_TGtoEntry.find(tg);
+	return it == m_TGtoEntry.end() ? def : it->second.timeslot;
+}
+
 bool CTGModuleMap::IsModuleInUse(char module) const
 {
 	std::lock_guard<std::mutex> lock(m_Mutex);
