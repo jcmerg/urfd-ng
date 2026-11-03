@@ -15,8 +15,8 @@ tcd/tcd
 tcd/tcdmon
 # built in the image, for its architecture
 tcd/plugins/*/mbelib-neo-*
-# libradiocodec's source comes from the host (the image has no git access),
-# its build is made in the image
-tcd/plugins/*/libradiocodec-*/build
-tcd/plugins/*/libradiocodec-*/install
-tcd/plugins/*/libradiocodec-*/configure.log
+# a library a plugin builds in a directory of its own: its source may come
+# from the host (the image has no git access), its build is made in the image
+tcd/plugins/*/*/build
+tcd/plugins/*/*/install
+tcd/plugins/*/*/configure.log
