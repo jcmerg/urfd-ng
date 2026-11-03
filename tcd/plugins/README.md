@@ -2,7 +2,9 @@
 
 `docker/Dockerfile.tcd` builds every `tcd/plugins/<name>/` that has a
 `Makefile` with `make TCD=/build/tcd` and puts the shared objects into
-`/usr/local/lib/tcd/`. Git ignores everything here but this README, so a
+`/usr/local/lib/tcd/`, with the plugin's license and those of the libraries it
+links statically (their `*/install/share/doc/`) in
+`/usr/local/share/doc/tcd-plugins/<name>/`. Git ignores everything here but this README, so a
 plugin from elsewhere can sit in its directory without ending up in the
 repository. For example, after reading its patent notice:
 
