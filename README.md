@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.37.3** | tcd 0.19.4 | Dashboard v2.14.2
+**urfd 4.37.2** | tcd 0.19.4 | Dashboard v2.14.2
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1083,7 +1083,6 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
-- **Codec plugins in the tcd image (4.37.3)**: the image builds the libraries a plugin builds in a directory of its own itself, also from a source fetched on the host; a build made on the host (another system or architecture) no longer comes into the image and is no longer taken as built already. Each plugin's license and those of the libraries it links statically are in `/usr/local/share/doc/tcd-plugins/<name>/` of the image
 - **tcd 0.19.4**: a value in `tcd.ini` that is no number (or NaN) is reported and the default kept instead of ending tcd, AGC values stay in sane ranges, from the web dashboard too; a reconnect to a reflector host that does not answer takes 2 s instead of minutes; `StatsLog` closes a stream's file 10 s after its last frame (they stayed open until tcd stopped) and deletes only its own CSV files; tcdmon's stats socket no longer sends half a line to a slow client; a quote in a USB serial no longer breaks the monitor's JSON
 - **tcd 0.19.3**: companding is set on every AMBE device, a DV3000 too, as `DeviceCompand` says (before, a DV3000 kept what its board's CP_ENABLE pin gave it with `linear`); a DV3003 alone with `mixed` does the DMR of a second module or stream on channel 2, which stayed free, see [tcd/README.md](tcd/README.md#single-dv3003-in-mixed-mode)
 - **tcd 0.19.2**: a byte of an AMBE device's answer dropped on the serial line (an FTDI receive overrun at 921600 baud) costs at most one frame instead of shifting the channel until tcd restarts (+20 ms each, the last frame of every stream held back); `DeviceCompand = ulaw | alaw` sends the audio as 8-bit G.711, half the bytes, no overruns, switched at run time in the web dashboard; lost answers counted per device; the vocoder table of the web dashboard keeps one row height and fits from 360 px, see [tcd/README.md](tcd/README.md#lost-answers-devicecompand)
