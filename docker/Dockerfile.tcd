@@ -32,12 +32,17 @@ COPY dashboard/fonts/saira-latin.woff2 ./dashboard/fonts/
 WORKDIR /build/tcd
 RUN make clean >/dev/null 2>&1 || true; make -j$(nproc)
 
-# the codec plugins in tcd/plugins/<name>/, each with a Makefile taking TCD=
-RUN set -e; mkdir -p /build/plugin-lib; \
+# the codec plugins in tcd/plugins/<name>/, each with a Makefile taking TCD=;
+# with each its license and those of the libraries it links statically (the
+# share/doc of their install in the plugin's directory)
+RUN set -e; mkdir -p /build/plugin-lib /build/plugin-doc; \
     for d in /build/tcd/plugins/*/; do \
         [ -f "$d/Makefile" ] || continue; \
         make -C "$d" -j$(nproc) TCD=/build/tcd; \
         cp "$d"*.so /build/plugin-lib/; \
+        doc=/build/plugin-doc/$(basename "$d"); mkdir -p "$doc"; \
+        for f in "$d"LICENSE* "$d"NOTICE* "$d"COPYING*; do if [ -f "$f" ]; then cp "$f" "$doc/"; fi; done; \
+        for l in "$d"*/install/share/doc/*/; do if [ -d "$l" ]; then cp -r "$l" "$doc/"; fi; done; \
     done
 
 ## ----- Runtime Stage -----
@@ -55,6 +60,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /build/tcd/tcd /build/tcd/tcdmon /usr/local/bin/
 COPY --from=builder /build/plugin-lib/ /usr/local/lib/tcd/
+COPY --from=builder /build/plugin-doc/ /usr/local/share/doc/tcd-plugins/
 COPY tcd/config/tcd.ini /usr/local/share/tcd/tcd.ini.template
 
 # tcd.ini comes from the host ($URFD_DATA/tcd/tcd.ini, see docker-compose.yml)
