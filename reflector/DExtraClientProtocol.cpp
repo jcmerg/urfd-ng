@@ -149,8 +149,8 @@ void CDExtraClientProtocol::HandleConnections(void)
 			// less and less often (LinkRetry.h)
 			if (m.keepaliveTimer.time() > LinkRetrySeconds(m.tries))
 			{
-				m.ip = CIp(m.host.c_str(), AF_INET, SOCK_DGRAM, m.port);
-				SendConnect(m);
+				if (ResolveLink(m.ip, m.host, m.port, m.unresolved, "DExtraClient"))
+					SendConnect(m);
 				m.keepaliveTimer.start();
 				m.tries++;
 			}

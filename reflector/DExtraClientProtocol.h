@@ -22,6 +22,7 @@ struct SDExtraClientMapping
 	std::string host;
 	uint16_t    port;
 	CIp         ip;
+	bool        unresolved = false;	// host not found on the last try (LinkRetry.h)
 	char        remoteModule;
 	char        localModule;
 	std::string reflector;      // the remote reflector's callsign, from its streams

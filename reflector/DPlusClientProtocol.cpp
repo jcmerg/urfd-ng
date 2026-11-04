@@ -134,7 +134,11 @@ void CDPlusClientProtocol::HandleConnections(void)
 			if (m.stateTimer.time() > LinkRetrySeconds(m.tries))
 			{
 				m.tries++;
-				m.ip = CIp(m.host.c_str(), AF_INET, SOCK_DGRAM, m.port);
+				if (!ResolveLink(m.ip, m.host, m.port, m.unresolved, "DPlusClient"))
+				{
+					m.stateTimer.start();
+					break;
+				}
 				CBuffer buf;
 				EncodeConnectPacket(&buf);
 				Send(buf, m.ip);

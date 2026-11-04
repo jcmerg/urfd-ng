@@ -23,6 +23,7 @@ struct SDcsClientMapping
 	std::string host;
 	uint16_t    port;
 	CIp         ip;
+	bool        unresolved = false;	// host not found on the last try (LinkRetry.h)
 	char        remoteModule;   // module on the remote DCS reflector
 	char        localModule;    // module on our reflector
 	std::string reflector;      // the remote reflector's callsign, from its streams
