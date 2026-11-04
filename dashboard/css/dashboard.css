@@ -126,7 +126,6 @@ h3 { font-size: var(--fs-m); }
   border-radius: 5px;
   background: var(--lcd);
   color: var(--lcd-ink);
-  box-shadow: inset 0 3px 0 #00000024;
   padding: 0.7rem 1rem 0.8rem;
   display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "top top" "call ch" "fields ch";
   gap: 0.25rem 1.1rem;
