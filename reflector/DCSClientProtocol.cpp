@@ -167,9 +167,8 @@ void CDcsClientProtocol::HandleConnections(void)
 			// try to connect, less and less often (LinkRetry.h)
 			if (m.reconnectTimer.time() > LinkRetrySeconds(m.tries))
 			{
-				// re-resolve hostname
-				m.ip = CIp(m.host.c_str(), AF_INET, SOCK_DGRAM, m.port);
-				SendConnect(m);
+				if (ResolveLink(m.ip, m.host, m.port, m.unresolved, "DCSClient"))
+					SendConnect(m);
 				m.reconnectTimer.start();
 				m.tries++;
 			}

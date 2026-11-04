@@ -171,8 +171,8 @@ void CYsfClientProtocol::HandleConnections(void)
 			// try to connect (send poll — YSF has no separate connect packet)
 			if (m.pollTimer.time() > YSFCLI_RECONNECT_PERIOD)
 			{
-				m.ip = CIp(m.host.c_str(), AF_INET, SOCK_DGRAM, m.port);
-				SendPoll(m);
+				if (ResolveLink(m.ip, m.host, m.port, m.unresolved, "YSFClient"))
+					SendPoll(m);
 				m.pollTimer.start();
 			}
 		}

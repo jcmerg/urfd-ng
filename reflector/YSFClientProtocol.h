@@ -8,6 +8,7 @@
 
 #include "Defines.h"
 #include "Timer.h"
+#include "LinkRetry.h"
 #include "Protocol.h"
 #include "DVHeaderPacket.h"
 #include "DVFramePacket.h"
@@ -29,6 +30,7 @@ struct SYsfClientMapping
 	std::string host;
 	uint16_t    port;
 	CIp         ip;
+	bool        unresolved = false;	// host not found on the last try (LinkRetry.h)
 	char        localModule;    // module on our reflector
 	uint8_t     dgid;           // DG-ID to set on outbound packets (0 = disabled)
 	bool        connected;

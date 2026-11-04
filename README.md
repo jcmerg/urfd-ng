@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.37.2** | tcd 0.19.4 | Dashboard v2.14.2
+**urfd 4.37.3** | tcd 0.19.5 | Dashboard v2.14.3
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -352,7 +352,7 @@ Map1 = ref001.dstargateway.org,20001,C,A # REF001 module C -> local module A
 
 **Routing**: the connector addresses the reflector as a gateway linked to it does: RPT1 is `<Callsign> <local module>`, RPT2 the reflector and the remote module (`DCS002 A`), and the reflector routes by that module. The reflector's callsign is taken from the streams it sends, until then from the first part of the host name (`dcs002.xreflector.net` -> `DCS002`); with an IP address and no stream yet, the connector's own callsign stands in, which urfd and xlxd accept (they look at the module only). A DPlus reflector sends the streams of all its modules to every client: only those of the mapped remote module reach the local module.
 
-**Keeping the link** (as ircDDBGateway does, since 4.37.1): the DCS connector answers every poll of the reflector at once with `<Callsign> <local module>` and the reflector with its module (`N0CALL  S`, `DCS002 A`), and names the reflector in its link and unlink packets; a reflector takes a link that answers no poll as gone (before, the connector's own polls named neither, and dcs001 dropped the link some 40 s after each relink). A link is taken as lost after 60 s without a poll of the reflector (DCS, DExtra; DPlus 30 s), then the connector tries again after 5 s, then 10, 20, 40 and every 60 s until the reflector answers. DCS packets with stream id 0, which no stream can be opened for (a reflector caught in a loop sent 120 a second), are dropped and logged once a minute.
+**Keeping the link** (as ircDDBGateway does, since 4.37.1): the DCS connector answers every poll of the reflector at once with `<Callsign> <local module>` and the reflector with its module (`N0CALL  S`, `DCS002 A`), and names the reflector in its link and unlink packets; a reflector takes a link that answers no poll as gone (before, the connector's own polls named neither, and dcs001 dropped the link some 40 s after each relink). A link is taken as lost after 60 s without a poll of the reflector (DCS, DExtra; DPlus 30 s), then the connector tries again after 5 s, then 10, 20, 40 and every 60 s until the reflector answers. DCS packets with stream id 0, which no stream can be opened for (a reflector caught in a loop sent 120 a second), are dropped and logged once a minute. Before each try the reflector's host is looked up again; if that fails (DNS down) the connector tries the last address it had and logs `cannot resolve <host>` once (since 4.37.3).
 
 **Callsign requirements**: DPlus reflectors require registration at [dstargateway.org](https://regist.dstargateway.org/). DExtra and DCS reflectors are typically open.
 
@@ -723,7 +723,7 @@ Module names are configured once in `urfd.ini` and automatically available in th
 
 The JSON report also includes a `DynamicTGs` array with protocol, TG, module, and remaining seconds for all active dynamic mappings.
 
-### Dashboard v2.14.2
+### Dashboard v2.14.3
 Redesigned in v2.9.0 as the front panel of a radio: an amber LCD shows who is on the air, the modules are a keypad, the rest are plain tables. Before that: dark mode (v2.6.0), hardened against directory outages (v2.6.1), M17 positions in the last-heard list (v2.7.0), directory registration moved to the reflector (v2.8.0), security fixes (v2.8.1, v2.8.2), status file and admin socket fixes (v2.8.3). Since v2.10.0 the operator's first name stands next to the callsign, from the ID databases urfd loads (urfd 4.12.0 and later).
 
 **Pages:**
@@ -976,6 +976,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **Connectors without DNS (4.37.3)**: DCSClient, DExtraClient, DPlusClient and YSFClient look the reflector's host up again before every try; when that failed (DNS down) the address was emptied, the try went nowhere with a `Wrong family: 0` line, and `connecting to` was logged all the same. Now the last address is kept and tried, `cannot resolve <host>` is logged once until the host resolves again, and a connector that never had an address sends nothing
 - **D-Star client links kept (4.37.1)**: DCSClient answers the reflector's polls as ircDDBGateway does and names the reflector in link and unlink (a DCS reflector dropped the link some 40 s after each relink); DCSClient, DExtraClient and DPlusClient retry after 5, 10, 20, 40 and every 60 s; a link is lost after 60 s without a poll (DPlus 30 s); DCS packets with stream id 0 are dropped, see [Keeping the link](#d-star-client-connectors-dcs-dextra-dplus)
 - **No log floods from a broken stream** (4.37.1): a header with stream id 0 is logged once a minute with a count instead of once per packet
 - **Module access by protocol (4.37.0)**: `[Modules] Protocols<M>` opens a module to the protocols listed only: the others cannot link to it, send to it or hear it; `[Modules] HideUnlisted` keeps talkers without an ID database entry off the dashboard, see [Module Access by Protocol](#module-access-by-protocol-4370)
@@ -1046,6 +1047,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.6.0**: Dark mode redesign, admin panel, module overview with TG mappings and NXDN RAN, protocol-specific columns hidden when disabled, protocol list, QuadNet Live proxy, reflector list with search/pagination
 - **Dashboard v2.6.1**: Survives an outage of the XLX directory. Explicit timeouts on every outbound request, CallingHome failures logged instead of aborting the page render, reflector and peer lists served from an on-disk cache, admin API no longer serialized behind the PHP session lock
 - **Dashboard v2.7.0**: Locator column for stations that send an M17 GNSS position, also in `/json/stations`
+- **Dashboard v2.14.3**: the LCD has no dark strip along its top edge any more, which looked like a step inside the bezel
 - **Dashboard v2.14.2**: the version in the header without `-dht`, so the status keeps to the header row
 - **Dashboard v2.14.1**: the Links page shows a band only for D-Star links, where the suffix is the repeater's port letter; elsewhere it is the module, and a node on module D was shown as a dongle
 - **Dashboard v2.14.0**: Admin page: the sections of loaded plugins, drawn from the description each plugin gives in `status` (urfd 4.24.0 and later); the protocol list shows a plugin's description. Since urfd 4.26.0 more than 8 modules spread evenly over at most 5 columns (9 = 5 + 4, 12 = 4 x 3), each key with its module's name, and the plugin sections have the same space between them as the others
@@ -1083,6 +1085,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.19.5**: the module LCD of the web monitor has no dark strip along its top edge any more, which looked like a step inside the bezel
 - **tcd 0.19.4**: a value in `tcd.ini` that is no number (or NaN) is reported and the default kept instead of ending tcd, AGC values stay in sane ranges, from the web dashboard too; a reconnect to a reflector host that does not answer takes 2 s instead of minutes; `StatsLog` closes a stream's file 10 s after its last frame (they stayed open until tcd stopped) and deletes only its own CSV files; tcdmon's stats socket no longer sends half a line to a slow client; a quote in a USB serial no longer breaks the monitor's JSON
 - **tcd 0.19.3**: companding is set on every AMBE device, a DV3000 too, as `DeviceCompand` says (before, a DV3000 kept what its board's CP_ENABLE pin gave it with `linear`); a DV3003 alone with `mixed` does the DMR of a second module or stream on channel 2, which stayed free, see [tcd/README.md](tcd/README.md#single-dv3003-in-mixed-mode)
 - **tcd 0.19.2**: a byte of an AMBE device's answer dropped on the serial line (an FTDI receive overrun at 921600 baud) costs at most one frame instead of shifting the channel until tcd restarts (+20 ms each, the last frame of every stream held back); `DeviceCompand = ulaw | alaw` sends the audio as 8-bit G.711, half the bytes, no overruns, switched at run time in the web dashboard; lost answers counted per device; the vocoder table of the web dashboard keeps one row height and fits from 360 px, see [tcd/README.md](tcd/README.md#lost-answers-devicecompand)

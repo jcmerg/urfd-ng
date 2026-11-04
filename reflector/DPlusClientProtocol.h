@@ -32,6 +32,7 @@ struct SDPlusClientMapping
 	std::string host;
 	uint16_t    port;
 	CIp         ip;
+	bool        unresolved = false;	// host not found on the last try (LinkRetry.h)
 	char        remoteModule;   // not used in connect (DPlus discovers module from header)
 	char        localModule;
 	std::string reflector;      // the remote reflector's callsign, from its streams

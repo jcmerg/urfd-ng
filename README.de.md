@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.37.2** | tcd 0.19.4 | Dashboard v2.14.2
+**urfd 4.37.3** | tcd 0.19.5 | Dashboard v2.14.3
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -352,7 +352,7 @@ Map1 = ref001.dstargateway.org,20001,C,A # REF001 module C -> local module A
 
 **Routing**: Die Anbindung spricht den Reflektor an wie ein mit ihm verbundenes Gateway: RPT1 ist `<Callsign> <lokales Modul>`, RPT2 der Reflektor mit dem fremden Modul (`DCS002 A`), und der Reflektor leitet nach diesem Modul. Das Rufzeichen des Reflektors kommt aus den Streams, die er schickt, bis dahin aus dem ersten Teil des Hostnamens (`dcs002.xreflector.net` -> `DCS002`); bei einer IP-Adresse und noch ohne Stream steht das eigene Rufzeichen der Anbindung dort, was urfd und xlxd annehmen (sie werten nur das Modul aus). Ein DPlus-Reflektor schickt die Streams aller Module an jeden Client: nur die des zugeordneten fremden Moduls kommen auf das lokale Modul.
 
-**Verbindung halten** (wie ircDDBGateway, seit 4.37.1): Die DCS-Anbindung beantwortet jeden Poll des Reflektors sofort mit `<Callsign> <lokales Modul>` und dem Reflektor mit seinem Modul (`N0CALL  S`, `DCS002 A`) und nennt den Reflektor in ihren Verbindungs- und Trennpaketen; ein Reflektor hält eine Verbindung, die keinen Poll beantwortet, für weg (vorher nannten die eigenen Polls der Anbindung beides nicht, und dcs001 warf die Verbindung etwa 40 s nach jedem Neuaufbau hinaus). Eine Verbindung gilt nach 60 s ohne Poll des Reflektors als verloren (DCS, DExtra; DPlus 30 s), dann versucht es die Anbindung nach 5 s wieder, dann nach 10, 20, 40 und alle 60 s, bis der Reflektor antwortet. DCS-Pakete mit Stream-ID 0, für die sich kein Stream öffnen lässt (ein Reflektor in einer Schleife schickte 120 davon je Sekunde), werden verworfen und einmal je Minute gemeldet.
+**Verbindung halten** (wie ircDDBGateway, seit 4.37.1): Die DCS-Anbindung beantwortet jeden Poll des Reflektors sofort mit `<Callsign> <lokales Modul>` und dem Reflektor mit seinem Modul (`N0CALL  S`, `DCS002 A`) und nennt den Reflektor in ihren Verbindungs- und Trennpaketen; ein Reflektor hält eine Verbindung, die keinen Poll beantwortet, für weg (vorher nannten die eigenen Polls der Anbindung beides nicht, und dcs001 warf die Verbindung etwa 40 s nach jedem Neuaufbau hinaus). Eine Verbindung gilt nach 60 s ohne Poll des Reflektors als verloren (DCS, DExtra; DPlus 30 s), dann versucht es die Anbindung nach 5 s wieder, dann nach 10, 20, 40 und alle 60 s, bis der Reflektor antwortet. DCS-Pakete mit Stream-ID 0, für die sich kein Stream öffnen lässt (ein Reflektor in einer Schleife schickte 120 davon je Sekunde), werden verworfen und einmal je Minute gemeldet. Vor jedem Versuch wird der Host des Reflektors neu aufgelöst; schlägt das fehl (DNS weg), versucht die Anbindung die letzte Adresse, die sie hatte, und meldet `cannot resolve <host>` einmal (seit 4.37.3).
 
 **Rufzeichen**: DPlus-Reflektoren verlangen eine Registrierung bei [dstargateway.org](https://regist.dstargateway.org/). DExtra- und DCS-Reflektoren sind meist offen.
 
@@ -713,7 +713,7 @@ Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Das
 
 Der JSON-Report enthält außerdem ein Array `DynamicTGs` mit Protokoll, TG, Modul und Restlaufzeit aller aktiven dynamischen Zuordnungen.
 
-### Dashboard v2.14.2
+### Dashboard v2.14.3
 In v2.9.0 neu gestaltet als Frontplatte eines Funkgeräts: Ein bernsteinfarbenes LCD zeigt, wer gerade sendet, die Module sind ein Tastenfeld, der Rest sind schlichte Tabellen. Davor: dunkles Design (v2.6.0), robust gegen Ausfälle des Verzeichnisses (v2.6.1), M17-Positionen in der Last-Heard-Liste (v2.7.0), Eintrag ins Verzeichnis an den Reflektor abgegeben (v2.8.0), Sicherheitskorrekturen (v2.8.1, v2.8.2), Korrekturen an Statusdatei und Admin-Socket (v2.8.3). Seit v2.10.0 steht der Vorname neben dem Rufzeichen, aus den ID-Datenbanken, die urfd lädt (ab urfd 4.12.0).
 
 **Seiten:**
@@ -954,6 +954,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **Anbindungen ohne DNS (4.37.3)**: DCSClient, DExtraClient, DPlusClient und YSFClient lösen den Host des Reflektors vor jedem Versuch neu auf; schlug das fehl (DNS weg), wurde die Adresse geleert, der Versuch ging ins Leere mit einer Zeile `Wrong family: 0`, und `connecting to` stand trotzdem im Log. Jetzt wird die letzte Adresse behalten und versucht, `cannot resolve <host>` einmal gemeldet, bis der Host wieder aufgelöst wird, und eine Anbindung, die nie eine Adresse hatte, sendet nichts
 - **D-Star-Client-Verbindungen halten (4.37.1)**: DCSClient beantwortet die Polls des Reflektors wie ircDDBGateway und nennt den Reflektor beim Verbinden und Trennen (ein DCS-Reflektor warf die Verbindung etwa 40 s nach jedem Neuaufbau hinaus); DCSClient, DExtraClient und DPlusClient versuchen es nach 5, 10, 20, 40 und alle 60 s wieder; eine Verbindung gilt nach 60 s ohne Poll als verloren (DPlus 30 s); DCS-Pakete mit Stream-ID 0 werden verworfen, siehe [Verbindung halten](#d-star-client-anbindungen-dcs-dextra-dplus)
 - **Keine Log-Fluten durch kaputte Streams** (4.37.1): Ein Header mit Stream-ID 0 wird einmal je Minute mit Zähler gemeldet statt einmal je Paket
 - **Modulzugang je Protokoll (4.37.0)**: `[Modules] Protocols<M>` öffnet ein Modul nur für die genannten Protokolle: Die anderen können nicht darauf linken, nicht darauf senden und hören es nicht; `[Modules] HideUnlisted` hält Sprecher ohne Eintrag in einer ID-Datenbank aus dem Dashboard heraus, siehe [Modulzugang je Protokoll](#modulzugang-je-protokoll-4370)
@@ -1024,6 +1025,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v2.14.3**: das LCD hat keinen dunklen Streifen mehr an der Oberkante, der wie ein Absatz im Rahmen aussah
 - **Dashboard v2.14.2**: die Version im Kopf ohne `-dht`, damit der Status in der Kopfzeile bleibt
 - **Dashboard v2.14.1**: die Seite Links zeigt ein Band nur bei D-Star-Links, wo der Suffix der Port-Buchstabe des Repeaters ist; sonst ist er das Modul, und ein Knoten auf Modul D erschien als Dongle
 - **Dashboard v2.14.0**: Admin-Seite: die Abschnitte geladener Plugins, gezeichnet aus der Beschreibung, die jedes Plugin in `status` liefert (ab urfd 4.24.0); die Protokoll-Liste zeigt die Beschreibung eines Plugins. Seit urfd 4.26.0 verteilen sich mehr als 8 Module gleichmäßig auf höchstens 5 Spalten (9 = 5 + 4, 12 = 4 x 3), jede Taste mit dem Namen ihres Moduls, und die Plugin-Abschnitte haben denselben Abstand zueinander wie die übrigen
@@ -1061,6 +1063,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.19.5**: Das Modul-LCD des Web-Monitors hat keinen dunklen Streifen mehr an der Oberkante, der wie ein Absatz im Rahmen aussah
 - **tcd 0.19.4**: Ein Wert in `tcd.ini`, der keine Zahl ist (oder NaN), wird gemeldet und der Standardwert behalten, statt tcd zu beenden, AGC-Werte bleiben in sinnvollen Grenzen, auch aus dem Web-Dashboard; ein Neuverbinden zu einem Reflektor-Host, der nicht antwortet, dauert 2 s statt Minuten; `StatsLog` schließt die Datei eines Streams 10 s nach seinem letzten Frame (sie blieben offen, bis tcd endete) und löscht nur seine eigenen CSV-Dateien; der Stats-Socket für tcdmon schickt einem langsamen Client keine halbe Zeile mehr; ein Anführungszeichen in einer USB-Seriennummer macht das JSON des Monitors nicht mehr kaputt
 - **tcd 0.19.3**: Companding wird an jedem AMBE-Gerät gesetzt, auch an einem DV3000, wie `DeviceCompand` es sagt (vorher behielt ein DV3000 bei `linear`, was der CP_ENABLE-Pin seiner Platine vorgab); ein einzelner DV3003 mit `mixed` macht das DMR eines zweiten Moduls oder Streams auf Kanal 2, der frei blieb, siehe [tcd/README.de.md](tcd/README.de.md#einzelner-dv3003-im-mischbetrieb)
 - **tcd 0.19.2**: Ein Byte einer AMBE-Geräteantwort, das auf der seriellen Leitung verloren geht (ein Empfangsüberlauf des FTDI bei 921600 Baud), kostet höchstens ein Frame, statt den Kanal bis zum Neustart von tcd zu verschieben (+20 ms je Fall, das letzte Frame jedes Streams hing); `DeviceCompand = ulaw | alaw` schickt das Audio als 8-Bit-G.711, halb so viele Bytes, keine Überläufe, im Web-Dashboard im Betrieb umschaltbar; verlorene Antworten je Gerät gezählt; die Vocoder-Tabelle des Web-Dashboards behält eine Zeilenhöhe und passt ab 360 px, siehe [tcd/README.de.md](tcd/README.de.md#verlorene-antworten-devicecompand)
