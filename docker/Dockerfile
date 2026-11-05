@@ -54,7 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /var/log/supervisor /var/lib/xlxd-ch /usr/local/etc/urfd
+    && mkdir -p /var/log/supervisor /var/cache/nginx /usr/local/etc/urfd
 
 # Copy urfd binary and tools
 COPY --from=builder /build/reflector/urfd /usr/local/bin/urfd
@@ -65,8 +65,6 @@ COPY --from=builder /build/plugin-lib/ /usr/local/lib/urfd/
 
 # the dashboard: static files, the state comes from urfd's WebSocket
 COPY dashboard/ /var/www/urfd-dashboard/
-# nginx keeps the XLX directory's reflector list there (proxy cache)
-RUN chown -R www-data:www-data /var/lib/xlxd-ch
 
 # Supervisord and nginx configs are injected at build time via --build-context
 COPY --from=optfiles supervisord.conf /etc/supervisor/conf.d/urfd.conf

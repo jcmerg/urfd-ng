@@ -71,13 +71,12 @@ git clone https://github.com/jcmerg/urfd-ng.git urfd
 cd urfd
 
 # Konfiguration, die Pfade in urfd.ini sind die im Container
-sudo mkdir -p /opt/urfd/config /opt/urfd/xlxd-ch
+sudo mkdir -p /opt/urfd/config
 sudo cp config/urfd.ini config/urfd.interlink config/urfd.whitelist config/urfd.blacklist config/urfd.terminal /opt/urfd/config/
 sudo sed -i 's#/home/user/#/usr/local/etc/urfd/#' /opt/urfd/config/urfd.ini
 
-# urfd.ini enthält Passwörter; dem Webserver (www-data, uid 33) gehört der Cache der Reflektorliste
+# urfd.ini enthält Passwörter
 sudo chmod 600 /opt/urfd/config/urfd.ini
-sudo chown 33:33 /opt/urfd/xlxd-ch
 ```
 
 `/opt/urfd/config/urfd.ini` anpassen (mindestens `[Names]`, `[IP Addresses]`, `[Modules]`, `[Transcoder]`, und `[Dashboard]` für das Dashboard), dann bauen und starten:
@@ -135,8 +134,6 @@ Das Dashboard ist statisch (HTML, CSS, JavaScript) und bekommt alles über den W
 ```bash
 sudo apt install nginx
 sudo cp -r ~/urfd/dashboard /var/www/urfd-dashboard
-sudo mkdir -p /var/lib/xlxd-ch
-sudo chown -R www-data:www-data /var/lib/xlxd-ch
 
 sudo cp ~/urfd/docker/nginx-dashboard.conf /etc/nginx/sites-available/urfd-dashboard.conf
 # der Resolver für Reflektorliste und QuadNet (die mit RESOLVER markierte Zeile): der dieses Systems

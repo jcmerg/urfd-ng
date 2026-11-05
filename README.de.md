@@ -727,7 +727,7 @@ Jede Seite außer Last heard und Admin trägt oben eine schmale LCD-Zeile mit de
 - Modulnamen aus urfd.ini (eine einzige Quelle)
 - Kontakt-E-Mail gegen Bots verschleiert
 
-**Robust gegen einen Ausfall des Verzeichnisses**: Die Reflektorliste kommt vom XLX-Verzeichnis über das nginx des Dashboards, das eine Kopie 5 Minuten lang hält (`/var/lib/xlxd-ch/nginx-cache`) und eine ältere ausliefert, solange das Verzeichnis ausgefallen ist; auch der QuadNet-Feed geht über nginx. Der Reflektor trägt sich selbst ins Verzeichnis ein, siehe [CallingHome](#xlx-verzeichnis-callinghome).
+**Robust gegen einen Ausfall des Verzeichnisses**: Die Reflektorliste kommt vom XLX-Verzeichnis über das nginx des Dashboards, das eine Kopie 5 Minuten lang hält (im Container, ein neues Image beginnt ohne sie) und eine ältere ausliefert, solange das Verzeichnis ausgefallen ist; auch der QuadNet-Feed geht über nginx. Der Reflektor trägt sich selbst ins Verzeichnis ein, siehe [CallingHome](#xlx-verzeichnis-callinghome).
 
 ```ini
 [Dashboard]
@@ -823,7 +823,7 @@ Die gesamte Konfiguration liegt in `/opt/urfd/config/` (als Volume eingebunden):
 - `urfd.blacklist` / `urfd.whitelist`: Zugangskontrolle (wird per SIGHUP neu geladen)
 - `urfd.terminal`: Konfiguration für G3 (Icom Terminal/AP-Modus). Optionen: `address <public-ip>` (hinter NAT nötig), `modules <letters>` (erlaubte Reflektor-Module), `alias <callsign>` (zusätzliches Reflektor-Rufzeichen, das von Terminals angenommen wird, z.B. um sowohl `URFxxx` als auch `XLXxxx` anzunehmen; mehrfach möglich). Wird bei Änderung über `stat()` neu geladen.
 
-Die Einstellungen des Dashboards stehen in `[Dashboard]` in `urfd.ini` (Banner, Zeilen, IP-Adressen); die Fußzeile nennt `[Names] SysopEmail`. `/opt/urfd/xlxd-ch/` hält die Kopie der Reflektorliste von nginx.
+Die Einstellungen des Dashboards stehen in `[Dashboard]` in `urfd.ini` (Banner, Zeilen, IP-Adressen); die Fußzeile nennt `[Names] SysopEmail`.
 
 ## Installation von Hand
 

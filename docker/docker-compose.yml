@@ -4,7 +4,6 @@
 # state live outside the checkout, in $URFD_DATA (default /opt/urfd), so a
 # git pull never touches them:
 #   $URFD_DATA/config/                     urfd.ini (also the dashboard's [Dashboard]), interlink, black/whitelist, databases
-#   $URFD_DATA/xlxd-ch/                    the dashboard's copy of the XLX directory's reflector list
 #
 # setup.sh in the repository root creates all of this. By hand:
 #   cd docker && docker compose build && docker compose up -d
@@ -42,7 +41,6 @@ services:
         hard: -1
     volumes:
       - ${URFD_DATA:-/opt/urfd}/config:/usr/local/etc/urfd
-      - ${URFD_DATA:-/opt/urfd}/xlxd-ch:/var/lib/xlxd-ch
     environment:
       # the Docker tcd's MonitorHttpPort, for the dashboard's /tcd/ (build.sh takes it from its tcd.ini)
       - TCD_MONITOR_PORT=${TCD_MONITOR_PORT:-8080}

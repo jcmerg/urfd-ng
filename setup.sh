@@ -296,7 +296,7 @@ ask_transcoder() {
 
 write_urfd_config() {
     info "Writing the reflector configuration to $CFG_DIR"
-    mkdir -p "$CFG_DIR" "$DATA_DIR/xlxd-ch"
+    mkdir -p "$CFG_DIR"
     local ini="$CFG_DIR/urfd.ini"
     cp "$REPO_DIR/config/urfd.ini" "$ini"
     for f in urfd.interlink urfd.whitelist urfd.blacklist urfd.terminal; do
@@ -376,13 +376,9 @@ write_urfd_config() {
 }
 
 # urfd.ini holds the admin, hotspot and BrandMeister passwords, so only root
-# (urfd in the container) reads it; the web server (www-data, uid 33) owns the
-# directory of its reflector list copy instead of everyone being able to write there
+# (urfd in the container) reads it
 secure_files() {
     chmod 600 "$CFG_DIR/urfd.ini"
-    mkdir -p "$DATA_DIR/xlxd-ch"
-    chown 33:33 "$DATA_DIR/xlxd-ch"
-    chmod 755 "$DATA_DIR/xlxd-ch"
 }
 
 write_tcd_config() {
