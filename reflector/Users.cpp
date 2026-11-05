@@ -73,7 +73,8 @@ bool CUsers::IsHidden(const CCallsign &my, char module)
 void CUsers::Clear(void)
 {
 	m_Users.clear();
-	CNotifierManager::Instance().Dispatch("last_heard_cleared", []() -> nlohmann::json { return nlohmann::json::object(); });
+	// in line with the station events
+	CNotifierManager::Instance().DispatchDeferred("last_heard_cleared", []() -> nlohmann::json { return nlohmann::json::object(); });
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -85,9 +86,11 @@ void CUsers::Hearing(const CCallsign &my, const CCallsign &rpt1, const CCallsign
 }
 
 // replaces: the callsign this station was shown as so far (StationRenamed)
+// built later in the notifier's thread: the name lookup takes the ID database
+// locks, and the callers hold the users lock
 static void DispatchStationEvent(const std::string &eventType, const CUser &heard, const std::string &replaces = "")
 {
-	CNotifierManager::Instance().Dispatch(eventType, [&]() -> nlohmann::json {
+	CNotifierManager::Instance().DispatchDeferred(eventType, [heard, replaces]() -> nlohmann::json {
 		auto j = heard.ToJson();
 		if (!replaces.empty())
 			j["replaces"] = replaces;

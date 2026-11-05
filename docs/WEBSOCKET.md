@@ -140,7 +140,7 @@ Example payload:
 
 - `callsign`: 8 characters and the module or suffix, as urfd keeps it (`N0CALL  B` is N0CALL-B)
 - `modules`: every module the node is linked to; a DMR hotspot has `ts1` / `ts2` as well, the module of each timeslot
-- `ip`: only with `[Dashboard] LinksIP` other than `HideIP` (the default), masked as it says: `ShowLast1ByteOfIP` `*.*.*.123`, `ShowLast2ByteOfIP` `*.*.56.123`, `ShowLast3ByteOfIP` `*.34.56.123`, `ShowFullIP`; for IPv6 the last two groups; the character is `IPMask`
+- `ip`: only with `[Dashboard] LinksIP` other than `HideIP` (the default), masked as it says: `ShowLast1ByteOfIP` `*.*.*.123`, `ShowLast2ByteOfIP` `*.*.56.123`, `ShowLast3ByteOfIP` `*.34.56.123`, `ShowFullIP`; for IPv6 the last 1, 2 or 3 groups; the character is `IPMask`
 
 ### `client_removed`
 
@@ -249,9 +249,9 @@ A client sends a JSON object with `cmd` and any `id` of its own; the answer is a
 ```
 
 - `snapshot`: a new `state_snapshot` (the last heard times of links and peers, a node changing its module and transcoding change without an event; the dashboard asks every 10 s). At most one every 2 seconds per connection, else a `reply` with an error.
-- `auth`: logs this connection in to the admin commands, with `password` (the `[Admin] Password`) or a `token` from an earlier login, e.g. after a reload of the page. A wrong password locks logins for 2 seconds; a token is valid for an hour. Answers `admin page disabled` without `[Admin] Enable = true` and `[Dashboard] Admin = true`.
+- `auth`: logs this connection in to the admin commands, with `password` (the `[Admin] Password`) or a `token` from an earlier login, e.g. after a reload of the page. A wrong password pauses logins from that browser's address for 2 seconds, doubling with every further one up to 5 minutes (the address comes from `X-Forwarded-For` when urfd's peer is on loopback, i.e. nginx; a TLS proxy in front passes `X-Real-IP` to it, or all browsers share one pause); a token is valid until an hour after its last command. Answers `admin page disabled` without `[Admin] Enable = true` and `[Dashboard] Admin = true`.
 - `logout`: ends the login and makes its token invalid.
-- every command of the admin socket, with the same fields and answers (`status`, `tg_list`, `tg_add`, `log`, `mmdvm_user_add`, `plugin`, ...; see `reflector/AdminSocket.cpp`), without a `token`: the connection's login counts. Without one the answer is `authentication required`. The commands run one after another in a thread of their own, so a slow one never holds up the events.
+- every command of the admin socket, with the same fields and answers (`status`, `tg_list`, `tg_add`, `log`, `mmdvm_user_add`, `plugin`, ...; see `reflector/AdminSocket.cpp`), without a `token`: the connection's login counts. Without one the answer is `authentication required`, with `"code": "auth"`. The commands run one after another in a thread of their own, so a slow one never holds up the events; at most 64 wait, 8 of them from one connection, else the answer is `busy, try again`.
 
 A request is at most 64 KB; a longer one closes the connection. The TCP admin socket (`[Admin] Port`) stays for scripts and takes the same commands with a `token` from its own `auth`.
 

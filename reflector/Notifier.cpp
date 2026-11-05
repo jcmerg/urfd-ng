@@ -1,12 +1,15 @@
+#include <arpa/inet.h>
+#include <cstring>
 #include <iostream>
-#include <vector>
+#include <sstream>
 
 #include "Global.h"
 #include "Notifier.h"
 #include "DMRMMDVMClient.h"
 #include "websocket_lws_notifier.h"
 
-// an IP shown as far as the mode allows, empty when it is hidden
+// an IP shown as far as the mode allows, empty when it is hidden: the last
+// 1, 2 or 3 bytes of an IPv4 address, the last 1, 2 or 3 groups of an IPv6 one
 static std::string MaskIP(const std::string &ip, const std::string &mode, const std::string &mc)
 {
 	if (mode == "ShowFullIP")
@@ -14,37 +17,39 @@ static std::string MaskIP(const std::string &ip, const std::string &mode, const 
 	if (mode != "ShowLast1ByteOfIP" && mode != "ShowLast2ByteOfIP" && mode != "ShowLast3ByteOfIP")
 		return "";
 	const int keep = mode[8] - '0';
-	// an IPv4 mapped into IPv6 (::ffff:1.2.3.4) as the IPv4 it is
-	if (ip.find('.') != std::string::npos && ip.find(':') != std::string::npos)
-		return MaskIP(ip.substr(ip.rfind(':') + 1), mode, mc);
-	if (ip.find(':') == std::string::npos)
+	unsigned char b[16];
+	if (inet_pton(AF_INET6, ip.c_str(), b) == 1)
 	{
-		// IPv4: the last <keep> bytes
-		std::vector<std::string> bytes;
-		std::string::size_type start = 0, dot;
-		while ((dot = ip.find('.', start)) != std::string::npos)
+		// an IPv4 address mapped into IPv6 (::ffff:1.2.3.4) as the IPv4 address it is
+		static const unsigned char mapped[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
+		if (memcmp(b, mapped, 12) == 0)
 		{
-			bytes.push_back(ip.substr(start, dot - start));
-			start = dot + 1;
+			char v4[INET_ADDRSTRLEN];
+			if (!inet_ntop(AF_INET, b + 12, v4, sizeof(v4)))
+				return "";
+			return MaskIP(v4, mode, mc);
 		}
-		bytes.push_back(ip.substr(start));
-		if (bytes.size() != 4)
-			return "";
+		std::ostringstream out;
+		out << std::hex;
+		for (int i = 0; i < 8; i++)
+		{
+			if (i)
+				out << ':';
+			if (i < 8 - keep)
+				out << mc;
+			else
+				out << ((unsigned(b[2 * i]) << 8) | b[2 * i + 1]);
+		}
+		return out.str();
+	}
+	if (inet_pton(AF_INET, ip.c_str(), b) == 1)
+	{
 		std::string out;
 		for (int i = 0; i < 4; i++)
-			out += (i ? "." : "") + (i < 4 - keep ? mc : bytes[i]);
+			out += (i ? "." : "") + (i < 4 - keep ? mc : std::to_string(b[i]));
 		return out;
 	}
-	// IPv6: the last two groups
-	const auto colon = ip.rfind(':');
-	const auto before = (colon == std::string::npos || colon == 0) ? std::string::npos : ip.rfind(':', colon - 1);
-	if (before == std::string::npos)
-		return "";
-	std::string out;
-	for (int i = 0; i < 6; i++)
-		out += mc + ":";
-	auto group = [](const std::string &g) { return g.empty() ? std::string("0") : g; };
-	return out + group(ip.substr(before + 1, colon - before - 1)) + ":" + group(ip.substr(colon + 1));
+	return "";
 }
 
 static void AddIP(nlohmann::json &j, const CIp &ip, const std::string &modeKey)
@@ -140,6 +145,8 @@ void CNotifierManager::Start(void)
 		(int)g_Configure.GetUnsigned(g_Keys.ws.pinginterval),
 		(int)g_Configure.GetUnsigned(g_Keys.ws.idletimeout)))
 	{
+		m_DeferStop = false;
+		m_DeferThread = std::thread(&CNotifierManager::DeferLoop, this);
 		m_Running = true;
 		std::cout << "WebSocket: listening on " << bind << ":" << port << std::endl;
 	}
@@ -153,10 +160,63 @@ void CNotifierManager::Start(void)
 void CNotifierManager::Stop(void)
 {
 	m_Running = false;
+	{
+		std::lock_guard<std::mutex> lk(m_DeferMutex);
+		m_DeferStop = true;
+		m_Deferred.clear();
+	}
+	m_DeferCv.notify_all();
+	if (m_DeferThread.joinable())
+		m_DeferThread.join();
 	// the object stays until exit: a Dispatch() that already saw m_Running
 	// still finds it, and Publish() on a stopped listener does nothing
 	if (m_Ws)
 		m_Ws->Stop();
+}
+
+#define DEFER_MAX 4096	// events waiting; more means the thread is stuck, a dashboard catches up with its next snapshot
+
+void CNotifierManager::Defer(const std::string &type, std::function<nlohmann::json()> payload)
+{
+	{
+		std::lock_guard<std::mutex> lk(m_DeferMutex);
+		if (m_DeferStop)
+			return;
+		if (m_Deferred.size() >= DEFER_MAX)
+		{
+			if (!m_DeferFull)
+				std::cerr << "WebSocket: " << DEFER_MAX << " events waiting, dropping " << type << " and what follows until there is room" << std::endl;
+			m_DeferFull = true;
+			return;
+		}
+		m_DeferFull = false;
+		m_Deferred.emplace_back(type, std::move(payload));
+	}
+	m_DeferCv.notify_one();
+}
+
+void CNotifierManager::DeferLoop(void)
+{
+	while (true)
+	{
+		std::pair<std::string, std::function<nlohmann::json()>> next;
+		{
+			std::unique_lock<std::mutex> lk(m_DeferMutex);
+			m_DeferCv.wait(lk, [this] { return m_DeferStop || !m_Deferred.empty(); });
+			if (m_DeferStop)
+				return;
+			next = std::move(m_Deferred.front());
+			m_Deferred.pop_front();
+		}
+		try
+		{
+			Send(CEvent(next.first, next.second(), m_ReflectorName));
+		}
+		catch (const std::exception &ex)
+		{
+			std::cerr << "WebSocket: cannot build " << next.first << ": " << ex.what() << std::endl;
+		}
+	}
 }
 
 void CNotifierManager::Send(const CEvent &ev)
