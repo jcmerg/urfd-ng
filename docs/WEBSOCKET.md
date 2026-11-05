@@ -25,11 +25,14 @@ location /ws {
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
+    proxy_set_header X-Forwarded-For $remote_addr;
     proxy_read_timeout 120s;
 }
 ```
 
-The Docker image has this block in `docker/nginx-dashboard.conf`, next to the static dashboard (`dashboard/`).
+`X-Forwarded-For` tells urfd the browser's address, so a wrong admin password pauses only that browser's logins (see Requests); without it every browser comes from 127.0.0.1 and shares one pause. urfd reads the header only from a peer on loopback, and only its last entry.
+
+The Docker image has this block in `docker/nginx-dashboard.conf`, next to the static dashboard (`dashboard/`); there the browser's address comes from the `X-Real-IP` of a TLS proxy in front. A TLS proxy that passes `/ws` straight to port 10102 instead sets `X-Forwarded-For` itself, as above.
 
 The browser connects with `new WebSocket("wss://" + location.host + "/ws")`; a subprotocol is optional (`urfd`).
 
