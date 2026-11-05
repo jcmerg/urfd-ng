@@ -737,7 +737,7 @@ Every page but Last heard and Admin carries a slim LCD line with the current tra
 - Module names from urfd.ini (single source of truth)
 - Contact email obfuscated against bots
 
-**Resilience against a directory outage**: the reflector list comes from the XLX directory through the dashboard's nginx, which keeps a copy for 5 minutes (`/var/lib/xlxd-ch/nginx-cache`) and serves an older one while the directory is down; the QuadNet feed goes through nginx as well. The reflector registers itself in the directory, see [CallingHome](#xlx-directory-registration-callinghome).
+**Resilience against a directory outage**: the reflector list comes from the XLX directory through the dashboard's nginx, which keeps a copy for 5 minutes (in the container, a new image starts without it) and serves an older one while the directory is down; the QuadNet feed goes through nginx as well. The reflector registers itself in the directory, see [CallingHome](#xlx-directory-registration-callinghome).
 
 ```ini
 [Dashboard]
@@ -833,7 +833,7 @@ All configuration is in `/opt/urfd/config/` (mounted as volume):
 - `urfd.blacklist` / `urfd.whitelist` - Access control (reloaded on SIGHUP)
 - `urfd.terminal` - G3 (Icom Terminal/AP mode) configuration. Options: `address <public-ip>` (required behind NAT), `modules <letters>` (allowed reflector modules), `alias <callsign>` (additional reflector callsign accepted from terminals, e.g. to accept both `URFxxx` and `XLXxxx`; repeatable). Hot-reloaded via `stat()` on file change.
 
-The dashboard's settings are `[Dashboard]` in `urfd.ini` (banner, rows, IP addresses); the footer names `[Names] SysopEmail`. `/opt/urfd/xlxd-ch/` holds nginx's copy of the reflector list.
+The dashboard's settings are `[Dashboard]` in `urfd.ini` (banner, rows, IP addresses); the footer names `[Names] SysopEmail`.
 
 ## Installation by Hand
 

@@ -28,14 +28,13 @@ The image is built from this checkout; configuration and state live outside it, 
 | Host path | In the container | Content |
 |---|---|---|
 | `$URFD_DATA/config/` | `/usr/local/etc/urfd` | `urfd.ini` (with the dashboard's `[Dashboard]`), interlink, black/whitelist, downloaded ID databases |
-| `$URFD_DATA/xlxd-ch/` | `/var/lib/xlxd-ch` | nginx's copy of the XLX directory's reflector list |
 | `$URFD_DATA/tcd/` | `/usr/local/etc/tcd` (tcd service) | `tcd.ini`, only with `--profile tcd` |
 
 `urfd.ini` must exist. See the main [README](../README.md) and the commented templates in [config/](../config/) for details.
 
 ### Dashboard
 
-The dashboard is static and has no PHP: nginx serves its files, passes `/ws` to urfd's WebSocket and fetches the XLX directory's reflector list (kept in `/var/lib/xlxd-ch/nginx-cache`, fresh for 5 minutes, an older copy while the directory is down) and the QuadNet feed. At start the container puts the system's resolver into the line marked `RESOLVER` of `nginx-dashboard.conf`, so nginx starts without DNS. Before urfd 4.38 the image had php-fpm and a volume `urfd-xml` for the status file; the volume is no longer used (`docker volume rm urfd_urfd-xml`).
+The dashboard is static and has no PHP: nginx serves its files, passes `/ws` to urfd's WebSocket and fetches the XLX directory's reflector list (kept in the container, fresh for 5 minutes, an older copy while the directory is down) and the QuadNet feed. At start the container puts the system's resolver into the line marked `RESOLVER` of `nginx-dashboard.conf`, so nginx starts without DNS. Before urfd 4.38 the image had php-fpm and a volume `urfd-xml` for the status file; the volume is no longer used (`docker volume rm urfd_urfd-xml`), nor is `$URFD_DATA/xlxd-ch/`, once the CallingHome state and then the reflector list cache.
 
 Note that `supervisorctl` is not usable inside the container — `supervisord.conf`
 defines no `unix_http_server` socket. Restart with `docker restart urfd`.
