@@ -11,6 +11,9 @@ var q = function (id) { return document.getElementById(id); };
 var TOKEN_KEY = 'urf-admin-token';
 var mounted = false, refreshTimer = null;
 
+// urfd's answer when the login is missing or ran out
+function authLost(resp) { return resp.code === 'auth'; }
+
 function getToken() { try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; } }
 function setToken(t) { try { if (t) sessionStorage.setItem(TOKEN_KEY, t); else sessionStorage.removeItem(TOKEN_KEY); } catch (e) {} }
 
@@ -23,7 +26,7 @@ function jsArg(v) { return esc(JSON.stringify(String(v === undefined || v === nu
 // a command for urfd; a login that ran out shows the login again
 function adminPost(cmd, args, callback) {
     URF.request(cmd, args).then(function (resp) {
-        if (resp.message === 'authentication required') { setToken(''); showLogin(); }
+        if (authLost(resp)) { setToken(''); showLogin(); }
         if (callback) callback(resp);
     });
 }
@@ -100,9 +103,9 @@ function resume() {
         if (!mounted) return;
         if (resp.status === 'ok') showAdmin();
         else {
-            if (resp.message === 'authentication required') setToken('');
+            if (authLost(resp)) setToken('');
             showLogin();
-            if (resp.message && resp.message !== 'authentication required') {
+            if (resp.message && !authLost(resp)) {
                 q('login-error').textContent = resp.message;
                 display('login-error', true);
             }
