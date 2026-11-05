@@ -278,15 +278,47 @@ ask_transcoder() {
     [ "$HW" = "2" ] && cover=3
     [ "$HW" = "3" ] && cover=0
     if [ "$HW" != "2" ] || [ ${#TC_MODULES} -gt $cover ]; then
-        warn "this needs a codec plugin (CodecPlugin = <path> in $TCD_INI), which is not part of this repository and not installed by setup.sh; tcd does not start without it. See 'Codec plugins' in tcd/README.md, e.g. https://github.com/jcmerg/tcd-mbelib-neo-plugin (read its patent notice)"
-        # Docker and tcd/build.sh build every tcd/plugins/<name>/ with tcd, update pulls it
-        echo "  Clone it to $REPO_DIR/tcd/plugins/<name>/ now, before tcd is built"
-        echo "  (git clone https://github.com/jcmerg/tcd-mbelib-neo-plugin.git $REPO_DIR/tcd/plugins/mbelib-neo),"
-        echo "  then CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so in $TCD_INI"
-        ask_yn "Continue?" y || exit 0
+        ask_codec_plugin
     fi
     if [ "$HW" = "2" ] && [ ${#TC_MODULES} -gt 1 ]; then
         echo "  (DV3000 + DV3003 cover 2 modules, two DV3000 1, two DV3003 3; tcd tells which at start)"
+    fi
+}
+
+# A codec plugin does D-Star and DMR/YSF (and P25) in software. None is part of
+# this repository: software AMBE/AMBE2+ may touch patents ("Codec plugins" in
+# tcd/README.md), so using one is the operator's decision and setup.sh fetches
+# tcd-mbelib-neo-plugin only when asked to. Docker and tcd/build.sh build every
+# tcd/plugins/<name>/ with tcd, write_tcd_config loads them, update pulls them.
+ask_codec_plugin() {
+    local d
+    for d in "$REPO_DIR"/tcd/plugins/*/; do
+        if [ -f "$d/Makefile" ]; then
+            info "Codec plugin in ${d%/}: it is built with tcd and loaded in $TCD_INI"
+            return 0
+        fi
+    done
+    echo
+    echo "This needs a codec plugin, a software vocoder for D-Star and DMR/YSF. None is part"
+    echo "of this repository: software AMBE and AMBE2+ may touch patents, so using one is your"
+    echo "decision (see 'Codec plugins' in tcd/README.md). One with mbelib-neo is"
+    echo "https://github.com/jcmerg/tcd-mbelib-neo-plugin, read its patent notice first."
+    if ask_yn "Fetch tcd-mbelib-neo-plugin into tcd/plugins/mbelib-neo now?" n; then
+        repo_git clone -q https://github.com/jcmerg/tcd-mbelib-neo-plugin.git tcd/plugins/mbelib-neo \
+            || die "could not fetch tcd-mbelib-neo-plugin"
+        info "tcd-mbelib-neo-plugin fetched, it is built with tcd and loaded in $TCD_INI"
+    else
+        warn "without a codec plugin tcd does not start for these modules. Put one into $REPO_DIR/tcd/plugins/<name>/, add 'CodecPlugin = /usr/local/lib/tcd/<file>.so' to $TCD_INI and run 'sudo ./setup.sh update'"
+        ask_yn "Continue?" y || exit 0
+    fi
+}
+
+# the codec plugins built with tcd, one path per line
+built_codec_plugins() {
+    if [ "$TCD_DOCKER" = true ]; then
+        docker run --rm --entrypoint sh urfd-tcd:latest -c 'ls /usr/local/lib/tcd/*.so 2>/dev/null' 2>/dev/null || true
+    else
+        ls /usr/local/lib/tcd/*.so 2>/dev/null || true
     fi
 }
 
@@ -387,9 +419,12 @@ write_tcd_config() {
     cp "$REPO_DIR/tcd/config/tcd.ini" "$TCD_INI"
     # a password for the monitor page (and tcdmon from other hosts)
     TCD_MONITOR_PASSWORD=$(python3 -c 'import secrets, string; print("".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12)))')
-    python3 - "$TCD_INI" "$TCD_SERVER" "$TC_MODULES" "$TCD_SERIALS" "${TC_PASSWORD:-}" "$TCD_MONITOR_PASSWORD" <<'PY'
+    # every codec plugin built with tcd gets its CodecPlugin line
+    local plugins
+    plugins=$(built_codec_plugins | tr '\n' ' ')
+    python3 - "$TCD_INI" "$TCD_SERVER" "$TC_MODULES" "$TCD_SERIALS" "${TC_PASSWORD:-}" "$TCD_MONITOR_PASSWORD" "$plugins" <<'PY'
 import re, sys
-path, server, modules, serials, password, monpass = sys.argv[1:7]
+path, server, modules, serials, password, monpass, plugins = sys.argv[1:8]
 lines = open(path).read().split('\n')
 out = []
 for l in lines:
@@ -402,6 +437,9 @@ for l in lines:
     elif re.match(r'^\s*#?\s*MonitorPassword\s*=', l):
         l = 'MonitorPassword = ' + monpass
     elif re.match(r'^\s*#?\s*DeviceSerial\s*=', l):
+        continue
+    elif plugins.split() and re.match(r'^\s*#\s*CodecPlugin\s*=', l):
+        out += ['CodecPlugin = ' + p for p in plugins.split()]
         continue
     out.append(l)
     # the serials go right after the comment that explains them
@@ -459,6 +497,9 @@ build_tcd() {
 }
 
 ask_tcd_serials() {
+    TCD_SERIALS=""
+    # no sticks: everything in software, from the codec plugin
+    [ "$HW" = "3" ] && return 0
     echo
     echo "Connected USB serial devices (the AMBE sticks show up here):"
     if [ "$TCD_DOCKER" = true ]; then
@@ -468,8 +509,15 @@ ask_tcd_serials() {
     fi
     echo
     echo "Enter the serial number(s) of the AMBE device(s), separated by spaces."
-    echo "Leave empty to use every AMBE device tcd finds."
-    ask TCD_SERIALS "Serial numbers" "" '^[A-Za-z0-9 ]*$' "Letters and digits only."
+    if [ "$TCD_DOCKER" = true ] && [ -n "$(built_codec_plugins)" ]; then
+        # docker/build.sh gives the container the sticks for a tcd.ini with a DeviceSerial,
+        # or one without a CodecPlugin; next to a plugin only the serials tell it
+        echo "Next to a codec plugin the container gets the sticks only when tcd.ini names them."
+        ask TCD_SERIALS "Serial numbers" "" '^ *[A-Za-z0-9]+( +[A-Za-z0-9]+)* *$' "At least one serial number, letters and digits."
+    else
+        echo "Leave empty to use every AMBE device tcd finds."
+        ask TCD_SERIALS "Serial numbers" "" '^[A-Za-z0-9 ]*$' "Letters and digits only."
+    fi
 }
 
 start_tcd() {
@@ -583,7 +631,10 @@ PY
 }
 
 # Since dashboard 3.0 (urfd 4.38) the dashboard reads everything from urfd's
-# WebSocket, so it has to be on: a dashboard without it stays empty.
+# WebSocket, so it has to be on: a dashboard without it stays empty. Unlike
+# before 4.38 an existing "Enable = false" is switched on as well: it came from
+# the template of the time (the WebSocket served only the /live/ dashboard).
+# Who wants no dashboard sets it back to false after the update.
 migrate_websocket() {
     local ini="$CFG_DIR/urfd.ini"
     [ -f "$ini" ] || return 0
@@ -623,9 +674,12 @@ def get(key, default=''):
     m = re.search(r"^\s*\$" + k + r"\s*=\s*(?:'([^']*)'|\"([^\"]*)\"|([\w.]+))\s*;", s, re.M)
     return next((g for g in m.groups() if g is not None), default) if m else default
 modes = ('HideIP', 'ShowLast1ByteOfIP', 'ShowLast2ByteOfIP', 'ShowLast3ByteOfIP', 'ShowFullIP')
+# what the old dashboard showed; without its file, nothing (urfd's default HideIP)
 def mode(key):
-    v = get(key, 'ShowLast2ByteOfIP')
-    return v if v in modes else 'ShowLast2ByteOfIP'
+    if not s:
+        return ''
+    v = get(key, 'HideIP')
+    return v if v in modes else 'HideIP'
 def rows(key, default):
     v = get(key)
     return str(int(v) + 1) if v.isdigit() else default
@@ -648,13 +702,16 @@ PY
     set_ini "$ini" Dashboard Filter "${filter:-true}"
     set_ini "$ini" Dashboard Links "${links:-100}"
     set_ini "$ini" Dashboard Peers "${peers:-100}"
-    set_ini "$ini" Dashboard LinksIP "${linksip:-ShowLast2ByteOfIP}"
-    set_ini "$ini" Dashboard PeersIP "${peersip:-ShowLast2ByteOfIP}"
+    [ -n "$linksip" ] && set_ini "$ini" Dashboard LinksIP "$linksip"
+    [ -n "$peersip" ] && set_ini "$ini" Dashboard PeersIP "$peersip"
     set_ini "$ini" Dashboard IPMask "${mask:-*}"
     # the admin page as before: the old dashboard had a switch of its own for it
     set_ini "$ini" Dashboard Admin "${admin:-false}"
     if [ -f "$php" ]; then
+        # dashboards before 2.8.2 kept a copy of the admin password in there
+        sed -E -i "/^[[:space:]]*\\\$Admin\\[[\"']Password[\"']\\]/d" "$php"
         mv "$php" "$php.old"
+        chmod 600 "$php.old"
         info "The old dashboard settings are kept as $php.old, they are not used any more"
     fi
 }
@@ -830,7 +887,7 @@ main() {
             update
             return
         fi
-        ask_yn "Set it up again? This overwrites urfd.ini, the dashboard config and tcd.ini." n || exit 0
+        ask_yn "Set it up again? This overwrites urfd.ini and tcd.ini." n || exit 0
     fi
 
     bold "urfd / tcd setup"

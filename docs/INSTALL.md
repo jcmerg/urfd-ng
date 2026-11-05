@@ -5,17 +5,16 @@
 This guide sets up a URF reflector, with its web dashboard and optionally the tcd transcoder, using the setup script. You need no Linux experience beyond typing a few commands. The script asks a handful of questions, writes the configuration for you, and builds and starts everything.
 
 - **urfd** is the reflector. It runs in Docker, together with the dashboard.
-- **tcd** is the transcoder. It converts audio between D-Star, DMR/YSF, M17, P25 and NXDN, using DVSI AMBE USB sticks. The setup script runs it in Docker or directly on the machine with systemd, as you choose; both work with the sticks (see "tcd in Docker" in [tcd/README.md](../tcd/README.md#tcd-in-docker)). Without a transcoder the reflector still works, but users only hear stations that use the same mode.
+- **tcd** is the transcoder. It converts audio between D-Star, DMR/YSF, M17, P25 and NXDN, with DVSI AMBE USB sticks, in software with a codec plugin, or both. The setup script runs it in Docker or directly on the machine with systemd, as you choose; both work with the sticks (see "tcd in Docker" in [tcd/README.md](../tcd/README.md#tcd-in-docker)). Without a transcoder the reflector still works, but users only hear stations that use the same mode.
 
 ## What you need
 
 - **A computer that is always on**: a PC, a small server, a VPS, or a Raspberry Pi 4/5. 2 GB of RAM is enough.
 - **Linux**: Debian 12, Ubuntu 22.04 or newer, or Raspberry Pi OS (64-bit recommended). A fresh install is best.
 - **Internet access** from that computer, and the ability to open ports in your router or firewall (see [Ports](#ports)).
-- **For the transcoder**: DVSI AMBE USB sticks (DV3000/ThumbDV or DV3003), plugged into the machine that runs tcd.
-  - One device (DV3000 or DV3003): 1 transcoded module, DMR/YSF then needs a [codec plugin](../tcd/README.md#codec-plugins).
-  - DV3000 + DV3003: 2 modules. Two DV3000: 1 module. Two DV3003: up to 3 modules.
-  - More modules, or no stick at all: a [codec plugin](../tcd/README.md#codec-plugins) for D-Star and DMR does them in software (not part of this repository, `setup.sh` does not install it).
+- **For the transcoder**, one of:
+  - **DVSI AMBE USB sticks** (DV3000/ThumbDV or DV3003), plugged into the machine that runs tcd. One device: 1 transcoded module, DMR/YSF then needs a codec plugin. DV3000 + DV3003: 2 modules. Two DV3000: 1 module. Two DV3003: up to 3 modules.
+  - **A codec plugin**, a software vocoder for D-Star and DMR/YSF: no sticks needed, as many modules as the CPU manages, also next to sticks for the modules they don't cover. None is part of this repository, because software AMBE and AMBE2+ may touch patents: using one is your decision (see [Codec plugins](../tcd/README.md#codec-plugins)). The setup script offers to fetch [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin); read its patent notice first. M17 and P25 need neither: tcd brings Codec2 and an IMBE vocoder of its own.
 - **A reflector callsign**: `URF` plus three letters or digits, e.g. `URF363`. Check that it is not taken in the [reflector list](https://xlxapi.rlx.lu/api/exportreflectors).
 
 ## Which setup?
@@ -23,6 +22,7 @@ This guide sets up a URF reflector, with its web dashboard and optionally the tc
 | Your situation | Choose in the script |
 |---|---|
 | Reflector and AMBE sticks on the same machine | **1** Reflector and transcoder |
+| Reflector with transcoding in software, no sticks | **1** Reflector and transcoder, AMBE hardware **3** (none), and fetch the codec plugin |
 | Reflector without transcoder | **2** Reflector only, answer **no** to "transcoder on another machine" |
 | Reflector on a server or VPS, AMBE sticks on a Raspberry Pi at home | On the server: **2** Reflector only, answer **yes**. On the Pi: **3** Transcoder only |
 
@@ -57,12 +57,13 @@ The script asks its questions one after another. A value in `[brackets]` is the 
 | Dashboard address | How the dashboard is reached from outside, e.g. `http://urf123.example.com:8363` or `http://your-ip:8363`. The suggestion is the local address, fine for a first test |
 | Modules | The "rooms" of the reflector, letters A to Z. `ADMSZ` is a good start |
 | Echo/parrot module | A module that plays back what you say, ideal for testing. Usually `Z` |
-| Transcoded modules | The modules whose audio is converted between modes, as many as your AMBE hardware allows (more with a codec plugin) |
+| Transcoded modules | The modules whose audio is converted between modes, as many as your AMBE hardware allows; with a codec plugin as many as you like |
 | Admin page | Lets you manage talkgroups and see the live log in the dashboard. The script creates a password. Over plain `http://` the password crosses the network unencrypted: for use from outside put a TLS proxy (Caddy, nginx) in front of port 8363 |
 | Register in the XLX directory | Lists the reflector in Pi-Star, WPSD and other hotspot software. Say **no** for now and register later, once the reflector works and is reachable from the internet |
 | Install Docker | Yes, if the script offers it |
 | AMBE hardware | 1 for a single device (DV3000 or DV3003), 2 for two devices, 3 for none (a codec plugin does everything in software) |
-| Serial numbers | The script lists the connected USB serial devices. Enter the serial numbers of your AMBE sticks, or press Enter to let tcd pick the AMBE sticks it recognises |
+| Fetch tcd-mbelib-neo-plugin | Asked when a codec plugin is needed: for no sticks, a single device, or more modules than the devices cover. **yes** fetches it into `tcd/plugins/mbelib-neo`, it is built with tcd and entered in `tcd.ini` (`CodecPlugin`). Read its patent notice first. With **no**, tcd does not start for those modules until you add a plugin. A plugin already in `tcd/plugins/<name>/` is taken without asking |
+| Serial numbers | Only with sticks. The script lists the connected USB serial devices. Enter the serial numbers of your AMBE sticks, or press Enter to let tcd pick the AMBE sticks it recognises. In Docker next to a codec plugin at least one is needed, the container gets the sticks only then |
 
 Building takes a few minutes, on a Raspberry Pi up to half an hour. At the end the script shows the dashboard address, the admin password and the ports to open. Everything it prints is also saved in `/var/log/urfd-setup.log`.
 
@@ -126,7 +127,7 @@ The update keeps your configuration. It pulls the new version, rebuilds and rest
 | `/opt/urfd/config/urfd.ini` | Reflector: modules, protocols, XLX directory registration, BrandMeister connection, D-Star and YSF links, interlinks, and the dashboard (`[Dashboard]`: banner text, IP privacy; `[Admin]`: admin page). Every setting is explained in the file |
 | `/opt/urfd/config/urfd.interlink` | Links to other reflectors |
 | `/opt/urfd/config/urfd.blacklist`, `urfd.whitelist` | Callsigns that may or may not link |
-| `/opt/urfd/tcd/tcd.ini` (natively `/usr/local/etc/tcd.ini`) | Transcoder: reflector address, modules, AMBE serial numbers, audio levels |
+| `/opt/urfd/tcd/tcd.ini` (natively `/usr/local/etc/tcd.ini`) | Transcoder: reflector address, modules, AMBE serial numbers, codec plugins (`CodecPlugin`) and which vocoder new streams get (`CodecDStar`, `CodecDMR`; switchable at run time in the transcoder monitor), audio levels |
 
 After editing, restart the reflector (`sudo ~/urfd/setup.sh restart urfd`) or the transcoder (`sudo ~/urfd/setup.sh restart tcd`). Whitelist, blacklist, interlink and TG mappings need no restart: `sudo ~/urfd/setup.sh reload`. Check `urfd.ini` before a restart with:
 
@@ -144,9 +145,9 @@ The transcoded modules are listed in `tcd.ini` (`Modules`); `urfd.ini` says `[Tr
 
 **Users cannot link.** The port for their protocol is not open or forwarded, see [Ports](#ports). Test from outside your network, e.g. with a hotspot on a phone hotspot.
 
-**Modules are not transcoded.** `docker logs urfd | grep -i transcoder` shows whether tcd connected. On the tcd machine, `docker logs tcd` (natively `journalctl -u tcd`) shows whether it found the AMBE sticks; `docker exec tcd tcd --list-devices` (natively `tcd --list-devices`) lists them. If tcd runs on another machine, `ServerAddress` in `tcd.ini` must be the reflector's address and port 10100/tcp must be reachable from there; `Password` in `tcd.ini` must be the reflector's `[Transcoder] Password` (the setup script prints it at the end of the reflector's installation). A wrong one shows as `refused: wrong password` in `docker logs urfd`.
+**Modules are not transcoded.** `docker logs urfd | grep -i transcoder` shows whether tcd connected. On the tcd machine, `docker logs tcd` (natively `journalctl -u tcd`) shows whether it found the AMBE sticks; `docker exec tcd tcd --list-devices` (natively `tcd --list-devices`) lists them. Without sticks, or for more modules than they cover, tcd needs a codec plugin: without a `CodecPlugin` line in `tcd.ini` it stops at start and says so in its log. A plugin added later goes into `~/urfd/tcd/plugins/<name>/`, its `CodecPlugin = /usr/local/lib/tcd/<file>.so` line into `tcd.ini`, then `sudo ~/urfd/setup.sh update` builds it. If tcd runs on another machine, `ServerAddress` in `tcd.ini` must be the reflector's address and port 10100/tcp must be reachable from there; `Password` in `tcd.ini` must be the reflector's `[Transcoder] Password` (the setup script prints it at the end of the reflector's installation). A wrong one shows as `refused: wrong password` in `docker logs urfd`.
 
-**Run the setup again.** `sudo ./setup.sh` on an installed machine offers an update. To start over, answer no to the update and yes to set it up again: this overwrites `urfd.ini`, the dashboard config and `tcd.ini`.
+**Run the setup again.** `sudo ./setup.sh` on an installed machine offers an update. To start over, answer no to the update and yes to set it up again: this overwrites `urfd.ini` and `tcd.ini`.
 
 ## Setting it up by hand
 
@@ -160,4 +161,5 @@ sudo rm -rf /opt/urfd
 # a native transcoder:
 sudo systemctl disable --now tcd
 sudo rm -f /etc/systemd/system/tcd.service /usr/local/bin/tcd /usr/local/bin/tcdmon /usr/local/bin/agc-analyze /usr/local/etc/tcd.ini /usr/local/etc/tcd-build.conf
+sudo rm -rf /usr/local/lib/tcd /usr/local/share/doc/tcd-plugins
 ```
