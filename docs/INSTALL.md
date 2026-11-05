@@ -90,7 +90,7 @@ Forward these ports from your router to the machine, or open them in the firewal
 
 ### 4. Test it
 
-1. Open the dashboard in a browser, e.g. `http://urf123.example.com:8363/`. It gets everything live from the reflector over a WebSocket at `/ws`; if you put the dashboard behind your own TLS proxy, it has to pass `/ws` on as a WebSocket (`Upgrade` headers, see [docs/WEBSOCKET.md](WEBSOCKET.md#setup)).
+1. Open the dashboard in a browser, e.g. `http://urf123.example.com:8363/`. It gets everything live from the reflector over a WebSocket at `/ws`; if you put the dashboard behind your own TLS proxy, it has to pass `/ws` on as a WebSocket (`Upgrade` headers) with the browser's address (`X-Real-IP` to port 8363, or `X-Forwarded-For` straight to port 10102), see [docs/WEBSOCKET.md](WEBSOCKET.md#setup).
 2. Link a hotspot or radio to your reflector and module, e.g. `URF123 Z` for the echo module.
 3. Say something and let go: after 3 seconds you hear yourself.
 4. Test a transcoded module across modes, e.g. D-Star and DMR on module `A`.
