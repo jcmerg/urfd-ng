@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="URF Universal Digital Voice Reflector for Ham Radio">
+    <meta name="robots" content="index,follow">
+    <title>Universal Reflector</title>
+    <link rel="icon" href="./favicon.ico" type="image/vnd.microsoft.icon">
+    <link rel="preload" href="./fonts/saira-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link href="css/dashboard.css" rel="stylesheet">
+    <script>
+    // theme before the first paint: system, light or dark
+    try { var t = localStorage.getItem('urf-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+    </script>
+</head>
+<body>
+<header class="bar">
+    <div class="wrap">
+        <a class="brand" href="./" data-nav="users"><b id="brand-name">URF</b><span>Universal Reflector</span></a>
+        <nav class="nav" aria-label="Pages" id="nav">
+            <a href="./" data-nav="users">Last heard</a>
+            <a href="./?show=modules" data-nav="modules">Modules</a>
+            <a href="./?show=repeaters" data-nav="repeaters">Links<small id="nav-links">0</small></a>
+            <a href="./?show=peers" data-nav="peers">Peers<small id="nav-peers">0</small></a>
+            <a href="./?show=reflectors" data-nav="reflectors">Reflector list</a>
+            <a href="./?show=livequadnet" data-nav="livequadnet">QuadNet live</a>
+        </nav>
+        <div class="status">
+            <span class="up" id="uptime">Connecting</span>
+            <span class="ver" id="version"></span>
+            <button class="theme-btn" id="theme-btn" type="button" aria-label="Theme: system" title="Theme: system. Click to switch">System</button>
+        </div>
+    </div>
+</header>
+<div class="motd" id="motd" hidden><div class="wrap" id="motd-text"></div></div>
+<main>
+    <div class="wrap">
+        <div class="strip idle" id="strip" hidden></div>
+        <div id="page"></div>
+    </div>
+</main>
+<footer class="foot">
+    <div class="wrap">
+        <span id="sysop"></span>
+        <a class="pi" id="admin-link" href="./?show=admin" data-nav="admin" title="Admin" hidden>&pi;</a>
+    </div>
+</footer>
+<noscript><p class="wrap">The dashboard needs JavaScript: it gets the reflector's state live over a WebSocket.</p></noscript>
+<script src="js/countries.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/admin.js"></script>
+</body>
+</html>
