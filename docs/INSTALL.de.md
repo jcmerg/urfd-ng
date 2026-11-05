@@ -89,7 +89,7 @@ Leite diese Ports in deinem Router auf den Rechner weiter, oder gib sie in der F
 
 ### 4. Ausprobieren
 
-1. Öffne das Dashboard im Browser. Das Live-Dashboard liegt unter `/live/` auf derselben Adresse, z.B. `http://urf123.example.com:8363/live/`; steht das Dashboard hinter einem eigenen TLS-Proxy, muss der `/ws` als WebSocket weiterreichen (`Upgrade`-Header, siehe [docs/WEBSOCKET.md](WEBSOCKET.md#setup)).
+1. Öffne das Dashboard im Browser, z.B. `http://urf123.example.com:8363/`. Es bekommt alles live vom Reflektor über einen WebSocket unter `/ws`; steht das Dashboard hinter einem eigenen TLS-Proxy, muss der `/ws` als WebSocket weiterreichen (`Upgrade`-Header, siehe [docs/WEBSOCKET.md](WEBSOCKET.md#setup)).
 2. Verbinde einen Hotspot oder ein Funkgerät mit deinem Reflektor und einem Modul, z.B. `URF123 Z` für das Echo-Modul.
 3. Sag etwas und lass los: Nach 3 Sekunden hörst du dich selbst.
 4. Teste ein transcodiertes Modul über Betriebsarten hinweg, z.B. D-Star und DMR auf Modul `A`.
@@ -123,10 +123,9 @@ Das Update behält deine Konfiguration. Es holt die neue Version, baut neu und s
 
 | Datei | Was drinsteht |
 |---|---|
-| `/opt/urfd/config/urfd.ini` | Reflektor: Module, Protokolle, Eintrag im XLX-Verzeichnis, BrandMeister-Anbindung, D-Star- und YSF-Verbindungen, Kopplungen. Jede Einstellung ist in der Datei erklärt |
+| `/opt/urfd/config/urfd.ini` | Reflektor: Module, Protokolle, Eintrag im XLX-Verzeichnis, BrandMeister-Anbindung, D-Star- und YSF-Verbindungen, Kopplungen, und das Dashboard (`[Dashboard]`: Banner-Text, Anzeige der IP-Adressen; `[Admin]`: Admin-Seite). Jede Einstellung ist in der Datei erklärt |
 | `/opt/urfd/config/urfd.interlink` | Kopplungen mit anderen Reflektoren |
 | `/opt/urfd/config/urfd.blacklist`, `urfd.whitelist` | Rufzeichen, die sich verbinden dürfen oder nicht |
-| `/opt/urfd/dashboard/config.inc.php` | Dashboard: Banner-Text, Anzeige der IP-Adressen, Admin-Seite |
 | `/opt/urfd/tcd/tcd.ini` (nativ `/usr/local/etc/tcd.ini`) | Transcoder: Adresse des Reflektors, Module, Seriennummern der AMBE-Geräte, Pegel |
 
 Nach dem Ändern den Reflektor (`sudo ~/urfd/setup.sh restart urfd`) oder den Transcoder (`sudo ~/urfd/setup.sh restart tcd`) neu starten. Whitelist, Blacklist, Interlink und TG-Zuordnungen brauchen keinen Neustart: `sudo ~/urfd/setup.sh reload`. `urfd.ini` vorher prüfen mit:

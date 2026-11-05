@@ -20,7 +20,7 @@ Diese Anleitung ist für alle, die sich mit Linux auskennen und selbst einrichte
 |---|---|---|
 | urfd, `inicheck`, `dbutil` | im Image `urfd`, gebaut aus dem Checkout | `/usr/local/bin`, aus `reflector/build.sh` |
 | Konfiguration | `$URFD_DATA/config/` (Standard `/opt/urfd/config`), eingebunden als `/usr/local/etc/urfd` | `/usr/local/etc/urfd/` |
-| Dashboard | im Container (nginx + php-fpm, Port 8363), Einstellungen in `$URFD_DATA/dashboard/config.inc.php` | eigener Webserver, z. B. `/var/www/urfd-dashboard` |
+| Dashboard | im Container (nginx, Port 8363), Einstellungen in `[Dashboard]` von `urfd.ini` | eigener Webserver, z. B. `/var/www/urfd-dashboard` |
 | Dienst | Container `urfd`, `restart: unless-stopped` | systemd-Unit `urfd` |
 | tcd | Container `tcd` mit `$URFD_DATA/tcd/tcd.ini` (`docker/build.sh`, siehe [tcd in Docker](../tcd/README.de.md#tcd-in-docker)) | systemd-Unit `tcd`, aus `tcd/build.sh` |
 
@@ -71,17 +71,16 @@ git clone https://github.com/jcmerg/urfd-ng.git urfd
 cd urfd
 
 # Konfiguration, die Pfade in urfd.ini sind die im Container
-sudo mkdir -p /opt/urfd/config /opt/urfd/dashboard /opt/urfd/xlxd-ch
+sudo mkdir -p /opt/urfd/config /opt/urfd/xlxd-ch
 sudo cp config/urfd.ini config/urfd.interlink config/urfd.whitelist config/urfd.blacklist config/urfd.terminal /opt/urfd/config/
 sudo sed -i 's#/home/user/#/usr/local/etc/urfd/#' /opt/urfd/config/urfd.ini
-sudo cp dashboard/pgs/config.inc.php /opt/urfd/dashboard/
 
-# urfd.ini enthält Passwörter; dem Dashboard (www-data, uid 33) gehören seine Konfiguration und sein Cache
+# urfd.ini enthält Passwörter; dem Webserver (www-data, uid 33) gehört der Cache der Reflektorliste
 sudo chmod 600 /opt/urfd/config/urfd.ini
-sudo chown 33:33 /opt/urfd/dashboard/config.inc.php /opt/urfd/xlxd-ch
+sudo chown 33:33 /opt/urfd/xlxd-ch
 ```
 
-`/opt/urfd/config/urfd.ini` anpassen (mindestens `[Names]`, `[IP Addresses]`, `[Modules]`, `[Transcoder]`) und `/opt/urfd/dashboard/config.inc.php`, dann bauen und starten:
+`/opt/urfd/config/urfd.ini` anpassen (mindestens `[Names]`, `[IP Addresses]`, `[Modules]`, `[Transcoder]`, und `[Dashboard]` für das Dashboard), dann bauen und starten:
 
 ```bash
 sudo docker/build.sh start     # oder: cd docker && sudo docker compose build && sudo docker compose up -d
@@ -131,28 +130,24 @@ sudo make install        # nur urfd und die Unit, und startet ihn; inicheck, dbu
 
 ## Dashboard ohne Docker
 
-Das Dashboard liest die Statusdatei des Reflektors (`[Files] XmlPath`, Standard `/var/log/xlxd.xml`) und spricht mit dem Admin-Socket (`[Admin]`, Port 10101), läuft also auf dem Rechner des Reflektors. Es braucht PHP mit einem Webserver; die mitgelieferte nginx-Konfiguration leitet auch die [JSON-API](../README.de.md#json-api) weiter.
+Das Dashboard ist statisch (HTML, CSS, JavaScript) und bekommt alles über den WebSocket von urfd (`[WebSocket] Enable = true`, Loopback-Port 10102); jeder Webserver tut es also, der `/ws` dorthin weiterreicht. Reflektorliste und QuadNet-Seite brauchen zusätzlich die beiden Proxy-Abschnitte der mitgelieferten nginx-Konfiguration.
 
 ```bash
-sudo apt install nginx php-fpm
+sudo apt install nginx
 sudo cp -r ~/urfd/dashboard /var/www/urfd-dashboard
-sudo cp -r ~/urfd/dashboard-ws/static /var/www/urfd-dashboard-ws   # das Live-Dashboard unter /live/
 sudo mkdir -p /var/lib/xlxd-ch
-sudo chown -R www-data:www-data /var/www/urfd-dashboard /var/lib/xlxd-ch
+sudo chown -R www-data:www-data /var/lib/xlxd-ch
 
 sudo cp ~/urfd/docker/nginx-dashboard.conf /etc/nginx/sites-available/urfd-dashboard.conf
-# die Konfiguration ist für PHP 8.3 (Ubuntu 24.04); den Socket dieses Systems eintragen, z. B. php8.2 unter Debian 12
-PHPSOCK=$(ls /run/php/php[0-9]*-fpm.sock)
-sudo sed -i "s#/var/run/php/php8.3-fpm.sock#$PHPSOCK#" /etc/nginx/sites-available/urfd-dashboard.conf
+# der Resolver für Reflektorliste und QuadNet (die mit RESOLVER markierte Zeile): der dieses Systems
+sudo sed -i "/# RESOLVER/s|resolver [^ ]* |resolver $(awk '/^nameserver/ { print $2; exit }' /etc/resolv.conf) |" /etc/nginx/sites-available/urfd-dashboard.conf
 sudo ln -s /etc/nginx/sites-available/urfd-dashboard.conf /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-Das Dashboard ist dann auf Port 8363; für einen anderen Port `listen` in der Konfiguration ändern oder es hinter den vorhandenen Webserver stellen. Das Docker-Image erhöht außerdem `pm.max_children` und senkt `default_socket_timeout` in PHP, siehe [docker/README.md](../docker/README.md#php-tuning); auf einem viel genutzten Reflektor lohnt sich das. Die Einstellungen stehen in `/var/www/urfd-dashboard/pgs/config.inc.php`; für Updates eine Kopie davon aufheben. Das Live-Dashboard unter `/live/` braucht `[WebSocket] Enable = true` in `urfd.ini`; die Konfiguration reicht `/ws` dorthin durch, siehe [WEBSOCKET.md](WEBSOCKET.md).
+Das Dashboard ist dann auf Port 8363; für einen anderen Port `listen` in der Konfiguration ändern oder es mit den Abschnitten `/ws`, `/xlxapi/reflectorlist` und `/quadnet/ics` hinter den vorhandenen Webserver stellen. Seine Einstellungen stehen in `[Dashboard]` in `urfd.ini` (Banner, Zeilen, IP-Adressen), siehe [WEBSOCKET.md](WEBSOCKET.md).
 
-**Admin-Seite**: `$Admin['Enable'] = true` im Dashboard und `[Admin] Enable = true` in `urfd.ini` (urfd neu starten). Anmelden mit dem `[Admin] Password` aus `urfd.ini`; das Dashboard hält keine Kopie davon. Die Seite liegt hinter dem π-Symbol in der Fußzeile.
-
-**Apache** geht auch, braucht für die JSON-API aber `mod_rewrite` und `AllowOverride FileInfo`, siehe [README](../README.de.md#json-api).
+**Admin-Seite**: `[Admin] Enable = true` in `urfd.ini` (urfd neu starten). Anmelden mit dem `[Admin] Password`; das Dashboard hält keine Kopie davon. Die Seite liegt hinter dem π-Symbol in der Fußzeile.
 
 ## Transcoder
 
@@ -177,7 +172,7 @@ cd ~/urfd && git pull
 | `setup.sh` | `sudo ./setup.sh update` |
 | Docker von Hand | `sudo docker/build.sh` (baut neu, startet einen laufenden Container neu) |
 | `reflector/build.sh` | `sudo bash reflector/build.sh` (startet einen laufenden urfd nach Prüfung von `urfd.ini` neu) |
-| Dashboard von Hand | `pgs/config.inc.php` sichern, `sudo cp -r ~/urfd/dashboard/. /var/www/urfd-dashboard/`, die eigenen Einstellungen in die neue `pgs/config.inc.php` übernehmen |
+| Dashboard von Hand | `sudo cp -r ~/urfd/dashboard/. /var/www/urfd-dashboard/` (seine Einstellungen stehen in `urfd.ini`) |
 | `tcd/build.sh` | `sudo bash tcd/build.sh` (startet einen laufenden tcd neu) |
 
 Neue Schlüssel erscheinen in den Vorlagen in `config/` und `tcd/config/`; `inicheck -q` zeigt, was in `urfd.ini` fehlt oder falsch ist.

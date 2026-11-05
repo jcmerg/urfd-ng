@@ -3,7 +3,6 @@
 .claude
 dashboard
 !dashboard/fonts/saira-latin.woff2
-dashboard-ws
 docs
 docker
 config

@@ -27,26 +27,15 @@ The image is built from this checkout; configuration and state live outside it, 
 
 | Host path | In the container | Content |
 |---|---|---|
-| `$URFD_DATA/config/` | `/usr/local/etc/urfd` | `urfd.ini`, interlink, black/whitelist, downloaded ID databases |
-| `$URFD_DATA/dashboard/config.inc.php` | dashboard `pgs/config.inc.php` | Dashboard settings |
-| `$URFD_DATA/xlxd-ch/` | `/var/lib/xlxd-ch` | Reflector list cache of the dashboard |
+| `$URFD_DATA/config/` | `/usr/local/etc/urfd` | `urfd.ini` (with the dashboard's `[Dashboard]`), interlink, black/whitelist, downloaded ID databases |
+| `$URFD_DATA/xlxd-ch/` | `/var/lib/xlxd-ch` | nginx's copy of the XLX directory's reflector list |
 | `$URFD_DATA/tcd/` | `/usr/local/etc/tcd` (tcd service) | `tcd.ini`, only with `--profile tcd` |
 
 `urfd.ini` must exist. See the main [README](../README.md) and the commented templates in [config/](../config/) for details.
 
-### PHP tuning
+### Dashboard
 
-The image changes three stock PHP settings:
-
-| Setting | Stock | Here | Why |
-|---|---|---|---|
-| `pm.max_children` | 5 | 25 | Five workers are exhausted by a handful of slow requests, which stalls every other PHP request including the admin API |
-| `default_socket_timeout` | 60 | 10 | Caps how long an unreachable upstream can hold a worker |
-| `session.upload_progress.enabled` | On | Off | The dashboard takes no uploads; one less path into php2shell (CVE-2026-109618/-109619) |
-
-The build also upgrades all packages and fails if `php8.3-fpm` is older than
-`8.3.6-0ubuntu0.24.04.13`, the Ubuntu build with the php2shell fix (USN-8948-1),
-and nginx answers multipart requests to PHP with 415, as the dashboard takes no uploads.
+The dashboard is static and has no PHP: nginx serves its files, passes `/ws` to urfd's WebSocket and fetches the XLX directory's reflector list (kept in `/var/lib/xlxd-ch/nginx-cache`, fresh for 5 minutes, an older copy while the directory is down) and the QuadNet feed. At start the container puts the system's resolver into the line marked `RESOLVER` of `nginx-dashboard.conf`, so nginx starts without DNS. Before urfd 4.38 the image had php-fpm and a volume `urfd-xml` for the status file; the volume is no longer used (`docker volume rm urfd_urfd-xml`).
 
 Note that `supervisorctl` is not usable inside the container — `supervisord.conf`
 defines no `unix_http_server` socket. Restart with `docker restart urfd`.
@@ -60,8 +49,8 @@ defines no `unix_http_server` socket. Restart with `docker restart urfd`.
 | `Dockerfile.dockerignore` | Keeps `.git`, `tcd/` and build output out of the build context |
 | `build.sh` | Build + restart helper for urfd and/or tcd, whichever has its configuration in `$URFD_DATA` |
 | `docker-compose.tcd-sticks.yml` | Added by `build.sh` for tcd with AMBE sticks: `/dev` read only and the USB serial devices |
-| `supervisord.conf` | Process manager (urfd, nginx, php-fpm) |
-| `nginx-dashboard.conf` | Dashboard web server config: the PHP dashboard at `/`, the live dashboard (`dashboard-ws`) at `/live/`, urfd's WebSocket at `/ws`, the monitor of the Docker tcd at `/tcd/` (`TCD_MONITOR_PORT`, default 8080) |
+| `supervisord.conf` | Process manager (urfd, nginx) |
+| `nginx-dashboard.conf` | Dashboard web server config: the static dashboard at `/`, urfd's WebSocket at `/ws`, the reflector list and QuadNet proxies, the monitor of the Docker tcd at `/tcd/` (`TCD_MONITOR_PORT`, default 8080) |
 
 ## Synology NAS
 

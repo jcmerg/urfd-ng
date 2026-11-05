@@ -90,8 +90,8 @@ digits, so a plugin can keep its logins in the credential database with
 
 The dashboard holds nothing specific to a plugin. For each active plugin it
 draws the sections from `status.plugins[].ui` into an area of the admin page of
-their own, with entries in the index. All calls go to the admin socket through
-the `plugin` action of `api/admin.php`.
+their own, with entries in the index. All calls go over the dashboard's WebSocket
+as the admin command `plugin` (`{"cmd": "plugin", "name": ..., "command": ...}`).
 
 The description (`AdminUi()`) is an array of sections:
 
