@@ -25,7 +25,7 @@ public:
 	// socket (any thread), and the tokens of its logins
 	bool IsEnabled(void) const { return m_Enabled; }
 	nlohmann::json Execute(const nlohmann::json &cmd, const std::string &clientAddr);
-	bool ValidateToken(const std::string &token) const;
+	bool ValidateToken(const std::string &token);
 	void RevokeToken(const std::string &token);
 
 private:
@@ -36,7 +36,7 @@ private:
 	nlohmann::json HandleCommand(const nlohmann::json &cmd, const std::string &clientAddr);
 
 	// Auth
-	nlohmann::json CmdAuth(const nlohmann::json &cmd);
+	nlohmann::json CmdAuth(const nlohmann::json &cmd, const std::string &clientAddr);
 	std::string GenerateToken(void);
 
 	// TG commands
@@ -105,7 +105,8 @@ private:
 
 	// Auth tokens
 	mutable std::mutex m_TokenMutex;
-	std::chrono::steady_clock::time_point m_LastAuthFailure{};   // guarded by m_TokenMutex
+	struct SAuthFailures { unsigned count = 0; std::chrono::steady_clock::time_point last; };
+	std::unordered_map<std::string, SAuthFailures> m_AuthFailures;   // by address, guarded by m_TokenMutex
 	std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_Tokens;
 
 	// Thread

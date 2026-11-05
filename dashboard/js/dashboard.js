@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.0.0';
+var DASHBOARD_VERSION = '3.0.1';
 
 var $ = function (id) { return document.getElementById(id); };
 
@@ -231,7 +231,7 @@ function request(cmd, args) {
         if (!ws || ws.readyState !== 1) { resolve({ status: 'error', message: 'Not connected to the reflector' }); return; }
         var id = nextId++, msg = Object.assign({}, args || {}, { cmd: cmd, id: id });
         pending[id] = { resolve: resolve, timer: setTimeout(function () {
-            delete pending[id]; resolve({ status: 'error', message: 'No answer from the reflector' });
+            delete pending[id]; resolve({ status: 'error', message: 'No answer from the reflector yet; it may still carry the command out, look again in a moment' });
         }, 20000) };
         ws.send(JSON.stringify(msg));
     });

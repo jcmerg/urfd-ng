@@ -1,10 +1,16 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <ctime>
+#include <deque>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <utility>
 #include <nlohmann/json.hpp>
 
 class CWebsocketLwsNotifier;
@@ -50,6 +56,16 @@ public:
 			Send(CEvent(type, payload(), m_ReflectorName));
 	}
 
+	// the same for a payload that takes the ID database locks (a station's
+	// name): built in the notifier's own thread, in the order queued, so the
+	// caller may hold the users lock while the ID database reloads. The
+	// callable must own what it uses (capture by value).
+	template <typename F> void DispatchDeferred(const std::string &type, F &&payload)
+	{
+		if (m_Running)
+			Defer(type, std::function<nlohmann::json()>(std::forward<F>(payload)));
+	}
+
 	const std::string &ReflectorName(void) const { return m_ReflectorName; }
 	bool IsRunning(void) const { return m_Running; }
 
@@ -60,8 +76,18 @@ private:
 	CNotifierManager &operator=(const CNotifierManager &) = delete;
 
 	void Send(const CEvent &ev);
+	void Defer(const std::string &type, std::function<nlohmann::json()> payload);
+	void DeferLoop(void);
 
 	std::atomic<bool> m_Running { false };
+
+	// the deferred events, for DeferLoop
+	std::thread m_DeferThread;
+	std::mutex m_DeferMutex;
+	std::condition_variable m_DeferCv;
+	std::deque<std::pair<std::string, std::function<nlohmann::json()>>> m_Deferred;
+	bool m_DeferStop = false;
+	bool m_DeferFull = false;	// logged once that events were dropped
 	std::string m_ReflectorName;	// set once in Start(), not read from the config later
 	std::unique_ptr<CWebsocketLwsNotifier> m_Ws;
 };

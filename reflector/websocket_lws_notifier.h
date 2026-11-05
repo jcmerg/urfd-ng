@@ -43,6 +43,7 @@ private:
 		uint64_t serial = 0;	// tells a connection from a later one at the same address
 		std::string rx;		// a request arriving in fragments
 		std::string token;	// the admin login of this connection, empty without one
+		std::string addr;	// the browser's address, for the pause after a wrong password
 		std::chrono::steady_clock::time_point lastSnapshot {};
 	};
 	struct SJob
@@ -64,7 +65,7 @@ private:
 	void Request(struct lws *wsi, uint64_t serial, const nlohmann::json &req);
 	nlohmann::json RunAdmin(const SJob &job);
 	void Reply(struct lws *wsi, uint64_t serial, const nlohmann::json &id, const nlohmann::json &result);
-	void Enqueue(struct lws *wsi, uint64_t serial, std::string msg, bool front = false);
+	void Enqueue(struct lws *wsi, uint64_t serial, std::string msg);
 
 	std::thread m_Thread;
 	std::mutex m_Mutex;
@@ -77,6 +78,9 @@ private:
 	std::condition_variable m_JobCv;
 	std::deque<SJob> m_Jobs;
 	bool m_AdminStop = false;
+	// the last snapshot built, given to everyone who asks within a second (admin thread only)
+	std::string m_SnapCache;
+	std::chrono::steady_clock::time_point m_SnapBuilt {};
 
 	struct lws_context *m_Ctx;
 	struct lws_protocols m_Protocols[2];

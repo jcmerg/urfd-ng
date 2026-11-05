@@ -11,6 +11,7 @@
 #include <poll.h>
 #include <random>
 #include <iomanip>
+#include <algorithm>
 
 #include "Global.h"
 #include "ProtocolNames.h"
@@ -26,9 +27,12 @@
 #include "DPlusClientProtocol.h"
 #include "YSFClientProtocol.h"
 
-#define ADMIN_TOKEN_TTL_SECONDS   3600   // 1 hour session
+#define ADMIN_TOKEN_TTL_SECONDS   3600   // a login ends after an hour without a command
 #define ADMIN_MAX_MSG_SIZE        8192
-#define ADMIN_AUTH_FAIL_DELAY     2      // seconds without logins after a wrong password
+#define ADMIN_AUTH_FAIL_DELAY     2      // seconds without logins from that address after a wrong password,
+#define ADMIN_AUTH_FAIL_MAX       300    // doubling with every further one up to this
+#define ADMIN_AUTH_FAIL_KEEP      3600   // seconds an address's failures are remembered
+#define ADMIN_AUTH_FAIL_ENTRIES   4096   // addresses remembered at most
 
 static const auto &s_NameToProto = ProtocolNames();
 
@@ -300,11 +304,11 @@ nlohmann::json CAdminSocket::HandleCommand(const nlohmann::json &cmd, const std:
 
 	// Auth does not require token
 	if (command == "auth")
-		return CmdAuth(cmd);
+		return CmdAuth(cmd, clientAddr);
 
 	// All other commands require valid token
-	if (!cmd.contains("token") || !ValidateToken(cmd["token"]))
-		return {{"status", "error"}, {"message", "authentication required"}};
+	if (!cmd.contains("token") || !cmd["token"].is_string() || !ValidateToken(cmd["token"]))
+		return {{"status", "error"}, {"code", "auth"}, {"message", "authentication required"}};
 
 	if (command == "tg_add")
 		return CmdTGAdd(cmd);
@@ -417,20 +421,29 @@ nlohmann::json CAdminSocket::HandleCommand(const nlohmann::json &cmd, const std:
 ////////////////////////////////////////////////////////////////////////////////////////
 // Auth
 
-nlohmann::json CAdminSocket::CmdAuth(const nlohmann::json &cmd)
+// clientAddr: where the login comes from (the TCP peer, or "ws:" and the
+// browser's address); a wrong password pauses that address only, so nobody
+// can keep the sysop out by failing on purpose
+nlohmann::json CAdminSocket::CmdAuth(const nlohmann::json &cmd, const std::string &clientAddr)
 {
-	if (!cmd.contains("password"))
+	if (!cmd.contains("password") || !cmd["password"].is_string())
 		return {{"status", "error"}, {"message", "missing password"}};
 
 	std::string pw = cmd["password"];
 
-	// after a wrong password, refuse every attempt for a while, so that
-	// passwords can't be guessed through the dashboard at any speed
+	// after a wrong password, refuse every attempt from there for a while,
+	// longer with every further one, so that passwords can't be guessed at any speed
 	const auto now = std::chrono::steady_clock::now();
 	{
 		std::lock_guard<std::mutex> lock(m_TokenMutex);
-		if (now - m_LastAuthFailure < std::chrono::seconds(ADMIN_AUTH_FAIL_DELAY))
-			return {{"status", "error"}, {"message", "too many attempts, try again in a few seconds"}};
+		auto it = m_AuthFailures.find(clientAddr);
+		if (it != m_AuthFailures.end())
+		{
+			const unsigned shift = std::min(it->second.count - 1, 16u);
+			const auto pause = std::chrono::seconds(std::min<long>(long(ADMIN_AUTH_FAIL_DELAY) << shift, ADMIN_AUTH_FAIL_MAX));
+			if (now - it->second.last < pause)
+				return {{"status", "error"}, {"message", "too many attempts, try again later"}};
+		}
 	}
 
 	// compare in constant time
@@ -445,8 +458,21 @@ nlohmann::json CAdminSocket::CmdAuth(const nlohmann::json &cmd)
 	if (!match)
 	{
 		std::lock_guard<std::mutex> lock(m_TokenMutex);
-		m_LastAuthFailure = now;
-		std::cerr << "Admin: authentication failed" << std::endl;
+		// forget old failures, and the oldest ones when too many addresses tried
+		for (auto it = m_AuthFailures.begin(); it != m_AuthFailures.end(); )
+		{
+			if (now - it->second.last > std::chrono::seconds(ADMIN_AUTH_FAIL_KEEP))
+				it = m_AuthFailures.erase(it);
+			else
+				++it;
+		}
+		while (m_AuthFailures.size() >= ADMIN_AUTH_FAIL_ENTRIES)
+			m_AuthFailures.erase(std::min_element(m_AuthFailures.begin(), m_AuthFailures.end(),
+				[](const auto &a, const auto &b) { return a.second.last < b.second.last; }));
+		auto &f = m_AuthFailures[clientAddr];
+		f.count++;
+		f.last = now;
+		std::cerr << "Admin: authentication failed from " << clientAddr << std::endl;
 		return {{"status", "error"}, {"message", "invalid password"}};
 	}
 
@@ -454,6 +480,7 @@ nlohmann::json CAdminSocket::CmdAuth(const nlohmann::json &cmd)
 
 	{
 		std::lock_guard<std::mutex> lock(m_TokenMutex);
+		m_AuthFailures.erase(clientAddr);
 		m_Tokens[token] = std::chrono::steady_clock::now() + std::chrono::seconds(ADMIN_TOKEN_TTL_SECONDS);
 
 		// Purge expired tokens
@@ -491,13 +518,21 @@ void CAdminSocket::RevokeToken(const std::string &token)
 	m_Tokens.erase(token);
 }
 
-bool CAdminSocket::ValidateToken(const std::string &token) const
+// a valid token counts as used: it runs out an hour after its last command
+bool CAdminSocket::ValidateToken(const std::string &token)
 {
 	std::lock_guard<std::mutex> lock(m_TokenMutex);
 	auto it = m_Tokens.find(token);
 	if (it == m_Tokens.end())
 		return false;
-	return std::chrono::steady_clock::now() < it->second;
+	const auto now = std::chrono::steady_clock::now();
+	if (now >= it->second)
+	{
+		m_Tokens.erase(it);
+		return false;
+	}
+	it->second = now + std::chrono::seconds(ADMIN_TOKEN_TTL_SECONDS);
+	return true;
 }
 
 // 128 bits straight from the system's random source

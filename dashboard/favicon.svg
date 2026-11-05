@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- the dashboard's front panel: the bezel, the amber LCD, the red TX lamp -->
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="#2B3236"/>
+  <rect x="9" y="15" width="46" height="40" rx="6" fill="#E3A23F"/>
+  <rect x="15" y="31" width="34" height="7" rx="2" fill="#2A1905"/>
+  <rect x="15" y="43" width="20" height="5" rx="2" fill="#7A4E12"/>
+  <circle cx="51" cy="8.5" r="4" fill="#C8352B"/>
+</svg>

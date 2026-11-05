@@ -1195,7 +1195,7 @@ void CReflector::EchoThread(void)
 			}
 			if (!keep_running) break;
 			m_EchoStreamId = echoStreamId;
-	
+
 			// push header to stream
 			stream->Push(std::move(echoHeader));
 

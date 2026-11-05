@@ -185,7 +185,11 @@ static nlohmann::json BuildReflectorSnapshot()
 	snapshot["transcoded"] = transcoded;
 
 	// the open channels from the clients that master a stream: the stream's
-	// owner pointer is reset outside any lock when it closes
+	// owner pointer is reset outside any lock when it closes. Only gathered
+	// under the clients lock: IsHidden() and the name take the ID database
+	// locks, which a reload of the database holds a while
+	struct SChannel { char module; uint16_t streamId; CCallsign user; std::string callsign, protocol; char linked; };
+	std::vector<SChannel> channels;
 	auto *clients = g_Reflector.GetClients();
 	for (const auto &client : *clients)
 	{
@@ -198,18 +202,25 @@ static nlohmann::json BuildReflectorSnapshot()
 		if (module == ' ')
 			continue;
 		auto stream = g_Reflector.GetStream(module);
-		if (!stream || !stream->IsOpen() || CUsers::IsHidden(stream->GetUserCallsign(), module))
+		if (!stream || !stream->IsOpen())
 			continue;
-		snapshot["open_channels"].push_back({
-			{ "module", std::string(1, module) },
-			{ "stream_id", stream->GetStreamId() },
-			{ "user", stream->GetUserCallsign().GetCS() },
-			{ "name", CUser::OperatorName(stream->GetUserCallsign()) },
-			{ "callsign", client->GetCallsign().GetCS() },
-			{ "protocol", client->GetProtocolName() },
-			{ "linked_module", std::string(1, client->GetReflectorModule()) } });
+		channels.push_back({ module, stream->GetStreamId(), stream->GetUserCallsign(), client->GetCallsign().GetCS(),
+			client->GetProtocolName(), client->GetReflectorModule() });
 	}
 	g_Reflector.ReleaseClients();
+	for (const auto &c : channels)
+	{
+		if (CUsers::IsHidden(c.user, c.module))
+			continue;
+		snapshot["open_channels"].push_back({
+			{ "module", std::string(1, c.module) },
+			{ "stream_id", c.streamId },
+			{ "user", c.user.GetCS() },
+			{ "name", CUser::OperatorName(c.user) },
+			{ "callsign", c.callsign },
+			{ "protocol", c.protocol },
+			{ "linked_module", std::string(1, c.linked) } });
+	}
 
 	auto *peers = g_Reflector.GetPeers();
 	for (auto pit = peers->cbegin(); pit != peers->cend(); ++pit)
@@ -229,7 +240,31 @@ static nlohmann::json BuildReflectorSnapshot()
 
 #define WS_MAX_REQUEST     (64 * 1024)	// bytes of one request
 #define WS_MAX_JOBS        64			// admin requests waiting, of all clients
+#define WS_MAX_JOBS_CLIENT 8			// of them from one client
 #define WS_SNAPSHOT_PERIOD 2			// seconds between two snapshots one client asks for
+
+// the browser's address: its own, or behind the dashboard's nginx (urfd only
+// listens on loopback) the last one nginx put into X-Forwarded-For; a value a
+// client sends itself stands before that one and does not count
+static std::string ClientAddress(struct lws *wsi)
+{
+	char peer[64] = "";
+	lws_get_peer_simple(wsi, peer, sizeof(peer));
+	const std::string p(peer);
+	const bool local = p.compare(0, 4, "127.") == 0 || p == "::1" || p.compare(0, 11, "::ffff:127.") == 0;
+	if (!local)
+		return p;
+	char xff[256] = "";
+	if (lws_hdr_copy(wsi, xff, sizeof(xff), WSI_TOKEN_X_FORWARDED_FOR) <= 0)
+		return p;
+	std::string last(xff);
+	const auto comma = last.rfind(',');
+	if (comma != std::string::npos)
+		last.erase(0, comma + 1);
+	last.erase(0, last.find_first_not_of(" \t"));
+	last.erase(last.find_last_not_of(" \t") + 1);
+	return last.empty() ? p : last;
+}
 
 static std::string Dump(const CEvent &ev)
 {
@@ -354,8 +389,8 @@ void CWebsocketLwsNotifier::Publish(const std::string &msg)
 	lws_cancel_service(m_Ctx);
 }
 
-// one client's message, from any thread; front: before the events already queued
-void CWebsocketLwsNotifier::Enqueue(struct lws *wsi, uint64_t serial, std::string msg, bool front)
+// one client's message, from any thread
+void CWebsocketLwsNotifier::Enqueue(struct lws *wsi, uint64_t serial, std::string msg)
 {
 	std::lock_guard<std::mutex> lk(m_Mutex);
 	if (!m_Running)
@@ -368,8 +403,6 @@ void CWebsocketLwsNotifier::Enqueue(struct lws *wsi, uint64_t serial, std::strin
 		it->second.kill = true;
 		it->second.queue.clear();
 	}
-	else if (front)
-		it->second.queue.push_front(std::move(msg));
 	else
 		it->second.queue.push_back(std::move(msg));
 	lws_cancel_service(m_Ctx);
@@ -377,7 +410,9 @@ void CWebsocketLwsNotifier::Enqueue(struct lws *wsi, uint64_t serial, std::strin
 
 void CWebsocketLwsNotifier::Reply(struct lws *wsi, uint64_t serial, const nlohmann::json &id, const nlohmann::json &result)
 {
-	CEvent ev("reply", result.is_object() ? result : nlohmann::json::object(), CNotifierManager::Instance().ReflectorName());
+	if (!result.is_object())
+		return;	// the client is gone (RunAdmin), nobody to answer
+	CEvent ev("reply", result, CNotifierManager::Instance().ReflectorName());
 	auto j = ev.ToJson();
 	j["id"] = id;
 	Enqueue(wsi, serial, j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
@@ -423,6 +458,7 @@ int CWebsocketLwsNotifier::OnEstablished(struct lws *wsi)
 		// registered first, so no event between the snapshot and now is lost
 		SConn conn;
 		conn.serial = m_NextSerial++;
+		conn.addr = ClientAddress(wsi);
 		m_Clients.emplace(wsi, std::move(conn));
 	}
 
@@ -557,7 +593,8 @@ void CWebsocketLwsNotifier::Request(struct lws *wsi, uint64_t serial, const nloh
 
 	{
 		std::lock_guard<std::mutex> lk(m_JobMutex);
-		if (m_Jobs.size() < WS_MAX_JOBS)
+		const auto mine = std::count_if(m_Jobs.begin(), m_Jobs.end(), [&](const SJob &j) { return j.wsi == wsi && j.serial == serial; });
+		if (m_Jobs.size() < WS_MAX_JOBS && mine < WS_MAX_JOBS_CLIENT)
 		{
 			m_Jobs.push_back({ wsi, serial, req });
 			m_JobCv.notify_one();
@@ -584,7 +621,14 @@ void CWebsocketLwsNotifier::AdminLoop(void)
 		{
 			try
 			{
-				Enqueue(job.wsi, job.serial, Dump(CEvent("state_snapshot", BuildReflectorSnapshot(), CNotifierManager::Instance().ReflectorName())));
+				// one build a second, however many clients ask
+				const auto now = std::chrono::steady_clock::now();
+				if (m_SnapCache.empty() || now - m_SnapBuilt >= std::chrono::seconds(1))
+				{
+					m_SnapCache = Dump(CEvent("state_snapshot", BuildReflectorSnapshot(), CNotifierManager::Instance().ReflectorName()));
+					m_SnapBuilt = now;
+				}
+				Enqueue(job.wsi, job.serial, m_SnapCache);
 			}
 			catch (const std::exception &ex)
 			{
@@ -619,14 +663,16 @@ nlohmann::json CWebsocketLwsNotifier::RunAdmin(const SJob &job)
 		if (it != m_Clients.end() && it->second.serial == job.serial)
 			it->second.token = token;
 	};
-	std::string token;
+	std::string token, addr;
 	{
 		std::lock_guard<std::mutex> lk(m_Mutex);
 		auto it = m_Clients.find(job.wsi);
 		if (it == m_Clients.end() || it->second.serial != job.serial)
 			return {};	// gone, nobody gets the answer
 		token = it->second.token;
+		addr = "ws:" + it->second.addr;
 	}
+	const nlohmann::json authRequired = {{"status", "error"}, {"code", "auth"}, {"message", "authentication required"}};
 
 	if (cmd == "auth")
 	{
@@ -635,13 +681,13 @@ nlohmann::json CWebsocketLwsNotifier::RunAdmin(const SJob &job)
 		{
 			const std::string t = req["token"];
 			if (!g_AdminSocket.ValidateToken(t))
-				return {{"status", "error"}, {"message", "authentication required"}};
+				return authRequired;
 			setToken(t);
 			return {{"status", "ok"}, {"token", t}};
 		}
 		if (!req.contains("password") || !req["password"].is_string())
 			return {{"status", "error"}, {"message", "missing password"}};
-		auto result = g_AdminSocket.Execute({{"cmd", "auth"}, {"password", req["password"]}}, "websocket");
+		auto result = g_AdminSocket.Execute({{"cmd", "auth"}, {"password", req["password"]}}, addr);
 		if (result.value("status", "") == "ok" && result.contains("token") && result["token"].is_string())
 		{
 			if (!token.empty())
@@ -659,12 +705,12 @@ nlohmann::json CWebsocketLwsNotifier::RunAdmin(const SJob &job)
 	}
 
 	if (token.empty())
-		return {{"status", "error"}, {"message", "authentication required"}};
+		return authRequired;
 	auto cmdWithToken = req;
 	cmdWithToken.erase("id");
 	cmdWithToken["token"] = token;
-	auto result = g_AdminSocket.Execute(cmdWithToken, "websocket");
-	if (result.value("message", "") == "authentication required")
+	auto result = g_AdminSocket.Execute(cmdWithToken, addr);
+	if (result.value("code", "") == "auth")
 		setToken("");	// ran out
 	return result;
 }
