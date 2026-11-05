@@ -45,10 +45,10 @@ static nlohmann::json BuildInitialConnectPayload()
 	// how the dashboard shows it, from [Dashboard]; admin: the admin page can log in
 	payload["dashboard"] = {
 		{ "motd", g_Configure.GetString(g_Keys.dashboard.motd) },
-		{ "last_heard", g_Configure.GetUnsigned(g_Keys.dashboard.lastheard) },
+		{ "last_heard_rows", g_Configure.GetUnsigned(g_Keys.dashboard.lastheard) },
 		{ "filter", g_Configure.GetBoolean(g_Keys.dashboard.filter) },
-		{ "links", g_Configure.GetUnsigned(g_Keys.dashboard.links) },
-		{ "peers", g_Configure.GetUnsigned(g_Keys.dashboard.peers) },
+		{ "links_rows", g_Configure.GetUnsigned(g_Keys.dashboard.links) },
+		{ "peers_rows", g_Configure.GetUnsigned(g_Keys.dashboard.peers) },
 		{ "links_ip", g_Configure.GetString(g_Keys.dashboard.linksip) != "HideIP" },
 		{ "peers_ip", g_Configure.GetString(g_Keys.dashboard.peersip) != "HideIP" },
 		{ "admin", g_AdminSocket.IsEnabled() && g_Configure.GetBoolean(g_Keys.dashboard.admin) } };

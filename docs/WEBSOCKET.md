@@ -94,7 +94,7 @@ This contains static descriptor data for the reflector and the startup timing me
 
 - `version`: urfd's version, e.g. `4.38.0`
 - `reflector`: callsign, and country, sponsor, dashboard URL and `email` (`[Names] SysopEmail`) when configured
-- `dashboard`: what the dashboard shows, from `[Dashboard]`: `motd`, `last_heard`, `filter`, `links`, `peers` (rows and switches), `links_ip` / `peers_ip` (whether IP addresses are shown at all) and `admin` (`[Admin] Enable` and `[Dashboard] Admin`: the admin page can log in)
+- `dashboard`: what the dashboard shows, from `[Dashboard]`: `motd`, `last_heard_rows`, `links_rows`, `peers_rows` (rows), `filter`, `links_ip` / `peers_ip` (whether IP addresses are shown at all) and `admin` (`[Admin] Enable` and `[Dashboard] Admin`: the admin page can log in)
 - `modules`: the configured module list, including description, echo flag, linked node count, on-air user (`on_air`, with `on_air_name`), transcoded flag, per-module protocol IDs, and `mappings`: the module's bridges, see `module_mappings`
 - `protocols`: the enabled protocol list and their configured ports; a plugin's with its `description`
 - `server_started`: Unix timestamp when the reflector process started

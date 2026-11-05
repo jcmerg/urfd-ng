@@ -45,7 +45,7 @@ function reflectorName() {
 }
 
 function options() {
-    return (S.info && S.info.dashboard) || { last_heard: 40, filter: true, links: 100, peers: 100 };
+    return (S.info && S.info.dashboard) || { last_heard_rows: 40, filter: true, links_rows: 100, peers_rows: 100 };
 }
 
 // "just now", "4 min ago", "2 h 5 min ago", "3 d ago"
@@ -174,7 +174,7 @@ var handlers = {
         while (i < S.lastHeard.length && S.lastHeard[i].time > st.time) i++;
         S.lastHeard.splice(i, 0, st);
         // as long as urfd keeps it, so a reload shows the same list
-        var max = options().last_heard || 40;
+        var max = options().last_heard_rows || 40;
         if (S.lastHeard.length > max) S.lastHeard.length = max;
         // the station on the air now has its position as well
         var air = S.onAir[st.module];
@@ -392,7 +392,7 @@ URF.pages.users = {
         while (n === 0 || n % cols) { out += '<span class="key blank" aria-hidden="true"></span>'; n++; }
         keys.innerHTML = out;
 
-        var rows = '', live = {}, list = S.lastHeard.slice(0, options().last_heard || 40);
+        var rows = '', live = {}, list = S.lastHeard.slice(0, options().last_heard_rows || 40);
         list.forEach(function (st) {
             var on = S.onAir[st.module], isLive = !!on && on.cs === st.cs && !live[st.module];
             if (isLive) live[st.module] = true;
@@ -557,7 +557,7 @@ URF.pages.repeaters = {
         document.querySelectorAll('.refl-name').forEach(function (e) { e.textContent = reflectorName(); });
         var showIP = !!options().links_ip;
         var out = '<table class="t"><thead><tr><th>Station</th><th class="opt">Band</th><th>Mode</th><th>Module</th><th class="r">Last heard</th><th class="r opt">Linked for</th>' + (showIP ? '<th class="opt">IP</th>' : '') + '</tr></thead><tbody>';
-        var list = S.links.slice(0, options().links || 100);
+        var list = S.links.slice(0, options().links_rows || 100);
         list.forEach(function (n) {
             var c = csParts(n.callsign);
             // like the last heard list: the callsign leads to QRZ, without the suffix
@@ -629,7 +629,7 @@ URF.pages.peers = {
         }
         var showIP = !!options().peers_ip;
         var out = '<table class="t"><thead><tr><th>Reflector</th><th>Mode</th><th>Shared modules</th><th class="r">Last heard</th><th class="r opt">Linked for</th>' + (showIP ? '<th class="opt">IP</th>' : '') + '</tr></thead><tbody>';
-        var list = S.peers.slice(0, options().peers || 100);
+        var list = S.peers.slice(0, options().peers_rows || 100);
         list.forEach(function (p) {
             var name = csParts(p.callsign).base;
             var mods = String(p.modules || '').toUpperCase().replace(/[^A-Z]/g, '').split('').filter(Boolean).map(function (m) {
