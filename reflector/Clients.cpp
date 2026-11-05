@@ -66,14 +66,10 @@ void CClients::AddClient(std::shared_ptr<CClient> client)
 	}
 	std::cout << std::endl;
 
-	// only real nodes, like the XML file: not the pseudo clients of connectors
+	// only real nodes: not the pseudo clients of connectors
 	// and bridges (MMDVMClient, SvxReflector, USRP, ...) nor the clients of peers
 	if (client->IsNode() && !client->IsLink())
-		CNotifierManager::Instance().Dispatch("client_added", [&]() -> nlohmann::json { return {
-			{ "callsign", client->GetCallsign().GetCS() },
-			{ "protocol", client->GetProtocolName() },
-			{ "reflector_module", std::string(1, client->GetReflectorModule()) },
-			{ "connect_time", client->GetConnectTime() } }; });
+		CNotifierManager::Instance().Dispatch("client_added", [&]() -> nlohmann::json { return NodeJson(*client); });
 }
 
 void CClients::RemoveClient(std::shared_ptr<CClient> client)
@@ -96,11 +92,7 @@ void CClients::RemoveClient(std::shared_ptr<CClient> client)
 				}
 				std::cout << std::endl;
 				if ((*it)->IsNode() && !(*it)->IsLink())
-					CNotifierManager::Instance().Dispatch("client_removed", [&]() -> nlohmann::json { return {
-						{ "callsign", (*it)->GetCallsign().GetCS() },
-						{ "protocol", (*it)->GetProtocolName() },
-						{ "reflector_module", std::string(1, (*it)->GetReflectorModule()) },
-						{ "last_heard_time", (*it)->GetLastHeardTime() } }; });
+					CNotifierManager::Instance().Dispatch("client_removed", [&]() -> nlohmann::json { return NodeJson(**it); });
 				m_Clients.erase(it);
 				break;
 			}

@@ -2,7 +2,9 @@
 #include <cstring>
 #include <ctime>
 #include <iostream>
+#include <list>
 #include <optional>
+#include <sstream>
 #include <vector>
 #include <nlohmann/json.hpp>
 
@@ -26,6 +28,9 @@ static nlohmann::json BuildInitialConnectPayload()
 	payload["current_time"] = now;
 	payload["uptime_seconds"] = static_cast<std::int64_t>(now - started);
 
+	std::ostringstream version;
+	version << g_Version;
+	payload["version"] = version.str();
 	payload["reflector"] = nlohmann::json::object();
 	payload["reflector"]["callsign"] = g_Configure.GetString(g_Keys.names.callsign);
 	if (g_Configure.Contains(g_Keys.names.country))
@@ -34,6 +39,19 @@ static nlohmann::json BuildInitialConnectPayload()
 		payload["reflector"]["sponsor"] = g_Configure.GetString(g_Keys.names.sponsor);
 	if (g_Configure.Contains(g_Keys.names.url))
 		payload["reflector"]["dashboard_url"] = g_Configure.GetString(g_Keys.names.url);
+	if (g_Configure.Contains(g_Keys.names.email))
+		payload["reflector"]["email"] = g_Configure.GetString(g_Keys.names.email);
+
+	// how the dashboard shows it, from [Dashboard]; admin: the admin page can log in
+	payload["dashboard"] = {
+		{ "motd", g_Configure.GetString(g_Keys.dashboard.motd) },
+		{ "last_heard", g_Configure.GetUnsigned(g_Keys.dashboard.lastheard) },
+		{ "filter", g_Configure.GetBoolean(g_Keys.dashboard.filter) },
+		{ "links", g_Configure.GetUnsigned(g_Keys.dashboard.links) },
+		{ "peers", g_Configure.GetUnsigned(g_Keys.dashboard.peers) },
+		{ "links_ip", g_Configure.GetString(g_Keys.dashboard.linksip) != "HideIP" },
+		{ "peers_ip", g_Configure.GetString(g_Keys.dashboard.peersip) != "HideIP" },
+		{ "admin", g_AdminSocket.IsEnabled() } };
 
 	// the nodes per module in one pass under the clients lock
 	int nodeCount[26] = {};
@@ -129,7 +147,7 @@ static nlohmann::json BuildInitialConnectPayload()
 	addProtocol("G3", g_Keys.g3.enable, std::nullopt);
 	for (size_t i = 0; i < g_Plugins.Size(); i++)
 		if (g_Plugins.Get(i).IsEnabled())
-			payload["protocols"].push_back({{"name", g_Plugins.Get(i).GetName()}, {"port", g_Plugins.Get(i).GetPort()}});
+			payload["protocols"].push_back({{"name", g_Plugins.Get(i).GetName()}, {"port", g_Plugins.Get(i).GetPort()}, {"description", g_Plugins.Get(i).GetDescription()}});
 	for (unsigned n = 1; n <= MMDVMCLI_MAX_INSTANCES; n++)
 	{
 		const auto ck = MmdvmClientKeys(n);
@@ -164,18 +182,10 @@ static nlohmann::json BuildReflectorSnapshot()
 	auto *clients = g_Reflector.GetClients();
 	for (const auto &client : *clients)
 	{
-		// links: the real nodes only, like the XML file; the pseudo clients of
+		// links: the real nodes only; the pseudo clients of
 		// connectors and the clients of peers still count for open_channels
 		if (client->IsNode() && !client->IsLink())
-		{
-			nlohmann::json entry;
-			entry["callsign"] = client->GetCallsign().GetCS();
-			entry["on_module"] = std::string(1, client->GetReflectorModule());
-			entry["protocol"] = client->GetProtocolName();
-			if (client->GetConnectTime() > 0)
-				entry["connect_time"] = client->GetConnectTime();
-			snapshot["links"].push_back(entry);
-		}
+			snapshot["links"].push_back(NodeJson(*client));
 
 		const char module = client->GetModuleMastered();
 		if (module == ' ')
@@ -196,43 +206,29 @@ static nlohmann::json BuildReflectorSnapshot()
 
 	auto *peers = g_Reflector.GetPeers();
 	for (auto pit = peers->cbegin(); pit != peers->cend(); ++pit)
-	{
-		nlohmann::json peerClients = nlohmann::json::array();
-		for (auto cit = (*pit)->cbegin(); cit != (*pit)->cend(); ++cit)
-			peerClients.push_back({
-				{ "callsign", (*cit)->GetCallsign().GetCS() },
-				{ "protocol", (*cit)->GetProtocolName() },
-				{ "reflector_module", std::string(1, (*cit)->GetReflectorModule()) } });
-		snapshot["peers"].push_back({
-			{ "callsign", (*pit)->GetCallsign().GetCS() },
-			{ "protocol", (*pit)->GetProtocolName() },
-			{ "connect_time", (*pit)->GetConnectTime() },
-			{ "clients", peerClients } });
-	}
+		snapshot["peers"].push_back(PeerJson(**pit));
 	g_Reflector.ReleasePeers();
 
+	// a copy, so the name lookups never hold up the users lock while the ID database reloads
 	auto *users = g_Reflector.GetUsers();
-	for (const auto &user : *users)
-	{
-		nlohmann::json entry;
-		entry["callsign"] = user.GetCallsign();
-		const auto name = user.GetName();
-		if (!name.empty())
-			entry["name"] = name;
-		entry["on_module"] = std::string(1, user.GetOnModule());
-		entry["via_peer"] = user.GetViaPeer();
-		entry["via_node"] = user.GetViaNode();
-		entry["protocol"] = user.GetProtocol();
-		entry["last_heard_time"] = user.GetLastHeardTime();
-		if (!user.GetLocator().empty())
-			entry["locator"] = user.GetLocator();
-		snapshot["last_heard"].push_back(entry);
-	}
+	const std::list<CUser> heard(users->begin(), users->end());
 	g_Reflector.ReleaseUsers();
+	for (const auto &user : heard)
+		snapshot["last_heard"].push_back(user.ToJson());
 
 	return snapshot;
 }
 
+
+#define WS_MAX_REQUEST     (64 * 1024)	// bytes of one request
+#define WS_MAX_JOBS        64			// admin requests waiting, of all clients
+#define WS_SNAPSHOT_PERIOD 2			// seconds between two snapshots one client asks for
+
+static std::string Dump(const CEvent &ev)
+{
+	// callsigns come from the air: replace invalid UTF-8 instead of throwing
+	return ev.ToJson().dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // listener
@@ -286,6 +282,8 @@ bool CWebsocketLwsNotifier::Start(const std::string &bindAddr, uint16_t port, in
 		return false;
 
 	m_Running = true;
+	m_AdminStop = false;
+	m_AdminThread = std::thread(&CWebsocketLwsNotifier::AdminLoop, this);
 	m_Thread = std::thread(&CWebsocketLwsNotifier::ServiceLoop, this);
 	return true;
 }
@@ -300,6 +298,15 @@ void CWebsocketLwsNotifier::Stop(void)
 			return;
 		m_Running = false;
 	}
+	// the admin thread first: its answers go through the context
+	{
+		std::lock_guard<std::mutex> lk(m_JobMutex);
+		m_AdminStop = true;
+		m_Jobs.clear();
+	}
+	m_JobCv.notify_all();
+	if (m_AdminThread.joinable())
+		m_AdminThread.join();
 	lws_cancel_service(m_Ctx);
 	if (m_Thread.joinable())
 		m_Thread.join();
@@ -340,7 +347,36 @@ void CWebsocketLwsNotifier::Publish(const std::string &msg)
 	lws_cancel_service(m_Ctx);
 }
 
-int CWebsocketLwsNotifier::Callback(struct lws *wsi, enum lws_callback_reasons reason, void *, void *, size_t)
+// one client's message, from any thread; front: before the events already queued
+void CWebsocketLwsNotifier::Enqueue(struct lws *wsi, uint64_t serial, std::string msg, bool front)
+{
+	std::lock_guard<std::mutex> lk(m_Mutex);
+	if (!m_Running)
+		return;
+	auto it = m_Clients.find(wsi);
+	if (it == m_Clients.end() || it->second.serial != serial || it->second.kill)
+		return;
+	if ((int)it->second.queue.size() >= m_PerClientQueueLen)
+	{
+		it->second.kill = true;
+		it->second.queue.clear();
+	}
+	else if (front)
+		it->second.queue.push_front(std::move(msg));
+	else
+		it->second.queue.push_back(std::move(msg));
+	lws_cancel_service(m_Ctx);
+}
+
+void CWebsocketLwsNotifier::Reply(struct lws *wsi, uint64_t serial, const nlohmann::json &id, const nlohmann::json &result)
+{
+	CEvent ev("reply", result.is_object() ? result : nlohmann::json::object(), CNotifierManager::Instance().ReflectorName());
+	auto j = ev.ToJson();
+	j["id"] = id;
+	Enqueue(wsi, serial, j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
+}
+
+int CWebsocketLwsNotifier::Callback(struct lws *wsi, enum lws_callback_reasons reason, void *, void *in, size_t len)
 {
 	auto *self = static_cast<CWebsocketLwsNotifier *>(lws_context_user(lws_get_context(wsi)));
 	if (!self)
@@ -354,6 +390,8 @@ int CWebsocketLwsNotifier::Callback(struct lws *wsi, enum lws_callback_reasons r
 		break;
 	case LWS_CALLBACK_SERVER_WRITEABLE:
 		return self->OnWritable(wsi);
+	case LWS_CALLBACK_RECEIVE:
+		return self->OnReceive(wsi, static_cast<const char *>(in), len);
 	case LWS_CALLBACK_EVENT_WAIT_CANCELLED:
 		self->OnCancelled();
 		break;
@@ -376,7 +414,9 @@ int CWebsocketLwsNotifier::OnEstablished(struct lws *wsi)
 			return -1;
 		}
 		// registered first, so no event between the snapshot and now is lost
-		m_Clients.emplace(wsi, SConn());
+		SConn conn;
+		conn.serial = m_NextSerial++;
+		m_Clients.emplace(wsi, std::move(conn));
 	}
 
 	// built without m_Mutex: it takes the clients and users locks, and the
@@ -384,9 +424,8 @@ int CWebsocketLwsNotifier::OnEstablished(struct lws *wsi)
 	std::string first, snapshot;
 	try
 	{
-		const auto dump = [](const CEvent &ev) { return ev.ToJson().dump(-1, ' ', false, nlohmann::json::error_handler_t::replace); };
-		first = dump(CEvent("initial_connect", BuildInitialConnectPayload(), CNotifierManager::Instance().ReflectorName()));
-		snapshot = dump(CEvent("state_snapshot", BuildReflectorSnapshot(), CNotifierManager::Instance().ReflectorName()));
+		first = Dump(CEvent("initial_connect", BuildInitialConnectPayload(), CNotifierManager::Instance().ReflectorName()));
+		snapshot = Dump(CEvent("state_snapshot", BuildReflectorSnapshot(), CNotifierManager::Instance().ReflectorName()));
 	}
 	catch (const std::exception &ex)
 	{
@@ -412,6 +451,7 @@ void CWebsocketLwsNotifier::OnClosed(struct lws *wsi)
 {
 	std::lock_guard<std::mutex> lk(m_Mutex);
 	m_Clients.erase(wsi);
+	// a token stays valid until it runs out: the page reconnects with it
 }
 
 int CWebsocketLwsNotifier::OnWritable(struct lws *wsi)
@@ -439,6 +479,182 @@ int CWebsocketLwsNotifier::OnWritable(struct lws *wsi)
 	if (more)
 		lws_callback_on_writable(wsi);
 	return 0;
+}
+
+// service thread: a request, maybe in fragments
+int CWebsocketLwsNotifier::OnReceive(struct lws *wsi, const char *in, size_t len)
+{
+	std::string text;
+	uint64_t serial;
+	{
+		std::lock_guard<std::mutex> lk(m_Mutex);
+		auto it = m_Clients.find(wsi);
+		if (it == m_Clients.end())
+			return -1;
+		if (it->second.rx.size() + len > WS_MAX_REQUEST)
+		{
+			std::cerr << "WebSocket: a request of more than " << WS_MAX_REQUEST << " bytes, closing the connection" << std::endl;
+			return -1;
+		}
+		it->second.rx.append(in, len);
+		if (!lws_is_final_fragment(wsi) || lws_remaining_packet_payload(wsi) > 0)
+			return 0;
+		text.swap(it->second.rx);
+		serial = it->second.serial;
+	}
+
+	nlohmann::json req;
+	try
+	{
+		req = nlohmann::json::parse(text);
+	}
+	catch (const nlohmann::json::exception &)
+	{
+		Reply(wsi, serial, nullptr, {{"status", "error"}, {"message", "invalid JSON"}});
+		return 0;
+	}
+	if (!req.is_object() || !req.contains("cmd") || !req["cmd"].is_string())
+	{
+		Reply(wsi, serial, req.is_object() ? req.value("id", nlohmann::json()) : nlohmann::json(), {{"status", "error"}, {"message", "missing 'cmd' field"}});
+		return 0;
+	}
+	Request(wsi, serial, req);
+	return 0;
+}
+
+void CWebsocketLwsNotifier::Request(struct lws *wsi, uint64_t serial, const nlohmann::json &req)
+{
+	const auto id = req.value("id", nlohmann::json());
+	if (req["cmd"] == "snapshot")
+	{
+		// the whole state again, for pages that show what has no events (last heard of links and peers)
+		const auto now = std::chrono::steady_clock::now();
+		bool tooSoon = false;
+		{
+			std::lock_guard<std::mutex> lk(m_Mutex);
+			auto it = m_Clients.find(wsi);
+			if (it == m_Clients.end())
+				return;
+			tooSoon = (now - it->second.lastSnapshot < std::chrono::seconds(WS_SNAPSHOT_PERIOD));
+			if (!tooSoon)
+				it->second.lastSnapshot = now;
+		}
+		if (tooSoon)
+		{
+			Reply(wsi, serial, id, {{"status", "error"}, {"message", "too many snapshots, wait a moment"}});
+			return;
+		}
+		try
+		{
+			Enqueue(wsi, serial, Dump(CEvent("state_snapshot", BuildReflectorSnapshot(), CNotifierManager::Instance().ReflectorName())));
+		}
+		catch (const std::exception &ex)
+		{
+			std::cerr << "WebSocket: cannot build the state: " << ex.what() << std::endl;
+		}
+		return;
+	}
+
+	{
+		std::lock_guard<std::mutex> lk(m_JobMutex);
+		if (m_Jobs.size() < WS_MAX_JOBS)
+		{
+			m_Jobs.push_back({ wsi, serial, req });
+			m_JobCv.notify_one();
+			return;
+		}
+	}
+	Reply(wsi, serial, id, {{"status", "error"}, {"message", "busy, try again"}});
+}
+
+void CWebsocketLwsNotifier::AdminLoop(void)
+{
+	while (true)
+	{
+		SJob job;
+		{
+			std::unique_lock<std::mutex> lk(m_JobMutex);
+			m_JobCv.wait(lk, [this] { return m_AdminStop || !m_Jobs.empty(); });
+			if (m_AdminStop)
+				return;
+			job = std::move(m_Jobs.front());
+			m_Jobs.pop_front();
+		}
+		nlohmann::json result;
+		try
+		{
+			result = RunAdmin(job);
+		}
+		catch (const std::exception &ex)
+		{
+			result = {{"status", "error"}, {"message", std::string("command failed: ") + ex.what()}};
+		}
+		Reply(job.wsi, job.serial, job.request.value("id", nlohmann::json()), result);
+	}
+}
+
+// admin thread: a command of the admin socket, with this connection's login
+nlohmann::json CWebsocketLwsNotifier::RunAdmin(const SJob &job)
+{
+	const auto &req = job.request;
+	const std::string cmd = req["cmd"];
+	if (!g_AdminSocket.IsEnabled())
+		return {{"status", "error"}, {"message", "admin interface disabled"}};
+
+	auto setToken = [&](const std::string &token) {
+		std::lock_guard<std::mutex> lk(m_Mutex);
+		auto it = m_Clients.find(job.wsi);
+		if (it != m_Clients.end() && it->second.serial == job.serial)
+			it->second.token = token;
+	};
+	std::string token;
+	{
+		std::lock_guard<std::mutex> lk(m_Mutex);
+		auto it = m_Clients.find(job.wsi);
+		if (it == m_Clients.end() || it->second.serial != job.serial)
+			return {};	// gone, nobody gets the answer
+		token = it->second.token;
+	}
+
+	if (cmd == "auth")
+	{
+		// a token from an earlier login of this page, else the password
+		if (req.contains("token") && req["token"].is_string())
+		{
+			const std::string t = req["token"];
+			if (!g_AdminSocket.ValidateToken(t))
+				return {{"status", "error"}, {"message", "authentication required"}};
+			setToken(t);
+			return {{"status", "ok"}, {"token", t}};
+		}
+		if (!req.contains("password") || !req["password"].is_string())
+			return {{"status", "error"}, {"message", "missing password"}};
+		auto result = g_AdminSocket.Execute({{"cmd", "auth"}, {"password", req["password"]}}, "websocket");
+		if (result.value("status", "") == "ok" && result.contains("token") && result["token"].is_string())
+		{
+			if (!token.empty())
+				g_AdminSocket.RevokeToken(token);
+			setToken(result["token"]);
+		}
+		return result;
+	}
+	if (cmd == "logout")
+	{
+		if (!token.empty())
+			g_AdminSocket.RevokeToken(token);
+		setToken("");
+		return {{"status", "ok"}};
+	}
+
+	if (token.empty())
+		return {{"status", "error"}, {"message", "authentication required"}};
+	auto cmdWithToken = req;
+	cmdWithToken.erase("id");
+	cmdWithToken["token"] = token;
+	auto result = g_AdminSocket.Execute(cmdWithToken, "websocket");
+	if (result.value("message", "") == "authentication required")
+		setToken("");	// ran out
+	return result;
 }
 
 void CWebsocketLwsNotifier::OnCancelled(void)

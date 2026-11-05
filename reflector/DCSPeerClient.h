@@ -18,5 +18,4 @@ public:
 	bool IsPeer(void) const                     { return true; }
 
 	bool IsAlive(void) const;
-	void WriteXml(std::ofstream &) {}
 };

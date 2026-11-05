@@ -63,8 +63,7 @@ public:
 	bool operator <(const CUser &) const;
 
 	// reporting
-	void WriteXml(std::ofstream &);
-	void JsonReport(nlohmann::json &report);
+	nlohmann::json ToJson(void) const;
 
 protected:
 	// data

@@ -32,7 +32,7 @@
 
 enum class ErrorLevel { fatal, mild };
 enum class ERefreshType { file, http, both };
-enum class ESection { none, names, ip, modules, urf, dplus, dextra, dcs, g3, dmrplus, mmdvm, nxdn, bm, ysf, p25, m17, usrp, dmrid, nxdnid, ysffreq, files, tc, mmdvmclient, echo, svx, svxserver, plugins, extra, admin, dcsclient, ysfclient, dextraclient, dplusclient, callinghome, websocket, credentials };
+enum class ESection { none, names, ip, modules, urf, dplus, dextra, dcs, g3, dmrplus, mmdvm, nxdn, bm, ysf, p25, m17, usrp, dmrid, nxdnid, ysffreq, files, tc, mmdvmclient, echo, svx, svxserver, plugins, extra, admin, dcsclient, ysfclient, dextraclient, dplusclient, callinghome, websocket, dashboard, credentials };
 
 // the lines of an ini section in the order of the file: key, value
 using CIniSection = std::vector<std::pair<std::string, std::string>>;

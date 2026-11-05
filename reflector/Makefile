@@ -16,7 +16,6 @@
 # locations for the executibles and other files are set here
 # NOTE: IF YOU CHANGE THESE, YOU WILL NEED TO UPDATE THE service.* FILES AND
 # if you change these locations, make sure the sgs.service file is updated!
-# you will also break hard coded paths in the dashboard file, index.php.
 
 EXE = urfd
 

@@ -21,6 +21,13 @@ public:
 	bool Start(void);
 	void Stop(void);
 
+	// for the dashboard's WebSocket: [Admin] Enable, a command as on the TCP
+	// socket (any thread), and the tokens of its logins
+	bool IsEnabled(void) const { return m_Enabled; }
+	nlohmann::json Execute(const nlohmann::json &cmd, const std::string &clientAddr);
+	bool ValidateToken(const std::string &token) const;
+	void RevokeToken(const std::string &token);
+
 private:
 	void ListenThread(void);
 	void ClientThread(int clientFd, const std::string &clientAddr);
@@ -30,7 +37,6 @@ private:
 
 	// Auth
 	nlohmann::json CmdAuth(const nlohmann::json &cmd);
-	bool ValidateToken(const std::string &token) const;
 	std::string GenerateToken(void);
 
 	// TG commands
@@ -103,6 +109,7 @@ private:
 	std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_Tokens;
 
 	// Thread
+	std::atomic<bool> m_Enabled { false };
 	std::atomic<bool> m_Running;
 	std::future<void> m_ListenFuture;
 };

@@ -75,14 +75,12 @@ public:
 	bool IsStreaming(char);
 	// MY as D-Star radios get it: with the source as its suffix, where it has none
 	static CCallsign DStarMy(const CCallsign &my, EProtocol src);
-	// a stream opened or closed or a station was heard: write the status file now
-	void StatusChanged(void) { m_StatusChanged = true; }
 	void EndStream(std::shared_ptr<CPacketStream>);
 	void CloseStream(std::shared_ptr<CPacketStream>);
 
 	// get
 	const CCallsign &GetCallsign(void) const        { return m_Callsign; }
-	nlohmann::json GetModuleMappings(char module);	// the bridges of a module, for XML and WebSocket
+	nlohmann::json GetModuleMappings(char module);	// the bridges of a module, for the WebSocket
 	std::time_t GetStartedAt(void) const             { return m_StartedAt; }
 	CUsers  *GetUsers(void)                         { m_Users.Lock(); return &m_Users; }
 	void    ReleaseUsers(void)                      { m_Users.Unlock(); }
@@ -143,9 +141,7 @@ protected:
 	bool IsStreamOpen(const std::unique_ptr<CDvHeaderPacket> &);
 	char GetStreamModule(std::shared_ptr<CPacketStream>);
 
-	// xml helpers
-	void WriteXmlFile(std::ofstream &);
-	void JsonReport(nlohmann::json &report);
+	// module_mappings for the WebSocket
 	void NotifyMappings(void);
 
 	// echo module
@@ -183,7 +179,6 @@ protected:
 
 	// threads
 	std::atomic<bool> keep_running;
-	std::atomic<bool> m_StatusChanged { false };
 	std::unordered_map<char, std::future<void>> m_RouterFuture;
 	std::future<void> m_MaintenanceFuture;
 

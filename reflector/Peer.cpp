@@ -103,39 +103,3 @@ void CPeer::Alive(void)
 		(*it)->Alive();
 	}
 }
-
-////////////////////////////////////////////////////////////////////////////////////////
-// reporting
-
-void CPeer::WriteXml(std::ofstream &xmlFile)
-{
-	xmlFile << "<PEER>" << std::endl;
-	xmlFile << "\t<Callsign>" << CUtils::XmlEscape(m_Callsign.GetLogString()) << "</Callsign>" << std::endl;
-	xmlFile << "\t<IP>" << m_Ip.GetAddress() << "</IP>" << std::endl;
-	xmlFile << "\t<LinkedModule>" << m_ReflectorModules << "</LinkedModule>" << std::endl;
-	xmlFile << "\t<Protocol>" << GetProtocolName() << "</Protocol>" << std::endl;
-	char mbstr[100];
-	if (std::strftime(mbstr, sizeof(mbstr), "%FT%TZ", std::gmtime(&m_ConnectTime)))
-	{
-		xmlFile << "\t<ConnectTime>" << mbstr << "</ConnectTime>" << std::endl;
-	}
-	if (std::strftime(mbstr, sizeof(mbstr), "%FT%TZ", std::gmtime(&m_LastHeardTime)))
-	{
-		xmlFile << "\t<LastHeardTime>" << mbstr << "</LastHeardTime>" << std::endl;
-	}
-	xmlFile << "</PEER>" << std::endl;
-}
-
-void CPeer::JsonReport(nlohmann::json &report)
-{
-	nlohmann::json jpeer;
-	jpeer["Callsign"] = m_Callsign.GetCS();
-	jpeer["Modules"] = m_ReflectorModules;
-	jpeer["Protocol"] = GetProtocolName();
-	char s[100];
-	if (std::strftime(s, sizeof(s), "%FT%TZ", std::gmtime(&m_ConnectTime)))
-	{
-		jpeer["ConnectTime"] = s;
-	}
-	report["Peers"].push_back(jpeer);
-}

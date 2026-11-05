@@ -101,54 +101,29 @@ std::string CUser::OperatorName(const CCallsign &my)
 	return name;
 }
 
-// takes the ID database locks, so the caller must not hold the users lock
-void CUser::WriteXml(std::ofstream &xmlFile)
+// one entry of the last heard list for the dashboard; takes the ID database locks
+nlohmann::json CUser::ToJson(void) const
 {
-	xmlFile << "<STATION>" << std::endl;
-	xmlFile << "\t<Callsign>" << CUtils::XmlEscape(m_My.GetLogString()) << "</Callsign>" << std::endl;
-	xmlFile << "\t<Via node>" << CUtils::XmlEscape(m_Rpt1.GetLogString()) << "</Via node>" << std::endl;
-	xmlFile << "\t<On module>" << CUtils::XmlEscape(std::string(1, m_Rpt2.GetCSModule())) << "</On module>" << std::endl;
-	xmlFile << "\t<Via peer>" << CUtils::XmlEscape(m_Xlx.GetLogString()) << "</Via peer>" << std::endl;
-	if (!m_Protocol.empty())
-		xmlFile << "\t<Protocol>" << m_Protocol << "</Protocol>" << std::endl;
-	auto name = OperatorName(m_My);
+	nlohmann::json j = {
+		{ "callsign", m_My.GetCS() },
+		{ "via_node", m_Rpt1.GetCS() },
+		{ "on_module", std::string(1, m_Rpt2.GetCSModule()) },
+		{ "via_peer", m_Xlx.GetCS() },
+		{ "protocol", m_Protocol },
+		{ "last_heard_time", m_LastHeardTime } };
+	// "N0CALL / ECHO": the suffix a D-Star radio sends
+	const auto log = m_My.GetLogString();
+	const auto slash = log.find(" / ");
+	if (slash != std::string::npos)
+		j["suffix"] = log.substr(slash + 3);
+	const auto name = OperatorName(m_My);
 	if (!name.empty())
-		xmlFile << "\t<Name>" << CUtils::XmlEscape(name) << "</Name>" << std::endl;
+		j["name"] = name;
 	if (!m_Locator.empty())
 	{
-		xmlFile << "\t<Locator>" << m_Locator << "</Locator>" << std::endl;
-		std::ostringstream pos;
-		pos << std::fixed << std::setprecision(5);
-		pos << "\t<Latitude>" << m_Latitude << "</Latitude>" << std::endl;
-		pos << "\t<Longitude>" << m_Longitude << "</Longitude>" << std::endl;
-		xmlFile << pos.str();
+		j["locator"] = m_Locator;
+		j["latitude"] = m_Latitude;
+		j["longitude"] = m_Longitude;
 	}
-
-	char mbstr[100];
-	if (std::strftime(mbstr, sizeof(mbstr), "%FT%TZ", std::gmtime(&m_LastHeardTime)))
-	{
-		xmlFile << "\t<LastHeardTime>" << mbstr << "</LastHeardTime>" << std::endl;
-	}
-	xmlFile << "</STATION>" << std::endl;
-}
-
-void CUser::JsonReport(nlohmann::json &report)
-{
-	nlohmann::json juser;
-	juser["Callsign"] = m_My.GetCS();
-	juser["Repeater"] = m_Rpt1.GetCS();
-	juser["OnModule"] = std::string(1, m_Rpt2.GetCSModule());
-	juser["ViaPeer"] = m_Xlx.GetCS();
-	if (!m_Locator.empty())
-	{
-		juser["Locator"] = m_Locator;
-		juser["Latitude"] = m_Latitude;
-		juser["Longitude"] = m_Longitude;
-	}
-	char s[100];
-	if (std::strftime(s, sizeof(s), "%FT%TZ", std::gmtime(&m_LastHeardTime)))
-	{
-		juser["LastHeard"] = s;
-	}
-	report["Users"].push_back(juser);
+	return j;
 }
