@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.38.0** | tcd 0.19.5 | Dashboard v3.0.0
+**urfd 4.38.1** | tcd 0.19.5 | Dashboard v3.0.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -449,7 +449,7 @@ Password = yoursecretpassword
 # BindingAddress = 127.0.0.1      # Default: loopback only
 ```
 
-The admin page (π in the dashboard's footer, shown with `[Admin] Enable = true` and `[Dashboard] Admin = true`; without the latter only the TCP socket is open) logs in with the `[Admin] Password`; the login is a token for that browser tab, valid for an hour, and a reload keeps it. The dashboard keeps no copy of the password.
+The admin page (π in the dashboard's footer, shown with `[Admin] Enable = true` and `[Dashboard] Admin = true`; without the latter only the TCP socket is open) logs in with the `[Admin] Password`; the login is a token for that browser tab, valid until an hour after its last command, and a reload keeps it. A wrong password pauses logins from that browser's address (2 s, doubling up to 5 min), not those of others. The dashboard keeps no copy of the password.
 
 **Features:**
 - **Dynamic TG Management**: Add/remove talkgroups at runtime with configurable TTL. With BM API key: registers as static via REST API (no kerchunk needed). Without: kerchunk to activate on BM. For SVX, updates the monitored TGs.
@@ -712,7 +712,7 @@ Since 4.38.0 urfd writes no XML or JSON status file any more (`[Files] XmlPath` 
 
 Module names are configured once in `urfd.ini` and automatically available in the dashboard.
 
-### Dashboard v3.0.0
+### Dashboard v3.0.1
 Since v3.0.0 (urfd 4.38.0) a static page, HTML and plain JavaScript without PHP: it gets the state live over urfd's WebSocket and shows a change the moment it happens, the admin page sends its commands the same way. The pages and the look are those of v2.14; old links (`index.php?show=...`) lead to the same pages. Settings are `[Dashboard]` in `urfd.ini`; `setup.sh update` carries those of the old `config.inc.php` over once.
 
 Redesigned in v2.9.0 as the front panel of a radio: an amber LCD shows who is on the air, the modules are a keypad, the rest are plain tables. Before that: dark mode (v2.6.0), hardened against directory outages (v2.6.1), M17 positions in the last-heard list (v2.7.0), directory registration moved to the reflector (v2.8.0), security fixes (v2.8.1, v2.8.2), status file and admin socket fixes (v2.8.3). Since v2.10.0 the operator's first name stands next to the callsign, from the ID databases urfd loads (urfd 4.12.0 and later).
@@ -746,9 +746,10 @@ Every page but Last heard and Admin carries a slim LCD line with the current tra
 # Filter = true                # module keys and callsign filter on Last heard
 # Links = 100                  # rows on the Links page
 # Peers = 100                  # rows on the Peers page
-LinksIP = ShowLast2ByteOfIP    # HideIP (default), ShowLast1ByteOfIP ... ShowLast3ByteOfIP, ShowFullIP
-PeersIP = ShowLast2ByteOfIP
+# LinksIP = HideIP             # (default) or ShowLast1ByteOfIP ... ShowLast3ByteOfIP, ShowFullIP
+# PeersIP = HideIP             # IPv6: the last 1, 2 or 3 groups
 # IPMask = *                   # the character for a hidden byte
+# Admin = false                # the admin page, with [Admin] Enable
 ```
 
 The footer names `[Names] SysopEmail`. The JSON API of the PHP dashboard (`/json/*`) is gone with it (answers 410); its data is in the WebSocket's messages.
@@ -984,6 +985,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Protocol plugins (4.24.0)**: protocols from shared objects loaded at start (`[Plugins]`), with their own ini section, protocol name, admin commands and dashboard parts, checked against the urfd they were built for
 - **SIGHUP config reload**: Hot-reload TG mappings, whitelist/blacklist/interlink, transcoder modules without dropping sessions — thread-safe via sigwait, exception-safe with rollback
 - **Config values checked (4.37.2)**: a value in `urfd.ini` that is no number (a port, `RxGain`/`TxGain`, `Latitude`, the port of a connector's `Map`) is reported with its line and the default taken, instead of ending urfd and `inicheck`; the last line of the white/black list, the interlink and the G3 terminal file counts without a newline at its end; the admin command that removes a TG reads its time slot under the map's lock
+- **Dashboard WebSocket hardened (4.38.1)**: a wrong admin password pauses logins from that browser's address only (2 s, doubling up to 5 min; behind nginx from `X-Forwarded-For`), no longer everyone's, so nobody can keep the sysop out by failing on purpose; a login token runs out an hour after its last command, not an hour after the login; one snapshot build a second serves every client that asks, and one client may have at most 8 requests waiting; the name lookups of the station events and the snapshot no longer happen under the users or clients lock (they wait for a reload of the ID database); a position updates the last heard list only when its locator changes; IPv6 addresses are masked to the last 1, 2 or 3 groups as the option says (was always 2); answers to a missing login carry `"code": "auth"`. `[WebSocket] Enable` defaults to `true` since 4.38.0 (loopback only)
 
 ### Audio & Transcoding
 - **Modules without transcoder carry each stream only where its codec goes (4.32.2)**: on a module without tcd a stream reached every protocol, also those of another codec, whose frames were then empty (zeros, decoded as noise, for example a D-Star stream sent to DMR, P25 or M17). Such a protocol now gets no stream: D-Star goes to the D-Star protocols, AMBE+2 (DMR, NXDN, YSF DN) to DMR, NXDN and YSF, IMBE (P25, YSF VW) to P25 and YSF, Codec2 to M17, USRP and SVX audio to USRP and SVX. Interlinks and plugins keep getting every stream, and transcoded modules are unchanged
@@ -1001,6 +1003,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.6.0**: Dark mode redesign, admin panel, module overview with TG mappings and NXDN RAN, protocol-specific columns hidden when disabled, protocol list, QuadNet Live proxy, reflector list with search/pagination
 - **Dashboard v2.6.1**: Survives an outage of the XLX directory. Explicit timeouts on every outbound request, CallingHome failures logged instead of aborting the page render, reflector and peer lists served from an on-disk cache, admin API no longer serialized behind the PHP session lock
 - **Dashboard v2.7.0**: Locator column for stations that send an M17 GNSS position, also in `/json/stations`
+- **Dashboard v3.0.1 (urfd 4.38.1)**: its own favicon in the front panel look (the XLX one was left from the PHP dashboard); the admin page tells a lost login by the answer's `code`, and a command without an answer within 20 s says it may still be carried out
 - **Dashboard v3.0.0 (urfd 4.38.0)**: the PHP dashboard is replaced by a static one (HTML and plain JavaScript) that gets everything live over urfd's WebSocket, the admin page included (login with the `[Admin] Password`, its commands over the same connection, a token keeps the login across a reload); same pages and look. Settings in `[Dashboard]` of `urfd.ini`, IP addresses masked by urfd; urfd writes no XML/JSON status file any more, `/json/*` and coolacid's live dashboard at `/live/` are gone (both lead to the dashboard); the reflector list and QuadNet come through nginx, which caches the list; php-fpm is no longer in the image
 - **Dashboard v2.14.3**: the LCD has no dark strip along its top edge any more, which looked like a step inside the bezel
 - **Dashboard v2.14.2**: the version in the header without `-dht`, so the status keeps to the header row
@@ -1032,7 +1035,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.8.0**: No CallingHome any more, the reflector registers itself; the reflector list reads `$Directory` (falling back to old `$CallingHome` settings); `/json/metadata` takes the dashboard URL from the reflector's XML
 - **Extended XML/JSON**: Module mappings (static + dynamic with TTL), reflector metadata, protocol list, per-user protocol info, dynamic TG array
 - **Protocol blocking display**: Active blocks shown as clickable labels in admin panel
-- **WebSocket (4.13.0)**: live events for the dashboard (clients, peers, talking stations, the whole state on connect) on `127.0.0.1:10102`, passed through as `/ws` by nginx; based on the notifier by Jason Kendall (coolacid), with the review fixes (lws calls only in its service thread, connections really closed, no log of every event), see [docs/WEBSOCKET.md](docs/WEBSOCKET.md); `setup.sh` switches it on, the Docker image serves `dashboard-ws` at `/live/`
+- **WebSocket (4.13.0)**: live events for the dashboard (clients, peers, talking stations, the whole state on connect) on `127.0.0.1:10102`, passed through as `/ws` by nginx; based on the notifier by Jason Kendall (coolacid), with the review fixes (lws calls only in its service thread, connections really closed, no log of every event), see [docs/WEBSOCKET.md](docs/WEBSOCKET.md); `setup.sh` switches it on, the Docker image serves `dashboard-ws` at `/live/` (until 4.37, see Dashboard v3.0.0)
 - **WebSocket bridges and names (4.14.0)**: `initial_connect` has the bridges of each module (TG mappings, autolinks, connectors to other reflectors), a `module_mappings` event follows their changes, and the station events, last heard and open channels carry the operator's name from the ID database; the XML file takes its bridges from the same code (issue #2)
 - **WebSocket links only real nodes (4.14.1)**: `links`, `client_added` and `client_removed` leave out the pseudo clients of the connectors and bridges (MMDVMClient, SvxReflector, DCS/DExtra/DPlus/YSF clients, USRP) and the clients of interlinked peers, like the XML file; the SvxReflector and USRP clients, set up by urfd itself, no longer show as linked nodes in the XML file either
 - **SVXServer node listed twice (4.14.3)**: a node's client made before its UDP address was known stayed in the links next to the one with the address, and printing its unset address logged "CIp::GetAddress: unknown socket family=0"; a node gets its client only once the UDP address is known, and the server keeps it by pointer

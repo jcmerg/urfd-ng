@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.38.0** | tcd 0.19.5 | Dashboard v3.0.0
+**urfd 4.38.1** | tcd 0.19.5 | Dashboard v3.0.1
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -449,7 +449,7 @@ Password = yoursecretpassword
 # BindingAddress = 127.0.0.1      # Default: loopback only
 ```
 
-Die Admin-Seite (π in der Fußzeile des Dashboards, sichtbar mit `[Admin] Enable = true` und `[Dashboard] Admin = true`; ohne Letzteres ist nur der TCP-Socket offen) meldet sich mit dem `[Admin]`-Passwort an; die Anmeldung ist ein Token für diesen Browser-Tab, eine Stunde gültig, ein Neuladen behält sie. Das Dashboard hält keine Kopie des Passworts.
+Die Admin-Seite (π in der Fußzeile des Dashboards, sichtbar mit `[Admin] Enable = true` und `[Dashboard] Admin = true`; ohne Letzteres ist nur der TCP-Socket offen) meldet sich mit dem `[Admin]`-Passwort an; die Anmeldung ist ein Token für diesen Browser-Tab, gültig bis eine Stunde nach ihrem letzten Befehl, ein Neuladen behält sie. Ein falsches Passwort sperrt Anmeldungen von der Adresse dieses Browsers (2 s, verdoppelt bis 5 min), nicht die anderer. Das Dashboard hält keine Kopie des Passworts.
 
 **Funktionen:**
 - **Dynamische TG-Verwaltung**: Talkgroups zur Laufzeit mit einstellbarer Laufzeit hinzufügen und entfernen. Mit BM-API-Schlüssel per REST-API als statisch eingetragen (kein Kerchunk nötig), ohne per Kerchunk bei BM aktiviert. Bei SVX werden die überwachten TGs angepasst.
@@ -702,7 +702,7 @@ Seit 4.38.0 schreibt urfd keine XML- oder JSON-Statusdatei mehr (`[Files] XmlPat
 
 Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Dashboard zur Verfügung.
 
-### Dashboard v3.0.0
+### Dashboard v3.0.1
 Seit v3.0.0 (urfd 4.38.0) eine statische Seite, HTML und einfaches JavaScript ohne PHP: Sie bekommt den Stand live über den WebSocket von urfd und zeigt eine Änderung in dem Moment, in dem sie passiert; die Admin-Seite schickt ihre Befehle auf demselben Weg. Seiten und Aussehen sind die von v2.14; alte Links (`index.php?show=...`) führen auf dieselben Seiten. Die Einstellungen stehen in `[Dashboard]` in `urfd.ini`; `setup.sh update` übernimmt die der alten `config.inc.php` einmal.
 
 In v2.9.0 neu gestaltet als Frontplatte eines Funkgeräts: Ein bernsteinfarbenes LCD zeigt, wer gerade sendet, die Module sind ein Tastenfeld, der Rest sind schlichte Tabellen. Davor: dunkles Design (v2.6.0), robust gegen Ausfälle des Verzeichnisses (v2.6.1), M17-Positionen in der Last-Heard-Liste (v2.7.0), Eintrag ins Verzeichnis an den Reflektor abgegeben (v2.8.0), Sicherheitskorrekturen (v2.8.1, v2.8.2), Korrekturen an Statusdatei und Admin-Socket (v2.8.3). Seit v2.10.0 steht der Vorname neben dem Rufzeichen, aus den ID-Datenbanken, die urfd lädt (ab urfd 4.12.0).
@@ -736,9 +736,10 @@ Jede Seite außer Last heard und Admin trägt oben eine schmale LCD-Zeile mit de
 # Filter = true                # module keys and callsign filter on Last heard
 # Links = 100                  # rows on the Links page
 # Peers = 100                  # rows on the Peers page
-LinksIP = ShowLast2ByteOfIP    # HideIP (default), ShowLast1ByteOfIP ... ShowLast3ByteOfIP, ShowFullIP
-PeersIP = ShowLast2ByteOfIP
+# LinksIP = HideIP             # (default) or ShowLast1ByteOfIP ... ShowLast3ByteOfIP, ShowFullIP
+# PeersIP = HideIP             # IPv6: the last 1, 2 or 3 groups
 # IPMask = *                   # the character for a hidden byte
+# Admin = false                # the admin page, with [Admin] Enable
 ```
 
 Die Fußzeile nennt `[Names] SysopEmail`. Die JSON-API des PHP-Dashboards (`/json/*`) ist mit ihm entfallen (antwortet mit 410); ihre Daten stehen in den Nachrichten des WebSockets.
@@ -974,6 +975,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Zugangsdaten aus einer Datenbank**: Logins von MMDVM und SVXServer (und Plugins) aus SQLite, MySQL/MariaDB oder PostgreSQL neben der `urfd.ini`, LRU-Cache mit Laufzeit und Negativ-Cache, Logins aus dem Cache überstehen einen Datenbank-Ausfall, Flush und Status über die Admin-API
 - **Neu laden per SIGHUP**: TG-Zuordnungen, Whitelist/Blacklist/Interlink und Transcoder-Module neu laden, ohne Verbindungen zu trennen: threadsicher über sigwait, bei Fehlern mit Rückgängigmachen
 - **Konfigurationswerte geprüft (4.37.2)**: Ein Wert in `urfd.ini`, der keine Zahl ist (ein Port, `RxGain`/`TxGain`, `Latitude`, der Port der `Map` einer Anbindung), wird mit seiner Zeile gemeldet und der Standardwert genommen, statt urfd und `inicheck` zu beenden; die letzte Zeile der White-/Blacklist, der Interlink- und der G3-Terminal-Datei zählt auch ohne Zeilenumbruch am Ende; der Admin-Befehl, der eine TG entfernt, liest ihren Zeitschlitz unter der Sperre der Tabelle
+- **Dashboard-WebSocket gehärtet (4.38.1)**: Ein falsches Admin-Passwort sperrt nur Anmeldungen von der Adresse dieses Browsers (2 s, verdoppelt bis 5 min; hinter nginx aus `X-Forwarded-For`), nicht mehr alle, sodass niemand den Sysop durch absichtliche Fehlversuche aussperren kann; ein Login-Token läuft eine Stunde nach seinem letzten Befehl ab, nicht eine Stunde nach der Anmeldung; ein Snapshot-Aufbau pro Sekunde bedient alle Clients, die fragen, und ein Client darf höchstens 8 Anfragen warten lassen; die Namensabfragen der Stations-Events und des Snapshots laufen nicht mehr unter dem Users- oder Clients-Lock (sie warten auf ein Neuladen der ID-Datenbank); eine Position ändert die Last-Heard-Liste nur, wenn sich ihr Locator ändert; IPv6-Adressen werden wie eingestellt auf die letzten 1, 2 oder 3 Gruppen maskiert (bisher immer 2); Antworten auf eine fehlende Anmeldung tragen `"code": "auth"`. `[WebSocket] Enable` ist seit 4.38.0 standardmäßig `true` (nur Loopback)
 
 ### Audio und Transcodierung
 - **Module ohne Transcoder geben jeden Stream nur dorthin, wo sein Codec hingeht (4.32.2)**: Auf einem Modul ohne tcd erreichte ein Stream jedes Protokoll, auch solche eines anderen Codecs, deren Frames dann leer waren (Nullen, als Rauschen dekodiert, etwa ein D-Star-Stream nach DMR, P25 oder M17). Ein solches Protokoll bekommt jetzt keinen Stream: D-Star geht an die D-Star-Protokolle, AMBE+2 (DMR, NXDN, YSF DN) an DMR, NXDN und YSF, IMBE (P25, YSF VW) an P25 und YSF, Codec2 an M17, USRP- und SVX-Audio an USRP und SVX. Interlinks und Plugins bekommen weiter jeden Stream, transkodierte Module bleiben unverändert
@@ -991,6 +993,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v3.0.1 (urfd 4.38.1)**: ein eigenes Favicon im Frontplatten-Look (das XLX-Logo stammte noch vom PHP-Dashboard); die Admin-Seite erkennt eine verlorene Anmeldung am `code` der Antwort, und ein Befehl ohne Antwort binnen 20 s sagt, dass er noch ausgeführt werden kann
 - **Dashboard v3.0.0 (urfd 4.38.0)**: Das PHP-Dashboard ist durch ein statisches (HTML und einfaches JavaScript) ersetzt, das alles live über den WebSocket von urfd bekommt, die Admin-Seite eingeschlossen (Anmeldung mit dem `[Admin]`-Passwort, ihre Befehle über dieselbe Verbindung, ein Token hält die Anmeldung über ein Neuladen); gleiche Seiten und gleiches Aussehen. Einstellungen in `[Dashboard]` von `urfd.ini`, IP-Adressen maskiert urfd; urfd schreibt keine XML-/JSON-Statusdatei mehr, `/json/*` und coolacids Live-Dashboard unter `/live/` sind entfallen (beide führen zum Dashboard); Reflektorliste und QuadNet kommen über nginx, das die Liste zwischenspeichert; php-fpm ist nicht mehr im Image
 - **Dashboard v2.14.3**: das LCD hat keinen dunklen Streifen mehr an der Oberkante, der wie ein Absatz im Rahmen aussah
 - **Dashboard v2.14.2**: die Version im Kopf ohne `-dht`, damit der Status in der Kopfzeile bleibt
@@ -1022,7 +1025,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.8.0**: Kein CallingHome mehr, der Reflektor trägt sich selbst ein; die Reflektorliste liest `$Directory` (mit Rückfall auf alte `$CallingHome`-Einstellungen); `/json/metadata` nimmt die Dashboard-URL aus dem XML des Reflektors
 - **Erweitertes XML/JSON**: Modul-Zuordnungen (statisch und dynamisch mit Laufzeit), Reflektor-Angaben, Protokollliste, Protokoll pro Nutzer, Array der dynamischen TGs
 - **Anzeige der Protokoll-Sperren**: Aktive Sperren als anklickbare Markierungen im Admin-Panel
-- **WebSocket (4.13.0)**: Live-Ereignisse für das Dashboard (Clients, Peers, sprechende Stationen, beim Verbinden der komplette Stand) auf `127.0.0.1:10102`, von nginx als `/ws` durchgereicht; basiert auf dem Notifier von Jason Kendall (coolacid), mit den Fixes aus dem Review (lws-Aufrufe nur in seinem Service-Thread, Verbindungen werden wirklich geschlossen, kein Log jedes Ereignisses), siehe [docs/WEBSOCKET.md](docs/WEBSOCKET.md); `setup.sh` schaltet ihn ein, das Docker-Image liefert `dashboard-ws` unter `/live/` aus
+- **WebSocket (4.13.0)**: Live-Ereignisse für das Dashboard (Clients, Peers, sprechende Stationen, beim Verbinden der komplette Stand) auf `127.0.0.1:10102`, von nginx als `/ws` durchgereicht; basiert auf dem Notifier von Jason Kendall (coolacid), mit den Fixes aus dem Review (lws-Aufrufe nur in seinem Service-Thread, Verbindungen werden wirklich geschlossen, kein Log jedes Ereignisses), siehe [docs/WEBSOCKET.md](docs/WEBSOCKET.md); `setup.sh` schaltet ihn ein, das Docker-Image liefert `dashboard-ws` unter `/live/` aus (bis 4.37, siehe Dashboard v3.0.0)
 - **WebSocket: Bridges und Namen (4.14.0)**: `initial_connect` enthält die Bridges jedes Moduls (TG-Mappings, Autolinks, Connectoren zu anderen Reflektoren), ein `module_mappings`-Ereignis folgt ihren Änderungen, und Stations-Ereignisse, Last Heard und offene Kanäle tragen den Namen des Funkers aus der ID-Datenbank; die XML-Datei nimmt ihre Bridges aus demselben Code (Issue #2)
 - **WebSocket-Links nur echte Nodes (4.14.1)**: `links`, `client_added` und `client_removed` lassen die Pseudo-Clients der Connectoren und Bridges (MMDVMClient, SvxReflector, DCS/DExtra/DPlus/YSF-Clients, USRP) und die Clients gekoppelter Peers weg, wie die XML-Datei; die SvxReflector- und USRP-Clients, die urfd selbst anlegt, erscheinen auch in der XML-Datei nicht mehr als verlinkte Nodes
 - **SVXServer-Node doppelt gelistet (4.14.3)**: der Client eines Nodes, angelegt bevor seine UDP-Adresse bekannt war, blieb neben dem mit Adresse in den Links stehen, und die Ausgabe seiner leeren Adresse protokollierte "CIp::GetAddress: unknown socket family=0"; ein Node bekommt seinen Client erst, wenn die UDP-Adresse bekannt ist, und der Server hält ihn über einen Zeiger
