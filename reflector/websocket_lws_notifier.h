@@ -20,7 +20,7 @@
 // A client may send requests, {"id": n, "cmd": "..."}: "snapshot" for the state
 // again, and the admin commands of the admin socket after an "auth" with the
 // [Admin] Password or a token from an earlier one. These run one after the other
-// in their own thread, so a slow one never holds up the events.
+// in their own thread, the snapshot too, so a slow one never holds up the events.
 class CWebsocketLwsNotifier
 {
 public:

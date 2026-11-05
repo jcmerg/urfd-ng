@@ -148,6 +148,8 @@ var handlers = {
         S.peers = p.peers || [];
         S.lastHeard = (p.last_heard || []).map(station);
         setOnAirFromChannels(p.open_channels);
+        // transcoding follows tcd while urfd runs
+        if (typeof p.transcoded === 'string') Object.keys(S.modules).forEach(function (m) { S.modules[m].transcoded = p.transcoded.indexOf(m) >= 0; });
     },
     client_added: function (p) {
         S.links = S.links.filter(function (n) { return nodeKey(n) !== nodeKey(p); });
@@ -171,10 +173,17 @@ var handlers = {
         var i = 0;
         while (i < S.lastHeard.length && S.lastHeard[i].time > st.time) i++;
         S.lastHeard.splice(i, 0, st);
-        if (S.lastHeard.length > 1000) S.lastHeard.length = 1000;
+        // as long as urfd keeps it, so a reload shows the same list
+        var max = options().last_heard || 40;
+        if (S.lastHeard.length > max) S.lastHeard.length = max;
         // the station on the air now has its position as well
         var air = S.onAir[st.module];
         if (air && air.cs === st.cs && st.locator) { air.locator = st.locator; air.lat = st.lat; air.lon = st.lon; }
+    },
+    // an entry that changed its callsign (a talker renamed during the stream)
+    user_removed: function (p) {
+        var key = station(p).key;
+        S.lastHeard = S.lastHeard.filter(function (u) { return u.key !== key; });
     },
     last_heard_cleared: function () { S.lastHeard = []; },
     module_mappings: function (p) {
@@ -338,7 +347,7 @@ function lcdPanel(key, air, last, hidden) {
 }
 
 URF.pages.users = {
-    refresh: false,
+    refresh: true,
     mount: function (el) {
         var f = options().filter;
         el.innerHTML = '<div class="page"><section class="deck" aria-label="On the air"><div class="bezel" id="lcds" aria-live="polite"></div>'
@@ -774,7 +783,8 @@ function route() {
     lastCall = null;
     current.mount(fresh);
     clearInterval(refreshTimer);
-    // the last heard times of links and peers have no events: ask for the state now and then
+    // what has no events (last heard times of links and peers, a node changing its
+    // module, transcoding): ask for the state now and then
     if (current.refresh) refreshTimer = setInterval(function () { if (S.connected && !document.hidden) request('snapshot'); }, 10000);
     render();
     window.scrollTo(0, 0);

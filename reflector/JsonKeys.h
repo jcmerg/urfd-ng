@@ -119,6 +119,6 @@ struct SJsonKeys {
 	ws { "wsEnable", "wsPort", "wsBindAddress", "wsMaxClients", "wsQueueLen", "wsPingInterval", "wsIdleTimeout" };
 
 	// what the dashboard shows, sent to it over the WebSocket
-	struct DASHBOARD { const std::string motd, lastheard, filter, links, peers, linksip, peersip, ipmask; }
-	dashboard { "dashMotd", "dashLastHeard", "dashFilter", "dashLinks", "dashPeers", "dashLinksIP", "dashPeersIP", "dashIPMask" };
+	struct DASHBOARD { const std::string motd, lastheard, filter, links, peers, linksip, peersip, ipmask, admin; }
+	dashboard { "dashMotd", "dashLastHeard", "dashFilter", "dashLinks", "dashPeers", "dashLinksIP", "dashPeersIP", "dashIPMask", "dashAdmin" };
 };

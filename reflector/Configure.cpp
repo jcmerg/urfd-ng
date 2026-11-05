@@ -1011,6 +1011,8 @@ bool CConfigure::ReadData(const std::string &path)
 					data[g_Keys.dashboard.lastheard] = getUnsigned(value, "Dashboard LastHeard", 1, 1000, 40);
 				else if (0 == key.compare("Filter"))
 					data[g_Keys.dashboard.filter] = IS_TRUE(value[0]);
+				else if (0 == key.compare("Admin"))
+					data[g_Keys.dashboard.admin] = IS_TRUE(value[0]);
 				else if (0 == key.compare("Links"))
 					data[g_Keys.dashboard.links] = getUnsigned(value, "Dashboard Links", 1, 10000, 100);
 				else if (0 == key.compare("Peers"))
@@ -1602,7 +1604,7 @@ bool CConfigure::ReadData(const std::string &path)
 
 	// WebSocket: optional, every key has a default
 	const std::pair<const std::string &, nlohmann::json> wsDefaults[] = {
-		{ g_Keys.ws.enable, false }, { g_Keys.ws.port, 10102u }, { g_Keys.ws.bindaddress, "127.0.0.1" },
+		{ g_Keys.ws.enable, true }, { g_Keys.ws.port, 10102u }, { g_Keys.ws.bindaddress, "127.0.0.1" },
 		{ g_Keys.ws.maxclients, 64u }, { g_Keys.ws.queuelen, 256u }, { g_Keys.ws.pinginterval, 30u }, { g_Keys.ws.idletimeout, 90u } };	// unsigned, for GetUnsigned()
 	for (const auto &[key, def] : wsDefaults)
 	{
@@ -1610,11 +1612,13 @@ bool CConfigure::ReadData(const std::string &path)
 			data[key] = def;
 	}
 
-	// Dashboard: optional as well; an IP that is not set is not shown
+	// Dashboard: optional as well; an IP that is not set is not shown, the admin
+	// page logs in only when asked for (the TCP admin socket may be for scripts alone)
 	const std::pair<const std::string &, nlohmann::json> dashDefaults[] = {
 		{ g_Keys.dashboard.motd, "" }, { g_Keys.dashboard.lastheard, 40u }, { g_Keys.dashboard.filter, true },
 		{ g_Keys.dashboard.links, 100u }, { g_Keys.dashboard.peers, 100u },
-		{ g_Keys.dashboard.linksip, "HideIP" }, { g_Keys.dashboard.peersip, "HideIP" }, { g_Keys.dashboard.ipmask, "*" } };
+		{ g_Keys.dashboard.linksip, "HideIP" }, { g_Keys.dashboard.peersip, "HideIP" }, { g_Keys.dashboard.ipmask, "*" },
+		{ g_Keys.dashboard.admin, false } };
 	for (const auto &[key, def] : dashDefaults)
 	{
 		if (!data.contains(key))

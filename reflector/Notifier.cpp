@@ -126,7 +126,7 @@ void CNotifierManager::Start(void)
 {
 	if (!g_Configure.Contains(g_Keys.ws.enable) || !g_Configure.GetBoolean(g_Keys.ws.enable))
 	{
-		std::cout << "WebSocket: disabled" << std::endl;
+		std::cout << "WebSocket: disabled, the dashboard shows nothing without it" << std::endl;
 		return;
 	}
 	m_ReflectorName = g_Reflector.GetCallsign().GetCS();

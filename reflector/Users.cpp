@@ -17,6 +17,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+#include <algorithm>
 #include <cmath>
 #include "Users.h"
 #include "Global.h"
@@ -33,16 +34,16 @@ CUsers::CUsers() {}
 ////////////////////////////////////////////////////////////////////////////////////////
 // users management
 
-#define LASTHEARD_USERS_MAX_SIZE 20
 void CUsers::AddUser(const CUser &user)
 {
 	// add
 	m_Users.push_front(user);
 
-	// if list size too big, remove oldest
-	if ( m_Users.size() >= (LASTHEARD_USERS_MAX_SIZE-1) )
+	// as long as the dashboard shows it ([Dashboard] LastHeard), the oldest goes
+	const size_t max = std::max(1u, g_Configure.GetUnsigned(g_Keys.dashboard.lastheard));
+	if ( m_Users.size() > max )
 	{
-		m_Users.resize(m_Users.size()-1);
+		m_Users.resize(max);
 	}
 }
 
@@ -146,6 +147,7 @@ void CUsers::StationRenamed(char module, const CCallsign &from, const CCallsign 
 		{
 			const CUser old(*it);
 			m_Users.erase(it);
+			DispatchStationEvent("user_removed", old);
 			Hearing(to, old.GetRpt1(), old.GetRpt2(), old.GetXlx(), old.GetProtocol());
 			break;
 		}
@@ -197,8 +199,11 @@ void CUsers::Location(const CCallsign &my, double lat, double lon)
 	{
 		if ( user.IsCallsign(my) )
 		{
+			// M17 sends its position every second: tell the dashboard when the locator changes
+			const bool changed = (user.GetLocator() != loc);
 			user.SetLocation(loc, lat, lon);
-			DispatchStationEvent("user_heard", user);
+			if (changed)
+				DispatchStationEvent("user_heard", user);
 			break;
 		}
 	}

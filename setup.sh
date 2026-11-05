@@ -346,6 +346,7 @@ write_urfd_config() {
     if [ -n "$ADMIN_PASSWORD" ]; then
         set_ini "$ini" Admin Enable true
         set_ini "$ini" Admin Password "$ADMIN_PASSWORD"
+        set_ini "$ini" Dashboard Admin true
     fi
 
     # the dashboard reads everything from here (loopback, nginx passes /ws)
@@ -639,9 +640,10 @@ print(rows("PageOptions['PeerPage']['LimitTo']", '100'))
 print(mode("PageOptions['RepeatersPage']['IPModus']"))
 print(mode("PageOptions['PeerPage']['IPModus']"))
 print(mask if len(mask) == 1 and mask != '#' else '*')
+print('true' if get("Admin['Enable']", 'false').lower() == 'true' else 'false')
 PY
-    local motd lastheard filter links peers linksip peersip mask
-    { read -r motd; read -r lastheard; read -r filter; read -r links; read -r peers; read -r linksip; read -r peersip; read -r mask; } <"$DATA_DIR/.dashboard" || true
+    local motd lastheard filter links peers linksip peersip mask admin
+    { read -r motd; read -r lastheard; read -r filter; read -r links; read -r peers; read -r linksip; read -r peersip; read -r mask; read -r admin; } <"$DATA_DIR/.dashboard" || true
     rm -f "$DATA_DIR/.dashboard"
     [ -n "$motd" ] && set_ini "$ini" Dashboard Motd "$motd"
     set_ini "$ini" Dashboard LastHeard "${lastheard:-40}"
@@ -651,6 +653,8 @@ PY
     set_ini "$ini" Dashboard LinksIP "${linksip:-ShowLast2ByteOfIP}"
     set_ini "$ini" Dashboard PeersIP "${peersip:-ShowLast2ByteOfIP}"
     set_ini "$ini" Dashboard IPMask "${mask:-*}"
+    # the admin page as before: the old dashboard had a switch of its own for it
+    set_ini "$ini" Dashboard Admin "${admin:-false}"
     if [ -f "$php" ]; then
         mv "$php" "$php.old"
         info "The old dashboard settings are kept as $php.old, they are not used any more"

@@ -147,7 +147,7 @@ sudo nginx -t && sudo systemctl reload nginx
 
 The dashboard is then on port 8363; change `listen` in the configuration for another port, or put it behind your existing web server with the `/ws`, `/xlxapi/reflectorlist` and `/quadnet/ics` locations. Its settings are `[Dashboard]` in `urfd.ini` (banner, rows, IP addresses), see [WEBSOCKET.md](WEBSOCKET.md).
 
-**Admin page**: `[Admin] Enable = true` in `urfd.ini` (restart urfd). Log in with the `[Admin] Password`; the dashboard keeps no copy of it. The page is behind the π symbol in the footer.
+**Admin page**: `[Admin] Enable = true` and `[Dashboard] Admin = true` in `urfd.ini` (restart urfd). Log in with the `[Admin] Password`; the dashboard keeps no copy of it. The page is behind the π symbol in the footer.
 
 ## Transcoder
 

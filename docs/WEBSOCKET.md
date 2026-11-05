@@ -94,7 +94,7 @@ This contains static descriptor data for the reflector and the startup timing me
 
 - `version`: urfd's version, e.g. `4.38.0`
 - `reflector`: callsign, and country, sponsor, dashboard URL and `email` (`[Names] SysopEmail`) when configured
-- `dashboard`: what the dashboard shows, from `[Dashboard]`: `motd`, `last_heard`, `filter`, `links`, `peers` (rows and switches), `links_ip` / `peers_ip` (whether IP addresses are shown at all) and `admin` (`[Admin] Enable`: the admin page can log in)
+- `dashboard`: what the dashboard shows, from `[Dashboard]`: `motd`, `last_heard`, `filter`, `links`, `peers` (rows and switches), `links_ip` / `peers_ip` (whether IP addresses are shown at all) and `admin` (`[Admin] Enable` and `[Dashboard] Admin`: the admin page can log in)
 - `modules`: the configured module list, including description, echo flag, linked node count, on-air user (`on_air`, with `on_air_name`), transcoded flag, per-module protocol IDs, and `mappings`: the module's bridges, see `module_mappings`
 - `protocols`: the enabled protocol list and their configured ports; a plugin's with its `description`
 - `server_started`: Unix timestamp when the reflector process started
@@ -112,6 +112,7 @@ This includes the current dynamic state of the reflector:
 - `server_started`: Unix timestamp when the reflector process started
 - `current_time`: Unix timestamp at the moment the snapshot was built
 - `uptime_seconds`: elapsed time since start
+- `transcoded`: the modules transcoded right now, e.g. `"AD"` (with `[Transcoder] Modules = auto` they follow tcd)
 - `links`: the nodes linked to the reflector, as `client_added` has them: not the pseudo clients of the connectors and bridges (MMDVMClient, SvxReflector, DCS/DExtra/DPlus/YSF clients, USRP; those are in the module's `mappings`) and not the clients of interlinked peers (those are in `peers`); `client_added` and `client_removed` cover the same nodes
 - `last_heard`: recent heard stations, newest first, as `user_heard` has them
 - `open_channels`: active streams currently transmitting on a module, with the operator's `name`
@@ -201,6 +202,10 @@ Sent when that stream closes, with the payload of its `station_started`. There i
 
 A station at the head of the last heard list, with the fields of `station_started`; also when the position of a station already in the list arrives. The list keeps one entry per station, node, module and peer: drop an older entry with the same `callsign`, `suffix`, `via_node`, `on_module` and `via_peer`, and keep the list sorted by `last_heard_time`.
 
+### `user_removed`
+
+An entry left the last heard list: the talker was renamed during the stream (the new callsign follows as `user_heard`). Fields and key as `user_heard`.
+
 ### `last_heard_cleared`
 
 The admin page cleared the last heard list; empty payload.
@@ -243,8 +248,8 @@ A client sends a JSON object with `cmd` and any `id` of its own; the answer is a
 { "event_type": "reply", "id": 7, "timestamp": 1730000000, "payload": { "status": "ok", "token": "3f2a..." } }
 ```
 
-- `snapshot`: a new `state_snapshot` (the last heard times of links and peers change without an event). At most one every 2 seconds per connection, else a `reply` with an error.
-- `auth`: logs this connection in to the admin commands, with `password` (the `[Admin] Password`) or a `token` from an earlier login, e.g. after a reload of the page. A wrong password locks logins for 2 seconds; a token is valid for an hour. Answers `admin interface disabled` without `[Admin] Enable = true`.
+- `snapshot`: a new `state_snapshot` (the last heard times of links and peers, a node changing its module and transcoding change without an event; the dashboard asks every 10 s). At most one every 2 seconds per connection, else a `reply` with an error.
+- `auth`: logs this connection in to the admin commands, with `password` (the `[Admin] Password`) or a `token` from an earlier login, e.g. after a reload of the page. A wrong password locks logins for 2 seconds; a token is valid for an hour. Answers `admin page disabled` without `[Admin] Enable = true` and `[Dashboard] Admin = true`.
 - `logout`: ends the login and makes its token invalid.
 - every command of the admin socket, with the same fields and answers (`status`, `tg_list`, `tg_add`, `log`, `mmdvm_user_add`, `plugin`, ...; see `reflector/AdminSocket.cpp`), without a `token`: the connection's login counts. Without one the answer is `authentication required`. The commands run one after another in a thread of their own, so a slow one never holds up the events.
 

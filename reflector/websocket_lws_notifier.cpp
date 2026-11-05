@@ -51,7 +51,7 @@ static nlohmann::json BuildInitialConnectPayload()
 		{ "peers", g_Configure.GetUnsigned(g_Keys.dashboard.peers) },
 		{ "links_ip", g_Configure.GetString(g_Keys.dashboard.linksip) != "HideIP" },
 		{ "peers_ip", g_Configure.GetString(g_Keys.dashboard.peersip) != "HideIP" },
-		{ "admin", g_AdminSocket.IsEnabled() } };
+		{ "admin", g_AdminSocket.IsEnabled() && g_Configure.GetBoolean(g_Keys.dashboard.admin) } };
 
 	// the nodes per module in one pass under the clients lock
 	int nodeCount[26] = {};
@@ -176,6 +176,13 @@ static nlohmann::json BuildReflectorSnapshot()
 	snapshot["last_heard"] = nlohmann::json::array();
 	snapshot["open_channels"] = nlohmann::json::array();
 	snapshot["peers"] = nlohmann::json::array();
+
+	// transcoding follows tcd (Modules = auto): the modules transcoded now
+	std::string transcoded;
+	for (char m : g_Configure.GetString(g_Keys.modules.modules))
+		if (m >= 'A' && m <= 'Z' && g_Reflector.IsTranscoded(m))
+			transcoded += m;
+	snapshot["transcoded"] = transcoded;
 
 	// the open channels from the clients that master a stream: the stream's
 	// owner pointer is reset outside any lock when it closes
@@ -527,7 +534,8 @@ void CWebsocketLwsNotifier::Request(struct lws *wsi, uint64_t serial, const nloh
 	const auto id = req.value("id", nlohmann::json());
 	if (req["cmd"] == "snapshot")
 	{
-		// the whole state again, for pages that show what has no events (last heard of links and peers)
+		// the whole state again, for what has no events (last heard times of links and
+		// peers, a node changing its module, transcoding)
 		const auto now = std::chrono::steady_clock::now();
 		bool tooSoon = false;
 		{
@@ -544,15 +552,7 @@ void CWebsocketLwsNotifier::Request(struct lws *wsi, uint64_t serial, const nloh
 			Reply(wsi, serial, id, {{"status", "error"}, {"message", "too many snapshots, wait a moment"}});
 			return;
 		}
-		try
-		{
-			Enqueue(wsi, serial, Dump(CEvent("state_snapshot", BuildReflectorSnapshot(), CNotifierManager::Instance().ReflectorName())));
-		}
-		catch (const std::exception &ex)
-		{
-			std::cerr << "WebSocket: cannot build the state: " << ex.what() << std::endl;
-		}
-		return;
+		// built in the admin thread: it takes the reflector and ID database locks
 	}
 
 	{
@@ -580,6 +580,18 @@ void CWebsocketLwsNotifier::AdminLoop(void)
 			job = std::move(m_Jobs.front());
 			m_Jobs.pop_front();
 		}
+		if (job.request["cmd"] == "snapshot")
+		{
+			try
+			{
+				Enqueue(job.wsi, job.serial, Dump(CEvent("state_snapshot", BuildReflectorSnapshot(), CNotifierManager::Instance().ReflectorName())));
+			}
+			catch (const std::exception &ex)
+			{
+				std::cerr << "WebSocket: cannot build the state: " << ex.what() << std::endl;
+			}
+			continue;
+		}
 		nlohmann::json result;
 		try
 		{
@@ -598,8 +610,8 @@ nlohmann::json CWebsocketLwsNotifier::RunAdmin(const SJob &job)
 {
 	const auto &req = job.request;
 	const std::string cmd = req["cmd"];
-	if (!g_AdminSocket.IsEnabled())
-		return {{"status", "error"}, {"message", "admin interface disabled"}};
+	if (!g_AdminSocket.IsEnabled() || !g_Configure.GetBoolean(g_Keys.dashboard.admin))
+		return {{"status", "error"}, {"message", "admin page disabled ([Admin] Enable and [Dashboard] Admin)"}};
 
 	auto setToken = [&](const std::string &token) {
 		std::lock_guard<std::mutex> lk(m_Mutex);

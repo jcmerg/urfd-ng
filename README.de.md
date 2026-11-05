@@ -449,7 +449,7 @@ Password = yoursecretpassword
 # BindingAddress = 127.0.0.1      # Default: loopback only
 ```
 
-Die Admin-Seite (π in der Fußzeile des Dashboards, sichtbar mit `[Admin] Enable = true`) meldet sich mit dem `[Admin]`-Passwort an; die Anmeldung ist ein Token für diesen Browser-Tab, eine Stunde gültig, ein Neuladen behält sie. Das Dashboard hält keine Kopie des Passworts.
+Die Admin-Seite (π in der Fußzeile des Dashboards, sichtbar mit `[Admin] Enable = true` und `[Dashboard] Admin = true`; ohne Letzteres ist nur der TCP-Socket offen) meldet sich mit dem `[Admin]`-Passwort an; die Anmeldung ist ein Token für diesen Browser-Tab, eine Stunde gültig, ein Neuladen behält sie. Das Dashboard hält keine Kopie des Passworts.
 
 **Funktionen:**
 - **Dynamische TG-Verwaltung**: Talkgroups zur Laufzeit mit einstellbarer Laufzeit hinzufügen und entfernen. Mit BM-API-Schlüssel per REST-API als statisch eingetragen (kein Kerchunk nötig), ohne per Kerchunk bei BM aktiviert. Bei SVX werden die überwachten TGs angepasst.
