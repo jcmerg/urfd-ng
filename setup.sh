@@ -114,23 +114,6 @@ open(path, 'w').write('\n'.join(lines))
 PY
 }
 
-# set_php FILE KEY VALUE -- set $KEY = VALUE; in the dashboard config, e.g.
-# set_php config.inc.php "Admin['Enable']" "true"
-set_php() {
-    python3 - "$@" <<'PY'
-import re, sys
-path, key, value = sys.argv[1:4]
-s = open(path).read()
-pat = re.compile(r"^(\s*\$" + re.escape(key) + r"\s*=\s*).*?;", re.M)
-if not pat.search(s):
-    sys.exit("missing setting " + key)
-s = pat.sub(lambda m: m.group(1) + value + ';', s, count=1)
-open(path, 'w').write(s)
-PY
-}
-
-php_str() { printf "'%s'" "${1//\'/\\\'}"; }
-
 local_ip() {
     ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<NF; i++) if ($i == "src") print $(i+1)}' | head -1
 }
@@ -313,7 +296,7 @@ ask_transcoder() {
 
 write_urfd_config() {
     info "Writing the reflector configuration to $CFG_DIR"
-    mkdir -p "$CFG_DIR" "$DATA_DIR/dashboard" "$DATA_DIR/xlxd-ch"
+    mkdir -p "$CFG_DIR" "$DATA_DIR/xlxd-ch"
     local ini="$CFG_DIR/urfd.ini"
     cp "$REPO_DIR/config/urfd.ini" "$ini"
     for f in urfd.interlink urfd.whitelist urfd.blacklist urfd.terminal; do
@@ -363,9 +346,10 @@ write_urfd_config() {
     if [ -n "$ADMIN_PASSWORD" ]; then
         set_ini "$ini" Admin Enable true
         set_ini "$ini" Admin Password "$ADMIN_PASSWORD"
+        set_ini "$ini" Dashboard Admin true
     fi
 
-    # live events for the dashboard at /live/ (loopback, nginx passes /ws)
+    # the dashboard reads everything from here (loopback, nginx passes /ws)
     set_ini "$ini" WebSocket Enable true
 
     # paths inside the container
@@ -377,40 +361,28 @@ write_urfd_config() {
     set_ini "$ini" "YSF TX/RX DB" Mode both
     set_ini "$ini" "YSF TX/RX DB" FilePath "$c/ysfnode.dat"
     set_ini "$ini" Files PidPath /var/run/xlxd.pid
-    set_ini "$ini" Files XmlPath /var/log/xlxd.xml
     set_ini "$ini" Files WhitelistPath "$c/urfd.whitelist"
     set_ini "$ini" Files BlacklistPath "$c/urfd.blacklist"
     set_ini "$ini" Files InterlinkPath "$c/urfd.interlink"
     set_ini "$ini" Files G3TerminalPath "$c/urfd.terminal"
 
-    local php="$DATA_DIR/dashboard/config.inc.php"
-    cp "$REPO_DIR/dashboard/pgs/config.inc.php" "$php"
-    set_php "$php" "PageOptions['ContactEmail']" "$(php_str "$EMAIL")"
-    if [ -n "$ADMIN_PASSWORD" ]; then
-        set_php "$php" "Admin['Enable']" true
-    fi
     # the reflector registers itself in the XLX directory ([CallingHome] in urfd.ini)
     if [ "$CALLHOME" = true ]; then
         set_ini "$ini" CallingHome Enable true
         set_ini "$ini" CallingHome Country "$CH_COUNTRY"
         set_ini "$ini" CallingHome Comment "${CH_COMMENT:0:100}"
     fi
-    chown 33:33 "$php"   # www-data in the container
     secure_files
 }
 
 # urfd.ini holds the admin, hotspot and BrandMeister passwords, so only root
-# (urfd in the container) reads it; the dashboard (www-data, uid 33) owns its
-# state directory instead of everyone being able to write there
+# (urfd in the container) reads it; the web server (www-data, uid 33) owns the
+# directory of its reflector list copy instead of everyone being able to write there
 secure_files() {
     chmod 600 "$CFG_DIR/urfd.ini"
+    mkdir -p "$DATA_DIR/xlxd-ch"
     chown 33:33 "$DATA_DIR/xlxd-ch"
     chmod 755 "$DATA_DIR/xlxd-ch"
-    # older dashboards kept a copy of the admin password, it is not used any more
-    local php="$DATA_DIR/dashboard/config.inc.php"
-    if [ -f "$php" ] && grep -Eq "^\\\$Admin\\[[\"']Password[\"']\\]" "$php"; then
-        sed -E -i "/^\\\$Admin\\[[\"']Password[\"']\\]/d" "$php"
-    fi
 }
 
 write_tcd_config() {
@@ -524,15 +496,14 @@ summary() {
         cat <<EOF
 
  Reflector $CALLSIGN
-   Dashboard:      $DASHURL
-   Live dashboard: ${DASHURL%/}/live/   (a TLS proxy in front must pass /ws as WebSocket)
+   Dashboard:      $DASHURL   (a TLS proxy in front must pass /ws as WebSocket)
    Configuration:  $CFG_DIR/urfd.ini   (more protocols, BrandMeister, interlinks)
    After changes:  docker restart urfd
    Logs:           docker logs -f urfd
 EOF
         [ -n "$ADMIN_PASSWORD" ] && echo "   Admin page:     π symbol in the dashboard footer, password: $ADMIN_PASSWORD"
         if [ -n "$ADMIN_PASSWORD" ] && [[ "$DASHURL" == http://* ]]; then
-            echo "   WARNING:        over plain http the admin password and its session cookie cross the"
+            echo "   WARNING:        over plain http the admin password and its login token cross the"
             echo "                   network unencrypted: put a TLS proxy (Caddy, nginx) in front of port 8363"
         fi
         cat <<EOF
@@ -615,16 +586,79 @@ PY
     [ -n "$url" ] && set_ini "$ini" Names DashboardUrl "$url"
 }
 
-# Since urfd 4.13 the image serves the live dashboard at /live/, which reads
-# urfd's WebSocket. Switch it on once for an urfd.ini from before; an existing
-# [WebSocket] section is the operator's choice and stays.
+# Since dashboard 3.0 (urfd 4.38) the dashboard reads everything from urfd's
+# WebSocket, so it has to be on: a dashboard without it stays empty.
 migrate_websocket() {
     local ini="$CFG_DIR/urfd.ini"
     [ -f "$ini" ] || return 0
-    grep -q '^\[WebSocket\]' "$ini" && return 0
-    info "Enabling the WebSocket for the live dashboard ([WebSocket] in urfd.ini)"
-    set_ini "$ini" WebSocket Enable true
-    set_ini "$ini" WebSocket Port 10102
+    if ! grep -q '^\[WebSocket\]' "$ini"; then
+        info "Enabling the WebSocket for the dashboard ([WebSocket] in urfd.ini)"
+        set_ini "$ini" WebSocket Enable true
+        set_ini "$ini" WebSocket Port 10102
+    elif python3 - "$ini" <<'PY'
+import re, sys
+s = open(sys.argv[1]).read()
+m = re.search(r'^\[WebSocket\]\s*$(.*?)(?=^\[|\Z)', s, re.M | re.S)
+e = re.search(r'^\s*Enable\s*=\s*(\S+)', m.group(1), re.M) if m else None
+sys.exit(0 if not e or e.group(1)[0] not in 'tT1yY' else 1)
+PY
+    then
+        info "Enabling the WebSocket, the dashboard reads everything from it ([WebSocket] Enable in urfd.ini)"
+        set_ini "$ini" WebSocket Enable true
+    fi
+}
+
+# Since dashboard 3.0 (urfd 4.38) the dashboard is static and its settings are
+# [Dashboard] in urfd.ini; urfd writes no XML file any more. Carry the settings
+# of the old dashboard's config.inc.php over once, while there is no [Dashboard].
+migrate_dashboard() {
+    local ini="$CFG_DIR/urfd.ini" php="$DATA_DIR/dashboard/config.inc.php"
+    [ -f "$ini" ] || return 0
+    del_ini "$ini" Files XmlPath
+    del_ini "$ini" Files JsonPath
+    grep -q '^\[Dashboard\]' "$ini" && return 0
+    info "Moving the dashboard settings to [Dashboard] in urfd.ini"
+    python3 - "$php" >"$DATA_DIR/.dashboard" <<'PY' || true
+import os, re, sys
+s = open(sys.argv[1]).read() if os.path.isfile(sys.argv[1]) else ''
+def get(key, default=''):
+    m = re.search(r"^\s*\$" + re.escape(key) + r"\s*=\s*(?:'([^']*)'|\"([^\"]*)\"|([\w.]+))\s*;", s, re.M)
+    return next((g for g in m.groups() if g is not None), default) if m else default
+modes = ('HideIP', 'ShowLast1ByteOfIP', 'ShowLast2ByteOfIP', 'ShowLast3ByteOfIP', 'ShowFullIP')
+def mode(key):
+    v = get(key, 'ShowLast2ByteOfIP')
+    return v if v in modes else 'ShowLast2ByteOfIP'
+def rows(key, default):
+    v = get(key)
+    return str(int(v) + 1) if v.isdigit() else default
+mask = get("PageOptions['RepeatersPage']['MasqueradeCharacter']", '*')
+print(get("PageOptions['MOTD']").replace('#', '').strip())
+print(rows("PageOptions['LastHeardPage']['LimitTo']", '40'))
+print('false' if get("PageOptions['UserPage']['ShowFilter']", 'true').lower() == 'false' else 'true')
+print(rows("PageOptions['RepeatersPage']['LimitTo']", '100'))
+print(rows("PageOptions['PeerPage']['LimitTo']", '100'))
+print(mode("PageOptions['RepeatersPage']['IPModus']"))
+print(mode("PageOptions['PeerPage']['IPModus']"))
+print(mask if len(mask) == 1 and mask != '#' else '*')
+print('true' if get("Admin['Enable']", 'false').lower() == 'true' else 'false')
+PY
+    local motd lastheard filter links peers linksip peersip mask admin
+    { read -r motd; read -r lastheard; read -r filter; read -r links; read -r peers; read -r linksip; read -r peersip; read -r mask; read -r admin; } <"$DATA_DIR/.dashboard" || true
+    rm -f "$DATA_DIR/.dashboard"
+    [ -n "$motd" ] && set_ini "$ini" Dashboard Motd "$motd"
+    set_ini "$ini" Dashboard LastHeard "${lastheard:-40}"
+    set_ini "$ini" Dashboard Filter "${filter:-true}"
+    set_ini "$ini" Dashboard Links "${links:-100}"
+    set_ini "$ini" Dashboard Peers "${peers:-100}"
+    set_ini "$ini" Dashboard LinksIP "${linksip:-ShowLast2ByteOfIP}"
+    set_ini "$ini" Dashboard PeersIP "${peersip:-ShowLast2ByteOfIP}"
+    set_ini "$ini" Dashboard IPMask "${mask:-*}"
+    # the admin page as before: the old dashboard had a switch of its own for it
+    set_ini "$ini" Dashboard Admin "${admin:-false}"
+    if [ -f "$php" ]; then
+        mv "$php" "$php.old"
+        info "The old dashboard settings are kept as $php.old, they are not used any more"
+    fi
 }
 
 update() {
@@ -651,11 +685,8 @@ update() {
         install_docker
         migrate_callinghome
         migrate_websocket
+        migrate_dashboard
         secure_files
-        # the dashboard version shown in the top bar lives in the kept config
-        local ver
-        ver=$(sed -n "s/^\$PageOptions\['DashboardVersion'\] *= *'\(.*\)';/\1/p" "$REPO_DIR/dashboard/pgs/config.inc.php")
-        [ -n "$ver" ] && set_php "$DATA_DIR/dashboard/config.inc.php" "PageOptions['DashboardVersion']" "'$ver'"
     fi
     if [ "$have_urfd" = true ] || [ "$TCD_DOCKER" = true ]; then
         install_docker

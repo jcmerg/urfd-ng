@@ -100,6 +100,7 @@
 #define JURL                     "URL"
 #define JUSRP                    "USRP"
 #define JWEBSOCKET               "WebSocket"
+#define JDASHBOARD               "Dashboard"
 #define JWHITELISTPATH           "WhitelistPath"
 #define JXMLPATH                 "XmlPath"
 #define JYSF                     "YSF"
@@ -307,6 +308,8 @@ bool CConfigure::ReadData(const std::string &path)
 				section = ESection::files;
 			else if (0 == hname.compare(JWEBSOCKET))
 				section = ESection::websocket;
+			else if (0 == hname.compare(JDASHBOARD))
+				section = ESection::dashboard;
 			else if (0 == hname.compare(JDCSCLIENT))
 				section = ESection::dcsclient;
 			else if (0 == hname.compare("YSFClient"))
@@ -970,10 +973,8 @@ bool CConfigure::ReadData(const std::string &path)
 			case ESection::files:
 				if (0 == key.compare(JPIDPATH))
 					data[g_Keys.files.pid] = value;
-				else if (0 == key.compare(JXMLPATH))
-					data[g_Keys.files.xml] = value;
-				else if (0 == key.compare(JJSONPATH))
-					data[g_Keys.files.json] = value;
+				else if (0 == key.compare(JXMLPATH) || 0 == key.compare(JJSONPATH))
+					std::cout << "INFO: line #" << counter << ": " << key << " is no longer used, the dashboard reads the WebSocket" << std::endl;
 				else if (0 == key.compare(JWHITELISTPATH))
 					data[g_Keys.files.white] = value;
 				else if (0 == key.compare(JBLACKLISTPATH))
@@ -1000,6 +1001,36 @@ bool CConfigure::ReadData(const std::string &path)
 					data[g_Keys.ws.pinginterval] = getUnsigned(value, "WebSocket PingInterval", 5, 300, 30);
 				else if (0 == key.compare("IdleTimeout"))
 					data[g_Keys.ws.idletimeout] = getUnsigned(value, "WebSocket IdleTimeout", 10, 3600, 90);
+				else
+					badParam(key);
+				break;
+			case ESection::dashboard:
+				if (0 == key.compare("Motd"))
+					data[g_Keys.dashboard.motd] = value;
+				else if (0 == key.compare("LastHeard"))
+					data[g_Keys.dashboard.lastheard] = getUnsigned(value, "Dashboard LastHeard", 1, 1000, 40);
+				else if (0 == key.compare("Filter"))
+					data[g_Keys.dashboard.filter] = IS_TRUE(value[0]);
+				else if (0 == key.compare("Admin"))
+					data[g_Keys.dashboard.admin] = IS_TRUE(value[0]);
+				else if (0 == key.compare("Links"))
+					data[g_Keys.dashboard.links] = getUnsigned(value, "Dashboard Links", 1, 10000, 100);
+				else if (0 == key.compare("Peers"))
+					data[g_Keys.dashboard.peers] = getUnsigned(value, "Dashboard Peers", 1, 10000, 100);
+				else if (0 == key.compare("LinksIP") || 0 == key.compare("PeersIP"))
+				{
+					if (value != "HideIP" && value != "ShowLast1ByteOfIP" && value != "ShowLast2ByteOfIP" && value != "ShowLast3ByteOfIP" && value != "ShowFullIP")
+						std::cout << "WARNING: line #" << counter << ": " << key << " must be HideIP, ShowLast1ByteOfIP, ShowLast2ByteOfIP, ShowLast3ByteOfIP or ShowFullIP, using HideIP" << std::endl;
+					else
+						data[key == "LinksIP" ? g_Keys.dashboard.linksip : g_Keys.dashboard.peersip] = value;
+				}
+				else if (0 == key.compare("IPMask"))
+				{
+					if (value.size() == 1)
+						data[g_Keys.dashboard.ipmask] = value;
+					else
+						std::cout << "WARNING: line #" << counter << ": IPMask is one character, using *" << std::endl;
+				}
 				else
 					badParam(key);
 				break;
@@ -1573,9 +1604,22 @@ bool CConfigure::ReadData(const std::string &path)
 
 	// WebSocket: optional, every key has a default
 	const std::pair<const std::string &, nlohmann::json> wsDefaults[] = {
-		{ g_Keys.ws.enable, false }, { g_Keys.ws.port, 10102u }, { g_Keys.ws.bindaddress, "127.0.0.1" },
+		{ g_Keys.ws.enable, true }, { g_Keys.ws.port, 10102u }, { g_Keys.ws.bindaddress, "127.0.0.1" },
 		{ g_Keys.ws.maxclients, 64u }, { g_Keys.ws.queuelen, 256u }, { g_Keys.ws.pinginterval, 30u }, { g_Keys.ws.idletimeout, 90u } };	// unsigned, for GetUnsigned()
 	for (const auto &[key, def] : wsDefaults)
+	{
+		if (!data.contains(key))
+			data[key] = def;
+	}
+
+	// Dashboard: optional as well; an IP that is not set is not shown, the admin
+	// page logs in only when asked for (the TCP admin socket may be for scripts alone)
+	const std::pair<const std::string &, nlohmann::json> dashDefaults[] = {
+		{ g_Keys.dashboard.motd, "" }, { g_Keys.dashboard.lastheard, 40u }, { g_Keys.dashboard.filter, true },
+		{ g_Keys.dashboard.links, 100u }, { g_Keys.dashboard.peers, 100u },
+		{ g_Keys.dashboard.linksip, "HideIP" }, { g_Keys.dashboard.peersip, "HideIP" }, { g_Keys.dashboard.ipmask, "*" },
+		{ g_Keys.dashboard.admin, false } };
+	for (const auto &[key, def] : dashDefaults)
 	{
 		if (!data.contains(key))
 			data[key] = def;
@@ -1859,7 +1903,6 @@ bool CConfigure::ReadData(const std::string &path)
 
 	// Other files
 	isDefined(ErrorLevel::fatal, JFILES, JPIDPATH, g_Keys.files.pid, rval);
-	isDefined(ErrorLevel::fatal, JFILES, JXMLPATH, g_Keys.files.xml, rval);
 	if (isDefined(ErrorLevel::fatal, JFILES, JWHITELISTPATH, g_Keys.files.white, rval))
 		checkFile(JFILES, JWHITELISTPATH, data[g_Keys.files.white]);
 	if (isDefined(ErrorLevel::fatal, JFILES, JBLACKLISTPATH, g_Keys.files.black, rval))

@@ -563,7 +563,6 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 
 		// and push header packet
 		stream->Push(std::move(DvHeader));
-		StatusChanged();
 
 		// WebSocket clients see the station on the module; via_peer like Hearing():
 		// the peer for a stream from an interlinked reflector, else this one
@@ -638,7 +637,6 @@ void CReflector::CloseStream(std::shared_ptr<CPacketStream> stream)
 
 		// and stop the queue
 		stream->ClosePacketStream();
-		StatusChanged();
 	}
 }
 
@@ -887,47 +885,16 @@ void CReflector::RouterThread(const char ThisModule)
 	}
 }
 
-// Maintenance thread hands xml and/or json update,
-// and also keeps the transcoder TCP port(s) connected
-#define XML_UPDATE_PERIOD 10
+// Maintenance thread: the bridges for the WebSocket clients, the transcoded
+// modules for the DHT, and keeps the transcoder TCP port(s) connected
+#define MAINTENANCE_PERIOD 10
 
 void CReflector::MaintenanceThread()
 {
-	std::string xmlpath, jsonpath;
-	if (g_Configure.Contains(g_Keys.files.xml))
-		xmlpath.assign(g_Configure.GetString(g_Keys.files.xml));
-	if (g_Configure.Contains(g_Keys.files.json))
-		jsonpath.assign(g_Configure.GetString(g_Keys.files.json));
 	auto tcport = g_Configure.GetUnsigned(g_Keys.tc.port);
-
-	if (xmlpath.empty() && jsonpath.empty())
-		return;	// nothing to do
 
 	while (keep_running)
 	{
-		// report to xml file, written aside and renamed over the old one so the
-		// dashboard never reads it empty or half written
-		if (! xmlpath.empty())
-		{
-			const std::string tmppath(xmlpath + ".tmp");
-			std::ofstream xmlFile;
-			xmlFile.open(tmppath, std::ios::out | std::ios::trunc);
-			if ( xmlFile.is_open() )
-			{
-				// write xml file
-				WriteXmlFile(xmlFile);
-
-				// and close file
-				xmlFile.close();
-				if (0 != std::rename(tmppath.c_str(), xmlpath.c_str()))
-					std::cout << "Failed to rename " << tmppath << " to " << xmlpath << std::endl;
-			}
-			else
-			{
-				std::cout << "Failed to open " << tmppath  << std::endl;
-			}
-		}
-
 		// bridges for the WebSocket clients, when they changed
 		NotifyMappings();
 
@@ -945,28 +912,8 @@ void CReflector::MaintenanceThread()
 		}
 #endif
 
-		// json report
-		if (!  jsonpath.empty())
-		{
-			nlohmann::json jreport;
-			JsonReport(jreport);
-			const std::string tmppath(jsonpath + ".tmp");
-			std::ofstream jsonFile;
-			jsonFile.open(tmppath, std::ios::out | std::ios::trunc);
-			if (jsonFile.is_open())
-			{
-				// callsigns come from packets and need not be valid UTF-8, which dump()
-				// would throw on, ending urfd
-				jsonFile << jreport.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
-				jsonFile.close();
-				std::rename(tmppath.c_str(), jsonpath.c_str());
-			}
-		}
-
-
-		// and wait a bit and do something useful at the same time; a speaker change
-		// cuts the wait short, so the dashboard shows it within a tenth of a second
-		for (int i=0; i< XML_UPDATE_PERIOD*10 && keep_running && !m_StatusChanged.exchange(false); i++)
+		// and wait a bit and do something useful at the same time
+		for (int i=0; i< MAINTENANCE_PERIOD*10 && keep_running; i++)
 		{
 			if (tcport)
 			{
@@ -1012,78 +959,7 @@ char CReflector::GetStreamModule(std::shared_ptr<CPacketStream> stream)
 	return ' ';
 }
 
-////////////////////////////////////////////////////////////////////////////////////////
-// report helpers
-
-void CReflector::JsonReport(nlohmann::json &report)
-{
-	const auto cfg = g_Configure.GetDataCopy();
-	for (auto &item : cfg.items())
-	{
-		if (isupper(item.key().at(0)))
-			report["Configure"][item.key()] = item.value();
-	}
-
-	report["Peers"] = nlohmann::json::array();
-	auto peers = GetPeers();
-	for (auto pit=peers->cbegin(); pit!=peers->cend(); pit++)
-		(*pit)->JsonReport(report);
-	ReleasePeers();
-
-	report["Clients"] = nlohmann::json::array();
-	auto clients = GetClients();
-	for (auto cit=clients->cbegin(); cit!=clients->cend(); cit++)
-		(*cit)->JsonReport(report);
-	ReleaseClients();
-
-	report["Users"] = nlohmann::json::array();
-	auto users = GetUsers();
-	for (auto uid=users->begin(); uid!=users->end(); uid++)
-		(*uid).JsonReport(report);
-	ReleaseUsers();
-
-	// Dynamic TG mappings (not in config)
-	report["DynamicTGs"] = nlohmann::json::array();
-	for (auto *mmdvm : m_Protocols.MmdvmClients())
-	{
-		for (const auto &mi : mmdvm->GetTGMap().GetAllMappings())
-		{
-			if (mi.is_static) continue;
-			report["DynamicTGs"].push_back({
-				{"protocol", "mmdvm"}, {"client", mmdvm->GetName()}, {"tg", mi.tg}, {"module", std::string(1, mi.module)},
-				{"ts", mi.timeslot}, {"remaining", mi.remainingSeconds}
-			});
-		}
-	}
-	auto *svxProto = m_Protocols.FindByType(EProtocol::svxreflector);
-	if (svxProto)
-	{
-		auto *svx = static_cast<CSvxReflectorProtocol *>(svxProto);
-		for (const auto &mi : svx->GetTGMappings())
-		{
-			if (mi.is_static) continue;
-			report["DynamicTGs"].push_back({
-				{"protocol", "svxreflector"}, {"tg", mi.tg}, {"module", std::string(1, mi.module)},
-				{"remaining", mi.remainingSeconds}
-			});
-		}
-	}
-	auto *svxsProto = m_Protocols.FindByType(EProtocol::svx);
-	if (svxsProto)
-	{
-		auto *svxs = static_cast<CSvxProtocol *>(svxsProto);
-		for (const auto &mi : svxs->GetTGMappings())
-		{
-			if (mi.is_static) continue;
-			report["DynamicTGs"].push_back({
-				{"protocol", "svx"}, {"tg", mi.tg}, {"module", std::string(1, mi.module)},
-				{"remaining", mi.remainingSeconds}
-			});
-		}
-	}
-}
-
-#define XML_PROTO_ENABLED(key) (!g_Configure.Contains(key) || g_Configure.GetBoolean(key))
+#define PROTO_ENABLED(key) (!g_Configure.Contains(key) || g_Configure.GetBoolean(key))
 
 // the same bridges, a dynamic TG's expiry moving by a few seconds aside: it is
 // taken anew on every call, while a TG whose timer was refreshed moves by more
@@ -1127,7 +1003,7 @@ void CReflector::NotifyMappings(void)
 
 // The bridges of one module: autolinks, TG mappings (static and dynamic, with
 // the time a dynamic one expires) and the connectors to other reflectors. For
-// the XML file and the WebSocket; only protocols that are enabled.
+// the WebSocket; only protocols that are enabled.
 nlohmann::json CReflector::GetModuleMappings(char m)
 {
 	const long long now = std::time(nullptr);
@@ -1148,7 +1024,7 @@ nlohmann::json CReflector::GetModuleMappings(char m)
 	auto enabled = [](const std::string &key) { return g_Configure.Contains(key) && g_Configure.GetBoolean(key); };
 	auto isModule = [&](const std::string &key) { return g_Configure.Contains(key) && g_Configure.GetString(key)[0] == m; };
 
-	if (XML_PROTO_ENABLED(g_Keys.ysf.enable) && isModule(g_Keys.ysf.autolinkmod))
+	if (PROTO_ENABLED(g_Keys.ysf.enable) && isModule(g_Keys.ysf.autolinkmod))
 	{
 		auto &e = add("YSF", "AutoLink");
 		if (g_Configure.Contains(g_Keys.ysf.ysfreflectordb.id))
@@ -1156,13 +1032,13 @@ nlohmann::json CReflector::GetModuleMappings(char m)
 		if (g_Configure.Contains(g_Keys.ysf.ysfreflectordb.name))
 			e["remote_name"] = g_Configure.GetString(g_Keys.ysf.ysfreflectordb.name);
 	}
-	if (XML_PROTO_ENABLED(g_Keys.nxdn.enable) && isModule(g_Keys.nxdn.autolinkmod))
+	if (PROTO_ENABLED(g_Keys.nxdn.enable) && isModule(g_Keys.nxdn.autolinkmod))
 	{
 		auto &e = add("NXDN", "AutoLink");
 		if (g_Configure.Contains(g_Keys.nxdn.reflectorid))
 			e["id"] = g_Configure.GetUnsigned(g_Keys.nxdn.reflectorid);
 	}
-	if (XML_PROTO_ENABLED(g_Keys.p25.enable) && isModule(g_Keys.p25.autolinkmod))
+	if (PROTO_ENABLED(g_Keys.p25.enable) && isModule(g_Keys.p25.autolinkmod))
 	{
 		auto &e = add("P25", "AutoLink");
 		if (g_Configure.Contains(g_Keys.p25.reflectorid))
@@ -1248,190 +1124,6 @@ nlohmann::json CReflector::GetModuleMappings(char m)
 	return list;
 }
 
-void CReflector::WriteXmlFile(std::ofstream &xmlFile)
-{
-	// write header
-	xmlFile << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" << std::endl;
-
-	// software version
-	xmlFile << "<Version>" << g_Version << "</Version>" << std::endl;
-
-	// reflector metadata
-	xmlFile << "<Reflector>" << std::endl;
-	xmlFile << "\t<Callsign>" << CUtils::XmlEscape(g_Configure.GetString(g_Keys.names.callsign)) << "</Callsign>" << std::endl;
-	if (g_Configure.Contains(g_Keys.names.country))
-		xmlFile << "\t<Country>" << CUtils::XmlEscape(g_Configure.GetString(g_Keys.names.country)) << "</Country>" << std::endl;
-	if (g_Configure.Contains(g_Keys.names.sponsor))
-		xmlFile << "\t<Sponsor>" << CUtils::XmlEscape(g_Configure.GetString(g_Keys.names.sponsor)) << "</Sponsor>" << std::endl;
-	if (g_Configure.Contains(g_Keys.names.url))
-		xmlFile << "\t<DashboardURL>" << CUtils::XmlEscape(g_Configure.GetString(g_Keys.names.url)) << "</DashboardURL>" << std::endl;
-	if (g_Configure.Contains(g_Keys.names.email))
-		xmlFile << "\t<Email>" << CUtils::XmlEscape(g_Configure.GetString(g_Keys.names.email)) << "</Email>" << std::endl;
-	xmlFile << "</Reflector>" << std::endl;
-
-	// configured modules
-	xmlFile << "<Modules>" << std::endl;
-	auto modules = g_Configure.GetString(g_Keys.modules.modules);
-	for (char m : modules)
-	{
-		if (m < 'A' || m > 'Z') continue;
-		xmlFile << "<Module>" << std::endl;
-		xmlFile << "\t<Name>" << m << "</Name>" << std::endl;
-		auto descKey = g_Keys.modules.descriptor[m - 'A'];
-		if (g_Configure.Contains(descKey))
-			xmlFile << "\t<Description>" << CUtils::XmlEscape(g_Configure.GetString(descKey)) << "</Description>" << std::endl;
-		// auto-set Echo description
-		if (g_Configure.Contains(g_Keys.echo.module) && g_Configure.GetString(g_Keys.echo.module)[0] == m)
-			xmlFile << "\t<Echo>true</Echo>" << std::endl;
-		// count connected nodes on this module
-		int nodeCount = 0;
-		CClients *modClients = GetClients();
-		for (auto cit = modClients->cbegin(); cit != modClients->cend(); cit++)
-		{
-			if ((*cit)->IsNode() && !(*cit)->IsLink() && (*cit)->IsLinkedTo(m))
-				nodeCount++;
-		}
-		ReleaseClients();
-		xmlFile << "\t<LinkedNodes>" << nodeCount << "</LinkedNodes>" << std::endl;
-		// who is transmitting on this module right now, for the dashboard
-		auto stream = GetStream(m);
-		if (stream && stream->IsOpen() && !CUsers::IsHidden(stream->GetUserCallsign(), m))
-			xmlFile << "\t<OnAir>" << CUtils::XmlEscape(stream->GetUserCallsign().GetCS()) << "</OnAir>" << std::endl;
-		// check if transcoded
-		bool transcoded = IsTranscoded(m);
-		xmlFile << "\t<Transcoded>" << (transcoded ? "true" : "false") << "</Transcoded>" << std::endl;
-		// standard protocol IDs for this module
-		int modIdx = m - 'A';
-		if (XML_PROTO_ENABLED(g_Keys.dmrplus.enable))
-			xmlFile << "\t<DMRplus>" << (4001 + modIdx) << "</DMRplus>" << std::endl;
-		if (XML_PROTO_ENABLED(g_Keys.ysf.enable))
-			xmlFile << "\t<YSFDGID>" << (10 + modIdx) << "</YSFDGID>" << std::endl;
-		// NXDN RAN and destination ID for this module
-		if (XML_PROTO_ENABLED(g_Keys.nxdn.enable))
-		{
-			uint8_t ran = CNXDNProtocol::ModuleToRAN(m);
-			if (ran != 0)
-				xmlFile << "\t<NXDNRAN>" << (int)ran << "</NXDNRAN>" << std::endl;
-			uint16_t dstid = CNXDNProtocol::ModuleToDstId(m);
-			if (dstid != 0)
-				xmlFile << "\t<NXDNDstId>" << dstid << "</NXDNDstId>" << std::endl;
-		}
-		// the bridges of this module, shared with the WebSocket
-		for (const auto &mp : GetModuleMappings(m))
-		{
-			xmlFile << "\t<Mapping><Protocol>" << mp["protocol"].get<std::string>() << "</Protocol><Type>" << mp["type"].get<std::string>() << "</Type>";
-			if (mp.contains("id"))
-				xmlFile << "<ID>" << (mp["id"].is_string() ? mp["id"].get<std::string>() : std::to_string(mp["id"].get<unsigned>())) << "</ID>";
-			if (mp.contains("timeslot"))
-				xmlFile << "<Timeslot>TS" << mp["timeslot"].get<int>() << "</Timeslot>";
-			if (mp.contains("remote_name"))
-				xmlFile << "<RemoteName>" << CUtils::XmlEscape(mp["remote_name"].get<std::string>()) << "</RemoteName>";
-			if (mp.contains("expires"))
-				xmlFile << "<Dynamic>true</Dynamic><Remaining>" << std::max<long long>(0, mp["expires"].get<long long>() - (long long)std::time(nullptr)) << "</Remaining>";
-			if (mp.value("connected", false))
-				xmlFile << "<Connected>true</Connected>";
-			xmlFile << "</Mapping>" << std::endl;
-		}
-		xmlFile << "</Module>" << std::endl;
-	}
-	xmlFile << "</Modules>" << std::endl;
-
-	// enabled protocols (only show if enabled; default=true for backwards compat)
-	xmlFile << "<Protocols>" << std::endl;
-	if (XML_PROTO_ENABLED(g_Keys.dextra.enable))
-		xmlFile << "<Protocol><Name>DExtra</Name><Port>" << g_Configure.GetUnsigned(g_Keys.dextra.port) << "</Port></Protocol>" << std::endl;
-	if (XML_PROTO_ENABLED(g_Keys.dplus.enable))
-		xmlFile << "<Protocol><Name>DPlus</Name><Port>" << g_Configure.GetUnsigned(g_Keys.dplus.port) << "</Port></Protocol>" << std::endl;
-	if (XML_PROTO_ENABLED(g_Keys.dcs.enable))
-		xmlFile << "<Protocol><Name>DCS</Name><Port>" << g_Configure.GetUnsigned(g_Keys.dcs.port) << "</Port></Protocol>" << std::endl;
-	if (XML_PROTO_ENABLED(g_Keys.mmdvm.enable))
-		xmlFile << "<Protocol><Name>MMDVM</Name><Port>" << g_Configure.GetUnsigned(g_Keys.mmdvm.port) << "</Port></Protocol>" << std::endl;
-	if (XML_PROTO_ENABLED(g_Keys.dmrplus.enable))
-		xmlFile << "<Protocol><Name>DMRPlus</Name><Port>" << g_Configure.GetUnsigned(g_Keys.dmrplus.port) << "</Port></Protocol>" << std::endl;
-	if (XML_PROTO_ENABLED(g_Keys.m17.enable))
-		xmlFile << "<Protocol><Name>M17</Name><Port>" << g_Configure.GetUnsigned(g_Keys.m17.port) << "</Port></Protocol>" << std::endl;
-	if (XML_PROTO_ENABLED(g_Keys.ysf.enable))
-		xmlFile << "<Protocol><Name>YSF</Name><Port>" << g_Configure.GetUnsigned(g_Keys.ysf.port) << "</Port></Protocol>" << std::endl;
-	if (XML_PROTO_ENABLED(g_Keys.p25.enable))
-		xmlFile << "<Protocol><Name>P25</Name><Port>" << g_Configure.GetUnsigned(g_Keys.p25.port) << "</Port></Protocol>" << std::endl;
-	if (XML_PROTO_ENABLED(g_Keys.nxdn.enable))
-		xmlFile << "<Protocol><Name>NXDN</Name><Port>" << g_Configure.GetUnsigned(g_Keys.nxdn.port) << "</Port></Protocol>" << std::endl;
-	if (XML_PROTO_ENABLED(g_Keys.urf.enable))
-		xmlFile << "<Protocol><Name>URF</Name><Port>" << g_Configure.GetUnsigned(g_Keys.urf.port) << "</Port></Protocol>" << std::endl;
-	if (g_Configure.Contains(g_Keys.xlxpeer.enable) && g_Configure.GetBoolean(g_Keys.xlxpeer.enable))
-		xmlFile << "<Protocol><Name>XLXPeer</Name><Port>" << g_Configure.GetUnsigned(g_Keys.xlxpeer.port) << "</Port></Protocol>" << std::endl;
-	if (g_Configure.Contains(g_Keys.usrp.enable) && g_Configure.GetBoolean(g_Keys.usrp.enable))
-		xmlFile << "<Protocol><Name>USRP</Name><Port>" << g_Configure.GetUnsigned(g_Keys.usrp.rxport) << "</Port></Protocol>" << std::endl;
-	if (g_Configure.Contains(g_Keys.svx.enable) && g_Configure.GetBoolean(g_Keys.svx.enable))
-		xmlFile << "<Protocol><Name>SvxReflector</Name><Port>" << g_Configure.GetUnsigned(g_Keys.svx.port) << "</Port></Protocol>" << std::endl;
-	if (g_Configure.Contains(g_Keys.svxs.enable) && g_Configure.GetBoolean(g_Keys.svxs.enable))
-		xmlFile << "<Protocol><Name>SVX</Name><Port>" << g_Configure.GetUnsigned(g_Keys.svxs.port) << "</Port></Protocol>" << std::endl;
-	for (size_t i = 0; i < g_Plugins.Size(); i++)
-		if (g_Plugins.Get(i).IsEnabled())
-			xmlFile << "<Protocol><Name>" << CUtils::XmlEscape(g_Plugins.Get(i).GetName()) << "</Name><Port>" << g_Plugins.Get(i).GetPort() << "</Port><Description>" << CUtils::XmlEscape(g_Plugins.Get(i).GetDescription()) << "</Description></Protocol>" << std::endl;
-	if (g_Configure.Contains(g_Keys.g3.enable) && g_Configure.GetBoolean(g_Keys.g3.enable))
-		xmlFile << "<Protocol><Name>G3</Name><Port>40000</Port></Protocol>" << std::endl;
-	for (unsigned n = 1; n <= MMDVMCLI_MAX_INSTANCES; n++)
-	{
-		const auto ck = MmdvmClientKeys(n);
-		if (g_Configure.Contains(ck.enable) && g_Configure.GetBoolean(ck.enable))
-			xmlFile << "<Protocol><Name>" << MmdvmClientName(n) << "</Name><Port>" << (g_Configure.Contains(ck.localport) ? g_Configure.GetUnsigned(ck.localport) : 0) << "</Port></Protocol>" << std::endl;
-	}
-	if (g_Configure.Contains(g_Keys.dcsclient.enable) && g_Configure.GetBoolean(g_Keys.dcsclient.enable))
-		xmlFile << "<Protocol><Name>DCSClient</Name><Port>0</Port></Protocol>" << std::endl;
-	if (g_Configure.Contains(g_Keys.dextraclient.enable) && g_Configure.GetBoolean(g_Keys.dextraclient.enable))
-		xmlFile << "<Protocol><Name>DExtraClient</Name><Port>0</Port></Protocol>" << std::endl;
-	if (g_Configure.Contains(g_Keys.dplusclient.enable) && g_Configure.GetBoolean(g_Keys.dplusclient.enable))
-		xmlFile << "<Protocol><Name>DPlusClient</Name><Port>0</Port></Protocol>" << std::endl;
-	if (g_Configure.Contains(g_Keys.ysfclient.enable) && g_Configure.GetBoolean(g_Keys.ysfclient.enable))
-		xmlFile << "<Protocol><Name>YSFClient</Name><Port>0</Port></Protocol>" << std::endl;
-	xmlFile << "</Protocols>" << std::endl;
-
-	CCallsign cs = m_Callsign;
-	cs.PatchCallsign(0, "XLX", 3);
-
-	// linked peers
-	xmlFile << "<" << (const char *)cs << "linked peers>" << std::endl;
-	// lock
-	CPeers *peers = GetPeers();
-	// iterate on peers
-	for ( auto pit=peers->cbegin(); pit!=peers->cend(); pit++ )
-	{
-		(*pit)->WriteXml(xmlFile);
-	}
-	// unlock
-	ReleasePeers();
-	xmlFile << "</" << (const char *)cs << "linked peers>" << std::endl;
-
-	// linked nodes
-	xmlFile << "<" << (const char *)cs << "linked nodes>" << std::endl;
-	// lock
-	CClients *clients = GetClients();
-	// iterate on clients
-	for ( auto cit=clients->cbegin(); cit!=clients->cend(); cit++ )
-	{
-		if ( (*cit)->IsNode() && !(*cit)->IsLink() )
-		{
-			(*cit)->WriteXml(xmlFile);
-		}
-	}
-	// unlock
-	ReleaseClients();
-	xmlFile << "</" << (const char *)cs << "linked nodes>" << std::endl;
-
-	// last heard users
-	xmlFile << "<" << (const char *)cs << "heard users>" << std::endl;
-	// a copy, so the name lookups never hold up the users lock while the ID database reloads
-	CUsers *users = GetUsers();
-	std::list<CUser> heard(users->begin(), users->end());
-	ReleaseUsers();
-	for ( auto &user : heard )
-	{
-		user.WriteXml(xmlFile);
-	}
-	xmlFile << "</" << (const char *)cs << "heard users>" << std::endl;
-}
-
 ////////////////////////////////////////////////////////////////////////////////////////
 // echo thread
 
@@ -1503,8 +1195,7 @@ void CReflector::EchoThread(void)
 			}
 			if (!keep_running) break;
 			m_EchoStreamId = echoStreamId;
-			StatusChanged();
-
+	
 			// push header to stream
 			stream->Push(std::move(echoHeader));
 

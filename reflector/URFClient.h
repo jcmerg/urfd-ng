@@ -41,9 +41,6 @@ public:
 	// status
 	bool IsAlive(void) const;
 
-	// reporting
-	void WriteXml(std::ofstream &) {}
-
 protected:
 	// data
 	EProtoRev m_ProtRev;

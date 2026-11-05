@@ -74,37 +74,3 @@ bool CClient::operator ==(const CClient &client) const
 			(client.m_Ip == m_Ip) &&
 			(client.m_ReflectorModule == m_ReflectorModule));
 }
-
-////////////////////////////////////////////////////////////////////////////////////////
-// reporting
-
-void CClient::WriteXml(std::ofstream &xmlFile)
-{
-	xmlFile << "<NODE>" << std::endl;
-	xmlFile << "\t<Callsign>" << CUtils::XmlEscape(m_Callsign.GetLogString()) << "</Callsign>" << std::endl;
-	xmlFile << "\t<IP>" << m_Ip.GetAddress() << "</IP>" << std::endl;
-	xmlFile << "\t<LinkedModule>" << m_ReflectorModule << "</LinkedModule>" << std::endl;
-	xmlFile << "\t<Protocol>" << GetProtocolName() << "</Protocol>" << std::endl;
-	char mbstr[100];
-	if (std::strftime(mbstr, sizeof(mbstr), "%FT%TZ", std::gmtime(&m_ConnectTime)))
-	{
-		xmlFile << "\t<ConnectTime>" << mbstr << "</ConnectTime>" << std::endl;
-	}
-	if (std::strftime(mbstr, sizeof(mbstr), "%FT%TZ", std::gmtime(&m_LastHeardTime)))
-	{
-		xmlFile << "\t<LastHeardTime>" << mbstr << "</LastHeardTime>" << std::endl;
-	}
-	xmlFile << "</NODE>" << std::endl;
-}
-
-void CClient::JsonReport(nlohmann::json &report)
-{
-	nlohmann::json jclient;
-	jclient["Callsign"] = m_Callsign.GetCS();
-	jclient["OnModule"] = std::string(1, m_ReflectorModule);
-	jclient["Protocol"] = GetProtocolName();
-	char s[100];
-	if (std::strftime(s, sizeof(s), "%FT%TZ", std::gmtime(&m_ConnectTime)))
-		jclient["ConnectTime"] = s;
-	report["Clients"].push_back(jclient);
-}

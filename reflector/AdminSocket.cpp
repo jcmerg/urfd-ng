@@ -148,6 +148,8 @@ bool CAdminSocket::Start(void)
 
 	m_Port = (uint16_t)g_Configure.GetUnsigned(g_Keys.admin.port);
 	m_Password = g_Configure.GetString(g_Keys.admin.password);
+	// the dashboard's WebSocket logs in here as well, even when the TCP socket fails
+	m_Enabled = true;
 
 	m_BindAddress = "127.0.0.1";
 	if (g_Configure.Contains(g_Keys.admin.bindaddress))
@@ -466,6 +468,27 @@ nlohmann::json CAdminSocket::CmdAuth(const nlohmann::json &cmd)
 	}
 
 	return {{"status", "ok"}, {"token", token}};
+}
+
+nlohmann::json CAdminSocket::Execute(const nlohmann::json &cmd, const std::string &clientAddr)
+{
+	if (!m_Enabled)
+		return {{"status", "error"}, {"message", "admin interface disabled"}};
+	try
+	{
+		return HandleCommand(cmd, clientAddr);
+	}
+	catch (const std::exception &e)
+	{
+		// a field of the wrong type
+		return {{"status", "error"}, {"message", std::string("invalid command: ") + e.what()}};
+	}
+}
+
+void CAdminSocket::RevokeToken(const std::string &token)
+{
+	std::lock_guard<std::mutex> lock(m_TokenMutex);
+	m_Tokens.erase(token);
 }
 
 bool CAdminSocket::ValidateToken(const std::string &token) const

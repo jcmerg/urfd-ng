@@ -48,35 +48,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libmariadb3 \
     libpq5 \
     nginx \
-    php-fpm \
     supervisor \
     curl \
     ca-certificates \
     procps \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /var/run/php /var/log/supervisor /var/lib/xlxd-ch /usr/local/etc/urfd
-
-# Refuse to build with a PHP open to php2shell (CVE-2026-109618/-109619, RCE via
-# use-after-free after an out-of-memory fatal error), fixed in Ubuntu's
-# 8.3.6-0ubuntu0.24.04.13. Raising the floor also invalidates a cached apt layer.
-RUN set -eux; \
-    v="$(dpkg-query -W -f='${Version}' php8.3-fpm)"; \
-    dpkg --compare-versions "$v" ge 8.3.6-0ubuntu0.24.04.13 \
-        || { echo "php8.3-fpm $v lacks the php2shell fix" >&2; exit 1; }
-
-# The stock pool allows 5 workers, so a handful of slow requests starves the whole
-# dashboard — including the admin API. Cap outbound waits too, so a dead upstream
-# can never hold a worker for the 60s default.
-RUN set -eux; \
-    pool="$(ls /etc/php/*/fpm/pool.d/www.conf)"; \
-    sed -i 's/^pm.max_children = .*/pm.max_children = 25/; \
-            s/^pm.start_servers = .*/pm.start_servers = 4/; \
-            s/^pm.min_spare_servers = .*/pm.min_spare_servers = 2/; \
-            s/^pm.max_spare_servers = .*/pm.max_spare_servers = 8/' "$pool"; \
-    ini="$(ls /etc/php/*/fpm/php.ini)"; \
-    sed -i 's/^;\?default_socket_timeout = .*/default_socket_timeout = 10/' "$ini"; \
-    sed -i 's/^;\?session.upload_progress.enabled = .*/session.upload_progress.enabled = Off/' "$ini"
+    && mkdir -p /var/log/supervisor /var/lib/xlxd-ch /usr/local/etc/urfd
 
 # Copy urfd binary and tools
 COPY --from=builder /build/reflector/urfd /usr/local/bin/urfd
@@ -85,20 +63,16 @@ COPY --from=builder /build/reflector/dbutil /usr/local/bin/dbutil
 # plugins, loaded with [Plugins] Load = /usr/local/lib/urfd/<name>.so
 COPY --from=builder /build/plugin-lib/ /usr/local/lib/urfd/
 
-# Copy dashboard
+# the dashboard: static files, the state comes from urfd's WebSocket
 COPY dashboard/ /var/www/urfd-dashboard/
-# live dashboard (coolacid), served as /live/
-COPY dashboard-ws/static/ /var/www/urfd-dashboard-ws/
-RUN chown -R www-data:www-data /var/www/urfd-dashboard /var/lib/xlxd-ch
+# nginx keeps the XLX directory's reflector list there (proxy cache)
+RUN chown -R www-data:www-data /var/lib/xlxd-ch
 
 # Supervisord and nginx configs are injected at build time via --build-context
 COPY --from=optfiles supervisord.conf /etc/supervisor/conf.d/urfd.conf
 COPY --from=optfiles nginx-dashboard.conf /etc/nginx/sites-available/urfd-dashboard.conf
 RUN rm -f /etc/nginx/sites-enabled/default \
     && ln -sf /etc/nginx/sites-available/urfd-dashboard.conf /etc/nginx/sites-enabled/urfd-dashboard.conf
-
-# Ensure XML file exists for dashboard
-RUN touch /var/log/xlxd.xml && chown root:root /var/log/xlxd.xml
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD pgrep urfd > /dev/null && curl -sf http://127.0.0.1:8363/ > /dev/null

@@ -8,6 +8,13 @@
 #include <nlohmann/json.hpp>
 
 class CWebsocketLwsNotifier;
+class CClient;
+class CPeer;
+
+// a linked node and a peer as the dashboard gets them, the IP masked as
+// [Dashboard] LinksIP / PeersIP say
+nlohmann::json NodeJson(const CClient &client);
+nlohmann::json PeerJson(const CPeer &peer);
 
 // one event for the WebSocket clients: {"event_type", "timestamp", "reflector_name", "payload"}
 class CEvent

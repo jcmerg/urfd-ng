@@ -3,9 +3,8 @@
 # The image is built from the checkout this file lives in. Configuration and
 # state live outside the checkout, in $URFD_DATA (default /opt/urfd), so a
 # git pull never touches them:
-#   $URFD_DATA/config/                     urfd.ini, interlink, black/whitelist, databases
-#   $URFD_DATA/dashboard/config.inc.php    dashboard settings
-#   $URFD_DATA/xlxd-ch/                    CallingHome state
+#   $URFD_DATA/config/                     urfd.ini (also the dashboard's [Dashboard]), interlink, black/whitelist, databases
+#   $URFD_DATA/xlxd-ch/                    the dashboard's copy of the XLX directory's reflector list
 #
 # setup.sh in the repository root creates all of this. By hand:
 #   cd docker && docker compose build && docker compose up -d
@@ -43,10 +42,7 @@ services:
         hard: -1
     volumes:
       - ${URFD_DATA:-/opt/urfd}/config:/usr/local/etc/urfd
-      - ${URFD_DATA:-/opt/urfd}/dashboard/config.inc.php:/var/www/urfd-dashboard/pgs/config.inc.php
       - ${URFD_DATA:-/opt/urfd}/xlxd-ch:/var/lib/xlxd-ch
-      # XML status file shared between urfd and the dashboard
-      - urfd-xml:/var/log
     environment:
       # the Docker tcd's MonitorHttpPort, for the dashboard's /tcd/ (build.sh takes it from its tcd.ini)
       - TCD_MONITOR_PORT=${TCD_MONITOR_PORT:-8080}
@@ -91,6 +87,3 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-
-volumes:
-  urfd-xml:

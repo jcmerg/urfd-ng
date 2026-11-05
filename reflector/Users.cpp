@@ -17,6 +17,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+#include <algorithm>
 #include <cmath>
 #include "Users.h"
 #include "Global.h"
@@ -33,16 +34,16 @@ CUsers::CUsers() {}
 ////////////////////////////////////////////////////////////////////////////////////////
 // users management
 
-#define LASTHEARD_USERS_MAX_SIZE 20
 void CUsers::AddUser(const CUser &user)
 {
 	// add
 	m_Users.push_front(user);
 
-	// if list size too big, remove oldest
-	if ( m_Users.size() >= (LASTHEARD_USERS_MAX_SIZE-1) )
+	// as long as the dashboard shows it ([Dashboard] LastHeard), the oldest goes
+	const size_t max = std::max(1u, g_Configure.GetUnsigned(g_Keys.dashboard.lastheard));
+	if ( m_Users.size() > max )
 	{
-		m_Users.resize(m_Users.size()-1);
+		m_Users.resize(max);
 	}
 }
 
@@ -69,6 +70,12 @@ bool CUsers::IsHidden(const CCallsign &my, char module)
 	return !nxdn;
 }
 
+void CUsers::Clear(void)
+{
+	m_Users.clear();
+	CNotifierManager::Instance().Dispatch("last_heard_cleared", []() -> nlohmann::json { return nlohmann::json::object(); });
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // operation
 
@@ -81,15 +88,7 @@ void CUsers::Hearing(const CCallsign &my, const CCallsign &rpt1, const CCallsign
 static void DispatchStationEvent(const std::string &eventType, const CUser &heard, const std::string &replaces = "")
 {
 	CNotifierManager::Instance().Dispatch(eventType, [&]() -> nlohmann::json {
-		nlohmann::json j = {
-			{ "callsign", heard.GetCallsign() },
-			{ "name", heard.GetName() },
-			{ "via_node", heard.GetViaNode() },
-			{ "via_peer", heard.GetViaPeer() },
-			{ "on_module", std::string(1, heard.GetOnModule()) },
-			{ "protocol", heard.GetProtocol() },
-			{ "last_heard_time", heard.GetLastHeardTime() },
-			{ "locator", heard.GetLocator() } };
+		auto j = heard.ToJson();
 		if (!replaces.empty())
 			j["replaces"] = replaces;
 		return j; });
@@ -148,6 +147,7 @@ void CUsers::StationRenamed(char module, const CCallsign &from, const CCallsign 
 		{
 			const CUser old(*it);
 			m_Users.erase(it);
+			DispatchStationEvent("user_removed", old);
 			Hearing(to, old.GetRpt1(), old.GetRpt2(), old.GetXlx(), old.GetProtocol());
 			break;
 		}
@@ -181,7 +181,8 @@ void CUsers::Hearing(const CCallsign &my, const CCallsign &rpt1, const CCallsign
 	}
 
 	AddUser(heard);
-	g_Reflector.StatusChanged();
+	// the new head of the last heard list; the dashboard drops an older entry equal to it
+	DispatchStationEvent("user_heard", heard);
 }
 
 void CUsers::Location(const CCallsign &my, double lat, double lon)
@@ -198,7 +199,11 @@ void CUsers::Location(const CCallsign &my, double lat, double lon)
 	{
 		if ( user.IsCallsign(my) )
 		{
+			// M17 sends its position every second: tell the dashboard when the locator changes
+			const bool changed = (user.GetLocator() != loc);
 			user.SetLocation(loc, lat, lon);
+			if (changed)
+				DispatchStationEvent("user_heard", user);
 			break;
 		}
 	}

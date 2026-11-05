@@ -55,9 +55,6 @@ public:
 	void SetSlotTG(uint8_t slot, uint32_t tg)   { if (slot >= 1 && slot <= 2) m_SlotTG[slot-1] = tg; }
 	uint32_t GetSlotTG(uint8_t slot) const       { return (slot >= 1 && slot <= 2) ? m_SlotTG[slot-1] : 0; }
 
-	// reporting
-	void WriteXml(std::ofstream &) override;
-
 protected:
 	uint32_t m_uiRawDmrId = 0;
 	char m_SlotModule[2] = {' ', ' '};  // index 0=TS1, index 1=TS2

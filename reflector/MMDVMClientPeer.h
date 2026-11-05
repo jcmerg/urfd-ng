@@ -25,9 +25,6 @@ public:
 	// status
 	bool IsAlive(void) const;
 
-	// reporting
-	void WriteXml(std::ofstream &) {}
-
 private:
 	const CProtocol *m_Owner = nullptr;	// the connection it belongs to
 };

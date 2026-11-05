@@ -80,10 +80,6 @@ public:
 	char GetModuleMastered(void) const                  { return m_ModuleMastered; }
 	virtual void Heard(void)                            { m_LastHeardTime = std::time(nullptr); }
 
-	// reporting
-	virtual void WriteXml(std::ofstream &);
-	void JsonReport(nlohmann::json &report);
-
 protected:
 	// data
 	CCallsign   m_Callsign;

@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.37.3** | tcd 0.19.5 | Dashboard v2.14.3
+**urfd 4.38.0** | tcd 0.19.5 | Dashboard v3.0.0
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -439,7 +439,7 @@ Dynamische TGs von MMDVM und SVX laufen nach 15 Minuten ohne Aktivität ab. Der 
 **Hinweis zu SVX**: Läuft eine dynamische SVX-TG ab, nimmt urfd sie aus den überwachten TGs; war sie gewählt, wird wieder die Heimat-TG gewählt (oder keine, wenn keine TG übrig ist).
 
 ### Admin-Oberfläche
-Verwaltung zur Laufzeit über einen JSON-basierten TCP-Socket, bedienbar über das Web-Panel im Dashboard. Läuft in einem eigenen Thread und blockiert die Audioverarbeitung nicht. Jede Client-Verbindung läuft in einem eigenen Thread mit 5 Sekunden Leerlauf-Timeout, langsame oder hängende Clients können den Admin-Socket also nicht blockieren.
+Verwaltung zur Laufzeit über die Admin-Seite des Dashboards, die sich über den [WebSocket](#websocket-4130-bridges-und-namen-4140-dashboard-und-admin-4380) anmeldet, und über einen JSON-basierten TCP-Socket für Skripte. Läuft in einem eigenen Thread und blockiert die Audioverarbeitung nicht. Jede Client-Verbindung läuft in einem eigenen Thread mit 5 Sekunden Leerlauf-Timeout, langsame oder hängende Clients können den Admin-Socket also nicht blockieren.
 
 ```ini
 [Admin]
@@ -449,13 +449,7 @@ Password = yoursecretpassword
 # BindingAddress = 127.0.0.1      # Default: loopback only
 ```
 
-Dashboard-Konfiguration (`config.inc.php`):
-```php
-$Admin['Enable']   = true;
-$Admin['Host']     = '127.0.0.1';
-$Admin['Port']     = 10101;
-# Anmeldung auf der Admin-Seite mit dem [Admin]-Passwort aus urfd.ini
-```
+Die Admin-Seite (π in der Fußzeile des Dashboards, sichtbar mit `[Admin] Enable = true` und `[Dashboard] Admin = true`; ohne Letzteres ist nur der TCP-Socket offen) meldet sich mit dem `[Admin]`-Passwort an; die Anmeldung ist ein Token für diesen Browser-Tab, eine Stunde gültig, ein Neuladen behält sie. Das Dashboard hält keine Kopie des Passworts.
 
 **Funktionen:**
 - **Dynamische TG-Verwaltung**: Talkgroups zur Laufzeit mit einstellbarer Laufzeit hinzufügen und entfernen. Mit BM-API-Schlüssel per REST-API als statisch eingetragen (kein Kerchunk nötig), ohne per Kerchunk bei BM aktiviert. Bei SVX werden die überwachten TGs angepasst.
@@ -521,9 +515,9 @@ Path = /usr/local/etc/urfd/credentials.db
 
 Tabelle, Cache, Bauen und die Admin-Befehle `credentials_status` und `credentials_flush`: [docs/CREDENTIALS.md](docs/CREDENTIALS.md) (englisch). Vorgeschlagen von Jason Kendall (coolacid), Issue #11.
 
-### WebSocket (4.13.0, Bridges und Namen 4.14.0)
+### WebSocket (4.13.0, Bridges und Namen 4.14.0, Dashboard und Admin 4.38.0)
 
-Live-Ereignisse für das Dashboard: Clients, Peers und sprechende Stationen (mit dem Namen des Funkers aus der ID-Datenbank), sobald sie sich ändern, die Bridges jedes Moduls (TG-Mappings, Autolinks, Connectoren zu anderen Reflektoren) und ihre Änderungen, und beim Verbinden der komplette Stand, ohne IP-Adressen. Nur lesend und ohne Passwort, daher lauscht es auf Loopback (`127.0.0.1:10102`), und das nginx des Dashboards reicht `/ws` durch. Immer eingebaut (braucht `libwebsockets-dev`), aus, bis `[WebSocket] Enable = true` gesetzt ist, was `setup.sh` bei der Installation und bei `setup.sh update` tut; Änderungen brauchen einen Neustart. Basiert auf dem Notifier von Jason Kendall (coolacid), dessen Live-Dashboard das Docker-Image unter `/live/` ausliefert, neben diesem Dashboard. Nachrichten und Einrichtung: [docs/WEBSOCKET.md](docs/WEBSOCKET.md) (englisch).
+Alles, was das Dashboard zeigt, kommt von hier: Clients, Peers und sprechende Stationen (mit dem Namen des Funkers aus der ID-Datenbank), sobald sie sich ändern, die Last-Heard-Liste, die Bridges jedes Moduls (TG-Mappings, Autolinks, Connectoren zu anderen Reflektoren) und ihre Änderungen, und beim Verbinden der komplette Stand; IP-Adressen nur maskiert, wie `[Dashboard]` es erlaubt. Die Admin-Seite schickt die Befehle des Admin-Sockets über dieselbe Verbindung, nach einer Anmeldung mit dem `[Admin]`-Passwort. Es lauscht auf Loopback (`127.0.0.1:10102`), und das nginx des Dashboards reicht `/ws` durch. Immer eingebaut (braucht `libwebsockets-dev`), `[WebSocket] Enable = true` steht in der Vorlage und wird von `setup.sh` bei der Installation und bei `setup.sh update` gesetzt; Änderungen brauchen einen Neustart. Basiert auf dem Notifier von Jason Kendall (coolacid). Nachrichten, Anfragen und Einrichtung: [docs/WEBSOCKET.md](docs/WEBSOCKET.md) (englisch).
 
 ### Externe Adresse (NAT, Ersatzleitung)
 
@@ -696,83 +690,58 @@ URL = https://radioid.net/static/user.csv, http://www.pistar.uk/downloads/DMRIds
 
 Für die YSF-TX/RX-Daten ist keine zweite Quelle bekannt, dort ist der Cache der einzige Ersatz. Fehlende YSF-Frequenzen betreffen nur die Frequenzangabe bei Wires-X.
 
-### Erweiterte XML-Ausgabe
-Die XML-Statusdatei enthält jetzt:
+### Status für das Dashboard
+Seit 4.38.0 schreibt urfd keine XML- oder JSON-Statusdatei mehr (`[Files] XmlPath` und `JsonPath` werden mit einem Hinweis übergangen); das Dashboard bekommt alles über den [WebSocket](docs/WEBSOCKET.md):
 
-- **Reflektor-Angaben**: Rufzeichen, Land, Sponsor, Dashboard-URL, E-Mail
-- **Modul-Konfiguration**: Beschreibung, Anzahl verbundener Knoten, Transcodierung, DMR+-TG-ID, YSF-DG-ID, NXDN-RAN, NXDN-Ziel-ID (nur wenn `ModuleDstIdBase` gesetzt ist)
-- **Zuordnungen pro Modul**: Autolinks (YSF, NXDN, P25), TG-Zuordnungen (MMDVM, MMDVMClient, SvxReflector, SVXServer), D-Star-Client-Zuordnungen (DCSClient, DExtraClient, DPlusClient mit Verbindungsstatus), YSF-Client-Zuordnungen (YSFClient mit DG-ID)
+- **Reflektor-Angaben**: Rufzeichen, Land, Sponsor, Dashboard-URL, Sysop-E-Mail, Version
+- **Modul-Konfiguration**: Beschreibung, Transcodierung, DMR+-TG-ID, YSF-DG-ID, NXDN-RAN, NXDN-Ziel-ID (nur wenn `ModuleDstIdBase` gesetzt ist)
+- **Zuordnungen pro Modul**: Autolinks (YSF, NXDN, P25), TG-Zuordnungen (MMDVM, MMDVMClient, SvxReflector, SVXServer) mit dem Ende einer dynamischen, D-Star-Client-Zuordnungen (DCSClient, DExtraClient, DPlusClient mit Verbindungsstatus), YSF-Client-Zuordnungen (YSFClient mit DG-ID)
 - **Aktive Protokolle**: Name und Port jedes eingeschalteten Protokolls
-- **Protokoll pro Station**: Über welches Protokoll eine Station gehört wurde (DCS, MMDVMClient, YSF usw.)
-- **Name pro Station**: `<Name>` mit dem Vornamen aus der DMR-ID-Datenbank, sonst aus der NXDN-Datenbank, wenn das Rufzeichen darin steht
-- **Auf Sendung**: `<OnAir>` in jedem Modul mit offenem Stream, mit dem sendenden Rufzeichen
-- **Position pro Station**: `<Locator>`, `<Latitude>` und `<Longitude>` für Stationen, die eine M17-GPS-, eine D-Star-DPRS- oder eine YSF-GPS-Position gesendet haben
-- **Kennzeichnung dynamischer TGs**: `<Dynamic>true</Dynamic>` und `<Remaining>` Sekunden für zur Laufzeit hinzugefügte TGs
+- **Stationen**: Protokoll, Vorname aus der DMR-ID-Datenbank (sonst aus der NXDN-Datenbank), D-Star-Suffix und Position (M17-GPS, D-Star-DPRS, YSF-GPS), wer auf welchem Modul sendet
+- **Links und Peers**: Module (beide Zeitschlitze eines DMR-Hotspots), Verbindungs- und Last-Heard-Zeit, die IP, soweit `[Dashboard] LinksIP` / `PeersIP` es erlauben
 
 Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Dashboard zur Verfügung.
 
-Der JSON-Report enthält außerdem ein Array `DynamicTGs` mit Protokoll, TG, Modul und Restlaufzeit aller aktiven dynamischen Zuordnungen.
+### Dashboard v3.0.0
+Seit v3.0.0 (urfd 4.38.0) eine statische Seite, HTML und einfaches JavaScript ohne PHP: Sie bekommt den Stand live über den WebSocket von urfd und zeigt eine Änderung in dem Moment, in dem sie passiert; die Admin-Seite schickt ihre Befehle auf demselben Weg. Seiten und Aussehen sind die von v2.14; alte Links (`index.php?show=...`) führen auf dieselben Seiten. Die Einstellungen stehen in `[Dashboard]` in `urfd.ini`; `setup.sh update` übernimmt die der alten `config.inc.php` einmal.
 
-### Dashboard v2.14.3
 In v2.9.0 neu gestaltet als Frontplatte eines Funkgeräts: Ein bernsteinfarbenes LCD zeigt, wer gerade sendet, die Module sind ein Tastenfeld, der Rest sind schlichte Tabellen. Davor: dunkles Design (v2.6.0), robust gegen Ausfälle des Verzeichnisses (v2.6.1), M17-Positionen in der Last-Heard-Liste (v2.7.0), Eintrag ins Verzeichnis an den Reflektor abgegeben (v2.8.0), Sicherheitskorrekturen (v2.8.1, v2.8.2), Korrekturen an Statusdatei und Admin-Socket (v2.8.3). Seit v2.10.0 steht der Vorname neben dem Rufzeichen, aus den ID-Datenbanken, die urfd lädt (ab urfd 4.12.0).
 
 **Seiten:**
 - **Last heard**: Das LCD zeigt die Station, die gerade sendet, mit Modul, Betriebsart, Weg und laufender Sendezeit, sonst gedimmt die zuletzt gehörte. Daneben eine Taste pro Modul: bernsteinfarben, wenn Knoten verbunden sind, mit roter Markierung, solange jemand sendet. Eine Taste schaltet LCD und Log auf ihr Modul; ohne Taste zeigt das LCD die zuletzt begonnene Aussendung und nennt die weiteren Module auf Sendung; der Rufzeichenfilter versteht Platzhalter (`DL*`). Beide Filter überstehen das Neuladen.
 - **Modules**: Eine Tabelle mit einer Zeile pro Modul: Name, verbundene Knoten (aufklappbar), DMR+-TG, YSF-DG-ID, NXDN-RAN und -Ziel-ID, Transcoding und Brücken (statisch, und gestrichelt für die zur Laufzeit angelegten). Spalten ausgeschalteter Protokolle werden ausgeblendet. Darunter die Server-Protokolle mit ihren Ports; Client-Protokolle, die nach außen verbinden, fehlen. `?show=modulesd` aus alten Links landet hier.
-- **Links**, **Peers**: Verbundene Knoten und Partner-Reflektoren, mit Verbindungsdauer und der IP, soweit `IPModus` es erlaubt.
+- **Links**, **Peers**: Verbundene Knoten und Partner-Reflektoren, mit Verbindungsdauer und der IP, soweit `[Dashboard] LinksIP` / `PeersIP` es erlauben.
 - **Reflector list**: Das XLX-Verzeichnis mit Suche und 25 pro Seite.
 - **QuadNet live**: D-Star-Routing-Verkehr aus dem OpenQuad-Feed, mit Suche.
 - **Admin** (versteckt): Talkgroups mit Kerchunk, D-Star- und YSF-Links, SVX- und MMDVM-Nutzer und -Knoten, Transcoder, Protokoll-Sperren, Log. Ein Index zeigt nur die Abschnitte, die die laufenden Protokolle nutzen. Zugang über das Pi-Symbol in der Fußzeile oder `?show=admin`.
 
-Jede Seite außer Last heard und Admin trägt oben eine schmale LCD-Zeile mit der laufenden Aussendung. Den Sendezustand liefert das Element `<OnAir>` der Statusdatei (ab urfd 4.11.0); mit einem älteren urfd zeigt das Dashboard stattdessen die zuletzt gehörte Station.
+Jede Seite außer Last heard und Admin trägt oben eine schmale LCD-Zeile mit der laufenden Aussendung.
 
 **Funktionen:**
 - Helles und dunkles Design, folgt dem System, mit Umschalter in der Kopfleiste
 - Schrift (Saira, OFL) vom Dashboard selbst ausgeliefert, keine Anfrage an Google Fonts
-- Kein Bootstrap mehr; jQuery nur noch auf der Admin-Seite
-- Inhalt lädt sich alle `PageRefreshDelay` ms an Ort und Stelle neu, bei einem Sprecherwechsel sofort, nicht während man in einem Feld tippt
+- Kein PHP, kein Bootstrap, kein jQuery: statische Dateien, die nginx ausliefert
+- Live: ein Durchgang, ein Link, eine Bridge erscheint, sobald urfd ihn hat; Links und Peers fragen alle 10 s ihre Last-Heard-Zeiten ab; nach einem Neustart von urfd verbindet sich die Seite von selbst wieder
 - Locator von Stationen, die eine M17-GPS-, eine D-Star-DPRS- oder eine YSF-GPS-Position senden, mit Link auf OpenStreetMap
-- MOTD-/Wartungsbanner über `$PageOptions['MOTD']` in config.inc.php
-- Modulnamen aus dem urfd-XML (eine einzige Quelle)
+- MOTD-/Wartungsbanner über `[Dashboard] Motd` in urfd.ini
+- Modulnamen aus urfd.ini (eine einzige Quelle)
 - Kontakt-E-Mail gegen Bots verschleiert
 
-**Robust gegen einen Ausfall des Verzeichnisses**: Das Dashboard hängt nicht davon ab, dass `xlxapi.rlx.lu` erreichbar ist. Die Reflektorliste hat ein festes Timeout und wird auf der Platte zwischengespeichert (`<CacheDir>/reflectorlist.cache`). Ein frischer Eintrag liefert die Seite ganz ohne Netzwerkzugriff, ein veralteter hält die Liste am Laufen, solange das Verzeichnis ausgefallen ist. Seit v2.8.0 trägt das Dashboard den Reflektor nicht mehr im Verzeichnis ein; das macht der Reflektor selbst, siehe [CallingHome](#xlx-verzeichnis-callinghome).
+**Robust gegen einen Ausfall des Verzeichnisses**: Die Reflektorliste kommt vom XLX-Verzeichnis über das nginx des Dashboards, das eine Kopie 5 Minuten lang hält (`/var/lib/xlxd-ch/nginx-cache`) und eine ältere ausliefert, solange das Verzeichnis ausgefallen ist; auch der QuadNet-Feed geht über nginx. Der Reflektor trägt sich selbst ins Verzeichnis ein, siehe [CallingHome](#xlx-verzeichnis-callinghome).
 
-```php
-// pgs/config.inc.php
-$Directory['ServerURL'] = 'http://xlxapi.rlx.lu/api.php';
-$Directory['Timeout']   = 5;                    // Seconds before giving up on the directory server
-$Directory['CacheDir']  = '/var/lib/xlxd-ch';   // Reflector list cache
+```ini
+[Dashboard]
+# Motd = Scheduled maintenance on Sunday 12:00-14:00 UTC   # a banner on every page
+# LastHeard = 40               # rows of the last heard list
+# Filter = true                # module keys and callsign filter on Last heard
+# Links = 100                  # rows on the Links page
+# Peers = 100                  # rows on the Peers page
+LinksIP = ShowLast2ByteOfIP    # HideIP (default), ShowLast1ByteOfIP ... ShowLast3ByteOfIP, ShowFullIP
+PeersIP = ShowLast2ByteOfIP
+# IPMask = *                   # the character for a hidden byte
 ```
 
-Ältere Konfigurationen ohne `$Directory` funktionieren weiter: Die Werte werden dann aus ihren `$CallingHome`-Einstellungen genommen.
-
-### JSON-API
-Nur lesende HTTP-Endpunkte unter `/json/`, ausgeliefert vom Dashboard:
-
-| Endpunkt | Liefert |
-|---|---|
-| `/json/metadata` | Dashboard-Version, Reflektor-Rufzeichen und -Version, öffentliche IPv4/IPv6, Sysop-E-Mail |
-| `/json/status` | Reflektor an/aus, Laufzeit, Zeitpunkte der letzten Aktualisierung |
-| `/json/reflector` | Vollständiger Reflektor-Datensatz mit Modulen und Angaben |
-| `/json/links` | Verbundene Knoten mit Rufzeichen, IP, Modul, Protokoll, Verbindungs- und Last-Heard-Zeit |
-| `/json/peers` | Gekoppelte Partner-Reflektoren |
-| `/json/stations` | Zuletzt gehörte Stationen mit Land und `name` (Vorname aus der DMR- oder NXDN-ID-Datenbank, leer wenn unbekannt); `locator`, `latitude` und `longitude`, wenn die Station eine M17-GPS-, eine D-Star-DPRS- oder eine YSF-GPS-Position gesendet hat |
-| `/json/modulesinuse` | Module mit den Rufzeichen, die gerade darauf sind |
-
-Endpunkte für Listen liefern `[]`, wenn sie leer sind (`/json/stations` liefert `{"stations":[]}`); ein unbekannter Pfad liefert 404.
-
-**Anforderungen an den Webserver**: Die Endpunkte sind saubere Pfade, die in `json/index.php` verteilt werden; der Webserver muss `/json/<name>` also dorthin leiten.
-
-- **nginx**: Erledigt die mitgelieferte `nginx-dashboard.conf` mit einem Block `location /json/`. Ohne ihn fällt das allgemeine `try_files` auf die `index.php` des Dashboards zurück, und jeder Endpunkt antwortet mit `200` und einer HTML-Seite.
-- **Apache**: Verlässt sich auf `json/.htaccess`, die eine Standard-Installation von Debian ignoriert: `apache2.conf` setzt `AllowOverride None` für `/var/www/`, und `mod_rewrite` ist nicht aktiv. Ohne beides liefern die Endpunkte 404:
-
-```bash
-sudo a2enmod rewrite
-# and in /etc/apache2/apache2.conf, for the <Directory /var/www/> block:
-#   AllowOverride FileInfo
-sudo systemctl restart apache2
-```
+Die Fußzeile nennt `[Names] SysopEmail`. Die JSON-API des PHP-Dashboards (`/json/*`) ist mit ihm entfallen (antwortet mit 410); ihre Daten stehen in den Nachrichten des WebSockets.
 
 ### D-Star-Slow-Data für transcodierte Streams
 Transcodierte Streams (DMR, YSF, SVX, M17, P25, USRP, Client-Protokolle -> D-Star) enthalten jetzt korrekte D-Star-Slow-Data:
@@ -844,7 +813,7 @@ Mit einem [Codec-Plugin](tcd/README.de.md#codec-plugins) für DMR braucht der Tr
 
 Im urfd-Container laufen zwei Dienste unter supervisord:
 - **urfd**: der Reflektor
-- **nginx + php-fpm**: Dashboard auf Port 8363, das Live-Dashboard unter `/live/` und der WebSocket von urfd unter `/ws`
+- **nginx**: das statische Dashboard auf Port 8363, der WebSocket von urfd unter `/ws`, die Reflektorliste des XLX-Verzeichnisses und der QuadNet-Feed (zwischengespeichert), der Monitor des Docker-tcd unter `/tcd/`
 
 ### Konfigurationsdateien
 
@@ -854,10 +823,7 @@ Die gesamte Konfiguration liegt in `/opt/urfd/config/` (als Volume eingebunden):
 - `urfd.blacklist` / `urfd.whitelist`: Zugangskontrolle (wird per SIGHUP neu geladen)
 - `urfd.terminal`: Konfiguration für G3 (Icom Terminal/AP-Modus). Optionen: `address <public-ip>` (hinter NAT nötig), `modules <letters>` (erlaubte Reflektor-Module), `alias <callsign>` (zusätzliches Reflektor-Rufzeichen, das von Terminals angenommen wird, z.B. um sowohl `URFxxx` als auch `XLXxxx` anzunehmen; mehrfach möglich). Wird bei Änderung über `stat()` neu geladen.
 
-Dashboard-Konfiguration in `/opt/urfd/dashboard/config.inc.php` (in den Container eingebunden):
-- `$PageOptions['MOTD']`: Wartungsbanner (auf allen Seiten)
-- `$PageOptions['ContactEmail']`: Kontakt in der Fußzeile (verschleiert)
-- `$Directory`: XLX-Verzeichnisserver und Cache für die Reflektorliste (der Eintrag ins Verzeichnis ist `[CallingHome]` in `urfd.ini`)
+Die Einstellungen des Dashboards stehen in `[Dashboard]` in `urfd.ini` (Banner, Zeilen, IP-Adressen); die Fußzeile nennt `[Names] SysopEmail`. `/opt/urfd/xlxd-ch/` hält die Kopie der Reflektorliste von nginx.
 
 ## Installation von Hand
 
@@ -990,7 +956,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **YSF-Client-Protokoll**: YSFClient: Verbindung mit fremden YSF-Reflektoren mit optionaler DG-ID, dynamische Zuordnung über die Admin-API, Reflektor-Rufzeichen im YSF-Feld "Radio"
 
 ### Verwaltung zur Laufzeit
-- **Admin-Oberfläche**: JSON-over-TCP-Socket und Web-Dashboard: dynamische TG-Verwaltung, Protokolle neu verbinden, Transcoder-Statistik, Live-Log, Protokoll-Sperren, ein Thread pro Client mit 5 s Leerlauf-Timeout
+- **Admin-Oberfläche**: Admin-Seite über den WebSocket des Dashboards (4.38.0) und JSON-over-TCP-Socket: dynamische TG-Verwaltung, Protokolle neu verbinden, Transcoder-Statistik, Live-Log, Protokoll-Sperren, ein Thread pro Client mit 5 s Leerlauf-Timeout
 - **Protokoll-Sperren zur Laufzeit**: Beliebige Protokoll-Paare in beide Richtungen im Admin-Dashboard sperren und freigeben: threadsicher mit shared_mutex, per Klick entfernbar, Rücksetzen auf die Konfiguration, wird nicht gespeichert (gilt nach Neustart nicht mehr)
 - **Dynamische TG-Verwaltung**: TGs zur Laufzeit mit einstellbarer Laufzeit hinzufügen und entfernen, Timer über alle Protokolle hinweg erneuert, Aktivierung per BM-API oder Kerchunk, abgelaufene SVX-TGs fallen aus den überwachten TGs
 - **Transcodierte Module von tcd (4.25.0)**: `[Transcoder] Modules = auto` transcodiert ein Modul, solange tcd dafür verbunden ist, nur noch die `tcd.ini` nennt also die Module; ein Stream auf einem Modul ohne tcd läuft wie auf einem Modul ohne Transcoding, Dashboard und DHT-Eintrag folgen
@@ -1025,6 +991,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v3.0.0 (urfd 4.38.0)**: Das PHP-Dashboard ist durch ein statisches (HTML und einfaches JavaScript) ersetzt, das alles live über den WebSocket von urfd bekommt, die Admin-Seite eingeschlossen (Anmeldung mit dem `[Admin]`-Passwort, ihre Befehle über dieselbe Verbindung, ein Token hält die Anmeldung über ein Neuladen); gleiche Seiten und gleiches Aussehen. Einstellungen in `[Dashboard]` von `urfd.ini`, IP-Adressen maskiert urfd; urfd schreibt keine XML-/JSON-Statusdatei mehr, `/json/*` und coolacids Live-Dashboard unter `/live/` sind entfallen (beide führen zum Dashboard); Reflektorliste und QuadNet kommen über nginx, das die Liste zwischenspeichert; php-fpm ist nicht mehr im Image
 - **Dashboard v2.14.3**: das LCD hat keinen dunklen Streifen mehr an der Oberkante, der wie ein Absatz im Rahmen aussah
 - **Dashboard v2.14.2**: die Version im Kopf ohne `-dht`, damit der Status in der Kopfzeile bleibt
 - **Dashboard v2.14.1**: die Seite Links zeigt ein Band nur bei D-Star-Links, wo der Suffix der Port-Buchstabe des Repeaters ist; sonst ist er das Modul, und ein Knoten auf Modul D erschien als Dongle

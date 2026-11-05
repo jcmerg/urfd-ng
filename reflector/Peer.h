@@ -42,7 +42,9 @@ public:
 	const CCallsign &GetCallsign(void) const            { return m_Callsign; }
 	const CIp &GetIp(void) const                        { return m_Ip; }
 	char *GetReflectorModules(void)                     { return m_ReflectorModules; }
+	const char *GetReflectorModules(void) const         { return m_ReflectorModules; }
 	std::time_t GetConnectTime(void) const              { return m_ConnectTime; }
+	std::time_t GetLastHeardTime(void) const            { return m_LastHeardTime; }
 
 	// set
 
@@ -66,10 +68,6 @@ public:
 	std::list<std::shared_ptr<CClient>>::iterator end()                { return m_Clients.end(); }
 	std::list<std::shared_ptr<CClient>>::const_iterator cbegin() const { return m_Clients.cbegin(); }
 	std::list<std::shared_ptr<CClient>>::const_iterator cend() const   { return m_Clients.cend(); }
-
-	// reporting
-	virtual void WriteXml(std::ofstream &);
-	void JsonReport(nlohmann::json &report);
 
 protected:
 	// data

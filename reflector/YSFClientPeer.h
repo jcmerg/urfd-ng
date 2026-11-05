@@ -20,7 +20,6 @@ public:
 	bool IsLink(void) const                     { return true; }
 
 	bool IsAlive(void) const;
-	void WriteXml(std::ofstream &) {}
 
 	// the DG-ID of its mapping (0 = none)
 	uint8_t GetDgId(void) const                 { return m_DgId; }

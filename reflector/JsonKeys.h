@@ -90,8 +90,8 @@ struct SJsonKeys {
 	struct CALLINGHOME { const std::string enable, country, comment, hash, overrideip, server, pushdelay, timeout; }
 	callinghome { "chEnable", "chCountry", "chComment", "chHash", "chOverrideIP", "chServer", "chPushDelay", "chTimeout" };
 
-	struct FILES { const std::string pid, xml, json, white, black, interlink, terminal; }
-	files { "pidFilePath", "xmlFilePath", "jsonFilePath", "whitelistFilePath", "blacklistFilePath", "interlinkFilePath", "g3TerminalFilePath" };
+	struct FILES { const std::string pid, white, black, interlink, terminal; }
+	files { "pidFilePath", "whitelistFilePath", "blacklistFilePath", "interlinkFilePath", "g3TerminalFilePath" };
 	// [MMDVMClient]; [MMDVMClient2] to [MMDVMClient9] use MmdvmClientKeys() in MmdvmClientConfig.h
 	struct MMDVMCLIENT { const std::string enable, address, port, localport, dmrid, password, callsign, latitude, longitude, location, description, url, rxfreq, txfreq, software, firmware, fallbackdmrid, blockprotocols, bmapikey, network; }
 	mmdvmclient { "mmdvmcliEnable", "mmdvmcliAddress", "mmdvmcliPort", "mmdvmcliLocalPort", "mmdvmcliDmrId", "mmdvmcliPassword", "mmdvmcliCallsign", "mmdvmcliLatitude", "mmdvmcliLongitude", "mmdvmcliLocation", "mmdvmcliDescription", "mmdvmcliUrl", "mmdvmcliRxFreq", "mmdvmcliTxFreq", "mmdvmcliSoftware", "mmdvmcliFirmware", "mmdvmcliFallbackDmrId", "mmdvmcliBlockProtocols", "mmdvmcliBmApiKey", "mmdvmcliNetwork" };
@@ -117,4 +117,8 @@ struct SJsonKeys {
 
 	struct WS { const std::string enable, port, bindaddress, maxclients, queuelen, pinginterval, idletimeout; }
 	ws { "wsEnable", "wsPort", "wsBindAddress", "wsMaxClients", "wsQueueLen", "wsPingInterval", "wsIdleTimeout" };
+
+	// what the dashboard shows, sent to it over the WebSocket
+	struct DASHBOARD { const std::string motd, lastheard, filter, links, peers, linksip, peersip, ipmask, admin; }
+	dashboard { "dashMotd", "dashLastHeard", "dashFilter", "dashLinks", "dashPeers", "dashLinksIP", "dashPeersIP", "dashIPMask", "dashAdmin" };
 };
