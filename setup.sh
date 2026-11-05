@@ -622,7 +622,9 @@ migrate_dashboard() {
 import os, re, sys
 s = open(sys.argv[1]).read() if os.path.isfile(sys.argv[1]) else ''
 def get(key, default=''):
-    m = re.search(r"^\s*\$" + re.escape(key) + r"\s*=\s*(?:'([^']*)'|\"([^\"]*)\"|([\w.]+))\s*;", s, re.M)
+    # a key written with ' or " ($Admin["Enable"])
+    k = re.escape(key).replace("'", "['\"]")
+    m = re.search(r"^\s*\$" + k + r"\s*=\s*(?:'([^']*)'|\"([^\"]*)\"|([\w.]+))\s*;", s, re.M)
     return next((g for g in m.groups() if g is not None), default) if m else default
 modes = ('HideIP', 'ShowLast1ByteOfIP', 'ShowLast2ByteOfIP', 'ShowLast3ByteOfIP', 'ShowFullIP')
 def mode(key):
