@@ -98,8 +98,6 @@ void CLookup::Thread()
 		// on the first pass through this while loop (count == 0)
 		if (ERefreshType::file != m_Type && 0ul == count % wait_cycles)
 		{
-			// if SIG_INT was received at this point in time,
-			// in might take a bit more than 10 seconds to soft close
 			http_loaded = LoadContentHttp(ss);
 			if (http_loaded)
 			{
@@ -178,7 +176,10 @@ bool CLookup::LoadContentHttp(std::stringstream &ss)
 
 	for (std::size_t i = 0; i < urls.size(); i++)
 	{
-		if (CURLE_OK == get.GetURL(urls[i], ss))
+		// radioid.net's user.csv is 17 MB and can come at under 100 KB/s, so
+		// 30 s were never enough there; a stalled one still ends after 30 s,
+		// and a stop of urfd aborts it at once
+		if (CURLE_OK == get.GetURL(urls[i], ss, 600, 10, CURL_IPRESOLVE_WHATEVER, &keep_running))
 		{
 			if (i > 0)
 				std::cout << "Loaded database from fallback source '" << urls[i] << "'" << std::endl;
@@ -187,6 +188,8 @@ bool CLookup::LoadContentHttp(std::stringstream &ss)
 		// A transfer that failed part way through leaves partial data behind.
 		ss.str(std::string());
 		ss.clear();
+		if (! keep_running)
+			break;
 	}
 	return false;
 }
