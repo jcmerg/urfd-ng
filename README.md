@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.38.1** | tcd 0.19.5 | Dashboard v3.0.1
+**urfd 4.38.2** | tcd 0.19.5 | Dashboard v3.0.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -986,6 +986,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **SIGHUP config reload**: Hot-reload TG mappings, whitelist/blacklist/interlink, transcoder modules without dropping sessions — thread-safe via sigwait, exception-safe with rollback
 - **Config values checked (4.37.2)**: a value in `urfd.ini` that is no number (a port, `RxGain`/`TxGain`, `Latitude`, the port of a connector's `Map`) is reported with its line and the default taken, instead of ending urfd and `inicheck`; the last line of the white/black list, the interlink and the G3 terminal file counts without a newline at its end; the admin command that removes a TG reads its time slot under the map's lock
 - **Dashboard WebSocket hardened (4.38.1)**: a wrong admin password pauses logins from that browser's address only (2 s, doubling up to 5 min; behind nginx from `X-Forwarded-For`), no longer everyone's, so nobody can keep the sysop out by failing on purpose; a login token runs out an hour after its last command, not an hour after the login; one snapshot build a second serves every client that asks, and one client may have at most 8 requests waiting; the name lookups of the station events and the snapshot no longer happen under the users or clients lock (they wait for a reload of the ID database); a position updates the last heard list only when its locator changes; IPv6 addresses are masked to the last 1, 2 or 3 groups as the option says (was always 2); answers to a missing login carry `"code": "auth"`. `[WebSocket] Enable` defaults to `true` since 4.38.0 (loopback only)
+- **ID database downloads may take longer (4.38.2)**: a download of the DMR, NXDN or YSF database had to be done within 30 s, so a slow link to radioid.net (its `user.csv` is 17 MB, at under 100 KB/s it needs some minutes) always timed out (`Curl returned: 28`) and the fallback source was loaded; a download may now take up to 10 minutes as long as it moves, and is given up when it stays below 1 KB/s for 30 s (every HTTP request of urfd); stopping urfd aborts a running download at once
 
 ### Audio & Transcoding
 - **Modules without transcoder carry each stream only where its codec goes (4.32.2)**: on a module without tcd a stream reached every protocol, also those of another codec, whose frames were then empty (zeros, decoded as noise, for example a D-Star stream sent to DMR, P25 or M17). Such a protocol now gets no stream: D-Star goes to the D-Star protocols, AMBE+2 (DMR, NXDN, YSF DN) to DMR, NXDN and YSF, IMBE (P25, YSF VW) to P25 and YSF, Codec2 to M17, USRP and SVX audio to USRP and SVX. Interlinks and plugins keep getting every stream, and transcoded modules are unchanged

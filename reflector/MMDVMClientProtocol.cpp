@@ -525,7 +525,7 @@ void CMMDVMClientProtocol::SendConfig(void)
 		description.empty() ? g_Configure.GetString(g_Keys.names.callsign).c_str() : description.c_str(),
 		'3',  // duplex (required by master)
 		url.c_str(),
-		g_Configure.Contains(m_Keys.firmware) ? g_Configure.GetString(m_Keys.firmware).c_str() : "20261105_URFD",
+		g_Configure.Contains(m_Keys.firmware) ? g_Configure.GetString(m_Keys.firmware).c_str() : "20261106_URFD",
 		g_Configure.Contains(m_Keys.software) ? g_Configure.GetString(m_Keys.software).c_str() : "MMDVM_URFD_Virtual"
 	);
 

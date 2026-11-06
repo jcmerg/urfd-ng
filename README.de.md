@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.38.1** | tcd 0.19.5 | Dashboard v3.0.1
+**urfd 4.38.2** | tcd 0.19.5 | Dashboard v3.0.1
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -976,6 +976,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Neu laden per SIGHUP**: TG-Zuordnungen, Whitelist/Blacklist/Interlink und Transcoder-Module neu laden, ohne Verbindungen zu trennen: threadsicher über sigwait, bei Fehlern mit Rückgängigmachen
 - **Konfigurationswerte geprüft (4.37.2)**: Ein Wert in `urfd.ini`, der keine Zahl ist (ein Port, `RxGain`/`TxGain`, `Latitude`, der Port der `Map` einer Anbindung), wird mit seiner Zeile gemeldet und der Standardwert genommen, statt urfd und `inicheck` zu beenden; die letzte Zeile der White-/Blacklist, der Interlink- und der G3-Terminal-Datei zählt auch ohne Zeilenumbruch am Ende; der Admin-Befehl, der eine TG entfernt, liest ihren Zeitschlitz unter der Sperre der Tabelle
 - **Dashboard-WebSocket gehärtet (4.38.1)**: Ein falsches Admin-Passwort sperrt nur Anmeldungen von der Adresse dieses Browsers (2 s, verdoppelt bis 5 min; hinter nginx aus `X-Forwarded-For`), nicht mehr alle, sodass niemand den Sysop durch absichtliche Fehlversuche aussperren kann; ein Login-Token läuft eine Stunde nach seinem letzten Befehl ab, nicht eine Stunde nach der Anmeldung; ein Snapshot-Aufbau pro Sekunde bedient alle Clients, die fragen, und ein Client darf höchstens 8 Anfragen warten lassen; die Namensabfragen der Stations-Events und des Snapshots laufen nicht mehr unter dem Users- oder Clients-Lock (sie warten auf ein Neuladen der ID-Datenbank); eine Position ändert die Last-Heard-Liste nur, wenn sich ihr Locator ändert; IPv6-Adressen werden wie eingestellt auf die letzten 1, 2 oder 3 Gruppen maskiert (bisher immer 2); Antworten auf eine fehlende Anmeldung tragen `"code": "auth"`. `[WebSocket] Enable` ist seit 4.38.0 standardmäßig `true` (nur Loopback)
+- **Downloads der ID-Datenbanken dürfen länger dauern (4.38.2)**: Ein Download der DMR-, NXDN- oder YSF-Datenbank musste in 30 s fertig sein, sodass eine langsame Verbindung zu radioid.net (die `user.csv` hat 17 MB, bei unter 100 KB/s braucht sie einige Minuten) immer abbrach (`Curl returned: 28`) und die Fallback-Quelle geladen wurde; ein Download darf jetzt bis zu 10 Minuten dauern, solange er vorankommt, und wird aufgegeben, wenn er 30 s unter 1 KB/s bleibt (jede HTTP-Anfrage von urfd); ein Stopp von urfd bricht einen laufenden Download sofort ab
 
 ### Audio und Transcodierung
 - **Module ohne Transcoder geben jeden Stream nur dorthin, wo sein Codec hingeht (4.32.2)**: Auf einem Modul ohne tcd erreichte ein Stream jedes Protokoll, auch solche eines anderen Codecs, deren Frames dann leer waren (Nullen, als Rauschen dekodiert, etwa ein D-Star-Stream nach DMR, P25 oder M17). Ein solches Protokoll bekommt jetzt keinen Stream: D-Star geht an die D-Star-Protokolle, AMBE+2 (DMR, NXDN, YSF DN) an DMR, NXDN und YSF, IMBE (P25, YSF VW) an P25 und YSF, Codec2 an M17, USRP- und SVX-Audio an USRP und SVX. Interlinks und Plugins bekommen weiter jeden Stream, transkodierte Module bleiben unverändert

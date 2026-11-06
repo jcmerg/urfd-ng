@@ -53,7 +53,15 @@ size_t CCurlGet::data_write(void* buf, size_t size, size_t nmemb, void* userp)
 	return 0;
 }
 
-// options both requests use; NOSIGNAL because several threads use libcurl
+// progress callback: a non-zero return aborts the transfer
+int CCurlGet::xfer_info(void *clientp, curl_off_t, curl_off_t, curl_off_t, curl_off_t)
+{
+	return static_cast<const std::atomic<bool>*>(clientp)->load() ? 0 : 1;
+}
+
+// options both requests use; NOSIGNAL because several threads use libcurl.
+// A transfer that stays below 1 KB/s for 30 s is given up, so a long total
+// timeout only lets a slow but moving download finish.
 CURLcode CCurlGet::Prepare(CURL *curl, const std::string &url, std::stringstream &ss, long timeout, long connecttimeout, long ipresolve)
 {
 	CURLcode code;
@@ -64,19 +72,25 @@ CURLcode CCurlGet::Prepare(CURL *curl, const std::string &url, std::stringstream
 	&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_FILE, &ss))
 	&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout))
 	&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connecttimeout))
+	&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1024L))
+	&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L))
 	&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_IPRESOLVE, ipresolve)))
 		code = curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 	return code;
 }
 
-CURLcode CCurlGet::GetURL(const std::string &url, std::stringstream &ss, long timeout, long connecttimeout, long ipresolve)
+CURLcode CCurlGet::GetURL(const std::string &url, std::stringstream &ss, long timeout, long connecttimeout, long ipresolve, const std::atomic<bool> *running)
 {
 	CURLcode code(CURLE_FAILED_INIT);
 	CURL* curl = curl_easy_init();
 
 	if(curl)
 	{
-		if(CURLE_OK == (code = Prepare(curl, url, ss, timeout, connecttimeout, ipresolve)))
+		if(CURLE_OK == (code = Prepare(curl, url, ss, timeout, connecttimeout, ipresolve))
+		&& (nullptr == running
+			|| (CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, &xfer_info))
+			&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_XFERINFODATA, const_cast<std::atomic<bool>*>(running)))
+			&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L)))))
 		{
 			code = curl_easy_perform(curl);
 		}
