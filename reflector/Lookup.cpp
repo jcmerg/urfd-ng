@@ -88,6 +88,23 @@ void CLookup::Thread()
 {
 	const unsigned long wait_cycles = (m_Refresh > 0) ? m_Refresh * 6u : 1u;
 	unsigned long count = 0;
+
+	// The last good download first: a database download can take minutes
+	// (radioid.net's user.csv) or fail, and until then every lookup would come
+	// back empty. The download replaces it as soon as it is complete.
+	if (ERefreshType::file != m_Type)
+	{
+		std::stringstream ss;
+		if (LoadContentFile(m_CachePath, ss))
+		{
+			Lock();
+			ClearContents();
+			UpdateContent(ss, Eaction::normal);
+			Unlock();
+			m_ContentLoaded = true;
+		}
+	}
+
 	while (keep_running)
 	{
 		std::stringstream ss;
