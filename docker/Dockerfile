@@ -3,8 +3,14 @@ FROM ubuntu:24.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+# apt keeps its downloads in a BuildKit cache across builds: a new ubuntu:24.04
+# (Ubuntu refreshes it) rebuilds this layer, but only changed packages are
+# downloaded again (ports.ubuntu.com, the arm64 mirror, is often slow)
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+# the compiler without build-essential, which adds perl and the Debian packaging tools
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     make \
     libcurl4-gnutls-dev \
@@ -16,8 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libsqlite3-dev \
     libmariadb-dev \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+    libpq-dev
 
 WORKDIR /build
 COPY reflector/ ./reflector/
@@ -39,7 +44,13 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# apt keeps its downloads in a BuildKit cache across builds: a new ubuntu:24.04
+# (Ubuntu refreshes it) rebuilds this layer, but only changed packages are
+# downloaded again (ports.ubuntu.com, the arm64 mirror, is often slow)
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     libcurl3t64-gnutls \
     libopendht3t64 \
     libopus0 \
@@ -53,7 +64,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     procps \
     && apt-get upgrade -y --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /var/log/supervisor /var/cache/nginx /usr/local/etc/urfd
 
 # Copy urfd binary and tools

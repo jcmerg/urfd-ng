@@ -10,18 +10,23 @@ FROM ubuntu:24.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+# apt keeps its downloads in a BuildKit cache across builds: a new ubuntu:24.04
+# (Ubuntu refreshes it) rebuilds this layer, but only changed packages are
+# downloaded again (ports.ubuntu.com, the arm64 mirror, is often slow)
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+# the compiler without build-essential (perl, the Debian packaging tools); cmake
+# and curl for the codec plugins (a plugin may build or fetch its library)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     make \
     cmake \
     curl \
     ca-certificates \
-    python3 \
     libspeexdsp-dev \
     libwebsockets-dev \
-    libncurses-dev \
-    && rm -rf /var/lib/apt/lists/*
+    libncurses-dev
 
 WORKDIR /build
 COPY reflector/ ./reflector/
@@ -50,13 +55,18 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# apt keeps its downloads in a BuildKit cache across builds: a new ubuntu:24.04
+# (Ubuntu refreshes it) rebuilds this layer, but only changed packages are
+# downloaded again (ports.ubuntu.com, the arm64 mirror, is often slow)
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     libspeexdsp1 \
     libwebsockets19t64 \
     libncurses6 \
     ca-certificates \
-    procps \
-    && rm -rf /var/lib/apt/lists/*
+    procps
 
 COPY --from=builder /build/tcd/tcd /build/tcd/tcdmon /usr/local/bin/
 COPY --from=builder /build/plugin-lib/ /usr/local/lib/tcd/

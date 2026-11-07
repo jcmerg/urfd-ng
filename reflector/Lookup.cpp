@@ -84,6 +84,27 @@ void CLookup::LookupInit()
 	m_Future = std::async(std::launch::async, &CLookup::Thread, this);
 }
 
+// A download that is a web page (a captive portal, a proxy login, a page
+// answered with 200) is no database: it would replace the good one and be
+// cached. The databases are plain text that starts with a record or a comment.
+// Reads up to the first character that is not blank and rewinds, so a large
+// download is not copied.
+static bool LooksLikeData(std::stringstream &ss, const std::string &source)
+{
+	auto *buf = ss.rdbuf();
+	int c;
+	do
+		c = buf->sbumpc();
+	while (EOF != c && (' ' == c || '\t' == c || '\r' == c || '\n' == c || 0xef == c || 0xbb == c || 0xbf == c));
+	buf->pubseekpos(0, std::ios_base::in);
+	if (EOF == c || '<' == c)
+	{
+		std::cout << "WARNING: '" << source << "' holds " << (EOF == c ? "nothing" : "a web page") << ", not a database" << std::endl;
+		return false;
+	}
+	return true;
+}
+
 void CLookup::Thread()
 {
 	const unsigned long wait_cycles = (m_Refresh > 0) ? m_Refresh * 6u : 1u;
@@ -94,12 +115,20 @@ void CLookup::Thread()
 	// back empty. The download replaces it as soon as it is complete.
 	// (the parse holds the map's lock, as every refresh does: a lookup that
 	// comes meanwhile waits for the whole database instead of missing)
+	// With Mode = both the operator's own entries in FilePath come along, as
+	// after every download.
 	if (ERefreshType::file != m_Type)
 	{
 		std::stringstream ss;
-		if (LoadContentFile(m_CachePath, ss) && ss.rdbuf()->in_avail() > 0)
+		if (LoadContentFile(m_CachePath, ss) && LooksLikeData(ss, m_CachePath))
 		{
 			std::cout << "Loading the last download from '" << m_CachePath << "' until the download is done" << std::endl;
+			if (ERefreshType::both == m_Type)
+			{
+				ss << '\n';
+				LoadContentFile(ss);
+				time(&m_LastLoadTime);
+			}
 			Lock();
 			ClearContents();
 			UpdateContent(ss, Eaction::normal);
@@ -131,7 +160,7 @@ void CLookup::Thread()
 				// content at all — once the map is populated, later failures just
 				// leave it in place.
 				if (! m_ContentLoaded)
-					http_loaded = LoadContentFile(m_CachePath, ss);
+					http_loaded = LoadContentFile(m_CachePath, ss) && LooksLikeData(ss, m_CachePath);
 			}
 		}
 		else
@@ -187,21 +216,6 @@ std::vector<std::string> CLookup::SplitUrls() const
 			urls.push_back(item);
 	}
 	return urls;
-}
-
-// A download that is a web page (a captive portal, a proxy login, a page
-// answered with 200) is no database: it would replace the good one and be
-// cached. The databases are plain text that starts with a record or a comment.
-static bool LooksLikeData(const std::stringstream &ss, const std::string &url)
-{
-	const std::string &s = ss.str();
-	const auto first = s.find_first_not_of(" \t\r\n\xef\xbb\xbf");
-	if (std::string::npos == first || '<' == s[first])
-	{
-		std::cout << "WARNING: '" << url << "' answered " << (std::string::npos == first ? "nothing" : "a web page") << ", not a database" << std::endl;
-		return false;
-	}
-	return true;
 }
 
 bool CLookup::LoadContentHttp(std::stringstream &ss)
