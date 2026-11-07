@@ -349,6 +349,14 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
           </select></div>
           <div class="row" id="dmr_gain_ambe" hidden><label for="ambe_gain_db">Offset</label><input type="range" min="-30" max="10" id="ambe_gain_db"><output id="v_ambe_gain_db" for="ambe_gain_db">0</output></div>
           <div class="row" id="dmr_gain_reencode" hidden><label for="g_dmr_reencode">Offset</label><input type="range" min="-24" max="24" id="g_dmr_reencode"><output id="v_dmr_reencode" for="g_dmr_reencode">0</output></div>
+          <div id="transcode_group" hidden>
+            <h3 style="margin-top:0.9rem">D-Star, DMR and P25 to each other</h3>
+            <p>When the codec plugin of the source also codes the target</p>
+            <div class="row"><label for="transcode_direct">Transcode</label><select id="transcode_direct">
+              <option value="direct">From the frames (direct)</option>
+              <option value="audio">From the audio</option>
+            </select></div>
+          </div>
         </div>
         <div class="group">
           <h3>AGC</h3>
@@ -428,6 +436,7 @@ function connect() {
         var o = document.querySelector('#dmr_gain_mode option[value="reencode"]'); if (o) o.remove();
       }
       updateDmrGainMode();
+      $('transcode_group').hidden = !data.transcode_available;
       configLoaded = true;
     }
     render();
@@ -569,7 +578,7 @@ function render() {
         '<span class="arr">→</span>' + (cfg.agc_enabled ? (m.agc_gate ? 'gate' : 'AGC ' + signed(m.agc_gain) + ' dB') : 'no AGC') +
         '<span class="arr">→</span>PCM ' + db(m.rms_out) +
         (m.direct ? ' <span class="arr">|</span> <b>' + esc(m.codec_in) + '</b><span class="arr">→</span>frames ' +
-          (cfg.agc_enabled && !m.agc_gate ? signed(m.agc_gain) + ' dB' : 'as they are') + '<span class="arr">→</span>' + esc(m.direct) : '')
+          (cfg.agc_enabled ? 'AGC ' + signed(m.agc_gain) + ' dB' : 'no AGC') + ' + output gains<span class="arr">→</span>' + esc(m.direct) : '')
       : '<span>No signal path while idle</span>';
     p.flow.innerHTML = flow + '<span class="pkts">' + m.pkts_in + ' in, ' + m.pkts_out + ' out</span>';
   });
@@ -654,6 +663,7 @@ function loadConfig(cfg) {
   outgainKeys.forEach(function (k) { var s = k.replace('outgain_', ''); setVal('og_' + s, 'v_og_' + s, cfg[k]); });
   $('dmr_gain_mode').value = ['off', 'ambe', 'reencode'][cfg.dmr_gain_mode] || 'off';
   setVal('ambe_gain_db', 'v_ambe_gain_db', cfg.ambe_gain_db);
+  $('transcode_direct').value = cfg.transcode_direct === false ? 'audio' : 'direct';
   $('agc_en').checked = cfg.agc_enabled;
   setVal('og_dmr_bs', 'v_og_dmr_bs', cfg.outgain_dmr_bitstream);
   agcKeys.forEach(function (k) { setVal(k, 'v_' + k, cfg[k]); });
@@ -741,6 +751,9 @@ $('og_dmr_bs').addEventListener('input', function (e) { $('v_og_dmr_bs').textCon
 $('dmr_gain_mode').addEventListener('change', function (e) {
   post('api/agc', { dmr_gain_mode: { off: 0, ambe: 1, reencode: 2 }[e.target.value] || 0 });
   updateDmrGainMode();
+});
+$('transcode_direct').addEventListener('change', function (e) {
+  post('api/agc', { transcode_direct: e.target.value === 'direct' });
 });
 $('ambe_gain_db').addEventListener('input', function (e) {
   $('v_ambe_gain_db').textContent = e.target.value;

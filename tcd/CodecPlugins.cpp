@@ -56,7 +56,7 @@ CSoftCodec::SState *CSoftCodec::State(uint32_t key, uint32_t sequence)
 			std::cerr << "Codec plugin " << m_Plugin->name << ": no state for stream " << streamid << ", its frames stay empty" << std::endl;
 			return nullptr;
 		}
-		it = m_States.emplace(key, SState{ state, now, sequence, false }).first;
+		it = m_States.emplace(key, SState{ state, now, sequence, false, kUnused }).first;
 	}
 	if (it->second.running && NewTransmission(it->second.sequence, sequence))
 		it->second.running = false;
@@ -65,6 +65,7 @@ CSoftCodec::SState *CSoftCodec::State(uint32_t key, uint32_t sequence)
 		if (m_Plugin->start)
 			m_Plugin->start(it->second.state);
 		it->second.running = true;
+		it->second.use = kUnused;
 	}
 	it->second.last_used = now;
 	it->second.sequence = sequence;
@@ -85,6 +86,10 @@ bool CSoftCodec::Encode(uint16_t streamid, uint32_t sequence, bool last, const i
 {
 	std::lock_guard<std::mutex> lock(*m_Mutex);
 	SState *s = State(Key(streamid, true), sequence);
+	if (s && s->use == kTranscode && m_Plugin->start)
+		m_Plugin->start(s->state);	// from transcode to encode mid-transmission: afresh
+	if (s)
+		s->use = kEncode;
 	const bool ok = s && 0 == m_Plugin->encode(s->state, pcm, frame);
 	Stop(s, last);
 	return ok;
@@ -114,7 +119,10 @@ bool CSoftCodec::Transcode(uint16_t streamid, uint32_t sequence, bool last, CSof
 	if (it == m_States.end())
 		return false;	// nothing decoded on this stream
 	SState *s = to->State(Key(streamid, true), sequence);
-	const bool ok = s && 0 == m_Plugin->transcode(it->second.state, s->state, gain_db, frame);
+	if (!s || s->use == kEncode)
+		return false;	// the transmission is encoded from the audio: it stays so
+	const bool ok = 0 == m_Plugin->transcode(it->second.state, s->state, gain_db, frame);
+	s->use = ok ? kTranscode : s->use;
 	to->Stop(s, last);
 	return ok;
 }

@@ -116,6 +116,7 @@ public:
 	// start; config.codec_choice is the one new streams get
 	std::vector<std::string> codec_options[kNumChoices];
 	std::atomic<bool> reencode_available{false};	// a codec plugin for DmrGainMode = reencode
+	std::atomic<bool> transcode_available{false};	// a codec plugin with transcode (API 4) for two of D-Star, DMR, P25
 	std::atomic<bool> pool_available{false};	// AMBE channels, so DeviceChannels means something
 	// the hardware (AMBE) channels of D-Star and DMR (kChoiceDStar, kChoiceDMR):
 	// in service, and of them in use by a stream
@@ -153,6 +154,7 @@ public:
 		std::atomic<int>   ambe_gain_db{-2};
 		std::atomic<int>   codec_choice[kNumChoices]{};   // index into codec_options
 		std::atomic<int>   monitor_view{0};    // 0 auto, 1 cards, 2 compact
+		std::atomic<bool>  transcode_direct{true}; // Transcode: direct (true) or audio, for the frames from now on
 		std::atomic<int>   device_pool{0};     // DeviceChannels: 0 fixed, 1 pool, for the streams that start from now on
 		std::atomic<int>   device_compand{0};  // DeviceCompand: 0 linear, 1 µ-law, 3 A-law; a device takes it when it is opened again
 	} config;
@@ -223,7 +225,8 @@ public:
 		int idx = module - 'A';
 		if (idx < 0 || idx >= MAX_MODULES) return;
 		modules[idx].packets_in.fetch_add(1, std::memory_order_relaxed);
-		modules[idx].stream_id.store(sid, std::memory_order_relaxed);
+		if (modules[idx].stream_id.exchange(sid, std::memory_order_relaxed) != sid)
+			modules[idx].direct.store(0, std::memory_order_relaxed);	// a new stream: no direct targets until its decoder says
 		modules[idx].codec_in.store((uint8_t)codec, std::memory_order_relaxed);
 		modules[idx].last_codec.store((uint8_t)codec, std::memory_order_relaxed);
 		modules[idx].last_activity.store(0.0f, std::memory_order_relaxed);
