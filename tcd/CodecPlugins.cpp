@@ -122,6 +122,8 @@ bool CSoftCodec::Transcode(uint16_t streamid, uint32_t sequence, bool last, CSof
 	if (!s || s->use == kEncode)
 		return false;	// the transmission is encoded from the audio: it stays so
 	const bool ok = 0 == m_Plugin->transcode(it->second.state, s->state, gain_db, frame);
+	// a failure keeps kTranscode: the audio path's Encode then starts the state
+	// afresh once and takes it over (kEncode) for the rest of the transmission
 	s->use = ok ? kTranscode : s->use;
 	to->Stop(s, last);
 	return ok;

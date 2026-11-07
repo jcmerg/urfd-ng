@@ -374,7 +374,7 @@ D-Star, DMR/YSF, P25 -> another of the three, both on one plugin with transcode 
 
 **With the AGC**, the static gains can usually all stay at 0, except `OutputGainDMR = -14` for the level DMR radios expect: it evens out different microphones, radios and codecs per transmission. Without it, every route needs its own static gain.
 
-Where the AGC acts: it always measures the decoded PCM of the incoming stream. Between different codecs it is applied to that PCM before encoding; on the direct path its gain for the frame goes into the target frame's parameters instead, at any level (no b2 steps); the 75 Hz high-pass and the ramp within a frame act on the audio only. DMR → DMR/YSF gets it in the AMBE2+ bitstream through b2 (`DmrGainMode = ambe`) or by re-encoding (`reencode`). D-Star → D-Star, M17 → M17 and P25 → P25 pass through unchanged.
+Where the AGC acts: it always measures the decoded PCM of the incoming stream. Between different codecs it is applied to that PCM before encoding; on the direct path its gain for the frame goes into the target frame's parameters instead, at any level (no b2 steps); the 75 Hz high-pass and the ramp within a frame act on the audio only. A gain of -60 dB or less (an output gain down to "off" in `tcd.ini`) codes silence there, as the audio path codes its zero samples. DMR → DMR/YSF gets it in the AMBE2+ bitstream through b2 (`DmrGainMode = ambe`) or by re-encoding (`reencode`). D-Star → D-Star, M17 → M17 and P25 → P25 pass through unchanged.
 
 The AGC works per stream (per transmission):
 - a 75 Hz high-pass (3rd order, 18 dB/octave) on the audio, so DC and hum neither drive the level nor reach the encoder
@@ -412,11 +412,13 @@ The gain limits are asymmetric on purpose: attenuating is safe, amplifying also 
 Terminal monitor, handy over SSH:
 
 ```bash
-tcdmon                      # this machine, port 8081
+tcdmon                      # this machine, the MonitorStatsPort of its tcd.ini (else 8081)
 tcdmon 192.0.2.20 8081      # another machine
 ```
 
-Shows level bars, signal flow, AGC state, the hardware (the AMBE channels of each codec in use, fixed or pool, each device with its channels and modules, phased out ones marked) and the software (the codec plugins and tcd's own vocoders), and the output gains. `q` quits.
+Without a port tcdmon takes `MonitorStatsPort` from `$TCD_INI`, `/usr/local/etc/tcd/tcd.ini` (the Docker image's, so `docker exec -it tcd tcdmon` works with any port) or `/usr/local/etc/tcd.ini` (since 0.20.3), else 8081.
+
+Shows a card with level bars and signal flow for each module on the air and the others in one line (since 0.20.3, as the web dashboard's compact view), the AGC state, the hardware (the AMBE channels of each codec in use, fixed or pool, each device with its channels and modules, phased out ones marked) and the software (the codec plugins and tcd's own vocoders), and the output gains. `q` quits.
 
 ### Stats CSV and agc-analyze
 

@@ -21,6 +21,8 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <fstream>
+#include <algorithm>
 
 // Minimal JSON value extraction (no library dependency)
 static std::string json_str(const std::string &json, const std::string &key)
@@ -312,10 +314,41 @@ static void draw_flow(int y, int x, int /*width*/, const ModuleData &m, const st
 	attroff(COLOR_PAIR(3) | A_BOLD);
 }
 
+// MonitorStatsPort of the tcd.ini at path, 0 without one
+static int StatsPortOf(const char *path)
+{
+	std::ifstream ini(path);
+	std::string line;
+	while (std::getline(ini, line))
+	{
+		line = line.substr(0, line.find('#'));
+		const auto eq = line.find('=');
+		if (eq == std::string::npos)
+			continue;
+		std::string key = line.substr(0, eq);
+		key.erase(key.find_last_not_of(" \t") + 1);
+		key.erase(0, key.find_first_not_of(" \t"));
+		if (key == "MonitorStatsPort")
+			return atoi(line.c_str() + eq + 1);
+	}
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	const char *host = "127.0.0.1";
 	int port = 8081;
+	// without a port: the one of this machine's tcd.ini ($TCD_INI, the Docker
+	// image's, a native install's), else 8081
+	for (const char *ini : { (const char *)getenv("TCD_INI"), "/usr/local/etc/tcd/tcd.ini", "/usr/local/etc/tcd.ini" })
+	{
+		const int p = ini ? StatsPortOf(ini) : 0;
+		if (p > 0 && p < 65536)
+		{
+			port = p;
+			break;
+		}
+	}
 	// tcd's MonitorPassword, asked by tcd from other hosts than 127.0.0.1
 	std::string password = getenv("TCD_MONITOR_PASSWORD") ? getenv("TCD_MONITOR_PASSWORD") : "";
 
@@ -327,7 +360,7 @@ int main(int argc, char *argv[])
 			password = argv[++i];
 		else if (0 == strcmp(argv[i], "-h") || 0 == strcmp(argv[i], "--help"))
 		{
-			printf("usage: %s [-p password] [host [port]]   (default 127.0.0.1 8081; without -p the password from TCD_MONITOR_PASSWORD or a prompt, -p shows it in the process list)\n", argv[0]);
+			printf("usage: %s [-p password] [host [port]]   (default 127.0.0.1 and the MonitorStatsPort of $TCD_INI, /usr/local/etc/tcd/tcd.ini or /usr/local/etc/tcd.ini, else 8081; without -p the password from TCD_MONITOR_PASSWORD or a prompt, -p shows it in the process list)\n", argv[0]);
 			return 0;
 		}
 		else if (pos == 0) { host = argv[i]; pos++; }
@@ -405,7 +438,9 @@ int main(int argc, char *argv[])
 		init_pair(2, COLOR_YELLOW, -1);
 		init_pair(3, COLOR_RED, -1);
 		init_pair(4, COLOR_WHITE, -1);
-		init_pair(5, 8, -1);  // dark gray (if supported)
+		// dark gray where the terminal has 16 colours; with 8 (docker exec, TERM=xterm)
+		// colour 8 does not exist and the pair would draw black on black
+		init_pair(5, COLORS > 8 ? 8 : COLOR_WHITE, -1);
 		init_pair(6, COLOR_MAGENTA, -1);
 		init_pair(7, COLOR_CYAN, -1);
 	}
@@ -478,23 +513,22 @@ int main(int argc, char *argv[])
 		bool ref_conn = json_bool(ref_json, "connected");
 		int ref_rx = json_int(ref_json, "pkts_rx");
 		int ref_tx = json_int(ref_json, "pkts_tx");
-		if (ref_conn)
 		{
-			attron(COLOR_PAIR(1));
-			mvprintw(0, cols - 35, "Reflector: CONNECTED");
-			attroff(COLOR_PAIR(1));
+			char counts[48];
+			const int n = snprintf(counts, sizeof(counts), "RX:%d TX:%d", ref_rx, ref_tx);
+			const char *state = ref_conn ? "Reflector: CONNECTED" : "Reflector: DISCONNECTED";
+			const int x = cols - n - 1;
+			attron(ref_conn ? COLOR_PAIR(1) : (COLOR_PAIR(3) | A_BOLD));
+			mvprintw(0, std::max(0, x - int(strlen(state)) - 2), "%s", state);
+			attroff(COLOR_PAIR(1) | COLOR_PAIR(3) | A_BOLD);
+			mvprintw(0, std::max(0, x), "%s", counts);
 		}
-		else
-		{
-			attron(COLOR_PAIR(3) | A_BOLD);
-			mvprintw(0, cols - 35, "Reflector: DISCONNECTED");
-			attroff(COLOR_PAIR(3) | A_BOLD);
-		}
-		mvprintw(0, cols - 14, "RX:%d TX:%d", ref_rx, ref_tx);
 
 		int row = 2;
 
-		// Modules
+		// Modules: a card for each module on the air, as the web dashboard's
+		// compact view; the others in one line with their state
+		std::string idle_mods, standby_mods;
 		for (auto &[mod, mj] : modules)
 		{
 			ModuleData m;
@@ -513,23 +547,23 @@ int main(int argc, char *argv[])
 			m.linked = json_bool(mj, "linked");
 
 			bool active = (m.codec_in != "none" && m.idle < 2.0);
+			if (!active)
+			{
+				// standby: another transcoder has the module (taken over ones are ours, idle)
+				(m.standby && !m.linked ? standby_mods : idle_mods) += mod;
+				continue;
+			}
+			if (row >= rows - 8)
+				continue;	// no room for its card: it still counts below
 
 			// Module header
-			if (active)
-				attron(COLOR_PAIR(7) | A_BOLD);
-			else
-				attron(COLOR_PAIR(5));
+			attron(COLOR_PAIR(7) | A_BOLD);
 			mvprintw(row, 0, "Module %c", mod);
-			if (active)
-			{
-				attroff(COLOR_PAIR(7) | A_BOLD);
-				attron(COLOR_PAIR(2));
-				printw("  [%s]", m.codec_in.c_str());
-				attroff(COLOR_PAIR(2));
-				printw("  pkts: %d/%d", m.pkts_in, m.pkts_out);
-			}
-			else
-				attroff(COLOR_PAIR(5));
+			attroff(COLOR_PAIR(7) | A_BOLD);
+			attron(COLOR_PAIR(2));
+			printw("  [%s]", m.codec_in.c_str());
+			attroff(COLOR_PAIR(2));
+			printw("  pkts: %d/%d", m.pkts_in, m.pkts_out);
 			row++;
 
 			// Signal flow
@@ -543,8 +577,17 @@ int main(int argc, char *argv[])
 			row++;
 
 			row++;  // spacing
-
-			if (row >= rows - 6) break;  // don't overflow terminal
+		}
+		if (!idle_mods.empty() || !standby_mods.empty())
+		{
+			attron(COLOR_PAIR(5));
+			mvprintw(row, 0, "%s", modules.size() == idle_mods.size() + standby_mods.size() ? "No module on the air" : "Not on the air");
+			if (!idle_mods.empty())
+				printw("  idle: %s", idle_mods.c_str());
+			if (!standby_mods.empty())
+				printw("  standby (another transcoder has them): %s", standby_mods.c_str());
+			attroff(COLOR_PAIR(5));
+			row += 2;
 		}
 
 		// Hardware: the free AMBE channels of each codec, fixed or pool, then the devices
@@ -565,6 +608,8 @@ int main(int argc, char *argv[])
 
 		for (auto &dj : dev_items)
 		{
+			if (row >= rows - 1)
+				break;
 			std::string serial = json_str(dj, "serial");
 			std::string type = json_str(dj, "type");
 			std::string role = json_str(dj, "role");
@@ -629,6 +674,8 @@ int main(int argc, char *argv[])
 		row++;
 		for (const auto &sw_json : json_arr_items(json_arr(last_json, "swvocoders")))
 		{
+			if (row >= rows - 1)
+				break;
 			std::string name = json_str(sw_json, "name");
 			std::string codec = json_str(sw_json, "codec");
 			std::string active_mod = json_str(sw_json, "active_module");
@@ -685,7 +732,7 @@ int main(int argc, char *argv[])
 			std::string p2 = json_str(json_obj(codecs, "p25"), "use"), m7 = json_str(json_obj(codecs, "m17"), "use");
 			const bool p25 = !p2.empty() && p2 != "op25";
 			const bool m17 = !m7.empty() && m7 != "codec2";
-			if (!codecs.empty() && (ds != "dvsi" || dm != "dvsi" || p25 || m17))
+			if (row < rows - 1 && !codecs.empty() && (ds != "dvsi" || dm != "dvsi" || p25 || m17))
 			{
 				attron(COLOR_PAIR(5));
 				mvprintw(row++, 2, "Vocoder for new streams: D-Star %s, DMR %s%s%s%s%s", ds.empty() ? "-" : ds.c_str(), dm.empty() ? "-" : dm.c_str(),
@@ -694,8 +741,9 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		// AGC config summary
+		// AGC config summary, where there is room
 		row++;
+		if (row + 3 < rows) {
 		bool agc_on = json_bool(cfg_json, "agc_enabled");
 		attron(COLOR_PAIR(5));
 		mvprintw(row, 0, "AGC: %s", agc_on ? "ON" : "OFF");
@@ -719,6 +767,7 @@ int main(int argc, char *argv[])
 			json_num(cfg_json, "outgain_dmr"),
 			json_num(cfg_json, "outgain_imbe"), json_num(cfg_json, "outgain_usrp"));
 		attroff(COLOR_PAIR(5));
+		}
 
 		row++;
 		attron(COLOR_PAIR(5));

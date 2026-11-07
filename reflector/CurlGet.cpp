@@ -86,7 +86,9 @@ CURLcode CCurlGet::GetURL(const std::string &url, std::stringstream &ss, long ti
 
 	if(curl)
 	{
+		// a 4xx/5xx answer is a failed download (its body is no database), so the next source is tried
 		if(CURLE_OK == (code = Prepare(curl, url, ss, timeout, connecttimeout, ipresolve))
+		&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L))
 		&& (nullptr == running
 			|| (CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, &xfer_info))
 			&& CURLE_OK == (code = curl_easy_setopt(curl, CURLOPT_XFERINFODATA, const_cast<std::atomic<bool>*>(running)))

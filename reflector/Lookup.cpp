@@ -92,11 +92,14 @@ void CLookup::Thread()
 	// The last good download first: a database download can take minutes
 	// (radioid.net's user.csv) or fail, and until then every lookup would come
 	// back empty. The download replaces it as soon as it is complete.
+	// (the parse holds the map's lock, as every refresh does: a lookup that
+	// comes meanwhile waits for the whole database instead of missing)
 	if (ERefreshType::file != m_Type)
 	{
 		std::stringstream ss;
-		if (LoadContentFile(m_CachePath, ss))
+		if (LoadContentFile(m_CachePath, ss) && ss.rdbuf()->in_avail() > 0)
 		{
+			std::cout << "Loading the last download from '" << m_CachePath << "' until the download is done" << std::endl;
 			Lock();
 			ClearContents();
 			UpdateContent(ss, Eaction::normal);
@@ -186,6 +189,21 @@ std::vector<std::string> CLookup::SplitUrls() const
 	return urls;
 }
 
+// A download that is a web page (a captive portal, a proxy login, a page
+// answered with 200) is no database: it would replace the good one and be
+// cached. The databases are plain text that starts with a record or a comment.
+static bool LooksLikeData(const std::stringstream &ss, const std::string &url)
+{
+	const std::string &s = ss.str();
+	const auto first = s.find_first_not_of(" \t\r\n\xef\xbb\xbf");
+	if (std::string::npos == first || '<' == s[first])
+	{
+		std::cout << "WARNING: '" << url << "' answered " << (std::string::npos == first ? "nothing" : "a web page") << ", not a database" << std::endl;
+		return false;
+	}
+	return true;
+}
+
 bool CLookup::LoadContentHttp(std::stringstream &ss)
 {
 	const auto urls = SplitUrls();
@@ -196,7 +214,7 @@ bool CLookup::LoadContentHttp(std::stringstream &ss)
 		// radioid.net's user.csv is 17 MB and can come at under 100 KB/s, so
 		// 30 s were never enough there; a stalled one still ends after 30 s,
 		// and a stop of urfd aborts it at once
-		if (CURLE_OK == get.GetURL(urls[i], ss, 600, 10, CURL_IPRESOLVE_WHATEVER, &keep_running))
+		if (CURLE_OK == get.GetURL(urls[i], ss, 600, 10, CURL_IPRESOLVE_WHATEVER, &keep_running) && LooksLikeData(ss, urls[i]))
 		{
 			if (i > 0)
 				std::cout << "Loaded database from fallback source '" << urls[i] << "'" << std::endl;
