@@ -424,8 +424,21 @@ CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTra
 		if (it != pinned[k].end())
 			return (it->second.choice >= 0 && it->second.choice < int(list.size())) ? list[it->second.choice] : nullptr;
 		int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
-		if (c < 0 || c >= int(list.size()) || !list[c])
-			return nullptr;	// a device or tcd's own vocoder for new streams
+		if (c < 0 || c >= int(list.size()))
+			return nullptr;
+		if (!list[c])
+		{
+			// a device for new streams: with fixed channels a module beyond them
+			// goes to the first plugin, as Pick sends it (in the pool a free
+			// channel is only known by taking it, so that stream's first frame
+			// takes the audio path, and its later frames follow the pin)
+			const bool device = (k == kChoiceDStar || k == kChoiceDMR) && !g_CodecChoices[k].own;
+			if (!device || Pool() || std::string::npos != hw_modules[k].find(packet->GetModule()))
+				return nullptr;
+			auto first = std::find_if(list.begin(), list.end(), [](CSoftCodec *sw) { return sw != nullptr; });
+			if (first == list.end())
+				return nullptr;
+		}
 	}
 	return list[Pick(k, list.size(), packet, nullptr, nullptr, false)];
 }
@@ -712,7 +725,7 @@ bool CController::InitVocoders()
 	const bool lone_mixed = deviceset.size() == 1 && Edvtype::dv3003 == deviceset.front().type && is_mixed(deviceset.front());
 	for (const auto &d : deviceset)
 		if (is_mixed(d) && !(lone_mixed && !dstar_forced && !dmr_forced))
-			std::cerr << "WARNING: 'mixed' is for a DV3003 alone, with CodecDStar and CodecDMR on dvsi: ignored for " << d.desc << std::endl;
+			std::cerr << "WARNING: 'mixed' is for a DV3003 alone, without a plugin named for only one of CodecDStar and CodecDMR: ignored for " << d.desc << std::endl;
 
 	if (dstar_named && dmr_named && !deviceset.empty())
 		std::cout << "CodecDStar and CodecDMR are set: new streams start in software, the AMBE devices are ready for a switch in the monitor" << std::endl;
@@ -977,13 +990,14 @@ bool CController::InitVocoders()
 		std::cout << "Codec plugin " << dmr_sw->GetName() << " can re-encode DMR (DmrGainMode = reencode)" << std::endl;
 	g_Stats.reencode_available.store(dmr_sw && HwAny(kChoiceDMR), std::memory_order_relaxed);
 	{
-		// the direct path needs a plugin with transcode for at least two of D-Star, DMR and P25
-		bool any = false;
-		for (auto *sw : g_Codecs.All(TCD_CODEC_DSTAR))
-			for (uint32_t other : { TCD_CODEC_DMR, TCD_CODEC_P25 })
-				any = any || sw->CanTranscode(g_Codecs.Get(other, sw->GetName()));
-		for (auto *sw : g_Codecs.All(TCD_CODEC_DMR))
-			any = any || sw->CanTranscode(g_Codecs.Get(TCD_CODEC_P25, sw->GetName()));
+		// the direct path needs one plugin with transcode for two of D-Star, DMR and P25
+		auto pair = [](uint32_t a, uint32_t b) {
+			for (auto *sw : g_Codecs.All(a))
+				if (sw->CanTranscode(g_Codecs.Get(b, sw->GetName())))
+					return true;
+			return false;
+		};
+		const bool any = pair(TCD_CODEC_DSTAR, TCD_CODEC_DMR) || pair(TCD_CODEC_DSTAR, TCD_CODEC_P25) || pair(TCD_CODEC_DMR, TCD_CODEC_P25);
 		g_Stats.transcode_available.store(any, std::memory_order_relaxed);
 		if (any)
 			std::cout << "Transcode = " << (g_Stats.config.transcode_direct.load() ? "direct" : "audio") << ": a codec plugin can code D-Star, DMR/YSF and P25 from each other's frames" << std::endl;
@@ -2294,6 +2308,7 @@ void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
 {
 	if (packet->P25IsSet())	// coded from the source's frame already (Transcode)
 	{
+		SwCodec(TCD_CODEC_P25, packet);	// its StreamLog count, as EncodeIMBE's lookup would make it
 		send_mux.lock();
 		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
 		send_mux.unlock();

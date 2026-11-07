@@ -7,7 +7,9 @@
 // is encoded as <from> and decoded, and every decoded frame is made into a <to>
 // frame by the plugin's transcode, as tcd does with Transcode = direct; it
 // writes the <to> frames and their decoded audio, and prints the time per
-// frame of transcode against decoding and encoding again.
+// frame of transcode against decoding and encoding again. It checks neither
+// the level nor the stream separation of the direct path (the plugin's own
+// tests do); compare the audio it writes for that.
 //
 // Encodes every 160 samples to a frame, decodes the frames again, writes both and
 // prints the time per frame. Two streams are interleaved (the same audio) to show
