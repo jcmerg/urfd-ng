@@ -995,7 +995,20 @@ void CMMDVMClientProtocol::OnDMRDVoiceFrameIn(const CBuffer &Buffer, uint32_t sr
 
 void CMMDVMClientProtocol::OnDMRDTerminatorIn(const CBuffer &Buffer, uint32_t srcId, uint32_t dstId, uint32_t streamId)
 {
-	m_UnknownTA.erase(streamId);
+	// an unknown ID whose call ended before its talker alias was whole: what
+	// came of it, so a log tells a source without one from a call too short
+	auto ta = m_UnknownTA.find(streamId);
+	if (ta != m_UnknownTA.end())
+	{
+		const auto &in = ta->second.second;
+		std::cout << m_Name << ": call of unknown ID " << ta->second.first << " ended without a whole talker alias (" << in.LCs() << " embedded LCs";
+		if (in.Blocks())
+			std::cout << ", alias LCs mask 0x" << std::hex << unsigned(in.Blocks()) << std::dec;
+		else
+			std::cout << ", none of them an alias";
+		std::cout << ")" << std::endl;
+		m_UnknownTA.erase(ta);
+	}
 	auto it = m_IncomingStreams.find(streamId);
 	if (it == m_IncomingStreams.end())
 		return;

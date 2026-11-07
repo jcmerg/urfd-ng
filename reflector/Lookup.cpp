@@ -143,14 +143,21 @@ void CLookup::Thread()
 		std::stringstream ss;
 		bool http_loaded = false;
 		bool file_loaded = false;
+		bool fallback = false;
 
 		// load http section first, if configured and m_Refresh minutes have lapsed
 		// on the first pass through this while loop (count == 0)
 		if (ERefreshType::file != m_Type && 0ul == count % wait_cycles)
 		{
-			http_loaded = LoadContentHttp(ss);
-			if (http_loaded)
+			http_loaded = LoadContentHttp(ss, &fallback);
+			// a fallback adds to what the map has (a mirror lags behind the first
+			// source, IDs it does not have yet stay), and the cache keeps the
+			// first source's last download; with nothing loaded yet it is all there is
+			if (http_loaded && fallback && m_ContentLoaded)
+				count++;
+			else if (http_loaded)
 			{
+				fallback = false;
 				SaveHttpCache(ss);	// keep a copy for the next outage
 				count++;	// only advance on success, so failed loads retry in 10s
 			}
@@ -186,7 +193,7 @@ void CLookup::Thread()
 			// if m_Type == ERefreshType::both, and if something was deleted from the file,
 			// it won't be purged from the map(s) until http is loaded
 			// It would be a lot of work (iterating on an unordered_map) to do otherwise!
-			if (http_loaded || ERefreshType::file == m_Type)
+			if ((http_loaded && !fallback) || ERefreshType::file == m_Type)
 				ClearContents();
 			UpdateContent(ss, Eaction::normal);
 			Unlock();
@@ -219,7 +226,7 @@ std::vector<std::string> CLookup::SplitUrls() const
 	return urls;
 }
 
-bool CLookup::LoadContentHttp(std::stringstream &ss)
+bool CLookup::LoadContentHttp(std::stringstream &ss, bool *fallback)
 {
 	const auto urls = SplitUrls();
 	CCurlGet get;
@@ -233,6 +240,8 @@ bool CLookup::LoadContentHttp(std::stringstream &ss)
 		{
 			if (i > 0)
 				std::cout << "Loaded database from fallback source '" << urls[i] << "'" << std::endl;
+			if (fallback)
+				*fallback = (i > 0);
 			return true;
 		}
 		// A transfer that failed part way through leaves partial data behind.

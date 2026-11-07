@@ -290,6 +290,7 @@ bool CDmrTalkerAliasIn::Collect(unsigned burst, const uint8_t *sync, std::string
 	uint8_t lc[9];
 	if (!m_LC.Collect(sync, lc))
 		return false;
+	m_uiLCs++;
 	const uint8_t flco = lc[0] & 0x3FU;
 	if (flco < FLCO_TALKER_ALIAS_HEADER || flco > FLCO_TALKER_ALIAS_HEADER + 3U)
 		return false;	// voice LC, GPS, ...

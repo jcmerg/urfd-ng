@@ -143,8 +143,6 @@ section > header { display: flex; flex-wrap: wrap; justify-content: space-betwee
 .flow .pkts { margin-left: auto; }
 
 /* tables */
-.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(15rem, max-content); gap: 2.5rem; align-items: start; }
-.cols > * { min-width: 0; }
 .scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: var(--fs-s); }
 th { text-align: left; font-weight: 500; font-size: var(--fs-xs); color: var(--graphite); padding: 0 0.7rem 0.4rem; border-bottom: 1px solid var(--rule); white-space: nowrap; }
@@ -160,8 +158,10 @@ td b { font-weight: 650; font-stretch: 85%; }
 .cnt { white-space: nowrap; display: inline-block; }
 .cnt + .cnt { margin-left: 0.55rem; }
 /* one column per counter (wide) or per two of them (narrow), so the numbers of all rows line up */
-td.slot { text-align: right; white-space: nowrap; padding-left: 0.25rem; padding-right: 0.25rem; }
+td.slot { width: 1%; text-align: right; white-space: nowrap; padding-left: 0.25rem; padding-right: 0.25rem; }
 td.slot.first { padding-left: 0.7rem; }
+/* wide: the frames and the errors set apart from what stands left of them */
+table:not(.narrow) td.slot.first { padding-left: 1.4rem; }
 .nowrap { white-space: nowrap; }
 .tbl { overflow-x: auto; }
 .legend { margin: 0.5rem 0 0; font-size: var(--fs-xs); color: var(--graphite); }
@@ -170,6 +170,9 @@ td.slot.first { padding-left: 0.7rem; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1.5rem; margin: 0; font-size: var(--fs-s); }
 .kv dt { color: var(--graphite); }
 .kv dd { margin: 0; }
+/* the reflector link in one line above the vocoder table, which takes the whole width */
+.kv.line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.6rem; }
+.kv.line dd + dt { margin-left: 1.4rem; }
 .empty { color: var(--graphite); padding-block: 1.25rem; text-align: center; }
 
 /* settings */
@@ -219,15 +222,9 @@ footer .wrap { padding-block: 1rem; font-size: var(--fs-xs); color: var(--graphi
 /* the vocoder table's box is narrower than its rows of counters (set by fitTable()) */
 table.narrow td.slot .cnt { display: block; }
 table.narrow td.slot .cnt + .cnt { margin-left: 0; }
-/* fitTable() measures the width the table needs: in columns without wrapping, narrow at its narrowest */
+/* fitTable() measures the width the table needs in columns, without wrapping */
 table.measure { width: max-content; }
-table.narrow.measure { width: min-content; }
 table.measure tr.grp { display: none; }
-/* the reflector column below the vocoder table, when the table does not fit beside it */
-.cols.stack { grid-template-columns: minmax(0, 1fr); }
-@media (max-width: 860px) {
-  .cols { grid-template-columns: minmax(0, 1fr); }
-}
 @media (max-width: 520px) {
   .bar .ver { display: none; }
   .row { grid-template-columns: minmax(0, 1fr) 3.4rem; }
@@ -289,22 +286,21 @@ table.measure tr.grp { display: none; }
       <div class="mods" id="modules"><p class="empty">Waiting for the first report from tcd</p></div>
     </section>
 
-    <div class="cols">
-      <section aria-labelledby="h-dev">
-        <header><h2 id="h-dev">Vocoders</h2></header>
-        <div class="scroll">
-          <div class="tbl"><table>
-            <thead id="devices-head"><tr><th>Vocoder</th><th class="opt">Type</th><th>State</th><th>Channels</th><th class="r opt">Frames</th><th class="r">Errors</th><th class="act"><span class="sr">Action</span></th></tr></thead>
-            <tbody id="devices"><tr><td colspan="7" class="empty">No report yet</td></tr></tbody>
-          </table></div>
-          <p class="legend">Frames: decoded and encoded. Errors: fec = decoded frames with bit errors the FEC corrected; unc = uncorrectable, an AMBE device repeats its last frame; bad = encoded by an AMBE device but failing their FEC (the device gives no AMBE frames, the radios mute the stream); rep / mute = repeated / muted by a codec plugin; lost = answers of an AMBE device lost on the serial line (a receive overrun of its USB adapter), a silent frame went out instead.</p>
-        </div>
-      </section>
-      <section aria-labelledby="h-ref">
-        <header><h2 id="h-ref">Reflector</h2></header>
-        <dl class="kv" id="reflector"><dt>Link</dt><dd class="muted">No report yet</dd></dl>
-      </section>
-    </div>
+    <section aria-labelledby="h-ref">
+      <header><h2 id="h-ref">Reflector</h2></header>
+      <dl class="kv line" id="reflector"><dt>Link</dt><dd class="muted">No report yet</dd></dl>
+    </section>
+
+    <section aria-labelledby="h-dev">
+      <header><h2 id="h-dev">Vocoders</h2></header>
+      <div class="scroll">
+        <div class="tbl"><table>
+          <thead id="devices-head"><tr><th>Vocoder</th><th class="opt">Type</th><th>State</th><th>Channels</th><th class="r opt">Frames</th><th class="r">Errors</th><th class="act"><span class="sr">Action</span></th></tr></thead>
+          <tbody id="devices"><tr><td colspan="7" class="empty">No report yet</td></tr></tbody>
+        </table></div>
+        <p class="legend">Frames: decoded and encoded. Errors: fec = decoded frames with bit errors the FEC corrected; unc = uncorrectable, an AMBE device repeats its last frame; bad = encoded by an AMBE device but failing their FEC (the device gives no AMBE frames, the radios mute the stream); rep / mute = repeated / muted by a codec plugin; lost = answers of an AMBE device lost on the serial line (a receive overrun of its USB adapter), a silent frame went out instead.</p>
+      </div>
+    </section>
 
     <section aria-labelledby="h-set">
       <header>
@@ -596,7 +592,8 @@ function render() {
   // wide: each counter in a column of its own (the table lines them up), as
   // many as the row with the most has; narrow: two counters one below the
   // other per column, frames: dec and enc on the right as in every row, direct
-  // and re-enc to their left; errors: fec unc over bad lost (rep over mute)
+  // and re-enc to their left; errors: fec unc over bad lost (a plugin's rep
+  // under unc, both repeat, and its mute under bad, the radios mute)
   var wide = tableWide;
   $('devices').parentNode.classList.toggle('narrow', !wide);
   var swFrames = function (x) { return [[x.decodes, 'dec'], [x.encodes, 'enc']].concat(x.reencodes || x.reencode_active ? [[x.reencodes, 're-enc']] : []).concat(x.transcodes ? [[x.transcodes, 'direct']] : []); };
@@ -673,25 +670,17 @@ function render() {
 // settings
 var lastDeviceRows = '', lastDeviceHead = '';
 // the vocoder table has a column per counter when its box takes it in that
-// width, else the counters of a group in one cell (narrow); by the box, not the
-// window: beside it the reflector column takes its share. When not even the
-// narrow table fits beside it, the reflector column goes below (stack)
-var tableWide = true, tableStack = false, wideNeed = 0, narrowNeed = 0, sideNeed = 0;
+// width, else the counters of a group in one cell (narrow)
+var tableWide = true, wideNeed = 0;
 function fitTable() {
-  var box = document.querySelector('.tbl'), table = box.firstElementChild, cols = document.querySelector('.cols');
-  table.classList.add('measure');
-  if (tableWide) wideNeed = table.offsetWidth; else narrowNeed = table.offsetWidth;
-  table.classList.remove('measure');
-  // the reflector column and the gap; 0 where the CSS puts it below anyway
-  if (!tableStack) sideNeed = cols.clientWidth - box.clientWidth;
-  var beside = cols.clientWidth - sideNeed;
-  var stack = beside < wideNeed && beside < narrowNeed;
-  var wide = (stack ? cols.clientWidth : beside) >= wideNeed;
-  if (stack !== tableStack || wide !== tableWide) {
-    tableStack = stack; tableWide = wide;
-    cols.classList.toggle('stack', stack);
-    lastDeviceRows = ''; render();
+  var box = document.querySelector('.tbl'), table = box.firstElementChild;
+  if (tableWide) {
+    table.classList.add('measure');
+    wideNeed = table.offsetWidth;
+    table.classList.remove('measure');
   }
+  var wide = box.clientWidth >= wideNeed;
+  if (wide !== tableWide) { tableWide = wide; lastDeviceRows = ''; render(); }
 }
 if (window.ResizeObserver) new ResizeObserver(function () { if (data) fitTable(); }).observe(document.querySelector('.tbl'));
 var gainKeys = ['dstar_in', 'dstar_out', 'dmr_in', 'dmr_out', 'dmr_reencode'];

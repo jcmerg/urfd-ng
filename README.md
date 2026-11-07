@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.38.9** | tcd 0.20.7 | Dashboard v3.0.1
+**urfd 4.38.10** | tcd 0.20.8 | Dashboard v3.0.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -683,7 +683,10 @@ URL = https://radioid.net/static/user.csv, http://www.pistar.uk/downloads/DMRIds
 ```
 
 **Multiple sources**: `URL` accepts a comma separated list. Sources are tried in
-order until one answers, and a message is logged whenever a fallback is used.
+order until one answers, and a message is logged whenever a fallback is used. A
+fallback adds to the database urfd has and leaves the cache alone (since 4.38.10):
+a mirror lags behind the first source, so the IDs only that one has stay until it
+answers again.
 
 **Separator tolerance**: fields may be separated by `;`, `,` or a tab, so the common
 publishers work unchanged — radioid.net CSV (`id,call,first,last,…`),
@@ -993,6 +996,8 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **ID database downloads checked (4.38.6)**: a source that answers with an HTTP error or a web page (a captive portal, a proxy login) counts as failed, so the next source is tried and the page is neither loaded nor cached; an empty cache no longer counts as a loaded database at the start, and the start says when it loads the cache
 - **ID database with `Mode = both` (4.38.9)**: when `FilePath` cannot be read at the start, it is read again at once instead of at the next download
 - **ID database cache checked at start (4.38.8)**: the cache loaded at the start is checked as a download is (a web page cached by 4.38.4 or 4.38.5 is not loaded), and with `Mode = both` the own entries of `FilePath` come with it, not only after the download; the check no longer copies a download of many megabytes
+- **ID database fallback adds (4.38.10)**: a fallback source replaced the whole database and the cache, so after one failed download of the first source (radioid.net) every ID only it has was gone until its next download, and calls from them came from `unknown (ID ...)`; a fallback now adds to what is loaded and the cache keeps the first source's last download (with nothing loaded yet, the fallback is loaded and cached as before)
+- **MMDVMClient: unknown ID without a talker alias logged (4.38.10)**: a call of an unknown DMR ID that ends before its talker alias is whole says so in the log, with the embedded LCs that came and which of them were alias blocks, so a source that sends none can be told from a call too short for it
 
 ### Audio & Transcoding
 - **Modules without transcoder carry each stream only where its codec goes (4.32.2)**: on a module without tcd a stream reached every protocol, also those of another codec, whose frames were then empty (zeros, decoded as noise, for example a D-Star stream sent to DMR, P25 or M17). Such a protocol now gets no stream: D-Star goes to the D-Star protocols, AMBE+2 (DMR, NXDN, YSF DN) to DMR, NXDN and YSF, IMBE (P25, YSF VW) to P25 and YSF, Codec2 to M17, USRP and SVX audio to USRP and SVX. Interlinks and plugins keep getting every stream, and transcoded modules are unchanged
@@ -1050,6 +1055,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.20.8**: the web dashboard shows the reflector link in one line above the vocoder table, which takes the whole width, instead of a column beside it that squeezed and shifted the table; the counter columns are as narrow as their numbers, the spare width goes to the text columns, and on wide screens the frames and the errors stand apart
 - **tcd 0.20.7**: the vocoder table's narrow layout uses table columns too, two counters one below the other in each, so the counters of all rows line up (each cell had a grid of its own, shifted by its numbers), and dec and enc stay one below the other in every row, `direct` and `re-enc` to their left; each frame reads every gain once (the monitor could change one between its check and its use); the README says that switching `Transcode` to direct at run time applies to the transmissions that start afterwards, and that a transmission takes the direct path only from its first frame; the Docker README says the images need BuildKit
 - **tcd 0.20.6**: the web dashboard picks the vocoder table's layout by the width its box has, not by the window's: beside the reflector column a 1300 px window still wrapped and scrolled it; a column per counter where it fits, else the counters of a group in one cell, and where not even that fits beside it, the reflector column goes below the table
 - **tcd 0.20.5**: a transmission joins the direct path only from its first frame, and one that began on the audio path or whose transcode failed stays there (its frames could swap between the source's and the target's thread, and a first failed transcode left the plugin's state without `start`); StreamLog counts a D-Star or DMR target of the audio path once (twice before); the gains are read safely while the monitor changes them; a failed decode keeps the monitor's direct marks; the vocoder table shortens large counters (`462k`, `1.8M`, the exact count in the tooltip), so it no longer widens as tcd runs; tcdmon names modules on the air it has no room for; `codectest` fails on a missing input again; the Docker images install the compiler without `build-essential` (no perl and packaging tools; tcd image 83 instead of 109 packages) and keep apt's downloads in the build cache, so a refreshed `ubuntu:24.04` downloads only the changed packages; the README gives the measured range of the direct path (0.09 to 0.24 PESQ) and its full gain list
