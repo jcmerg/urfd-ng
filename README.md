@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.38.4** | tcd 0.20.1 | Dashboard v3.0.1
+**urfd 4.38.5** | tcd 0.20.2 | Dashboard v3.0.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1047,6 +1047,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.20.2**: with `CodecDStar` and `CodecDMR` both on a codec plugin, tcd no longer leaves the AMBE devices unused: it sets them up as without the two lines, new streams start on the plugin, and the web dashboard can switch them to `dvsi` (before, it never could, the devices were not opened)
 - **tcd 0.20.1**: `Transcode` switches in the web dashboard at run time ("D-Star, DMR and P25 to each other", shown when a plugin can) and Save writes it; a transmission's encoder state gets either the direct path or the audio, so a switch mid-transmission or a failed transcode starts that encoder afresh instead of mixing the two; a target on an AMBE device is no longer looked up through the channel choice by the direct path (with `DeviceChannels = pool` the last frame could lose its channel), a frame whose decode failed is not transcoded, and a new stream clears the monitor's "(direct)" mark of the one before; `tools/codectest <plugin> dstar:dmr ...` shows the direct path of a plugin, tcdmon marks direct targets with `*` and counts them; the README's audio-level diagram shows the direct path
 - **tcd 0.20.0**: codec plugin interface 4 (`TCD_CODEC_API 4`): a plugin may offer `transcode`, and tcd then makes D-Star, DMR/YSF and P25 from each other's frames directly, from the vocoder's parameters instead of the decoded audio, when the stream's source and target are on that plugin (`Transcode = direct`, the default; `audio` keeps the old path); the AGC's gain and the output gains go into the frames, all of `OutputGainDMR` included. The three codecs share the MBE vocoder model, and the second analysis of synthesized speech is what a transcoder loses most to: over 19 clips every one of the six directions gains 0.1 to 0.24 PESQ, confirmed through a DV3000 for D-Star and DMR, at a fifth of the processing time. M17, USRP, SVX, AMBE devices and tcd's own vocoders keep the audio path. The monitor marks the targets a stream is coded into directly and counts the frames per plugin codec. Plugins of interface 2 and 3 load as before, see [tcd/README.md](tcd/README.md#codec-plugins)
 - **tcd 0.19.5**: the module LCD of the web monitor has no dark strip along its top edge any more, which looked like a step inside the bezel

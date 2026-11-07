@@ -674,11 +674,17 @@ bool CController::InitVocoders()
 	// put the codec in software, else the devices come first and a plugin only
 	// does what no device does (and the DMR re-encode)
 	const std::string &dstar_name = names[kChoiceDStar], &dmr_name = names[kChoiceDMR];
-	const bool dstar_forced = !dstar_name.empty();
-	const bool dmr_forced = !dmr_name.empty();
+	const bool dstar_named = !dstar_name.empty();
+	const bool dmr_named = !dmr_name.empty();
+	// how the devices are laid out: a plugin named for one codec leaves the
+	// devices to the other; named for both, the devices are laid out as without
+	// a name, so the monitor can still switch new streams to them (the names
+	// are only where new streams start)
+	const bool dstar_forced = dstar_named && !dmr_named;
+	const bool dmr_forced = dmr_named && !dstar_named;
 	CSoftCodec *dstar_plugin = g_Codecs.Get(TCD_CODEC_DSTAR, dstar_name);
 	dmr_sw = g_Codecs.Get(TCD_CODEC_DMR, dmr_name);
-	if ((dstar_forced && !dstar_plugin) || (dmr_forced && !dmr_sw))
+	if ((dstar_named && !dstar_plugin) || (dmr_named && !dmr_sw))
 	{
 		std::cerr << "ERROR: CodecDStar/CodecDMR names no loaded codec plugin that does that codec" << std::endl;
 		return true;
@@ -708,13 +714,9 @@ bool CController::InitVocoders()
 		if (is_mixed(d) && !(lone_mixed && !dstar_forced && !dmr_forced))
 			std::cerr << "WARNING: 'mixed' is for a DV3003 alone, with CodecDStar and CodecDMR on dvsi: ignored for " << d.desc << std::endl;
 
-	if (dstar_forced && dmr_forced)
-	{
-		// everything in software, no device
-		if (!deviceset.empty())
-			std::cout << "CodecDStar and CodecDMR are set: the AMBE devices stay unused" << std::endl;
-	}
-	else if (lone_mixed && !dstar_forced && !dmr_forced)
+	if (dstar_named && dmr_named && !deviceset.empty())
+		std::cout << "CodecDStar and CodecDMR are set: new streams start in software, the AMBE devices are ready for a switch in the monitor" << std::endl;
+	if (lone_mixed && !dstar_forced && !dmr_forced)
 	{
 		// a DV3003 alone in mixed mode: D-Star on channel 0 and DMR on channels 1 and 2:
 		// one module (with the pool: one stream) both ways on the device, a second one
