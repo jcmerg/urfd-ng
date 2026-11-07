@@ -32,11 +32,20 @@ public:
 	bool Encode(uint16_t streamid, uint32_t sequence, bool last, const int16_t *pcm, uint8_t *frame);
 	// info, when not nullptr, gets how the frame was decoded (a plugin before
 	// api 3 reports nothing: errors 0, no flags)
-	bool Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm, tcd_frame_info *info = nullptr);
+	// hold: a last frame does not stop the state yet, Transcode still needs it
+	// (End ends it after)
+	bool Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm, tcd_frame_info *info = nullptr, bool hold = false);
 	// the transmission of a stream ended after a frame that did not reach this
 	// codec (M17 1600 decodes the first packet of a payload, urfd marks the
 	// second as the last): stop its state
 	void End(uint16_t streamid, bool encode);
+	// api 4: the frame this codec's decoder state of the stream just decoded,
+	// coded by the plugin's codec `to` (another codec of the same plugin) from
+	// the frame itself, the level changed by gain_db; false when the plugin
+	// cannot (CanTranscode) or fails. sequence and last as for Encode
+	bool HasTranscode(void) const { return m_Plugin->api >= 4 && m_Plugin->transcode; }
+	bool CanTranscode(const CSoftCodec *to) const { return to && to->m_Plugin == m_Plugin && m_Plugin->api >= 4 && m_Plugin->transcode && to->m_Codec != m_Codec; }
+	bool Transcode(uint16_t streamid, uint32_t sequence, bool last, CSoftCodec *to, float gain_db, uint8_t *frame);
 	// the streams it codes right now (a frame in the last 2 s)
 	int Streams(void);
 	// urfd counts the frames of a transmission from 0: a lower count than the

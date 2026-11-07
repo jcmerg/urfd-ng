@@ -17,6 +17,7 @@
 #include "G711.h"
 #include "MonitorServer.h"
 #include "TcdStats.h"
+#include "CodecPlugin.h"
 #include "Configure.h"
 #include "Version.h"
 #include <libwebsockets.h>
@@ -105,6 +106,16 @@ static const char *codec_name(uint8_t c)
 	return (c < 8) ? s_codec_names[c] : "unknown";
 }
 
+// the codecs a stream's frames are coded into directly (ModuleStats::direct), as the monitor names them
+static std::string direct_names(uint8_t bits)
+{
+	std::string out;
+	for (const auto &[bit, name] : { std::make_pair(TCD_CODEC_DSTAR, "D-Star"), std::make_pair(TCD_CODEC_DMR, "DMR/YSF/NXDN"), std::make_pair(TCD_CODEC_P25, "P25") })
+		if (bits & bit)
+			out += (out.empty() ? "" : ", ") + std::string(name);
+	return out;
+}
+
 std::string CMonitorServer::BuildStatsJson()
 {
 	std::ostringstream js;
@@ -132,6 +143,7 @@ std::string CMonitorServer::BuildStatsJson()
 		   << ",\"peak_out\":" << m.peak_out.load(std::memory_order_relaxed)
 		   << ",\"agc_gain\":" << m.agc_gain_db.load(std::memory_order_relaxed)
 		   << ",\"agc_gate\":" << (m.agc_gate.load(std::memory_order_relaxed) ? "true" : "false")
+		   << ",\"direct\":\"" << direct_names(m.direct.load(std::memory_order_relaxed)) << "\""
 		   << ",\"pkts_in\":" << m.packets_in.load(std::memory_order_relaxed)
 		   << ",\"pkts_out\":" << m.packets_out.load(std::memory_order_relaxed)
 		   << ",\"idle\":" << m.last_activity.load(std::memory_order_relaxed)
@@ -183,6 +195,7 @@ std::string CMonitorServer::BuildStatsJson()
 			   << ",\"encodes\":" << sw->encodes.load(std::memory_order_relaxed)
 			   << ",\"decodes\":" << sw->decodes.load(std::memory_order_relaxed)
 			   << ",\"reencodes\":" << sw->reencodes.load(std::memory_order_relaxed)
+			   << ",\"transcodes\":" << sw->transcodes.load(std::memory_order_relaxed)
 			   << ",\"error_frames\":" << sw->error_frames.load(std::memory_order_relaxed)
 			   << ",\"repeats\":" << sw->repeats.load(std::memory_order_relaxed)
 			   << ",\"mutes\":" << sw->mutes.load(std::memory_order_relaxed)

@@ -394,6 +394,49 @@ static void SwDecodeStat(const CSoftCodec *sw, char module, const tcd_frame_info
 		st.mutes.fetch_add(1, std::memory_order_relaxed);
 }
 
+// a gain numerator (256 = 0 dB) in dB
+static float GainDb(int32_t num)
+{
+	return (num > 0) ? 20.0f * log10f((float)num / 256.0f) : -100.0f;
+}
+
+// the monitor: which codecs the module's stream is coded into directly
+static void ModuleDirect(const std::shared_ptr<CTranscoderPacket> &packet, uint8_t direct)
+{
+	const int i = packet->GetModule() - 'A';
+	if (i >= 0 && i < CTcdStats::MAX_MODULES)
+		g_Stats.modules[i].direct.store(direct, std::memory_order_relaxed);
+}
+
+bool CController::Transcode(uint32_t to, CSoftCodec *from, float source_db, const std::shared_ptr<CTranscoderPacket> &packet, uint8_t *direct)
+{
+	if (!from || !transcode_direct || !from->HasTranscode())
+		return false;
+	auto *sw = SwCodec(to, packet);	// the stream's choice for `to`, pinned here as the audio path would pin it
+	if (!from->CanTranscode(sw))
+		return false;
+	float gain_db = source_db;
+	switch (to)
+	{
+	case TCD_CODEC_DSTAR: gain_db += GainDb(outgain_dstar_num) + GainDb(dstar_in_num); break;
+	case TCD_CODEC_DMR:   gain_db += GainDb(outgain_dmr_num) + GainDb(ambe_in_num); break;	// all of OutputGainDMR, the bitstream part too
+	case TCD_CODEC_P25:   gain_db += GainDb(outgain_imbe_num); break;
+	default: return false;
+	}
+	uint8_t frame[11] = {};
+	if (!from->Transcode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), sw, gain_db, frame))
+		return false;
+	switch (to)
+	{
+	case TCD_CODEC_DSTAR: packet->SetDStarData(frame); break;
+	case TCD_CODEC_DMR:   packet->SetDMRData(frame); break;
+	default:              packet->SetP25Data(frame); break;
+	}
+	SwStat(sw, packet->GetModule(), &SwVocoderStats::transcodes);
+	*direct |= uint8_t(to);
+	return true;
+}
+
 // a monitor entry for one of tcd's own vocoders, -1 when all are taken
 static int BuiltinStats(const char *name, const char *codec)
 {
@@ -413,6 +456,7 @@ CController::CController() : keep_running(true), ambe_in_num(256), ambe_out_num(
 
 bool CController::Start()
 {
+	transcode_direct = g_Conf.GetTranscodeDirect();
 	dmr_reencode_num = calcNumerator(g_Conf.GetGain(EGainType::dmrreencode));
 	outgain_dstar_num = calcNumerator(g_Conf.GetGain(EGainType::outgain_dstar));
 	outgain_dmr_num = calcNumerator(g_Conf.GetGain(EGainType::outgain_dmr));
@@ -962,6 +1006,7 @@ void CController::ReadReflectorThread()
 				if (idle >= 2.0f && ms.codec_in.load(std::memory_order_relaxed) != 0)
 				{
 					ms.codec_in.store(0, std::memory_order_relaxed);
+					ms.direct.store(0, std::memory_order_relaxed);
 					ms.stream_id.store(0, std::memory_order_relaxed);
 					ms.rms_in.store(-100.0f, std::memory_order_relaxed);
 					ms.peak_in.store(-100.0f, std::memory_order_relaxed);
@@ -1343,6 +1388,13 @@ void CController::ProcessC2Thread()
 
 void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 {
+	if (packet->DMRIsSet())	// coded from the source's frame already (Transcode)
+	{
+		send_mux.lock();
+		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
+		send_mux.unlock();
+		return;
+	}
 	uint8_t ambe2[9] = {};
 	int16_t gained[160];
 	memcpy(gained, packet->GetAudioSamples(), sizeof(gained));
@@ -1369,7 +1421,7 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	int16_t tmp[160] = {};
 	auto *sw = SwCodec(TCD_CODEC_DMR, packet);
 	tcd_frame_info info;
-	sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDMRData(), tmp, &info);
+	sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDMRData(), tmp, &info, sw->HasTranscode());
 	SwDecodeStat(sw, packet->GetModule(), info);
 	if (ambe_out_num != 256)
 	{
@@ -1404,6 +1456,14 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 				ms.agc_gain_db.load(), ms.agc_gate.load());
 		}
 	}
+	// D-Star and P25 from the DMR frame itself, where the plugin can
+	uint8_t direct = 0;
+	const float source_db = agc_db + GainDb(ambe_out_num);
+	Transcode(TCD_CODEC_DSTAR, sw, source_db, packet, &direct);
+	Transcode(TCD_CODEC_P25, sw, source_db, packet, &direct);
+	if (packet->IsLast())
+		sw->End(packet->GetStreamId(), false);
+	ModuleDirect(packet, direct);
 	ToDStar(packet);
 	codec2_queue.push(packet);
 	imbe_queue.push(packet);
@@ -1443,6 +1503,13 @@ void CController::ProcessSWAMBE2Thread()
 
 void CController::AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 {
+	if (packet->DStarIsSet())	// coded from the source's frame already (Transcode)
+	{
+		dstar_mux.lock();
+		RouteDstPacket(packet);
+		dstar_mux.unlock();
+		return;
+	}
 	// OutputGainDStar and DStarGainIn, as a device applies them before its encoder
 	int16_t pcm[160];
 	memcpy(pcm, packet->GetAudioSamples(), sizeof(pcm));
@@ -1463,12 +1530,12 @@ void CController::SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet)
 	int16_t pcm[160] = {};
 	auto *sw = SwCodec(TCD_CODEC_DSTAR, packet);
 	tcd_frame_info info;
-	sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDStarData(), pcm, &info);
+	sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDStarData(), pcm, &info, sw->HasTranscode());
 	SwDecodeStat(sw, packet->GetModule(), info);
 	ApplyGain(pcm, 160, dstar_out_num);
 	packet->SetAudioSamples(pcm, false);
 	dstar_mux.lock();
-	RouteDstPacket(packet);
+	RouteDstPacket(packet, sw);
 	dstar_mux.unlock();
 }
 
@@ -2166,25 +2233,33 @@ void CController::EncodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, c
 	Stat(own_stats[kChoiceP25], packet->GetModule(), &SwVocoderStats::encodes);
 }
 
-void CController::DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm)
+CSoftCodec *CController::DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm)
 {
 	if (auto *sw = SwCodec(TCD_CODEC_P25, packet))
 	{
 		tcd_frame_info info;
-		if (!sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetP25Data(), pcm, &info))
+		if (!sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetP25Data(), pcm, &info, sw->HasTranscode()))
 			memset(pcm, 0, 160 * sizeof(int16_t));
 		SwDecodeStat(sw, packet->GetModule(), info);
-		return;
+		return sw;
 	}
 	std::lock_guard<std::mutex> lock(p25vocoder_mux);
 	if (Begin(imbe_dec_stream, packet))
 		imbe_dec[packet->GetModule()] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
 	imbe_dec[packet->GetModule()]->decode_4400(pcm, (uint8_t *)packet->GetP25Data());
 	Stat(own_stats[kChoiceP25], packet->GetModule(), &SwVocoderStats::decodes);
+	return nullptr;
 }
 
 void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
 {
+	if (packet->P25IsSet())	// coded from the source's frame already (Transcode)
+	{
+		send_mux.lock();
+		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
+		send_mux.unlock();
+		return;
+	}
 	uint8_t imbe[11];
 	int16_t gained[160];
 	memcpy(gained, packet->GetAudioSamples(), sizeof(gained));
@@ -2200,10 +2275,11 @@ void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
 void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t tmp[160] = { 0 };
-	DecodeIMBE(packet, tmp);
+	auto *from = DecodeIMBE(packet, tmp);
 	g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
+	float agc_db = 0.0f;
 	{
-		float agc_db; bool agc_gate;
+		bool agc_gate;
 		m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
 		g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 	}
@@ -2218,6 +2294,13 @@ void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 				ms.agc_gain_db.load(), ms.agc_gate.load());
 		}
 	}
+	// D-Star and DMR from the IMBE frame itself, where the plugin that decoded it can
+	uint8_t direct = 0;
+	Transcode(TCD_CODEC_DSTAR, from, agc_db, packet, &direct);
+	Transcode(TCD_CODEC_DMR, from, agc_db, packet, &direct);
+	if (from && packet->IsLast())
+		from->End(packet->GetStreamId(), false);
+	ModuleDirect(packet, direct);
 	ToDStar(packet);
 	codec2_queue.push(packet);
 
@@ -2383,16 +2466,17 @@ void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
 	packet->Sent();
 }
 
-void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet)
+void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSoftCodec *from)
 {
 	if (ECodecType::dstar == packet->GetCodecIn())
 	{
 		// codec_in is dstar, the audio has just completed — apply AGC before encoding
 		g_Stats.UpdateLevelsIn(packet->GetModule(), packet->GetAudioSamples(), 160);
+		float agc_db = 0.0f;
 		if (m_agcDigital.IsEnabled())
 		{
 			int16_t tmp[160];
-			float agc_db; bool agc_gate;
+			bool agc_gate;
 			memcpy(tmp, packet->GetAudioSamples(), sizeof(tmp));
 			m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
 			packet->SetAudioSamples(tmp, false);
@@ -2408,6 +2492,17 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet)
 					ms.agc_gain_db.load(), ms.agc_gate.load());
 			}
 		}
+		// DMR and P25 from the D-Star frame itself, where the plugin that decoded it can
+		uint8_t direct = 0;
+		if (from)
+		{
+			const float source_db = agc_db + GainDb(dstar_out_num);
+			Transcode(TCD_CODEC_DMR, from, source_db, packet, &direct);
+			Transcode(TCD_CODEC_P25, from, source_db, packet, &direct);
+			if (packet->IsLast())
+				from->End(packet->GetStreamId(), false);
+		}
+		ModuleDirect(packet, direct);
 		// Output gains applied in encode functions and DVSI FeedDevice
 		codec2_queue.push(packet);
 		imbe_queue.push(packet);

@@ -438,12 +438,16 @@ function connect() {
 function pos(v) { return Math.max(0, Math.min(100, (v + 60) / 60 * 100)); }
 
 // what a module turns its input into
-function targets(codec) {
+// the codecs a stream of `codec` is transcoded into; those in `direct` (the
+// stats' list) are coded from the stream's frames themselves, not from its audio
+function targets(codec, direct) {
   var c = codec.toLowerCase(), out = [];
-  if (c.indexOf('star') < 0) out.push('D-Star');
-  if (c.indexOf('dmr') < 0) out.push('DMR/YSF/NXDN');
+  var d = (direct || '').split(', ').filter(Boolean);
+  var mark = function (name) { return d.indexOf(name) >= 0 ? name + ' (direct)' : name; };
+  if (c.indexOf('star') < 0) out.push(mark('D-Star'));
+  if (c.indexOf('dmr') < 0) out.push(mark('DMR/YSF/NXDN'));
   if (c.indexOf('codec2') < 0) out.push('M17');
-  if (c.indexOf('p25') < 0) out.push('P25');
+  if (c.indexOf('p25') < 0) out.push(mark('P25'));
   if (c !== 'usrp') out.push('USRP');
   if (c !== 'svx') out.push('SVX');
   return out;
@@ -539,7 +543,7 @@ function render() {
       p.ann.className = 'ann' + ((cfg.agc_enabled && m.agc_gate) ? ' gate' : '');
       p.state.textContent = cfg.agc_enabled ? (m.agc_gate ? 'Noise gate closed' : 'AGC ' + signed(m.agc_gain) + ' dB') : 'AGC off';
       p.codec.textContent = m.codec_in;
-      p.to.textContent = 'to ' + targets(m.codec_in).join(', ');
+      p.to.textContent = 'to ' + targets(m.codec_in, m.direct).join(', ');
     } else {
       p.ann.hidden = true;
       p.state.textContent = m.last_codec === 'none' ? 'No stream since tcd started' : 'Last stream ' + m.last_codec + ', ' + ago(m.idle);
@@ -563,7 +567,9 @@ function render() {
       ? '<b>' + esc(m.codec_in) + '</b>' + (gainIn ? '<span class="arr">→</span>DVSI ' + (gainIn > 0 ? '+' : '') + gainIn + ' dB' : '') +
         '<span class="arr">→</span>PCM ' + db(m.rms_in) +
         '<span class="arr">→</span>' + (cfg.agc_enabled ? (m.agc_gate ? 'gate' : 'AGC ' + signed(m.agc_gain) + ' dB') : 'no AGC') +
-        '<span class="arr">→</span>PCM ' + db(m.rms_out)
+        '<span class="arr">→</span>PCM ' + db(m.rms_out) +
+        (m.direct ? ' <span class="arr">|</span> <b>' + esc(m.codec_in) + '</b><span class="arr">→</span>frames ' +
+          (cfg.agc_enabled && !m.agc_gate ? signed(m.agc_gain) + ' dB' : 'as they are') + '<span class="arr">→</span>' + esc(m.direct) : '')
       : '<span>No signal path while idle</span>';
     p.flow.innerHTML = flow + '<span class="pkts">' + m.pkts_in + ' in, ' + m.pkts_out + ' out</span>';
   });
@@ -607,6 +613,7 @@ function render() {
     var act = x.active_module && x.active_module.length > 0;
     var frames = [[x.decodes, 'dec'], [x.encodes, 'enc']];
     if (x.reencodes || x.reencode_active) frames.push([x.reencodes, 're-enc']);
+    if (x.transcodes) frames.push([x.transcodes, 'direct']);
     rows += '<tr><td><b>' + esc(x.name) + '</b></td><td class="opt">' + (x.builtin ? 'Built in' : 'Plugin') + ' <span class="muted">' + esc(x.codec) + '</span></td>' +
       '<td>' + (act ? '<span class="state-use">in use</span>' : '<span class="state-ok">ready</span>') + '</td>' +
       '<td>' + (act ? '<span class="mod-tag">' + esc(x.active_module) + '</span>' : '') +
