@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.20.10** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.20.11** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF/NXDN (AMBE2+), and software vocoders for M17 (Codec2) and P25 (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF/NXDN in software, and since 0.14.0 P25 as a choice next to the built-in IMBE vocoder. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -232,7 +232,7 @@ tcd --list-devices
 
 lists the USB serial devices from `/dev/serial/by-id` (on macOS from IOKit, see [macOS](#macos)) with their serial numbers and marks the ones that look like AMBE devices.
 
-Without `DeviceSerial` in `tcd.ini`, tcd uses every device it recognises as AMBE by its name. With other USB serial devices on the machine (GPS, CAT cables, ...), list your AMBE devices explicitly. `DeviceSerial` must match exactly one of:
+Without `DeviceSerial` in `tcd.ini`, tcd uses every device named as a DVSI one: ThumbDV, DVstick-30, DVstick-33, USB-3000, USB-3003, USB-3006, USB-3012 and the DF2ET boards. A clone with the generic FTDI name `FT232R_USB_UART` or `FT230X_Basic_UART` is only used with its `DeviceSerial` (since 0.20.11): every other FTDI USB serial adapter (programming and CAT cables, GPS) has that name too, and probing one sends AMBE packets at 460800 baud to whatever hangs on it. tcd logs such a device with the line to add, and `tcd --list-devices` marks it. Without `DeviceSerial` tcd also binds only the DVSI named FTDI devices back to `ftdi_sio`. `DeviceSerial = none` uses no AMBE device at all, even with sticks plugged in (since 0.20.11; tcd in Docker then gets no `/dev`). `DeviceSerial` must match exactly one of:
 
 - the USB serial number (`DKB7FXGE`)
 - the older libftd2xx form with the port letter of multi-port devices (`DA1234A`)
@@ -258,7 +258,7 @@ A device that cannot be opened or does not answer is left out with a warning, an
 | `Password` | — | the reflector's `[Transcoder] Password`, needed when it has one (since 0.8.0) |
 | `Modules` | `FS` | transcoded modules; with the reflector's `[Transcoder] Modules = auto` (urfd 4.25.0) any of its modules, this list alone decides; else the same letters as there |
 | `StandbyModules` | — | modules this tcd takes only while no other tcd has them (since 0.11.0, urfd 4.26.0), see [Standby](#standby-a-second-tcd-for-the-same-modules); not in `Modules` as well |
-| `DeviceSerial` | — | AMBE device to use, one line each (see [above](#selecting-the-ambe-devices)); `mixed` after the serial of a DV3003 alone: D-Star and DMR of one module on it, since 0.19.3 also the DMR of a second one (since 0.17.0, see [Single DV3003 in mixed mode](#single-dv3003-in-mixed-mode)) |
+| `DeviceSerial` | — | AMBE device to use, one line each (see [above](#selecting-the-ambe-devices)), `none` for none (since 0.20.11); `mixed` after the serial of a DV3003 alone: D-Star and DMR of one module on it, since 0.19.3 also the DMR of a second one (since 0.17.0, see [Single DV3003 in mixed mode](#single-dv3003-in-mixed-mode)) |
 | `CodecPlugin` | — | codec plugin to load, one line each (see [Codec plugins](#codec-plugins)) |
 | `CodecDStar` / `CodecDMR` / `CodecP25` / `CodecM17` | — | the vocoder new streams get: `dvsi`, `op25`, `codec2` or a plugin's name (see [Codec plugins](#codec-plugins)); written by Save |
 | `Transcode` | `direct` | `direct`: a plugin that decodes a D-Star, DMR/YSF or P25 stream and codes another of the three makes the outgoing frames from the incoming frames' vocoder parameters (plugin API 4, since 0.20.0, see [Codec plugins](#codec-plugins)); `audio`: every codec from the decoded audio |

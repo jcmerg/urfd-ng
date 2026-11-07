@@ -2,7 +2,7 @@
 
 [English](README.md) | **Deutsch**
 
-**Version 0.20.10** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.20.11** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF/NXDN (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25 (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF/NXDN in Software ergänzen, seit 0.14.0 auch P25 als Wahl neben dem eingebauten IMBE-Vocoder. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
@@ -232,7 +232,7 @@ tcd --list-devices
 
 listet die seriellen USB-Geräte aus `/dev/serial/by-id` (unter macOS aus IOKit, siehe [macOS](#macos)) mit ihren Seriennummern und markiert die, die nach AMBE-Geräten aussehen.
 
-Ohne `DeviceSerial` in `tcd.ini` verwendet tcd jedes Gerät, das er am Namen als AMBE erkennt. Hängen weitere serielle USB-Geräte am Rechner (GPS, CAT-Kabel, ...), die AMBE-Geräte ausdrücklich eintragen. `DeviceSerial` muss exakt einem davon entsprechen:
+Ohne `DeviceSerial` in `tcd.ini` verwendet tcd jedes Gerät mit dem Namen eines DVSI-Geräts: ThumbDV, DVstick-30, DVstick-33, USB-3000, USB-3003, USB-3006, USB-3012 und die DF2ET-Platinen. Ein Klon mit dem generischen FTDI-Namen `FT232R_USB_UART` oder `FT230X_Basic_UART` wird nur mit seiner `DeviceSerial` verwendet (seit 0.20.11): diesen Namen hat auch jeder andere FTDI-USB-Seriell-Wandler (Programmier- und CAT-Kabel, GPS), und eine Probe schickt AMBE-Pakete mit 460800 Baud an das, was daran hängt. tcd nennt ein solches Gerät im Log mit der Zeile, die einzutragen ist, und `tcd --list-devices` markiert es. Ohne `DeviceSerial` bindet tcd auch nur die FTDI-Geräte mit DVSI-Namen wieder an `ftdi_sio`. `DeviceSerial = none` verwendet gar kein AMBE-Gerät, auch wenn Sticks stecken (seit 0.20.11; tcd in Docker bekommt dann kein `/dev`). `DeviceSerial` muss exakt einem davon entsprechen:
 
 - der USB-Seriennummer (`DKB7FXGE`)
 - der älteren libftd2xx-Form mit dem Port-Buchstaben von Mehrport-Geräten (`DA1234A`)
@@ -258,7 +258,7 @@ Ein Gerät, das sich nicht öffnen lässt oder nicht antwortet, wird mit einer W
 | `Password` | — | `[Transcoder] Password` des Reflektors, nötig, wenn er eins hat (seit 0.8.0) |
 | `Modules` | `FS` | transcodierte Module; mit `[Transcoder] Modules = auto` im Reflektor (urfd 4.25.0) beliebige seiner Module, dann entscheidet allein diese Liste; sonst dieselben Buchstaben wie dort |
 | `StandbyModules` | — | Module, die dieser tcd nur übernimmt, solange kein anderer tcd sie hat (seit 0.11.0, urfd 4.26.0), siehe [Standby](#standby-ein-zweiter-tcd-für-dieselben-module); nicht zusätzlich in `Modules` |
-| `DeviceSerial` | — | zu verwendendes AMBE-Gerät, je eine Zeile (siehe [oben](#ambe-geräte-auswählen)); `mixed` hinter der Seriennummer eines DV3003 allein: D-Star und DMR eines Moduls darauf, seit 0.19.3 dazu das DMR eines zweiten (seit 0.17.0, siehe [Einzelner DV3003 im Mischbetrieb](#einzelner-dv3003-im-mischbetrieb)) |
+| `DeviceSerial` | — | zu verwendendes AMBE-Gerät, je eine Zeile (siehe [oben](#ambe-geräte-auswählen)), `none` für keines (seit 0.20.11); `mixed` hinter der Seriennummer eines DV3003 allein: D-Star und DMR eines Moduls darauf, seit 0.19.3 dazu das DMR eines zweiten (seit 0.17.0, siehe [Einzelner DV3003 im Mischbetrieb](#einzelner-dv3003-im-mischbetrieb)) |
 | `CodecPlugin` | — | zu ladendes Codec-Plugin, je eine Zeile (siehe [Codec-Plugins](#codec-plugins)) |
 | `CodecDStar` / `CodecDMR` / `CodecP25` / `CodecM17` | — | der Vocoder für neue Streams: `dvsi`, `op25`, `codec2` oder der Name eines Plugins (siehe [Codec-Plugins](#codec-plugins)); von „Save“ gespeichert |
 | `Transcode` | `direct` | `direct`: ein Plugin, das einen D-Star-, DMR/YSF- oder P25-Stream decodiert und einen anderen der drei codiert, macht die ausgehenden Frames aus den Vocoder-Parametern der eingehenden (Plugin-Schnittstelle 4, seit 0.20.0, siehe [Codec-Plugins](#codec-plugins)); `audio`: jeder Codec aus dem decodierten Audio |

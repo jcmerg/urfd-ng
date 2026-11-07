@@ -50,6 +50,8 @@ public:
 	const std::string &GetPassword(void) const { return password; }
 	unsigned GetPort(void) const { return port; }
 	const std::vector<std::string> &GetDeviceSerials(void) const { return device_serials; }
+	// DeviceSerial = none: no AMBE device at all, even with sticks plugged in
+	bool GetNoDevices(void) const { return no_devices; }
 	// the DeviceSerial lines with "mixed" after the serial: a DV3003 alone does D-Star
 	// and DMR for one module (channel 0 and 1) instead of D-Star for three
 	const std::vector<std::string> &GetMixedSerials(void) const { return mixed_serials; }
@@ -117,6 +119,7 @@ public:
 private:
 	std::string tcmods, standbymods, address, password, ini_path;
 	std::vector<std::string> device_serials, mixed_serials;
+	bool no_devices = false;
 	bool device_pool = false;
 	int device_compand = 0;
 	std::vector<std::string> codec_plugins;

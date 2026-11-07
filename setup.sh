@@ -515,7 +515,8 @@ ask_tcd_serials() {
         echo "Next to a codec plugin the container gets the sticks only when tcd.ini names them."
         ask TCD_SERIALS "Serial numbers" "" '^ *[A-Za-z0-9]+( +[A-Za-z0-9]+)* *$' "At least one serial number, letters and digits."
     else
-        echo "Leave empty to use every AMBE device tcd finds."
+        echo "Leave empty to use every device tcd finds by a DVSI name (ThumbDV, DVstick, USB-30xx);"
+        echo "a clone named FT232R_USB_UART or FT230X_Basic_UART needs its serial number."
         ask TCD_SERIALS "Serial numbers" "" '^[A-Za-z0-9 ]*$' "Letters and digits only."
     fi
 }

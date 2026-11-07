@@ -212,6 +212,11 @@ bool CConfigure::ReadData(const std::string &path)
 			std::istringstream words(value);
 			std::string serial, option;
 			words >> serial;
+			if (serial == "none")
+			{
+				no_devices = true;
+				continue;
+			}
 			device_serials.push_back(serial);
 			while (words >> option)
 			{

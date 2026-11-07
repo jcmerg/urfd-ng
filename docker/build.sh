@@ -5,7 +5,8 @@
 #   urfd   config/urfd.ini
 #   tcd    tcd/tcd.ini (tcd in Docker, see "tcd in Docker" in tcd/README.md); with a
 #          DeviceSerial or without a CodecPlugin it uses AMBE sticks and the
-#          container gets them (docker-compose.tcd-sticks.yml)
+#          container gets them (docker-compose.tcd-sticks.yml), with
+#          DeviceSerial = none never
 #
 # So the same script serves a reflector, a reflector with tcd and a machine with
 # only tcd. Unchanged sources come from the build cache.
@@ -25,7 +26,9 @@ SERVICES=()
 [ -f "$DATA/config/urfd.ini" ] && SERVICES+=(urfd)
 if [ -f "$TCD_INI" ]; then
     SERVICES+=(tcd)
-    if grep -qE '^[[:space:]]*DeviceSerial[[:space:]]*=' "$TCD_INI" || ! grep -qE '^[[:space:]]*CodecPlugin[[:space:]]*=' "$TCD_INI"; then
+    if grep -qE '^[[:space:]]*DeviceSerial[[:space:]]*=[[:space:]]*none([[:space:]#]|$)' "$TCD_INI"; then
+        echo "=== tcd without AMBE sticks (DeviceSerial = none) ==="
+    elif grep -qE '^[[:space:]]*DeviceSerial[[:space:]]*=' "$TCD_INI" || ! grep -qE '^[[:space:]]*CodecPlugin[[:space:]]*=' "$TCD_INI"; then
         echo "=== tcd with AMBE sticks: the container gets /dev (docker-compose.tcd-sticks.yml) ==="
         FILES+=(-f docker-compose.tcd-sticks.yml)
     fi
