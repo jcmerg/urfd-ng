@@ -387,6 +387,10 @@ table.measure tr.grp { display: none; }
 
 <script>
 var ws, data = null, configLoaded = false, cards = {};
+// the tcd version this page came with: a tab left open reconnects to a new tcd
+// with the old page, so a new version loads the page again (once per version,
+// in case something in between still hands out the old one)
+var pageVersion = null;
 var $ = function (id) { return document.getElementById(id); };
 
 function esc(v) { return String(v).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
@@ -424,7 +428,12 @@ function connect() {
   ws.onerror = function () { ws.close(); };
   ws.onmessage = function (e) {
     data = JSON.parse(e.data);
-    if (data.version) $('ver').textContent = 'tcd ' + data.version;
+    if (data.version && pageVersion && data.version !== pageVersion) {
+      var reloaded = null;
+      try { reloaded = sessionStorage.getItem('tcd-reloaded-for'); sessionStorage.setItem('tcd-reloaded-for', data.version); } catch (err) {}
+      if (reloaded !== data.version) { ws.onclose = null; ws.close(); location.reload(); return; }
+    }
+    if (data.version) { pageVersion = pageVersion || data.version; $('ver').textContent = 'tcd ' + data.version; }
     if (!configLoaded) {
       loadConfig(data.config);
       loadCodecs(data.codecs);
