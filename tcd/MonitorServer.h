@@ -34,6 +34,11 @@ private:
 	struct SSession
 	{
 		bool ws = false;
+		// a WebSocket client gets the next stats only after it acknowledged the
+		// last: a frozen browser tab would let them pile up in the socket buffers
+		// of tcd and every proxy in between (megabytes, minutes behind), which the
+		// proxies then pass on in tiny pieces as the window opens
+		bool ready = true;
 		std::string uri, body;	// a POST collects its body first
 		std::string out;		// the response body still to send
 		size_t sent = 0;

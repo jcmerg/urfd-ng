@@ -427,6 +427,8 @@ function connect() {
   };
   ws.onerror = function () { ws.close(); };
   ws.onmessage = function (e) {
+    // tcd sends the next stats once this one is taken (a frozen tab takes none)
+    if (ws.readyState === 1) ws.send('a');
     data = JSON.parse(e.data);
     if (data.version && pageVersion && data.version !== pageVersion) {
       var reloaded = null;
