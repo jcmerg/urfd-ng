@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.38.10** | tcd 0.20.8 | Dashboard v3.0.1
+**urfd 4.38.10** | tcd 0.20.9 | Dashboard v3.0.1
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -1040,6 +1040,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.20.9**: Ein offen gelassener Monitor-Tab lädt die Seite neu, wenn tcd eine andere Version meldet (er verband sich mit dem neuen tcd und behielt die alte Seite, die nur ein erzwungenes Neuladen ersetzte); einmal pro Version, ein Cache dazwischen kann also keine Schleife auslösen
 - **tcd 0.20.8**: Das Web-Dashboard zeigt die Reflector-Verbindung in einer Zeile über der Vocoder-Tabelle, die die ganze Breite hat, statt in einer Spalte daneben, die die Tabelle zusammendrückte und verschob; die Zähler-Spalten sind so schmal wie ihre Zahlen, die übrige Breite bekommen die Textspalten, und auf breiten Bildschirmen stehen Frames und Errors abgesetzt
 - **tcd 0.20.7**: Die schmale Darstellung der Vocoder-Tabelle nutzt auch Tabellenspalten, zwei Zähler untereinander in jeder, sodass die Zähler aller Zeilen fluchten (jede Zelle hatte ihr eigenes Raster, verschoben durch ihre Zahlen), und dec und enc stehen in jeder Zeile untereinander, `direct` und `re-enc` links daneben; jeder Frame liest jeden Gain einmal (der Monitor konnte einen zwischen Prüfung und Verwendung ändern); die README sagt, dass das Umschalten von `Transcode` auf direct zur Laufzeit für die danach beginnenden Aussendungen gilt und eine Aussendung nur ab ihrem ersten Frame auf den direkten Weg geht; die Docker-README sagt, dass die Images BuildKit brauchen
 - **tcd 0.20.6**: Das Web-Dashboard wählt die Darstellung der Vocoder-Tabelle nach der Breite ihres Kastens, nicht nach der des Fensters: Neben der Reflector-Spalte brach sie in einem 1300-px-Fenster noch um und scrollte; eine Spalte pro Zähler, wo sie passt, sonst die Zähler einer Gruppe in einer Zelle, und wo nicht einmal das daneben passt, rückt die Reflector-Spalte unter die Tabelle
