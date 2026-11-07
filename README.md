@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.38.3** | tcd 0.20.0 | Dashboard v3.0.1
+**urfd 4.38.4** | tcd 0.20.1 | Dashboard v3.0.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -692,9 +692,11 @@ no names, so the DMR talker alias would be the bare callsign; it is therefore la
 order is the same everywhere; lines not starting with an ID, such as a CSV header,
 are skipped.
 
-**Download cache**: every successful download is mirrored to `<FilePath>.cache`. If
-no source answers at startup, the cache is loaded instead, so the database is never
-empty just because a directory is down. This is separate from `FilePath`, which in
+**Download cache**: every successful download is mirrored to `<FilePath>.cache`. At
+startup the cache is loaded first and the download replaces it when it is complete,
+and it stays when no source answers, so the database is never empty just because a
+directory is slow or down (since 4.38.4; before, the lookups were empty until the
+download ended, up to minutes with radioid.net). This is separate from `FilePath`, which in
 `Mode = both` holds the operator's own additional entries and is never overwritten.
 
 Note that no second publisher of the YSF TX/RX data is known, so there the cache is
@@ -987,6 +989,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Config values checked (4.37.2)**: a value in `urfd.ini` that is no number (a port, `RxGain`/`TxGain`, `Latitude`, the port of a connector's `Map`) is reported with its line and the default taken, instead of ending urfd and `inicheck`; the last line of the white/black list, the interlink and the G3 terminal file counts without a newline at its end; the admin command that removes a TG reads its time slot under the map's lock
 - **Dashboard WebSocket hardened (4.38.1)**: a wrong admin password pauses logins from that browser's address only (2 s, doubling up to 5 min; behind nginx from `X-Forwarded-For`), no longer everyone's, so nobody can keep the sysop out by failing on purpose; a login token runs out an hour after its last command, not an hour after the login; one snapshot build a second serves every client that asks, and one client may have at most 8 requests waiting; the name lookups of the station events and the snapshot no longer happen under the users or clients lock (they wait for a reload of the ID database); a position updates the last heard list only when its locator changes; IPv6 addresses are masked to the last 1, 2 or 3 groups as the option says (was always 2); answers to a missing login carry `"code": "auth"`. `[WebSocket] Enable` defaults to `true` since 4.38.0 (loopback only)
 - **ID database downloads may take longer (4.38.2)**: a download of the DMR, NXDN or YSF database had to be done within 30 s, so a slow link to radioid.net (its `user.csv` is 17 MB, at under 100 KB/s it needs some minutes) always timed out (`Curl returned: 28`) and the fallback source was loaded; a download may now take up to 10 minutes as long as it moves, and is given up when it stays below 1 KB/s for 30 s (every HTTP request of urfd); stopping urfd aborts a running download at once
+- **ID databases from the cache at once (4.38.4)**: with 4.38.2 a download may run for minutes, and the cache of the last download was only read when every source had failed, so the DMR, NXDN and YSF lookups stayed empty after a start until the download ended: hotspots logging in with a callsign were refused (`invalid callsign in RPTL`), calls came from `unknown (ID ...)` and `N0CALL`. The cache (`<FilePath>.cache`) is now loaded at the start and the download replaces it when it is complete
 
 ### Audio & Transcoding
 - **Modules without transcoder carry each stream only where its codec goes (4.32.2)**: on a module without tcd a stream reached every protocol, also those of another codec, whose frames were then empty (zeros, decoded as noise, for example a D-Star stream sent to DMR, P25 or M17). Such a protocol now gets no stream: D-Star goes to the D-Star protocols, AMBE+2 (DMR, NXDN, YSF DN) to DMR, NXDN and YSF, IMBE (P25, YSF VW) to P25 and YSF, Codec2 to M17, USRP and SVX audio to USRP and SVX. Interlinks and plugins keep getting every stream, and transcoded modules are unchanged
@@ -1044,6 +1047,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.20.1**: `Transcode` switches in the web dashboard at run time ("D-Star, DMR and P25 to each other", shown when a plugin can) and Save writes it; a transmission's encoder state gets either the direct path or the audio, so a switch mid-transmission or a failed transcode starts that encoder afresh instead of mixing the two; a target on an AMBE device is no longer looked up through the channel choice by the direct path (with `DeviceChannels = pool` the last frame could lose its channel), a frame whose decode failed is not transcoded, and a new stream clears the monitor's "(direct)" mark of the one before; `tools/codectest <plugin> dstar:dmr ...` shows the direct path of a plugin, tcdmon marks direct targets with `*` and counts them; the README's audio-level diagram shows the direct path
 - **tcd 0.20.0**: codec plugin interface 4 (`TCD_CODEC_API 4`): a plugin may offer `transcode`, and tcd then makes D-Star, DMR/YSF and P25 from each other's frames directly, from the vocoder's parameters instead of the decoded audio, when the stream's source and target are on that plugin (`Transcode = direct`, the default; `audio` keeps the old path); the AGC's gain and the output gains go into the frames, all of `OutputGainDMR` included. The three codecs share the MBE vocoder model, and the second analysis of synthesized speech is what a transcoder loses most to: over 19 clips every one of the six directions gains 0.1 to 0.24 PESQ, confirmed through a DV3000 for D-Star and DMR, at a fifth of the processing time. M17, USRP, SVX, AMBE devices and tcd's own vocoders keep the audio path. The monitor marks the targets a stream is coded into directly and counts the frames per plugin codec. Plugins of interface 2 and 3 load as before, see [tcd/README.md](tcd/README.md#codec-plugins)
 - **tcd 0.19.5**: the module LCD of the web monitor has no dark strip along its top edge any more, which looked like a step inside the bezel
 - **tcd 0.19.4**: a value in `tcd.ini` that is no number (or NaN) is reported and the default kept instead of ending tcd, AGC values stay in sane ranges, from the web dashboard too; a reconnect to a reflector host that does not answer takes 2 s instead of minutes; `StatsLog` closes a stream's file 10 s after its last frame (they stayed open until tcd stopped) and deletes only its own CSV files; tcdmon's stats socket no longer sends half a line to a slow client; a quote in a USB serial no longer breaks the monitor's JSON

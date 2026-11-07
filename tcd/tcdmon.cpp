@@ -145,6 +145,7 @@ static std::map<char, std::string> json_modules(const std::string &json)
 struct ModuleData
 {
 	std::string codec_in;
+	std::string direct;     // the targets coded from the stream's frames directly (tcd 0.20.0)
 	double rms_in, peak_in, rms_out, peak_out;
 	double agc_gain, idle;
 	bool agc_gate;
@@ -299,10 +300,12 @@ static void draw_flow(int y, int x, int /*width*/, const ModuleData &m, const st
 	// Target codecs
 	attron(COLOR_PAIR(3) | A_BOLD);
 	std::string targets;
-	if (m.codec_in.find("Star") == std::string::npos) targets += "D-Star ";
-	if (m.codec_in.find("DMR") == std::string::npos) targets += "DMR/YSF/NXDN ";
+	// a target coded from the stream's frames directly gets a '*'
+	auto mark = [&](const char *name) { return std::string(name) + (m.direct.find(name) != std::string::npos ? "* " : " "); };
+	if (m.codec_in.find("Star") == std::string::npos) targets += mark("D-Star");
+	if (m.codec_in.find("DMR") == std::string::npos) targets += mark("DMR/YSF/NXDN");
 	if (m.codec_in.find("Codec2") == std::string::npos) targets += "M17 ";
-	if (m.codec_in.find("P25") == std::string::npos) targets += "P25 ";
+	if (m.codec_in.find("P25") == std::string::npos) targets += mark("P25");
 	if (m.codec_in != "USRP") targets += "USRP ";
 	if (m.codec_in != "SVX") targets += "SVX";
 	mvprintw(y, col, "%s", targets.c_str());
@@ -496,6 +499,7 @@ int main(int argc, char *argv[])
 		{
 			ModuleData m;
 			m.codec_in = json_str(mj, "codec_in");
+			m.direct = json_str(mj, "direct");
 			m.rms_in = json_num(mj, "rms_in");
 			m.peak_in = json_num(mj, "peak_in");
 			m.rms_out = json_num(mj, "rms_out");
@@ -635,6 +639,7 @@ int main(int argc, char *argv[])
 			int enc = json_int(sw_json, "encodes");
 			int dec = json_int(sw_json, "decodes");
 			int re = json_int(sw_json, "reencodes");
+			int direct = json_int(sw_json, "transcodes");
 
 			if (active) attron(COLOR_PAIR(7) | A_BOLD);
 			else attron(COLOR_PAIR(1));
@@ -657,6 +662,8 @@ int main(int argc, char *argv[])
 			printw("  dec:%d enc:%d", dec, enc);
 			if (codec == "dmr")
 				printw(" re:%d", re);
+			if (direct)
+				printw(" direct:%d", direct);
 			attroff(COLOR_PAIR(5));
 			// how the decoded frames came out (plugins of codec API 3 report it)
 			{

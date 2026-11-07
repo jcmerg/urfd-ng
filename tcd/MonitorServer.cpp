@@ -216,6 +216,7 @@ std::string CMonitorServer::BuildStatsJson()
 		js << "],\"use\":\"" << jstr(c >= 0 && c < int(options.size()) ? options[c] : std::string()) << "\"}";
 	}
 	js << "},\"reencode_available\":" << (g_Stats.reencode_available.load(std::memory_order_relaxed) ? "true" : "false");
+	js << ",\"transcode_available\":" << (g_Stats.transcode_available.load(std::memory_order_relaxed) ? "true" : "false");
 	js << ",\"pool_available\":" << (g_Stats.pool_available.load(std::memory_order_relaxed) ? "true" : "false");
 	js << ",\"hw_channels\":{\"dstar\":{\"total\":" << g_Stats.hw_total[kChoiceDStar].load() << ",\"busy\":" << g_Stats.hw_busy[kChoiceDStar].load()
 	   << "},\"dmr\":{\"total\":" << g_Stats.hw_total[kChoiceDMR].load() << ",\"busy\":" << g_Stats.hw_busy[kChoiceDMR].load() << "}}";
@@ -250,6 +251,7 @@ std::string CMonitorServer::BuildStatsJson()
 	   << ",\"outgain_m17\":" << g_Stats.config.outgain_m17.load()
 	   << ",\"dmr_gain_mode\":" << g_Stats.config.dmr_gain_mode.load()
 	   << ",\"ambe_gain_db\":" << g_Stats.config.ambe_gain_db.load()
+	   << ",\"transcode_direct\":" << (g_Stats.config.transcode_direct.load() ? "true" : "false")
 	   << ",\"device_pool\":" << g_Stats.config.device_pool.load()
 	   << ",\"device_compand\":" << g_Stats.config.device_compand.load()
 	   << "}}";
@@ -377,6 +379,9 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 				m = 1;  // re-encode needs a codec plugin for DMR, fall back to the bitstream gain
 			g_Stats.config.dmr_gain_mode.store(m);
 		}
+		bool direct;
+		if (json_get_bool(body.c_str(), body.size(), "transcode_direct", direct))
+			g_Stats.config.transcode_direct.store(direct);
 		float ambe_db;
 		if (json_get_float(body.c_str(), body.size(), "ambe_gain_db", ambe_db))
 			g_Stats.config.ambe_gain_db.store((int)ambe_db < -30 ? -30 : (int)ambe_db > 10 ? 10 : (int)ambe_db);
@@ -1088,7 +1093,8 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 	// the module view is replaced where it stands, else written when it is not auto
 	bool codecWritten[kNumChoices] = {};
 	auto codecLine = [](int k) { return g_Stats.codec_options[k][g_Stats.config.codec_choice[k].load()]; };
-	bool viewWritten = false, poolWritten = false, compandWritten = false;
+	bool viewWritten = false, poolWritten = false, compandWritten = false, transcodeWritten = false;
+	const bool direct = g_Stats.config.transcode_direct.load();
 	const int pool = g_Stats.config.device_pool.load();
 	const int compand = g_Stats.config.device_compand.load();
 	static const char *views[] = { "auto", "cards", "compact" };
@@ -1126,6 +1132,7 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 				if (key == "OutputGainM17")    { out << key << " = " << g_Stats.config.outgain_m17.load() << "\n"; continue; }
 				if (key == "DmrGainMode")      { int m = g_Stats.config.dmr_gain_mode.load(); out << key << " = " << (m==2 ? "reencode" : m==1 ? "ambe" : "off") << "\n"; continue; }
 				if (key == "AmbeGainDb")       { out << key << " = " << g_Stats.config.ambe_gain_db.load() << "\n"; continue; }
+				if (key == "Transcode")        { out << key << " = " << (direct ? "direct" : "audio") << "\n"; transcodeWritten = true; continue; }
 				if (key == "MonitorView") { out << key << " = " << views[view] << "\n"; viewWritten = true; continue; }
 				// without devices at this start the setting is not in use: the line stays
 				if (key == "DeviceChannels" && g_Stats.pool_available.load()) { out << key << " = " << (pool ? "pool" : "fixed") << "\n"; poolWritten = true; continue; }
@@ -1169,6 +1176,8 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 		out << "DeviceChannels = pool\n";
 	if (!compandWritten && compand)
 		out << "DeviceCompand = " << CompandName(compand) << "\n";
+	if (!transcodeWritten && !direct)
+		out << "Transcode = audio\n";
 
 	std::ofstream of(ini_path);
 	if (!of.is_open()) return false;

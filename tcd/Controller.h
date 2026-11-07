@@ -50,7 +50,8 @@ public:
 	void Stop();
 	void ListDevices();
 	// from: the plugin codec that decoded a D-Star packet, for Transcode (nullptr: a device did)
-	void RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, class CSoftCodec *from = nullptr);
+	// decoded: from's decode succeeded (a failed one gets no transcode, only its End)
+	void RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, class CSoftCodec *from = nullptr, bool decoded = true);
 	void RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet);
 	void ReconfigureAGC();  // re-read AGC params from g_Stats.config
 	void Dump(const std::shared_ptr<CTranscoderPacket> packet, const std::string &title) const;
@@ -170,7 +171,9 @@ protected:
 	// the index of a stream's choice k (CodecChoice.h) into a list of
 	// list_size, pinned for the stream; for a device its AMBE channel in
 	// dev and ch (dev stays empty for a plugin or tcd's own vocoder)
-	int Pick(int k, size_t list_size, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev = nullptr, uint8_t *ch = nullptr);
+	// count: the frame counts for the stream's log (false for a lookup besides the frame's own)
+	int Pick(int k, size_t list_size, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev = nullptr, uint8_t *ch = nullptr, bool count = true);
+	class CSoftCodec *PluginChoice(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet);
 	// codec: TCD_CODEC_DSTAR, _DMR, _P25, _M17 or _M17_1600 (the two M17 share the choice)
 	class CSoftCodec *SwCodec(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev = nullptr, uint8_t *ch = nullptr)
 	{
@@ -182,8 +185,8 @@ protected:
 	// P25 with the stream's choice: OP25 or a plugin. A plugin's error gives IMBE
 	// silence (encode) or silent samples (decode)
 	void EncodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *imbe);
-	// the plugin codec that decoded, nullptr for OP25
-	class CSoftCodec *DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm);
+	// the plugin codec that decoded, nullptr for OP25; decoded: the plugin's decode succeeded
+	class CSoftCodec *DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm, bool *decoded = nullptr);
 	// Transcode = direct: the frame `from` (a plugin codec) just decoded, coded into
 	// codec `to` by the same plugin from the frame itself, when the stream's choice
 	// for `to` is that plugin and it can (CodecPlugin.h api 4); the AGC's gain and
@@ -191,7 +194,6 @@ protected:
 	// the packet's frame of `to` and its bit in direct; false leaves `to` to the
 	// audio path
 	bool Transcode(uint32_t to, class CSoftCodec *from, float source_db, const std::shared_ptr<CTranscoderPacket> &packet, uint8_t *direct);
-	bool transcode_direct = true;
 	// M17 with the stream's choice: tcd's own Codec2 or a plugin. Encode: 3200,
 	// 160 samples into 8 bytes; decode: 8 bytes into 160 samples (3200) or 320
 	// (1600). A plugin's error gives Codec2 silence or silent samples

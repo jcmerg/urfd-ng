@@ -56,8 +56,11 @@ public:
 	int stats = -1;
 
 private:
-	// running: between the plugin's start and stop; sequence: of the last frame
-	struct SState { void *state; std::chrono::steady_clock::time_point last_used; uint32_t sequence; bool running; };
+	// running: between the plugin's start and stop; sequence: of the last frame;
+	// use: how an encoder state codes the transmission (a plugin's encoder keeps a
+	// history of its own for encode and for transcode, so one transmission gets one)
+	enum EUse : uint8_t { kUnused, kEncode, kTranscode };
+	struct SState { void *state; std::chrono::steady_clock::time_point last_used; uint32_t sequence; bool running; EUse use; };
 	// a state per stream and direction: decoding and encoding the same stream (DMR
 	// reencode) each begin and end on their own, a start resets the plugin's state
 	static uint32_t Key(uint16_t streamid, bool encode) { return (encode ? 0x10000u : 0u) | streamid; }

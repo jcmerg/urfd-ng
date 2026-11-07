@@ -191,7 +191,7 @@ bool CConfigure::ReadData(const std::string &path)
 		{
 			if (value == "direct")     transcode_direct = true;
 			else if (value == "audio") transcode_direct = false;
-			else std::cerr << "Warning: unknown " << TRANSCODE << " '" << value << "', using 'direct'" << std::endl;
+			else { std::cerr << "Warning: unknown " << TRANSCODE << " '" << value << "', using 'direct'" << std::endl; transcode_direct = true; }
 		}
 		else if (0 == key.compare(DMRGAINMODE))
 		{
