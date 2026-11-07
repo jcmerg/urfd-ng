@@ -175,12 +175,13 @@ protected:
 	int Pick(int k, size_t list_size, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev = nullptr, uint8_t *ch = nullptr, bool count = true);
 	class CSoftCodec *PluginChoice(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet);
 	// codec: TCD_CODEC_DSTAR, _DMR, _P25, _M17 or _M17_1600 (the two M17 share the choice)
-	class CSoftCodec *SwCodec(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev = nullptr, uint8_t *ch = nullptr)
+	// count: the frame counts for StreamLog here (false where ToDStar/ToDmr counted it already)
+	class CSoftCodec *SwCodec(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev = nullptr, uint8_t *ch = nullptr, bool count = true)
 	{
 		const int k = ChoiceOfCodec(codec);
 		assert(k >= 0);
 		const auto &list = codec == TCD_CODEC_M17_1600 ? m17_1600_choices : choices[k];
-		return list.empty() ? nullptr : list[Pick(k, list.size(), packet, dev, ch)];
+		return list.empty() ? nullptr : list[Pick(k, list.size(), packet, dev, ch, count)];
 	}
 	// P25 with the stream's choice: OP25 or a plugin. A plugin's error gives IMBE
 	// silence (encode) or silent samples (decode)
@@ -204,9 +205,11 @@ protected:
 	class CSoftCodec *dmr_sw = nullptr;
 	// the monitor's entries of tcd's own vocoders (OP25, Codec2), -1 without one
 	int own_stats[kNumChoices];	// set to -1 in the constructor
-	int32_t dstar_in_num = 256, dstar_out_num = 256;	// DStarGainIn/Out for a D-Star plugin
-	int32_t ambe_in_num, ambe_out_num, dmr_reencode_num;
-	int32_t outgain_dstar_num, outgain_dmr_num, outgain_usrp_num, outgain_imbe_num, outgain_m17_num;
+	// the gains as numerators (256 = 0 dB): written by ReconfigureAGC (the monitor's
+	// changes, from the reflector thread) and read by every codec thread
+	std::atomic<int32_t> dstar_in_num{256}, dstar_out_num{256};	// DStarGainIn/Out for a D-Star plugin
+	std::atomic<int32_t> ambe_in_num{256}, ambe_out_num{256}, dmr_reencode_num{256};
+	std::atomic<int32_t> outgain_dstar_num{256}, outgain_dmr_num{256}, outgain_usrp_num{256}, outgain_imbe_num{256}, outgain_m17_num{256};
 	// P25: IMBE quantises each frame against the one before, so every module has its
 	// own encoder and decoder (streams of two modules must not share one state)
 	std::unordered_map<char, std::unique_ptr<imbe_vocoder>> imbe_enc, imbe_dec;

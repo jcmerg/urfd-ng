@@ -105,10 +105,11 @@ struct tcd_codec_plugin
 	// the decoded frame itself, not from its audio, with its level changed by
 	// gain_db; 0 = ok, frame has the size of the encoder's codec. Both states
 	// are from open of this plugin, for one stream, the decoder's codec another
-	// than the encoder's; tcd calls it right after a successful decode. A
-	// transmission's encoder state gets transcode or encode, not both: one
-	// encoded from the audio stays so, and one tcd has to encode after a
-	// transcode (an error, or Transcode switched to audio) gets start first.
+	// than the encoder's; tcd calls it right after a successful decode, from a
+	// transmission's first frame on. A transmission's encoder state gets
+	// transcode or encode, not both: one encoded from the audio stays so, and
+	// one tcd has to encode after a transcode (an error, or Transcode switched
+	// to audio) gets start first.
 	// A plugin without it, or an error, leaves tcd to encode the audio.
 	int (*transcode)(void *decoder, void *encoder, float gain_db, uint8_t *frame);
 };

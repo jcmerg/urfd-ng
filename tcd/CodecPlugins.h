@@ -58,8 +58,11 @@ public:
 private:
 	// running: between the plugin's start and stop; sequence: of the last frame;
 	// use: how an encoder state codes the transmission (a plugin's encoder keeps a
-	// history of its own for encode and for transcode, so one transmission gets one)
-	enum EUse : uint8_t { kUnused, kEncode, kTranscode };
+	// history of its own for encode and for transcode, so one transmission gets one).
+	// The direct path takes a transmission only from its first frame on; one that
+	// began on the audio path, or whose transcode failed (kAudio: the plugin
+	// touched the state, encode starts it first), stays on the audio path.
+	enum EUse : uint8_t { kUnused, kEncode, kTranscode, kAudio };
 	struct SState { void *state; std::chrono::steady_clock::time_point last_used; uint32_t sequence; bool running; EUse use; };
 	// a state per stream and direction: decoding and encoding the same stream (DMR
 	// reencode) each begin and end on their own, a start resets the plugin's state

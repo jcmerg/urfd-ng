@@ -528,7 +528,7 @@ int main(int argc, char *argv[])
 
 		// Modules: a card for each module on the air, as the web dashboard's
 		// compact view; the others in one line with their state
-		std::string idle_mods, standby_mods;
+		std::string idle_mods, standby_mods, more_mods;
 		for (auto &[mod, mj] : modules)
 		{
 			ModuleData m;
@@ -554,7 +554,10 @@ int main(int argc, char *argv[])
 				continue;
 			}
 			if (row >= rows - 8)
-				continue;	// no room for its card: it still counts below
+			{
+				more_mods += mod;	// no room for its card: named below
+				continue;
+			}
 
 			// Module header
 			attron(COLOR_PAIR(7) | A_BOLD);
@@ -577,6 +580,12 @@ int main(int argc, char *argv[])
 			row++;
 
 			row++;  // spacing
+		}
+		if (!more_mods.empty())
+		{
+			attron(COLOR_PAIR(7));
+			mvprintw(row++, 0, "Also on the air (no room for their cards): %s", more_mods.c_str());
+			attroff(COLOR_PAIR(7));
 		}
 		if (!idle_mods.empty() || !standby_mods.empty())
 		{
