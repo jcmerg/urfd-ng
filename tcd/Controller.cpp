@@ -430,13 +430,12 @@ CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTra
 		{
 			// a device for new streams: with fixed channels a module beyond them
 			// goes to the first plugin, as Pick sends it (in the pool a free
-			// channel is only known by taking it, so that stream's first frame
-			// takes the audio path, and its later frames follow the pin)
+			// channel is only known by taking it, so such a stream takes the
+			// audio path for its whole transmission)
 			const bool device = (k == kChoiceDStar || k == kChoiceDMR) && !g_CodecChoices[k].own;
 			if (!device || Pool() || std::string::npos != hw_modules[k].find(packet->GetModule()))
 				return nullptr;
-			auto first = std::find_if(list.begin(), list.end(), [](CSoftCodec *sw) { return sw != nullptr; });
-			if (first == list.end())
+			if (std::none_of(list.begin(), list.end(), [](CSoftCodec *sw) { return sw != nullptr; }))
 				return nullptr;
 		}
 	}
@@ -1453,7 +1452,7 @@ void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 		for (int i = 0; i < 160; ++i)
 			gained[i] = int16_t((gained[i] * ambe_in_num) >> 8);
 	}
-	auto *sw = SwCodec(TCD_CODEC_DMR, packet);
+	auto *sw = SwCodec(TCD_CODEC_DMR, packet, nullptr, nullptr, false);	// ToDmr counted the frame
 	sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), gained, ambe2);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 	BitstreamDmrGain(ambe2, packet->GetStreamId());
@@ -1512,7 +1511,8 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	Transcode(TCD_CODEC_P25, decoded ? sw : nullptr, source_db, packet, &direct);
 	if (packet->IsLast())
 		sw->End(packet->GetStreamId(), false);
-	ModuleDirect(packet, direct);
+	if (decoded)	// a failed decode keeps the marks: no flicker
+		ModuleDirect(packet, direct);
 	ToDStar(packet);
 	codec2_queue.push(packet);
 	imbe_queue.push(packet);
@@ -1565,7 +1565,7 @@ void CController::AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 	ApplyGain(pcm, 160, outgain_dstar_num);
 	ApplyGain(pcm, 160, dstar_in_num);
 	uint8_t frame[9] = {};
-	auto *sw = SwCodec(TCD_CODEC_DSTAR, packet);
+	auto *sw = SwCodec(TCD_CODEC_DSTAR, packet, nullptr, nullptr, false);	// ToDStar counted the frame
 	sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), pcm, frame);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 	packet->SetDStarData(frame);
@@ -2355,7 +2355,8 @@ void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	Transcode(TCD_CODEC_DMR, decoded ? from : nullptr, agc_db, packet, &direct);
 	if (from && packet->IsLast())
 		from->End(packet->GetStreamId(), false);
-	ModuleDirect(packet, direct);
+	if (decoded || !from)	// a failed decode keeps the marks: no flicker (OP25 has no direct path)
+		ModuleDirect(packet, direct);
 	ToDStar(packet);
 	codec2_queue.push(packet);
 
@@ -2557,7 +2558,8 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSof
 			if (packet->IsLast())
 				from->End(packet->GetStreamId(), false);
 		}
-		ModuleDirect(packet, direct);
+		if (decoded)	// a failed decode keeps the marks: no flicker
+			ModuleDirect(packet, direct);
 		// Output gains applied in encode functions and DVSI FeedDevice
 		codec2_queue.push(packet);
 		imbe_queue.push(packet);
@@ -2670,7 +2672,7 @@ int CController::BitstreamDmrDb(void) const
 int32_t CController::PcmDmrGainNum(void) const
 {
 	const int bs = BitstreamDmrDb();
-	return bs ? calcNumerator(g_Stats.config.outgain_dmr.load(std::memory_order_relaxed) - bs) : outgain_dmr_num;
+	return bs ? calcNumerator(g_Stats.config.outgain_dmr.load(std::memory_order_relaxed) - bs) : outgain_dmr_num.load();
 }
 
 void CController::BitstreamDmrGain(uint8_t *ambe2, uint16_t streamId)

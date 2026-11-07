@@ -7,7 +7,8 @@
 // is encoded as <from> and decoded, and every decoded frame is made into a <to>
 // frame by the plugin's transcode, as tcd does with Transcode = direct; it
 // writes the <to> frames and their decoded audio, and prints the time per
-// frame of transcode against decoding and encoding again. It checks neither
+// frame of transcode against encoding the decoded audio (the decode both share
+// is not timed). It checks neither
 // the level nor the stream separation of the direct path (the plugin's own
 // tests do); compare the audio it writes for that.
 //
@@ -45,6 +46,7 @@ static std::vector<int16_t> ReadPcm(const char *path)
 static int Transcode(const tcd_codec_plugin *p, uint32_t from, uint32_t to, const char *in, const char *out_frames, const char *out_raw)
 {
 	const std::vector<int16_t> pcm = ReadPcm(in);
+	if (pcm.empty()) { fprintf(stderr, "%s: no audio\n", in); return 1; }
 	const size_t frames = pcm.size() / 160, tsize = to == TCD_CODEC_P25 ? 11 : 9;
 	const size_t fsize = from == TCD_CODEC_P25 ? 11 : 9;
 	void *enc = p->open(from), *dec = p->open(from), *xc = p->open(to), *reenc = p->open(to), *out = p->open(to);
@@ -121,6 +123,7 @@ int main(int argc, char *argv[])
 		return Transcode(p, codec, target, argv[3], argv[4], argv[5]);
 
 	const std::vector<int16_t> pcm = ReadPcm(argv[3]);
+	if (pcm.empty()) { fprintf(stderr, "%s: no audio\n", argv[3]); return 1; }
 	const size_t frames = pcm.size() / 160;
 
 	void *s1 = p->open(codec), *s2 = p->open(codec);

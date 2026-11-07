@@ -86,7 +86,7 @@ bool CSoftCodec::Encode(uint16_t streamid, uint32_t sequence, bool last, const i
 {
 	std::lock_guard<std::mutex> lock(*m_Mutex);
 	SState *s = State(Key(streamid, true), sequence);
-	if (s && s->use == kTranscode && m_Plugin->start)
+	if (s && (s->use == kTranscode || s->use == kAudio) && m_Plugin->start)
 		m_Plugin->start(s->state);	// from transcode to encode mid-transmission: afresh
 	if (s)
 		s->use = kEncode;
@@ -119,12 +119,19 @@ bool CSoftCodec::Transcode(uint16_t streamid, uint32_t sequence, bool last, CSof
 	if (it == m_States.end())
 		return false;	// nothing decoded on this stream
 	SState *s = to->State(Key(streamid, true), sequence);
-	if (!s || s->use == kEncode)
+	if (!s || s->use == kEncode || s->use == kAudio)
 		return false;	// the transmission is encoded from the audio: it stays so
+	if (s->use == kUnused && sequence != 0)
+	{
+		// it began on the audio path (its first frame may still wait in the
+		// target's queue): it stays there, the order of its frames with it
+		s->use = kEncode;
+		return false;
+	}
 	const bool ok = 0 == m_Plugin->transcode(it->second.state, s->state, gain_db, frame);
-	// a failure keeps kTranscode: the audio path's Encode then starts the state
-	// afresh once and takes it over (kEncode) for the rest of the transmission
-	s->use = ok ? kTranscode : s->use;
+	// a failure hands the transmission to the audio path for good: its Encode
+	// starts the state afresh first, and no later frame is transcoded before it
+	s->use = ok ? kTranscode : kAudio;
 	to->Stop(s, last);
 	return ok;
 }
