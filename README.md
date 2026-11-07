@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.38.10** | tcd 0.20.11 | Dashboard v3.0.1
+**urfd 4.38.10** | tcd 0.20.12 | Dashboard v3.0.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1055,6 +1055,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.20.12**: the monitor page acknowledges each update and tcd sends a page the next one only then; a frozen browser tab (Chrome freezes hidden ones) took none, so the updates piled up in the socket buffers of tcd and every proxy in between (megabytes, minutes behind), and the proxies passed them on in tiny pieces as the window opened: a TLS nginx on a Raspberry Pi used 14 % CPU for one such tab
 - **tcd 0.20.11**: without `DeviceSerial` tcd takes only devices named as DVSI ones (ThumbDV, DVstick, USB-30xx, DF2ET); a clone with the generic FTDI name `FT232R_USB_UART` or `FT230X_Basic_UART` needs its `DeviceSerial`, as every FTDI USB serial adapter (programming and CAT cables, GPS) has that name and the probe sent AMBE packets at 460800 baud to it; the log names such a device with the line to add, and without `DeviceSerial` only DVSI named devices are bound back to `ftdi_sio`. `DeviceSerial = none` uses no AMBE device even with sticks plugged in, and `docker/build.sh` then gives the tcd container no `/dev`
 - **tcd 0.20.10**: the monitor's Transcode choice follows tcd, as the pool and the AMBE speech choices do (it showed the value of the page's load, and a switch from another browser or the API did not show); not while it is being used
 - **tcd 0.20.9**: a monitor tab left open loads the page again when tcd reports another version (it reconnected to a new tcd and kept the old page, which needed a forced reload); once per version, so a cache in between cannot make it loop

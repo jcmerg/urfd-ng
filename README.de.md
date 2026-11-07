@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.38.10** | tcd 0.20.11 | Dashboard v3.0.1
+**urfd 4.38.10** | tcd 0.20.12 | Dashboard v3.0.1
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -1040,6 +1040,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.20.12**: Die Monitor-Seite bestätigt jedes Update, und tcd schickt ihr das nächste erst dann; ein eingefrorener Browser-Tab (Chrome friert verborgene ein) nahm keines ab, die Updates stauten sich in den Socket-Puffern von tcd und jedem Proxy dazwischen (Megabytes, Minuten hinterher), und die Proxys gaben sie in winzigen Stücken weiter, sobald das Fenster aufging: ein TLS-nginx auf einem Raspberry Pi brauchte für einen solchen Tab 14 % CPU
 - **tcd 0.20.11**: Ohne `DeviceSerial` nimmt tcd nur Geräte mit DVSI-Namen (ThumbDV, DVstick, USB-30xx, DF2ET); ein Klon mit dem generischen FTDI-Namen `FT232R_USB_UART` oder `FT230X_Basic_UART` braucht seine `DeviceSerial`, denn diesen Namen hat jeder FTDI-USB-Seriell-Wandler (Programmier- und CAT-Kabel, GPS), und die Probe schickte ihm AMBE-Pakete mit 460800 Baud; das Log nennt ein solches Gerät mit der einzutragenden Zeile, und ohne `DeviceSerial` werden nur Geräte mit DVSI-Namen wieder an `ftdi_sio` gebunden. `DeviceSerial = none` verwendet kein AMBE-Gerät, auch wenn Sticks stecken, und `docker/build.sh` gibt dem tcd-Container dann kein `/dev`
 - **tcd 0.20.10**: Die Transcode-Auswahl im Monitor folgt tcd, wie die Auswahl von Pool und AMBE-Sprache (sie zeigte den Wert vom Laden der Seite, ein Umschalten aus einem anderen Browser oder über die API zeigte sie nicht); nicht während sie bedient wird
 - **tcd 0.20.9**: Ein offen gelassener Monitor-Tab lädt die Seite neu, wenn tcd eine andere Version meldet (er verband sich mit dem neuen tcd und behielt die alte Seite, die nur ein erzwungenes Neuladen ersetzte); einmal pro Version, ein Cache dazwischen kann also keine Schleife auslösen

@@ -747,11 +747,21 @@ int CMonitorServer::Callback(struct lws *wsi, enum lws_callback_reasons reason, 
 		self->m_Sessions[wsi] = SSession();
 		self->m_Sessions[wsi].ws = true;
 		break;
+	case LWS_CALLBACK_RECEIVE:
+	{
+		// the page's acknowledgement of the last stats: the next may go
+		auto it = self->m_Sessions.find(wsi);
+		if (it != self->m_Sessions.end())
+			it->second.ready = true;
+		break;
+	}
 	case LWS_CALLBACK_SERVER_WRITEABLE:
 	{
-		// the latest stats, every client gets the same
-		if (self->m_Push.empty())
+		// the latest stats, every client gets the same, once it took the last
+		auto it = self->m_Sessions.find(wsi);
+		if (self->m_Push.empty() || it == self->m_Sessions.end() || !it->second.ready)
 			break;
+		it->second.ready = false;
 		std::vector<unsigned char> buf(LWS_PRE + self->m_Push.size());
 		memcpy(buf.data() + LWS_PRE, self->m_Push.data(), self->m_Push.size());
 		if (lws_write(wsi, buf.data() + LWS_PRE, self->m_Push.size(), LWS_WRITE_TEXT) < (int)self->m_Push.size())
@@ -764,7 +774,7 @@ int CMonitorServer::Callback(struct lws *wsi, enum lws_callback_reasons reason, 
 		{
 			bool any = false;
 			for (const auto &[w, s] : self->m_Sessions)
-				any = any || s.ws;
+				any = any || (s.ws && s.ready);
 			if (any)
 			{
 				self->m_Push = self->BuildStatsJson();
