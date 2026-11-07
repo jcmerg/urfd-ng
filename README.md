@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.38.10** | tcd 0.20.9 | Dashboard v3.0.1
+**urfd 4.38.10** | tcd 0.20.10 | Dashboard v3.0.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1055,6 +1055,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.20.10**: the monitor's Transcode choice follows tcd, as the pool and the AMBE speech choices do (it showed the value of the page's load, and a switch from another browser or the API did not show); not while it is being used
 - **tcd 0.20.9**: a monitor tab left open loads the page again when tcd reports another version (it reconnected to a new tcd and kept the old page, which needed a forced reload); once per version, so a cache in between cannot make it loop
 - **tcd 0.20.8**: the web dashboard shows the reflector link in one line above the vocoder table, which takes the whole width, instead of a column beside it that squeezed and shifted the table; the counter columns are as narrow as their numbers, the spare width goes to the text columns, and on wide screens the frames and the errors stand apart
 - **tcd 0.20.7**: the vocoder table's narrow layout uses table columns too, two counters one below the other in each, so the counters of all rows line up (each cell had a grid of its own, shifted by its numbers), and dec and enc stay one below the other in every row, `direct` and `re-enc` to their left; each frame reads every gain once (the monitor could change one between its check and its use); the README says that switching `Transcode` to direct at run time applies to the transmissions that start afterwards, and that a transmission takes the direct path only from its first frame; the Docker README says the images need BuildKit
