@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.38.2** | tcd 0.19.5 | Dashboard v3.0.1
+**urfd 4.38.3** | tcd 0.20.0 | Dashboard v3.0.1
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -1034,6 +1034,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.20.0**: Codec-Plugin-Schnittstelle 4 (`TCD_CODEC_API 4`): Ein Plugin kann `transcode` anbieten, dann macht tcd D-Star, DMR/YSF und P25 direkt aus den Frames der anderen, aus den Parametern des Vocoders statt aus dem decodierten Audio, wenn Quelle und Ziel des Streams auf diesem Plugin liegen (`Transcode = direct`, der Standard; `audio` behält den alten Weg); der Gain der AGC und die Ausgangs-Gains gehen in die Frames ein, `OutputGainDMR` ganz. Die drei Codecs teilen das MBE-Vocoder-Modell, und die zweite Analyse synthetisierter Sprache ist der größte Verlust eines Transcoders: Über 19 Clips gewinnt jede der sechs Richtungen 0,1 bis 0,24 PESQ, für D-Star und DMR durch einen DV3000 bestätigt, bei einem Fünftel der Rechenzeit. M17, USRP, SVX, AMBE-Geräte und tcds eigene Vocoder behalten den Audio-Weg. Der Monitor markiert die Ziele, in die ein Stream direkt codiert wird, und zählt die Frames je Plugin-Codec. Plugins der Schnittstellen 2 und 3 laden wie bisher, siehe [tcd/README.md](tcd/README.de.md#codec-plugins)
 - **tcd 0.19.5**: Das Modul-LCD des Web-Monitors hat keinen dunklen Streifen mehr an der Oberkante, der wie ein Absatz im Rahmen aussah
 - **tcd 0.19.4**: Ein Wert in `tcd.ini`, der keine Zahl ist (oder NaN), wird gemeldet und der Standardwert behalten, statt tcd zu beenden, AGC-Werte bleiben in sinnvollen Grenzen, auch aus dem Web-Dashboard; ein Neuverbinden zu einem Reflektor-Host, der nicht antwortet, dauert 2 s statt Minuten; `StatsLog` schließt die Datei eines Streams 10 s nach seinem letzten Frame (sie blieben offen, bis tcd endete) und löscht nur seine eigenen CSV-Dateien; der Stats-Socket für tcdmon schickt einem langsamen Client keine halbe Zeile mehr; ein Anführungszeichen in einer USB-Seriennummer macht das JSON des Monitors nicht mehr kaputt
 - **tcd 0.19.3**: Companding wird an jedem AMBE-Gerät gesetzt, auch an einem DV3000, wie `DeviceCompand` es sagt (vorher behielt ein DV3000 bei `linear`, was der CP_ENABLE-Pin seiner Platine vorgab); ein einzelner DV3003 mit `mixed` macht das DMR eines zweiten Moduls oder Streams auf Kanal 2, der frei blieb, siehe [tcd/README.de.md](tcd/README.de.md#einzelner-dv3003-im-mischbetrieb)

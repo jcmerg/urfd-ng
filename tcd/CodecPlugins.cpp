@@ -90,7 +90,7 @@ bool CSoftCodec::Encode(uint16_t streamid, uint32_t sequence, bool last, const i
 	return ok;
 }
 
-bool CSoftCodec::Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm, tcd_frame_info *info)
+bool CSoftCodec::Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm, tcd_frame_info *info, bool hold)
 {
 	std::lock_guard<std::mutex> lock(*m_Mutex);
 	SState *s = State(Key(streamid, false), sequence);
@@ -101,7 +101,21 @@ bool CSoftCodec::Decode(uint16_t streamid, uint32_t sequence, bool last, const u
 	bool ok = false;
 	if (s)
 		ok = 0 == (m_Plugin->api >= 3 && m_Plugin->decode_info ? m_Plugin->decode_info(s->state, frame, pcm, info) : m_Plugin->decode(s->state, frame, pcm));
-	Stop(s, last);
+	Stop(s, last && !hold);
+	return ok;
+}
+
+bool CSoftCodec::Transcode(uint16_t streamid, uint32_t sequence, bool last, CSoftCodec *to, float gain_db, uint8_t *frame)
+{
+	if (!CanTranscode(to))
+		return false;
+	std::lock_guard<std::mutex> lock(*m_Mutex);	// the plugin's, shared by both codecs
+	auto it = m_States.find(Key(streamid, false));
+	if (it == m_States.end())
+		return false;	// nothing decoded on this stream
+	SState *s = to->State(Key(streamid, true), sequence);
+	const bool ok = s && 0 == m_Plugin->transcode(it->second.state, s->state, gain_db, frame);
+	to->Stop(s, last);
 	return ok;
 }
 

@@ -39,7 +39,7 @@
 extern "C" {
 #endif
 
-#define TCD_CODEC_API     3	// 2: start and stop; 3: decode_info, frame_format
+#define TCD_CODEC_API     4	// 2: start and stop; 3: decode_info, frame_format; 4: transcode
 #define TCD_CODEC_API_MIN 2	// the oldest api tcd still loads
 
 // the codecs, also as bits in tcd_codec_plugin.codecs
@@ -100,6 +100,15 @@ struct tcd_codec_plugin
 	// either needs frame_format. tcd carries only these and refuses a plugin
 	// that reports another format.
 	int (*frame_format)(uint32_t codec, uint32_t *bytes, uint32_t *samples);
+	// api 4: may be NULL. transcode: the frame the decoder state last decoded
+	// (decode or decode_info), coded with the codec of the encoder state from
+	// the decoded frame itself, not from its audio, with its level changed by
+	// gain_db; 0 = ok, frame has the size of the encoder's codec. Both states
+	// are from open of this plugin, for one stream, the decoder's codec another
+	// than the encoder's; tcd calls it right after the decode and uses the
+	// encoder state for that codec through transcode only, never through
+	// encode. A plugin without it, or an error, leaves tcd to encode the audio.
+	int (*transcode)(void *decoder, void *encoder, float gain_db, uint8_t *frame);
 };
 
 typedef const struct tcd_codec_plugin *(*tcd_codec_plugin_func)(void);

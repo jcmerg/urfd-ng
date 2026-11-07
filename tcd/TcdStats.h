@@ -33,6 +33,7 @@ struct ModuleStats
 	std::atomic<uint16_t> stream_id{0};
 	std::atomic<uint8_t>  codec_in{0};        // ECodecType cast
 	std::atomic<uint8_t>  last_codec{0};      // codec_in of the last stream, kept while idle
+	std::atomic<uint8_t>  direct{0};          // TCD_CODEC_* bits: the codecs made from the stream's frames directly, not from its audio
 
 	// Packet counters
 	std::atomic<uint32_t> packets_in{0};      // from reflector
@@ -82,6 +83,7 @@ struct SwVocoderStats
 	std::atomic<uint32_t> encodes{0};        // total encode calls
 	std::atomic<uint32_t> decodes{0};        // total decode calls
 	std::atomic<uint32_t> reencodes{0};      // total re-encode calls
+	std::atomic<uint32_t> transcodes{0};     // frames coded from another codec's frame (plugin api 4), not from audio
 	// how the decoded frames came out, from plugins of codec api 3 (0 otherwise)
 	std::atomic<uint32_t> error_frames{0};   // frames with bit errors the FEC corrected
 	std::atomic<uint32_t> repeats{0};        // frames played as a repeat of the last good one

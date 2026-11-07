@@ -63,6 +63,10 @@ public:
 	// DMR/YSF gain mode: off, ambe (bitstream b2), reencode (PCM through a codec plugin)
 	enum class EDmrGainMode { off, ambe, reencode };
 	EDmrGainMode GetDmrGainMode(void) const { return dmr_gain_mode; }
+	// Transcode = direct (the default): a codec plugin that can codes D-Star,
+	// DMR/YSF and P25 from each other's frames, skipping the decoded audio;
+	// audio: every codec is encoded from the audio, as before
+	bool GetTranscodeDirect(void) const { return transcode_direct; }
 	int  GetAmbeGainDb(void) const          { return ambe_gain_db; }
 
 	// AGC
@@ -123,6 +127,7 @@ private:
 	int outgain_dstar = 0, outgain_dmr = 0, outgain_usrp = 0, outgain_imbe = 0, outgain_m17 = 0;
 	int outgain_dmr_bitstream = -6;  // clean at -4 and -6 since 0.7.1, more crackles
 	EDmrGainMode dmr_gain_mode = EDmrGainMode::ambe;
+	bool transcode_direct = true;
 	int  ambe_gain_db = 0;
 	bool  agc_enabled = false;
 	float agc_target  = -16.0f;

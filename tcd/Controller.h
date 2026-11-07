@@ -49,7 +49,8 @@ public:
 	bool Start();
 	void Stop();
 	void ListDevices();
-	void RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet);
+	// from: the plugin codec that decoded a D-Star packet, for Transcode (nullptr: a device did)
+	void RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, class CSoftCodec *from = nullptr);
 	void RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet);
 	void ReconfigureAGC();  // re-read AGC params from g_Stats.config
 	void Dump(const std::shared_ptr<CTranscoderPacket> packet, const std::string &title) const;
@@ -181,7 +182,16 @@ protected:
 	// P25 with the stream's choice: OP25 or a plugin. A plugin's error gives IMBE
 	// silence (encode) or silent samples (decode)
 	void EncodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *imbe);
-	void DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm);
+	// the plugin codec that decoded, nullptr for OP25
+	class CSoftCodec *DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm);
+	// Transcode = direct: the frame `from` (a plugin codec) just decoded, coded into
+	// codec `to` by the same plugin from the frame itself, when the stream's choice
+	// for `to` is that plugin and it can (CodecPlugin.h api 4); the AGC's gain and
+	// the source's output gain in source_db, the target's gains added here. Sets
+	// the packet's frame of `to` and its bit in direct; false leaves `to` to the
+	// audio path
+	bool Transcode(uint32_t to, class CSoftCodec *from, float source_db, const std::shared_ptr<CTranscoderPacket> &packet, uint8_t *direct);
+	bool transcode_direct = true;
 	// M17 with the stream's choice: tcd's own Codec2 or a plugin. Encode: 3200,
 	// 160 samples into 8 bytes; decode: 8 bytes into 160 samples (3200) or 320
 	// (1600). A plugin's error gives Codec2 silence or silent samples
