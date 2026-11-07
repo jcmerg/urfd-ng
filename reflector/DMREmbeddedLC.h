@@ -49,10 +49,15 @@ public:
 	// when the whole alias arrived, its text is then in utf8
 	bool Collect(unsigned burst, const uint8_t *sync, std::string &utf8);
 	bool Done(void) const { return m_bDone; }
+	// for the log of a call that ended without one: the LCs that passed their
+	// checks, and bit n set for each LC n of an alias among them
+	unsigned LCs(void) const { return m_uiLCs; }
+	uint8_t Blocks(void) const { return m_uiMask; }
 
 private:
 	CDmrEmbeddedLC m_LC;
 	std::array<std::array<uint8_t, 9>, 4> m_TA {};
 	uint8_t m_uiMask = 0;	// bit n: LC n of the alias arrived
+	unsigned m_uiLCs = 0;	// whole LCs of any kind
 	bool m_bDone = false;
 };
