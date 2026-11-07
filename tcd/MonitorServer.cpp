@@ -820,7 +820,14 @@ int CMonitorServer::Respond(struct lws *wsi)
 	unsigned char headers[LWS_PRE + 1024];
 	unsigned char *start = headers + LWS_PRE, *p = start, *end = headers + sizeof(headers) - 1;
 	static const char cors[] = "*";
+	// the page is part of tcd: a browser asks again at every load, so a new tcd
+	// version shows without a forced reload (it sent no caching header at all,
+	// and browsers kept the old page by their own rules); the API is never kept
+	static const char cache_page[] = "no-cache", cache_api[] = "no-store";
+	const bool page = 0 == strncmp(type, "text/html", 9);
 	if (lws_add_http_common_headers(wsi, (unsigned)status, type, (lws_filepos_t)s.out.size(), &p, end)
+	 || lws_add_http_header_by_name(wsi, (const unsigned char *)"Cache-Control:", (const unsigned char *)(page ? cache_page : cache_api),
+	                                page ? (int)sizeof(cache_page) - 1 : (int)sizeof(cache_api) - 1, &p, end)
 	 || (m_Password.empty() && lws_add_http_header_by_name(wsi, (const unsigned char *)"Access-Control-Allow-Origin:", (const unsigned char *)cors, sizeof(cors) - 1, &p, end))
 	 || (!s.cookie.empty() && lws_add_http_header_by_name(wsi, (const unsigned char *)"Set-Cookie:", (const unsigned char *)s.cookie.c_str(), (int)s.cookie.size(), &p, end))
 	 || lws_finalize_write_http_header(wsi, start, &p, end))
