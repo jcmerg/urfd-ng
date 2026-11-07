@@ -126,8 +126,9 @@ void CLookup::Thread()
 			if (ERefreshType::both == m_Type)
 			{
 				ss << '\n';
-				LoadContentFile(ss);
-				time(&m_LastLoadTime);
+				// failed, the loop reads it again on its first pass
+				if (LoadContentFile(ss))
+					time(&m_LastLoadTime);
 			}
 			Lock();
 			ClearContents();
