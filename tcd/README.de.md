@@ -374,7 +374,7 @@ D-Star, DMR/YSF, P25 -> ein anderer der drei, beide auf einem Plugin mit transco
 
 **Mit AGC** können die festen Verstärkungen meist alle auf 0 bleiben, bis auf `OutputGainDMR = -14` für den Pegel, den DMR-Funkgeräte erwarten: Sie gleicht unterschiedliche Mikrofone, Funkgeräte und Codecs pro Aussendung aus. Ohne sie braucht jeder Weg seine eigene feste Verstärkung.
 
-Wo die AGC wirkt: Sie misst immer am dekodierten PCM des eingehenden Streams. Zwischen verschiedenen Codecs wird sie auf dieses PCM angewendet, bevor kodiert wird; auf dem direkten Weg geht ihr Gain für den Frame stattdessen in die Parameter des Ziel-Frames, bei jedem Pegel (keine b2-Stufen); der 75-Hz-Hochpass und die Rampe innerhalb eines Frames wirken nur auf das Audio. DMR → DMR/YSF bekommt sie im AMBE2+-Bitstrom über b2 (`DmrGainMode = ambe`) oder durch Neukodieren (`reencode`). D-Star → D-Star, M17 → M17 und P25 → P25 laufen unverändert durch.
+Wo die AGC wirkt: Sie misst immer am dekodierten PCM des eingehenden Streams. Zwischen verschiedenen Codecs wird sie auf dieses PCM angewendet, bevor kodiert wird; auf dem direkten Weg geht ihr Gain für den Frame stattdessen in die Parameter des Ziel-Frames, bei jedem Pegel (keine b2-Stufen); der 75-Hz-Hochpass und die Rampe innerhalb eines Frames wirken nur auf das Audio. Ein Gain von -60 dB oder weniger (ein Ausgangs-Gain bis „aus" in der `tcd.ini`) codiert dort Stille, wie der Audio-Weg seine Null-Samples codiert. DMR → DMR/YSF bekommt sie im AMBE2+-Bitstrom über b2 (`DmrGainMode = ambe`) oder durch Neukodieren (`reencode`). D-Star → D-Star, M17 → M17 und P25 → P25 laufen unverändert durch.
 
 Die AGC arbeitet pro Stream (pro Aussendung):
 - ein Hochpass bei 75 Hz (3. Ordnung, 18 dB/Oktave) auf dem Audio, damit Gleichanteil und Brumm weder den Pegel bestimmen noch in den Encoder gelangen
@@ -412,11 +412,13 @@ Die Grenzen sind absichtlich ungleich: Absenken ist unkritisch, Anheben hebt auc
 Monitor im Terminal, praktisch über SSH:
 
 ```bash
-tcdmon                      # this machine, port 8081
+tcdmon                      # this machine, the MonitorStatsPort of its tcd.ini (else 8081)
 tcdmon 192.0.2.20 8081      # another machine
 ```
 
-Zeigt Pegelbalken, Signalweg, AGC-Zustand, die Hardware (die belegten AMBE-Kanäle je Codec, fest oder Pool, jedes Gerät mit seinen Kanälen und Modulen, ausgephaste markiert) und die Software (die Codec-Plugins und die eigenen Vocoder von tcd) sowie die Ausgangsverstärkungen. `q` beendet.
+Ohne Port nimmt tcdmon `MonitorStatsPort` aus `$TCD_INI`, `/usr/local/etc/tcd/tcd.ini` (die des Docker-Images, `docker exec -it tcd tcdmon` geht also mit jedem Port) oder `/usr/local/etc/tcd.ini` (seit 0.20.3), sonst 8081.
+
+Zeigt für jedes Modul auf Sendung eine Karte mit Pegelbalken und Signalweg und die übrigen in einer Zeile (seit 0.20.3, wie die Kompaktansicht des Web-Dashboards), den AGC-Zustand, die Hardware (die belegten AMBE-Kanäle je Codec, fest oder Pool, jedes Gerät mit seinen Kanälen und Modulen, ausgephaste markiert) und die Software (die Codec-Plugins und die eigenen Vocoder von tcd) sowie die Ausgangsverstärkungen. `q` beendet.
 
 ### Statistik-CSV und agc-analyze
 
