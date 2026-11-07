@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.38.6** | tcd 0.20.3 | Dashboard v3.0.1
+**urfd 4.38.7** | tcd 0.20.4 | Dashboard v3.0.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1048,6 +1048,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.20.4**: the web dashboard's vocoder table puts each counter in a column of its own on wide screens, so the numbers of all rows line up (they ran in one right-aligned cell, and the `direct` counter shifted them), and a module tag no longer wraps away from its stream count; the monitor page is sent with `Cache-Control: no-cache` and its API with `no-store`, so a new tcd version shows at the next load instead of only after a forced reload
 - **tcd 0.20.3**: tcdmon shows a card only for the modules on the air and the others in one line, takes the stats port from the machine's `tcd.ini` when none is given (`docker exec -it tcd tcdmon` with any `MonitorStatsPort`), draws its gray in terminals with 8 colours (it was black on black under `docker exec`), keeps the reflector counters on the first line and writes nothing past the screen; the direct path counts a P25 target in StreamLog, follows the fixed channels' fallback to a plugin for modules beyond the devices, and a gain of -60 dB or less codes silence there as on the audio path; the mixed-mode warning names the case it is for
 - **tcd 0.20.2**: with `CodecDStar` and `CodecDMR` both on a codec plugin, tcd no longer leaves the AMBE devices unused: it sets them up as without the two lines, new streams start on the plugin, and the web dashboard can switch them to `dvsi` (before, it never could, the devices were not opened)
 - **tcd 0.20.1**: `Transcode` switches in the web dashboard at run time ("D-Star, DMR and P25 to each other", shown when a plugin can) and Save writes it; a transmission's encoder state gets either the direct path or the audio, so a switch mid-transmission or a failed transcode starts that encoder afresh instead of mixing the two; a target on an AMBE device is no longer looked up through the channel choice by the direct path (with `DeviceChannels = pool` the last frame could lose its channel), a frame whose decode failed is not transcoded, and a new stream clears the monitor's "(direct)" mark of the one before; `tools/codectest <plugin> dstar:dmr ...` shows the direct path of a plugin, tcdmon marks direct targets with `*` and counts them; the README's audio-level diagram shows the direct path
