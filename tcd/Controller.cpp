@@ -213,6 +213,27 @@ static bool IsWhitelisted(const SSerialDevice &dev, const std::vector<std::strin
 	return false;
 }
 
+// The names of the DVSI devices, found without DeviceSerial. The generic FTDI
+// names many clones report (FT232R_USB_UART, FT230X_Basic_UART) are those of
+// every other USB serial adapter too (programming and CAT cables, GPS): such a
+// device is only taken with DeviceSerial, as probing one sends bytes at 460800
+// baud to whatever hangs on it. Names as /dev/serial/by-id has them, or as the
+// USB product string with blanks
+static bool IsDvsiName(std::string desc)
+{
+	std::replace(desc.begin(), desc.end(), ' ', '_');
+	for (const char *name : { "ThumbDV", "DVstick-30", "DVstick-33", "USB-3000", "USB-3003", "USB-3006", "USB-3012", "DF2ET" })
+		if (std::string::npos != desc.find(name))
+			return true;
+	return false;
+}
+
+static bool IsGenericFtdiName(std::string desc)
+{
+	std::replace(desc.begin(), desc.end(), ' ', '_');
+	return std::string::npos != desc.find("FT232R_USB_UART") || std::string::npos != desc.find("FT230X_Basic_UART");
+}
+
 #ifdef __APPLE__
 static void BindFtdiSio(const std::vector<std::string> &) {}	// nothing to bind on macOS
 #else
@@ -242,7 +263,9 @@ static void BindFtdiSio(const std::vector<std::string> &whitelist)
 		if (ReadFirstLine(devdir + "/idVendor") != "0403" || 0 == access((usb + intf + "/driver").c_str(), F_OK))
 			continue;	// not FTDI, or it has a driver
 		const std::string serial = ReadFirstLine(devdir + "/serial");
-		bool wanted = whitelist.empty();
+		// without DeviceSerial only a device named as a DVSI one: another FTDI
+		// device may be unbound on purpose, for a program that uses it through libftdi
+		bool wanted = whitelist.empty() && IsDvsiName(ReadFirstLine(devdir + "/product"));
 		for (const auto &ws : whitelist)
 			wanted = wanted || (!serial.empty() && 0 == ws.compare(0, serial.size(), serial));
 		if (!wanted)
@@ -586,7 +609,8 @@ void CController::Stop()
 
 void CController::ListDevices()
 {
-	BindFtdiSio(g_Conf.GetDeviceSerials());
+	if (!g_Conf.GetNoDevices())
+		BindFtdiSio(g_Conf.GetDeviceSerials());
 	std::vector<SSerialDevice> devices;
 	if (!ListSerialDevices(devices) || devices.empty())
 	{
@@ -598,37 +622,28 @@ void CController::ListDevices()
 	int idx = 0;
 	for (const auto &dev : devices)
 		std::cout << "  [" << idx++ << "] Serial: " << (dev.serial.empty() ? "(none)" : dev.serial)
-		          << "  " << dev.desc << " -> " << dev.devnode << (IsAmbeDevice(dev.desc) ? "  (AMBE)" : "") << std::endl;
+		          << "  " << dev.desc << " -> " << dev.devnode
+		          << (IsAmbeDevice(dev.desc) ? "  (AMBE)" : IsGenericFtdiName(dev.desc) ? "  (AMBE clone or any USB serial adapter: only with DeviceSerial)" : "") << std::endl;
 	std::cout << std::endl;
-	std::cout << "Use 'DeviceSerial = <serial>' in tcd.ini to select your AMBE device." << std::endl;
+	std::cout << "Use 'DeviceSerial = <serial>' in tcd.ini to select your AMBE device, 'DeviceSerial = none' for none." << std::endl;
 }
 
 bool CController::IsAmbeDevice(const std::string &desc)
 {
-	// Known AMBE/DVSI device descriptions
-	// Generic FTDI names (FT232R, FT230X) are included because many
-	// ThumbDV/DVstick clones report these generic names.
-	static const std::vector<std::string> known = {
-		"ThumbDV", "DVstick-30", "DVstick-33",
-		"USB-3000", "USB-3003", "USB-3006", "USB-3012",
-		"FT232R_USB_UART", "FT230X_Basic_UART",
-		"DF2ET"
-	};
-	// Devices with empty description are not AMBE devices
-	if (desc.empty())
-		return false;
-	for (const auto &k : known)
-	{
-		if (std::string::npos != desc.find(k))
-			return true;
-	}
-	return false;
+	return !desc.empty() && IsDvsiName(desc);
 }
 
 bool CController::DiscoverFtdiDevices(std::list<std::pair<std::string, std::string>> &found)
 {
 	// the AMBE devices are used through the kernel's ftdi_sio driver
 	const auto &whitelist = g_Conf.GetDeviceSerials();
+	if (g_Conf.GetNoDevices())
+	{
+		if (!whitelist.empty())
+			std::cerr << "WARNING: DeviceSerial = none, the other DeviceSerial lines are ignored" << std::endl;
+		std::cout << "DeviceSerial = none: no AMBE device is used" << std::endl;
+		return false;
+	}
 	BindFtdiSio(whitelist);
 
 	// none at all is fine with codec plugins; InitVocoders says what is missing
@@ -647,6 +662,9 @@ bool CController::DiscoverFtdiDevices(std::list<std::pair<std::string, std::stri
 			if (mixed)
 				mixed_nodes.push_back(dev.devnode);
 		}
+		else if (whitelist.empty() && IsGenericFtdiName(dev.desc))
+			std::cout << "Skipping serial device: " << dev.desc << " (SN=" << sn << "), an AMBE clone or any USB serial adapter by its name; "
+			          << "if it is an AMBE device, add 'DeviceSerial = " << sn << "' to tcd.ini" << std::endl;
 		else
 		{
 			std::cout << "Skipping serial device" << (whitelist.empty() ? "" : " (not whitelisted)") << ": " << dev.desc << " (SN=" << sn << ")" << std::endl;

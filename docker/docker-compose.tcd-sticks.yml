@@ -1,5 +1,5 @@
 # tcd in Docker with DVSI AMBE sticks: docker/build.sh adds this file when the
-# tcd.ini in $URFD_DATA/tcd/ names a DeviceSerial or loads no CodecPlugin
+# tcd.ini in $URFD_DATA/tcd/ names a DeviceSerial (not none) or loads no CodecPlugin
 # (by hand: docker compose -f docker-compose.yml -f docker-compose.tcd-sticks.yml ...).
 #
 # The host's /dev, read only, and the USB serial devices (major 188, ttyUSB*)
