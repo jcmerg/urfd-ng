@@ -1447,10 +1447,11 @@ void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 	int16_t gained[160];
 	memcpy(gained, packet->GetAudioSamples(), sizeof(gained));
 	ApplyGain(gained, 160, PcmDmrGainNum());
-	if (ambe_in_num != 256)
+	const int32_t in_num = ambe_in_num;	// one value for the frame, the monitor may change it
+	if (in_num != 256)
 	{
 		for (int i = 0; i < 160; ++i)
-			gained[i] = int16_t((gained[i] * ambe_in_num) >> 8);
+			gained[i] = int16_t((gained[i] * in_num) >> 8);
 	}
 	auto *sw = SwCodec(TCD_CODEC_DMR, packet, nullptr, nullptr, false);	// ToDmr counted the frame
 	sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), gained, ambe2);
@@ -1471,10 +1472,11 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	tcd_frame_info info;
 	const bool decoded = sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDMRData(), tmp, &info, sw->HasTranscode());
 	SwDecodeStat(sw, packet->GetModule(), info);
-	if (ambe_out_num != 256)
+	const int32_t out_num = ambe_out_num;	// one value for the frame, the monitor may change it
+	if (out_num != 256)
 	{
 		for (int i=0; i<160; i++)
-			tmp[i] = (tmp[i] * ambe_out_num) >> 8;
+			tmp[i] = (tmp[i] * out_num) >> 8;
 	}
 	g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 	float agc_db = 0.0f;
@@ -1506,7 +1508,7 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	}
 	// D-Star and P25 from the DMR frame itself, where the plugin can
 	uint8_t direct = 0;
-	const float source_db = agc_db + GainDb(ambe_out_num);
+	const float source_db = agc_db + GainDb(out_num);
 	Transcode(TCD_CODEC_DSTAR, decoded ? sw : nullptr, source_db, packet, &direct);
 	Transcode(TCD_CODEC_P25, decoded ? sw : nullptr, source_db, packet, &direct);
 	if (packet->IsLast())
@@ -2605,18 +2607,20 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 		// Re-encode DMR from AGC'd PCM with the codec plugin
 		// Always re-encode when AGC or OutputGainDMR is active, otherwise the
 		// original (un-gained) AMBE data passes through unchanged
+		// one value of each gain for the frame, the monitor may change them
+		const int32_t out_num = outgain_dmr_num, reencode_num = dmr_reencode_num;
 		if (dmr_sw && (g_Stats.config.dmr_gain_mode.load(std::memory_order_relaxed) == 2) &&
-		    (m_agcDigital.IsEnabled() || outgain_dmr_num != 256 || dmr_reencode_num != 256))
+		    (m_agcDigital.IsEnabled() || out_num != 256 || reencode_num != 256))
 		{
 			uint8_t ambe2[9];
 			const int16_t *pcm = packet->GetAudioSamples();
 			int16_t tmp[160];
 			memcpy(tmp, pcm, sizeof(tmp));
-			ApplyGain(tmp, 160, outgain_dmr_num);
-			if (dmr_reencode_num != 256)
+			ApplyGain(tmp, 160, out_num);
+			if (reencode_num != 256)
 			{
 				for (int i = 0; i < 160; i++)
-					tmp[i] = (int16_t)((tmp[i] * dmr_reencode_num) >> 8);
+					tmp[i] = (int16_t)((tmp[i] * reencode_num) >> 8);
 			}
 			// the plugin keeps a state per stream; on its error the original frame stays
 			if (dmr_sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), tmp, ambe2))

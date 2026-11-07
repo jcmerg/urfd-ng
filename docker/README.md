@@ -19,6 +19,8 @@ docker compose --profile tcd build tcd && docker compose --profile tcd up -d tcd
 docker compose -f docker-compose.yml -f docker-compose.tcd-sticks.yml --profile tcd up -d tcd   # tcd with AMBE sticks
 ```
 
+The Dockerfiles keep apt's downloads in a BuildKit cache (`RUN --mount=type=cache`): they need BuildKit, which `docker compose` (Compose v2) and Docker Engine 23 and later use by default; the legacy builder (`DOCKER_BUILDKIT=0`, an older engine) stops at the `--mount` option.
+
 `build.sh` decides by the files in `$URFD_DATA`: `config/urfd.ini` builds urfd, `tcd/tcd.ini` builds tcd, both build both; on a transcoder machine it builds tcd alone. Which build script does what (`docker/build.sh`, `reflector/build.sh`, `tcd/build.sh`) and why each part runs one way only: [docs/INSTALL-ADVANCED.md](../docs/INSTALL-ADVANCED.md#what-gets-built).
 
 ## Configuration
