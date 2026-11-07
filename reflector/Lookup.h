@@ -59,7 +59,8 @@ protected:
 	void Thread();
 
 	// refresh
-	bool LoadContentHttp(std::stringstream &ss);
+	// fallback: set when a source after the first one delivered
+	bool LoadContentHttp(std::stringstream &ss, bool *fallback = nullptr);
 	bool LoadContentFile(std::stringstream &ss);
 	bool LoadContentFile(const std::string &path, std::stringstream &ss);
 	// The download is mirrored to m_CachePath so a database outage does not leave
