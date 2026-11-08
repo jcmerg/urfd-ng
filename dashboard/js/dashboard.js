@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.1';
+var DASHBOARD_VERSION = '3.1.2';
 
 var $ = function (id) { return document.getElementById(id); };
 
@@ -202,6 +202,21 @@ var handlers = {
 
 var ws = null, retry = 1000, nextId = 1, pending = {};
 var URF = window.URF = { request: request, onOpen: [], onClose: [], h: h, state: S, formatSpan: formatSpan, now: now, pages: {} };
+
+// a tab left open keeps the scripts of its load: after an update it reconnects to
+// the new urfd with the old page. At every connect the page asks the server for
+// the version of this file and loads itself again when it differs, once per
+// version (sessionStorage), so a cache in between cannot make it loop
+function checkVersion() {
+    fetch('js/dashboard.js', { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (text) {
+        var m = /DASHBOARD_VERSION = '([^']+)'/.exec(text);
+        if (!m || m[1] === DASHBOARD_VERSION) return;
+        var done = null;
+        try { done = sessionStorage.getItem('urf-reloaded-for'); sessionStorage.setItem('urf-reloaded-for', m[1]); } catch (e) {}
+        if (done !== m[1]) location.reload();
+    }).catch(function () {});
+}
+URF.onOpen.push(checkVersion);
 
 function connect() {
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
