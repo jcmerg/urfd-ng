@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.0';
+var DASHBOARD_VERSION = '3.1.1';
 
 var $ = function (id) { return document.getElementById(id); };
 
@@ -325,25 +325,37 @@ function waiting() {
 
 function dB(v) { return (v > 0 ? '+' : v < 0 ? '\u2212' : '') + Math.abs(v).toFixed(1) + ' dB'; }
 
-// sev: 0 fine, 1 to look at, 2 bad, for the word; level: that of the level alone, for the meter
-// the input level for the log and the LCD: none without speech (it would read -100 dB)
-function audioLevel(a) { return a.speech_percent ? dB(a.level_in_db) : ''; }
+// a transmission too short to rate its level: under 1.5 s, or under 1 s of speech
+// (a kerchunk, a quick "ok"); a few frames would make the verdict chance. One
+// without any speech is "No speech" only from 3 s on: a kerchunk may hold the
+// key for 2 s, a longer silent one is a stuck PTT or a dead microphone
+var SHORT_MS = 1500, SHORT_SPEECH_MS = 1000, NO_SPEECH_MS = 3000, MIN_FEC_FRAMES = 50;
+function speechMs(a) { return a.duration_ms * (a.speech_percent || 0) / 100; }
 
+// the input level for the log and the LCD: none without speech (it would read -100 dB)
+// and none for a short transmission (it would be rated by a few frames)
+function audioLevel(a, v) { return a.speech_percent && !v.short ? dB(a.level_in_db) : ''; }
+
+// sev: 0 fine, 1 to look at, 2 bad, for the word; level: that of the level alone, for
+// the meter; short: no level verdict, grey. Bit errors and packet loss count from
+// MIN_FEC_FRAMES on, so one bad frame of a kerchunk is not "33 %"
 function audioVerdict(a) {
-    var lost = a.fec && a.fec.frames ? a.fec.uncorrectable / a.fec.frames * 100 : 0;
-    var level = 0, w = 'Good';
-    if (!a.speech_percent) { level = 1; w = 'No speech'; }	// a carrier without modulation, or all of it muted
+    var rated = a.fec && a.fec.frames >= MIN_FEC_FRAMES;
+    var lost = rated ? a.fec.uncorrectable / a.fec.frames * 100 : 0;
+    var level = 0, w = 'Good', short = false;
+    if (!a.speech_percent && a.duration_ms >= NO_SPEECH_MS) { level = 1; w = 'No speech'; }	// a carrier without modulation, or all of it muted
+    else if (a.duration_ms < SHORT_MS || speechMs(a) < SHORT_SPEECH_MS) { short = true; w = 'Short'; }
     else if (a.clipped_percent >= 5 || a.level_in_db > -8) { level = 2; w = 'Overdriven'; }
     else if (a.level_in_db < -40) { level = 2; w = 'Too quiet'; }
     else if (a.clipped_percent >= 1 || a.level_in_db > -12) { level = 1; w = 'Loud'; }
     else if (a.level_in_db < -32) { level = 1; w = 'Quiet'; }
     var fec = lost >= 5 ? 2 : lost >= 2 ? 1 : 0;
-    var net = a.network_lost && a.fec && a.fec.frames ? a.network_lost / a.fec.frames * 100 : 0;
+    var net = a.network_lost && rated ? a.network_lost / a.fec.frames * 100 : 0;
     var loss = net >= 5 ? 2 : net >= 2 ? 1 : 0;
     if (fec > level && fec >= loss) w = 'Bit errors';
     else if (loss > level) w = 'Packet loss';
     var sev = Math.max(level, fec, loss);
-    return { w: w, sev: sev, level: level, warn: sev > 0 };
+    return { w: w, sev: sev, level: level, warn: sev > 0, short: short && sev === 0 };
 }
 
 var SEV = ['', ' warn', ' bad'];
@@ -355,7 +367,8 @@ function audioDetails(a) {
     if (a.fec) lines.push('FEC: ' + a.fec.frames + ' frames, ' + a.fec.corrected + ' repaired, ' + a.fec.uncorrectable + ' beyond repair');
     if (a.decoder) lines.push('Decoder: ' + a.decoder.repeated + ' repeated, ' + a.decoder.muted + ' muted');
     if (a.network_lost) lines.push('Network: ' + a.network_lost + ' frames lost on the way, filled in');
-    lines.push((a.duration_ms / 1000).toFixed(1) + ' s, ' + a.speech_percent + ' % speech');
+    lines.push((a.duration_ms / 1000).toFixed(1) + ' s, ' + (speechMs(a) / 1000).toFixed(1) + ' s of it speech');
+    if (audioVerdict(a).short) lines.unshift('Too short to rate the level');
     return lines.join('\n');
 }
 
@@ -366,10 +379,10 @@ function audioCell(a, v) {
     var peak = Math.max(0, Math.min(100, (a.peak_in_db + 40) / 40 * 100));
     // two causes: frames the FEC could not repair (bad), frames lost on the way (lost)
     var bad = a.fec ? a.fec.uncorrectable : 0, lost = a.network_lost || 0, muted = a.decoder ? a.decoder.muted : 0;
-    return '<span class="lvl' + SEV[v.sev] + ' lv' + v.level + '" title="' + h(audioDetails(a)) + '">'
+    return '<span class="lvl' + (v.short ? ' short' : SEV[v.sev] + ' lv' + v.level) + '" title="' + h(audioDetails(a)) + '">'
         + '<span class="lvl-bar" aria-hidden="true"><i style="width:' + fill.toFixed(0) + '%"></i><b style="left:' + peak.toFixed(0) + '%"></b></span>'
         + '<span class="lvl-w">' + v.w + '</span>'
-        + '<span class="lvl-n">' + [audioLevel(a), a.agc_db && Math.abs(a.agc_db.avg) >= 0.5 ? 'AGC ' + dB(a.agc_db.avg) : '',
+        + '<span class="lvl-n">' + [audioLevel(a, v), a.agc_db && Math.abs(a.agc_db.avg) >= 0.5 ? 'AGC ' + dB(a.agc_db.avg) : '',
             bad ? bad + ' bad' : '', lost ? lost + ' lost' : '', muted ? muted + ' muted' : ''].filter(Boolean).join(', ') + '</span></span>';
 }
 
@@ -402,7 +415,7 @@ function lcdPanel(key, air, last, hidden) {
             + '<div><dt>Mode</dt><dd>' + (st.protocol ? h(st.protocol) : 'unknown') + '</dd></div>'
             + '<div><dt>Via</dt><dd>' + h(st.via) + '</dd></div>'
             + (st.locator ? '<div><dt>Locator</dt><dd>' + h(st.locator) + '</dd></div>' : '')
-            + (!air && st.audio ? '<div title="' + h(audioDetails(st.audio)) + '"><dt>Audio</dt><dd>' + st.verdict.w + (st.audio.speech_percent ? ', ' + audioLevel(st.audio) : '') + '</dd></div>'
+            + (!air && st.audio ? '<div title="' + h(audioDetails(st.audio)) + '"><dt>Audio</dt><dd>' + st.verdict.w + (audioLevel(st.audio, st.verdict) ? ', ' + audioLevel(st.audio, st.verdict) : '') + '</dd></div>'
                 + (st.audio.agc_db ? '<div><dt>AGC</dt><dd>' + dB(st.audio.agc_db.avg) + '</dd></div>' : '') : '') + '</dl>';
     } else {
         out += '<p class="lcd-call">' + (key ? 'Quiet so far' : 'Waiting for the first call') + '</p>'
@@ -468,7 +481,7 @@ URF.pages.users = {
                 + '<td class="m"><span class="mod' + (isLive ? ' on' : '') + '">' + h(st.module) + '</span></td>'
                 + '<td class="p">' + h(st.protocol) + '</td><td class="v">' + h(st.via) + '</td>'
                 + '<td class="meta">' + h((st.protocol + (st.via ? ' via ' + st.via : '')).trim())
-                + (st.audio && !isLive ? ' \u00b7 <span class="lvl-m' + SEV[st.verdict.sev] + '">' + st.verdict.w + (st.audio.speech_percent ? ', ' + audioLevel(st.audio) : '') + '</span>' : '') + '</td><td class="opt">';
+                + (st.audio && !isLive ? ' \u00b7 <span class="lvl-m' + (st.verdict.short ? ' short' : SEV[st.verdict.sev]) + '">' + st.verdict.w + (audioLevel(st.audio, st.verdict) ? ', ' + audioLevel(st.audio, st.verdict) : '') + '</span>' : '') + '</td><td class="opt">';
             if (st.locator) {
                 // position sent along with the transmission (M17 GNSS, D-Star DPRS, YSF GPS), rounded to its locator
                 var lat = Number(st.lat), lon = Number(st.lon);
