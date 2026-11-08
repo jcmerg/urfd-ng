@@ -131,6 +131,12 @@ bool CMMDVMClientProtocol::Transcoded(char module) const
 
 bool CMMDVMClientProtocol::IsSourceClientBlocked(const CClient &client) const
 {
+	// an OpenBridge link into the same network: the network has the call already
+	if (client.GetProtocol() == EProtocol::openbridge)
+	{
+		const auto *src = dynamic_cast<const CMMDVMClientProtocol *>(client.GetOwnerProtocol());
+		return src && src->GetNetwork() == m_Network;
+	}
 	if (client.GetProtocol() != EProtocol::mmdvmclient)
 		return false;
 	const auto *src = dynamic_cast<const CMMDVMClientProtocol *>(client.GetOwnerProtocol());
@@ -571,7 +577,7 @@ void CMMDVMClientProtocol::SendKerchunk(uint32_t tg)
 	// This activates the TG on BrandMeister (dynamic subscription)
 	uint8_t ts = m_TGMap.TGToTimeslot(tg);
 	uint8_t slotFlag = (ts == 1) ? MMDVMCLI_FLAG_SLOT1 : MMDVMCLI_FLAG_SLOT2;
-	uint32_t streamId = (uint32_t)::rand();
+	uint32_t streamId = NextStreamId();
 
 	// Source ID must be a valid 24-bit DMR user ID (not the 9-digit repeater ID)
 	// Look up the callsign's personal DMR ID, fall back to FallbackDmrId
@@ -836,6 +842,8 @@ static void BurstAmbe(const uint8_t *dmrframe, uint8_t *dmr3ambe)
 
 bool CMMDVMClientProtocol::MayBeEcho(char module, uint32_t srcId)
 {
+	if (!m_EchoCheck)
+		return false;
 	auto it = m_RecentCalls.find(CallKey(module, srcId));
 	return it != m_RecentCalls.end() && !it->second.frames.empty() && it->second.last.time() < MMDVMCLI_ECHO_WINDOW;
 }
@@ -1063,7 +1071,7 @@ void CMMDVMClientProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &
 	std::shared_ptr<CClient> &client = m_ModuleClients[module];
 	if (!client || !clients->IsClient(client))
 	{
-		client = std::make_shared<CMMDVMClientPeer>(cs, Ip, module, this);
+		client = MakeModuleClient(cs, Ip, module);
 		clients->AddClient(client);
 	}
 
@@ -1084,6 +1092,11 @@ void CMMDVMClientProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &
 		g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, m_Name.c_str());
 		g_Reflector.ReleaseUsers();
 	}
+}
+
+std::shared_ptr<CClient> CMMDVMClientProtocol::MakeModuleClient(const CCallsign &cs, const CIp &ip, char module)
+{
+	return std::make_shared<CMMDVMClientPeer>(cs, ip, module, this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -1132,7 +1145,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 			cache.frameCount = 0;
 			cache.seqNo = 0;
 			cache.pktSeqNo = 0;
-			cache.streamId = (uint32_t)::rand();
+			cache.streamId = NextStreamId();
 			cache.srcId = userSrcId;
 			// without tcd the module carries the source's codec: only AMBE+2 (DMR, YSF,
 			// NXDN) may go to the master, and only the first frame tells
@@ -1144,7 +1157,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 			CBuffer buf;
 			if (EncodeDMRDHeader(header, module, buf))
 			{
-				Send(buf, m_MasterIp);
+				SendDMRD(buf, module);
 			}
 		}
 		else if (packet->IsDvFrame())
@@ -1186,7 +1199,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 				cache.frameCount = 0;
 				cache.seqNo = 0;
 				cache.pktSeqNo = 0;
-				cache.streamId = (uint32_t)::rand();
+				cache.streamId = NextStreamId();
 				cache.srcId = srcId;
 				m_OutboundCache[module] = cache;
 				it = m_OutboundCache.find(module);
@@ -1206,7 +1219,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 				AppendVoiceLCToBuffer(&buf, srcId, tg);
 				buf.Append((uint8_t)0);
 				buf.Append((uint8_t)0x32);
-				Send(buf, m_MasterIp);
+				SendDMRD(buf, module);
 			}
 
 			auto &c = it->second;
@@ -1218,7 +1231,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 					c.held = false;
 					CBuffer hb;
 					if (EncodeDMRDHeader(c.header, module, hb))
-						Send(hb, m_MasterIp);
+						SendDMRD(hb, module);
 				}
 				else
 				{
@@ -1238,7 +1251,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 			{
 				CBuffer buf;
 				if (EncodeDMRDTerminator(c.streamId, module, buf))
-					Send(buf, m_MasterIp);
+					SendDMRD(buf, module);
 				m_OutboundCache.erase(it);
 				continue;
 			}
@@ -1252,7 +1265,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 				if (EncodeDMRDVoiceFrame(c.frames[0], c.frames[1], c.frames[2],
 				                          c.seqNo, c.streamId, module, buf))
 				{
-					Send(buf, m_MasterIp);
+					SendDMRD(buf, module);
 				}
 				c.seqNo++;
 				c.frameCount = 0;
@@ -1337,19 +1350,23 @@ bool CMMDVMClientProtocol::EncodeDMRDVoiceFrame(
 bool CMMDVMClientProtocol::EncodeDMRDTerminator(uint32_t streamId, char module, CBuffer &buffer)
 {
 	uint32_t tg = m_TGMap.ModuleToTG(module);
+	auto cit = m_OutboundCache.find(module);
+	const uint32_t srcId = (cit != m_OutboundCache.end()) ? TerminatorSrcId(cit->second) : m_uiDmrId;
 
 	buffer.Set((uint8_t *)"DMRD", 4);
-	buffer.Append((uint8_t)0);
-	buffer.Append((uint8_t)(m_uiDmrId >> 16));
-	buffer.Append((uint8_t)(m_uiDmrId >> 8));
-	buffer.Append((uint8_t)(m_uiDmrId));
+	// the call's next sequence number: FreeDMR drops a packet whose number is not
+	// ahead of the one before, and with it the end of the call
+	buffer.Append((uint8_t)(cit != m_OutboundCache.end() ? cit->second.pktSeqNo++ : 0));
+	buffer.Append((uint8_t)(srcId >> 16));
+	buffer.Append((uint8_t)(srcId >> 8));
+	buffer.Append((uint8_t)(srcId));
 	buffer.Append((uint8_t)(tg >> 16));
 	buffer.Append((uint8_t)(tg >> 8));
 	buffer.Append((uint8_t)(tg));
 	buffer.Append(m_uiId, 4);
 	buffer.Append((uint8_t)(SlotFlag(module) | MMDVMCLI_FLAG_DATA_SYNC | DMR_DT_TERMINATOR_WITH_LC));
 	buffer.Append((uint8_t *)&streamId, 4);
-	AppendTerminatorLCToBuffer(&buffer, m_uiDmrId, tg);
+	AppendTerminatorLCToBuffer(&buffer, srcId, tg);
 	buffer.Append((uint8_t)0);
 	buffer.Append((uint8_t)0x32);
 

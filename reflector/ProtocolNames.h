@@ -27,7 +27,7 @@ inline std::map<std::string, EProtocol> &ProtocolNameTable(void)
 		{"M17", EProtocol::m17}, {"NXDN", EProtocol::nxdn},
 		{"P25", EProtocol::p25}, {"USRP", EProtocol::usrp},
 		{"URF", EProtocol::urf}, {"XLXPeer", EProtocol::xlxpeer},
-		{"G3", EProtocol::g3},
+		{"G3", EProtocol::g3}, {"OpenBridge", EProtocol::openbridge},
 	};
 	return names;
 }

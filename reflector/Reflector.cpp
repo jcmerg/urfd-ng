@@ -27,6 +27,7 @@
 #include "ExternalIp.h"
 #include "DMRMMDVMProtocol.h"
 #include "MMDVMClientProtocol.h"
+#include "OpenBridgeProtocol.h"
 #include "SvxReflectorProtocol.h"
 #include "SvxProtocol.h"
 #include "DCSClientProtocol.h"
@@ -286,6 +287,8 @@ void CReflector::ReloadConfig(const std::string &configPath)
 			mmdvm->GetTGMap().ReloadStaticFromConfig(MmdvmClientPrefix(mmdvm->GetInstance()), mmdvm->GetName());
 			mmdvm->RequestReconnect();
 		}
+		if (auto *obp = m_Protocols.FindByType(EProtocol::openbridge))
+			static_cast<COpenBridgeProtocol *>(obp)->GetTGMap().ReloadStaticFromConfig("obp", "OpenBridge");
 
 		auto *svxProto = m_Protocols.FindByType(EProtocol::svxreflector);
 		if (svxProto)
@@ -421,7 +424,7 @@ static const char *SourceSuffix(EProtocol p)
 {
 	switch (p)
 	{
-	case EProtocol::dmrplus: case EProtocol::dmrmmdvm: case EProtocol::mmdvmclient:
+	case EProtocol::dmrplus: case EProtocol::dmrmmdvm: case EProtocol::mmdvmclient: case EProtocol::openbridge:
 		return "DMR";
 	case EProtocol::ysf: case EProtocol::ysfclient:
 		return "YSF";
@@ -700,7 +703,7 @@ static ECodecType SourceCodec(EProtocol p, ECodecType packetCodec)
 	case EProtocol::dextra: case EProtocol::dplus: case EProtocol::dcs: case EProtocol::g3:
 	case EProtocol::dextraclient: case EProtocol::dplusclient: case EProtocol::dcsclient:
 		return ECodecType::dstar;
-	case EProtocol::dmrplus: case EProtocol::dmrmmdvm: case EProtocol::mmdvmclient: case EProtocol::nxdn: case EProtocol::ysfclient:
+	case EProtocol::dmrplus: case EProtocol::dmrmmdvm: case EProtocol::mmdvmclient: case EProtocol::openbridge: case EProtocol::nxdn: case EProtocol::ysfclient:
 		return ECodecType::dmr;
 	case EProtocol::ysf:
 		return ECodecType::p25 == packetCodec ? ECodecType::p25 : ECodecType::dmr;
@@ -725,7 +728,7 @@ static bool CarriesCodec(EProtocol p, ECodecType c)
 	case EProtocol::dextra: case EProtocol::dplus: case EProtocol::dcs: case EProtocol::g3:
 	case EProtocol::dextraclient: case EProtocol::dplusclient: case EProtocol::dcsclient:
 		return ECodecType::dstar == c;
-	case EProtocol::dmrplus: case EProtocol::dmrmmdvm: case EProtocol::mmdvmclient: case EProtocol::nxdn: case EProtocol::ysfclient:
+	case EProtocol::dmrplus: case EProtocol::dmrmmdvm: case EProtocol::mmdvmclient: case EProtocol::openbridge: case EProtocol::nxdn: case EProtocol::ysfclient:
 		return ECodecType::dmr == c;
 	case EProtocol::ysf:
 		return ECodecType::dmr == c || ECodecType::p25 == c;	// DN, and VW (since 4.31.0)
@@ -802,8 +805,8 @@ void CReflector::RouterThread(const char ThisModule)
 			}
 			if (ownerClient && (*it)->IsSourceClientBlocked(*ownerClient))
 			{
-				// only worth a line when the other MMDVMClient connection serves the module
-				const bool serves = (dstProto != EProtocol::mmdvmclient) || static_cast<CMMDVMClientProtocol *>((*it).get())->GetTGMap().IsModuleInUse(ThisModule);
+				// only worth a line when the other MMDVMClient connection (or OpenBridge) serves the module
+				const bool serves = (dstProto != EProtocol::mmdvmclient && dstProto != EProtocol::openbridge) || static_cast<CMMDVMClientProtocol *>((*it).get())->GetTGMap().IsModuleInUse(ThisModule);
 				if (packet->IsDvHeader() && (*it).get() != srcInstance && serves)
 				{
 					const std::string dstName = (dstProto == EProtocol::mmdvmclient) ? static_cast<CMMDVMClientProtocol *>((*it).get())->GetName() : g_GateKeeper.ProtocolName(dstProto);
@@ -1072,6 +1075,17 @@ nlohmann::json CReflector::GetModuleMappings(char m)
 		for (const auto &mi : cli->GetTGMap().GetAllMappings())
 			if (mi.module == m)
 				addTG(cli->GetName().c_str(), mi, true)["network"] = cli->GetNetwork();
+	}
+	if (auto *proto = m_Protocols.FindByType(EProtocol::openbridge))
+	{
+		auto *obp = static_cast<COpenBridgeProtocol *>(proto);
+		for (const auto &mi : obp->GetTGMap().GetAllMappings())
+			if (mi.module == m)
+			{
+				auto &e = addTG("OpenBridge", mi, false);
+				e["network"] = obp->GetNetwork();
+				e["remote_name"] = obp->GetMasterAddress();
+			}
 	}
 	if (enabled(g_Keys.svx.enable))
 	{

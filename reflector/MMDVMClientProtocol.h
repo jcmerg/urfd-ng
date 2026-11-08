@@ -22,6 +22,7 @@
 #include <deque>
 #include <set>
 #include <vector>
+#include <random>
 
 // MMDVM protocol constants
 #define MMDVMCLI_RETRY_PERIOD       10  // seconds between retransmissions
@@ -72,6 +73,7 @@ public:
 	// instance 1 is [MMDVMClient], n is [MMDVMClient<n>]
 	explicit CMMDVMClientProtocol(unsigned instance = 1)
 		: m_Instance(instance), m_Keys(MmdvmClientKeys(instance)), m_Name(MmdvmClientName(instance)) {}
+	virtual ~CMMDVMClientProtocol() {}
 
 	unsigned GetInstance(void) const          { return m_Instance; }
 	const std::string &GetName(void) const    { return m_Name; }
@@ -155,7 +157,18 @@ protected:
 	// Stream helpers
 	void OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &, const CIp &);
 
-private:
+	// what OpenBridge (OpenBridgeProtocol.h) does its own way: a DMRD packet of a
+	// call on module to the other end, the client of a module, the source ID of
+	// a terminator
+	virtual void SendDMRD(CBuffer &buffer, char module) { (void)module; Send(buffer, m_MasterIp); }
+	virtual std::shared_ptr<CClient> MakeModuleClient(const CCallsign &cs, const CIp &ip, char module);
+	virtual uint32_t TerminatorSrcId(const SMMDVMClientStreamCache &) const { return m_uiDmrId; }
+
+	// a connection without a name of its own among the MMDVMClient ones (OpenBridge);
+	// m_Keys are [MMDVMClient]'s then and stay unread, it has its own keys
+	CMMDVMClientProtocol(const std::string &name)
+		: m_Instance(0), m_Keys(MmdvmClientKeys(1)), m_Name(name) {}
+
 	// which connection this is
 	const unsigned  m_Instance;
 	const SJsonKeys::MMDVMCLIENT m_Keys;
@@ -165,6 +178,13 @@ private:
 	// the client of each module, ours alone: another connection may use the
 	// same callsign to the same master
 	std::unordered_map<char, std::shared_ptr<CClient>> m_ModuleClients;
+
+	// a call from the master right after one of the same ID may be its echo (BrandMeister)
+	bool            m_EchoCheck = true;
+	// stream IDs of our calls: not ::rand(), whose sequence starts the same after
+	// every restart, and FreeDMR ignores an ID it saw end in the last 3 minutes
+	std::mt19937    m_StreamIds{std::random_device{}()};
+	uint32_t NextStreamId(void) { uint32_t id; do id = uint32_t(m_StreamIds()); while ((id & 0x00FFFFFF) == 0); return id; }
 
 	// Config
 	uint32_t        m_FallbackDmrId;

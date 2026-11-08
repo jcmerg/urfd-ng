@@ -110,6 +110,7 @@
 #define JSVXSERVER               "SVXServer"
 #define JPLUGINS                 "Plugins"
 #define JDCSCLIENT               "DCSClient"
+#define JOPENBRIDGE              "OpenBridge"
 
 static inline void split(const std::string &s, char delim, std::vector<std::string> &v)
 {
@@ -312,6 +313,8 @@ bool CConfigure::ReadData(const std::string &path)
 				section = ESection::dashboard;
 			else if (0 == hname.compare(JDCSCLIENT))
 				section = ESection::dcsclient;
+			else if (0 == hname.compare(JOPENBRIDGE))
+				section = ESection::openbridge;
 			else if (0 == hname.compare("YSFClient"))
 				section = ESection::ysfclient;
 			else if (0 == hname.compare("DExtraClient"))
@@ -793,6 +796,54 @@ bool CConfigure::ReadData(const std::string &path)
 					badParam(key);
 				break;
 			}
+			case ESection::openbridge:
+			{
+				const auto &ok = g_Keys.openbridge;
+				if (0 == key.compare(JENABLE))
+					data[ok.enable] = IS_TRUE(value[0]);
+				else if (0 == key.compare("TargetAddress"))
+					data[ok.address] = value;
+				else if (0 == key.compare("TargetPort"))
+					data[ok.port] = getUnsigned(value, "OpenBridge TargetPort", 1, 65535, 62035);
+				else if (0 == key.compare("LocalPort"))
+					data[ok.localport] = getUnsigned(value, "OpenBridge LocalPort", 1, 65535, 62035);
+				else if (0 == key.compare("NetworkId"))
+					data[ok.networkid] = getUnsigned(value, "OpenBridge NetworkId", 1, 4294967295U, 0);
+				else if (0 == key.compare("SourceServer"))
+					data[ok.sourceserver] = getUnsigned(value, "OpenBridge SourceServer", 1000, 9999999, 0);
+				else if (0 == key.compare("PeerId"))
+					data[ok.peerid] = getUnsigned(value, "OpenBridge PeerId", 0, 4294967295U, 0);
+				else if (0 == key.compare("Passphrase"))
+					data[ok.passphrase] = value;
+				else if (0 == key.compare("Dialect"))
+				{
+					std::string d(value);
+					for (auto &ch : d) ch = char(std::tolower((unsigned char)ch));
+					if (d == "classic" || d == "freedmr")
+						data[ok.dialect] = d;
+					else
+						std::cerr << "ERROR: [" << JOPENBRIDGE << "] Dialect = " << value << ": only classic or freedmr is known, classic it is" << std::endl;
+				}
+				else if (0 == key.compare("AutoUpgrade"))
+					data[ok.autoupgrade] = IS_TRUE(value[0]);
+				else if (0 == key.compare("PreserveSourcePeer"))
+					data[ok.preservesourcepeer] = IS_TRUE(value[0]);
+				else if (0 == key.compare("FallbackDmrId"))
+					data[ok.fallbackdmrid] = getUnsigned(value, "OpenBridge FallbackDmrId", 0, 16777215, 0);
+				else if (0 == key.compare("BlockProtocols"))
+					data[ok.blockprotocols] = value;
+				else if (0 == key.compare("Network"))
+					data[ok.network] = value;
+				else if (0 == key.compare("TGs"))
+					data["obpAutoTGs"] = value;	// auto: every module with a talkgroup, resolved below
+				else if (0 == key.compare("Modules"))
+					data["obpModules"] = value;	// these modules' talkgroups, resolved below
+				else if (0 == key.compare(0, 2, "TG") && key.size() > 2 && std::all_of(key.begin() + 2, key.end(), ::isdigit))
+					data["obpTG" + key.substr(2)] = value;	// TG<number> = <Module>
+				else
+					badParam(key);
+				break;
+			}
 			case ESection::svx:
 				if (0 == key.compare(JENABLE))
 					data[g_Keys.svx.enable] = IS_TRUE(value[0]);
@@ -1213,7 +1264,26 @@ bool CConfigure::ReadData(const std::string &path)
 					data["mmdvmTG" + std::to_string(data[ModuleTGKey(m)].get<unsigned>())] = std::string(1, m) + "," + ts;
 			}
 		}
-		const std::pair<const char *, const char *> autoSections[] = { { "mmdvm", JMMDVM }, { "svxs", JSVXSERVER } };
+		// [OpenBridge] Modules = <modules>: their talkgroups, as TS1 = above without a timeslot
+		if (data.contains("obpModules"))
+		{
+			const std::string list = data["obpModules"].get<std::string>();
+			data.erase("obpModules");
+			for (char m : list)
+			{
+				if (!std::isalpha((unsigned char)m))
+					continue;
+				m = char(std::toupper((unsigned char)m));
+				if (!data.contains(ModuleTGKey(m)))
+				{
+					std::cerr << "ERROR: [" << JOPENBRIDGE << "] Modules = " << list << ": module " << m << " has no talkgroup, give it TG" << m << " = <number> in [" << JMODULES << "]" << std::endl;
+					rval = true;
+				}
+				else if (!mapsModule("obpTG", m) && !data.contains("obpTG" + std::to_string(data[ModuleTGKey(m)].get<unsigned>())))
+					data["obpTG" + std::to_string(data[ModuleTGKey(m)].get<unsigned>())] = std::string(1, m);
+			}
+		}
+		const std::pair<const char *, const char *> autoSections[] = { { "mmdvm", JMMDVM }, { "svxs", JSVXSERVER }, { "obp", JOPENBRIDGE } };
 		for (const auto &[prefix, section] : autoSections)
 		{
 			const std::string key = std::string(prefix) + "AutoTGs";
@@ -1233,13 +1303,15 @@ bool CConfigure::ReadData(const std::string &path)
 				rval = true;
 				continue;
 			}
-			// SVXServer takes transcoded modules only: all of them with [Transcoder] Modules = auto
+			// SVXServer takes transcoded modules only: all of them with [Transcoder] Modules = auto;
+			// MMDVM and OpenBridge every module, untranscoded ones carry AMBE+2 alone
+			const bool svx = (0 == std::string(prefix).compare("svxs"));
 			const bool tcAll = data.contains(g_Keys.tc.automatic) && data[g_Keys.tc.automatic].get<bool>();
 			const std::string tcList = data.contains(g_Keys.tc.modules) ? data[g_Keys.tc.modules].get<std::string>() : std::string();
 			const std::string tgPrefix = std::string(prefix) + "TG";
 			for (char m : mods)
 			{
-				if (!data.contains(ModuleTGKey(m)) || mapsModule(tgPrefix, m) || (!mmdvm && !tcAll && std::string::npos == tcList.find(m)))
+				if (!data.contains(ModuleTGKey(m)) || mapsModule(tgPrefix, m) || (svx && !tcAll && std::string::npos == tcList.find(m)))
 					continue;
 				const std::string tgKey = tgPrefix + std::to_string(data[ModuleTGKey(m)].get<unsigned>());
 				if (!data.contains(tgKey))	// a TG line with this number wins
@@ -1729,6 +1801,35 @@ bool CConfigure::ReadData(const std::string &path)
 	{
 		struct SUsed { std::string network, name; };
 		std::map<std::string, SUsed> usedTG, usedId;	// "<network>/<TG or DMR ID>" -> first user
+		// TG mappings: the module must exist; without transcoding only AMBE+2 (DMR,
+		// YSF, NXDN) crosses it, the other modes stay local
+		const auto tcmods(tcport ? GetString(g_Keys.tc.modules) : std::string());
+		const auto mods(data.contains(g_Keys.modules.modules) ? GetString(g_Keys.modules.modules) : std::string());
+		auto checkTGs = [&](const std::string &tgPrefix, const std::string &name, const std::string &network) {
+			for (auto it = data.begin(); it != data.end(); ++it)
+			{
+				const std::string &k = it.key();
+				if (k.compare(0, tgPrefix.size(), tgPrefix) != 0 || k.size() == tgPrefix.size() || !std::isdigit((unsigned char)k[tgPrefix.size()]))
+					continue;
+				const std::string tg = k.substr(tgPrefix.size());
+				std::string val = it.value().get<std::string>();
+				if (val.size() >= 1 && std::string::npos == mods.find(val[0]))
+				{
+					std::cerr << "ERROR: [" << name << "] TG" << tg << " module " << val[0] << " is not a configured module" << std::endl;
+					rval = true;
+				}
+				else if (val.size() >= 1 && std::string::npos == tcmods.find(val[0]))
+					std::cout << "NOTE: [" << name << "] TG" << tg << " is on module " << val[0] << ", which is not transcoded: only DMR, YSF and NXDN reach it and come from it" << std::endl;
+				const std::string tgKey = network + "/" + tg;
+				if (usedTG.count(tgKey))
+				{
+					std::cerr << "ERROR: [" << name << "] TG" << tg << " is mapped by [" << usedTG[tgKey].name << "] in the same network " << network << " already" << std::endl;
+					rval = true;
+				}
+				else
+					usedTG[tgKey] = { network, name };
+			}
+		};
 		for (unsigned n = 1; n <= MMDVMCLI_MAX_INSTANCES; n++)
 		{
 			const auto ck = MmdvmClientKeys(n);
@@ -1771,34 +1872,63 @@ bool CConfigure::ReadData(const std::string &path)
 				else
 					usedId[idKey] = { network, name };
 			}
-			// TG mappings: the module must exist; without transcoding only AMBE+2 (DMR,
-			// YSF, NXDN) crosses it, the other modes stay local
-			const auto tcmods(tcport ? GetString(g_Keys.tc.modules) : std::string());
-			const auto mods(data.contains(g_Keys.modules.modules) ? GetString(g_Keys.modules.modules) : std::string());
-			const std::string tgPrefix = MmdvmClientPrefix(n) + "TG";
-			for (auto it = data.begin(); it != data.end(); ++it)
+			checkTGs(MmdvmClientPrefix(n) + "TG", name, network);
+		}
+
+		// OpenBridge: one more connection into a network, with its TGs among the others
+		const auto &ok = g_Keys.openbridge;
+		if (isDefined(ErrorLevel::mild, JOPENBRIDGE, JENABLE, ok.enable, rval) && GetBoolean(ok.enable))
+		{
+			isDefined(ErrorLevel::fatal, JOPENBRIDGE, "TargetAddress", ok.address, rval);
+			isDefined(ErrorLevel::fatal, JOPENBRIDGE, "TargetPort", ok.port, rval);
+			isDefined(ErrorLevel::fatal, JOPENBRIDGE, "NetworkId", ok.networkid, rval);
+			isDefined(ErrorLevel::fatal, JOPENBRIDGE, "Passphrase", ok.passphrase, rval);
+			if (!data.contains(ok.localport))
+				data[ok.localport] = 62035U;
+			if (!data.contains(ok.dialect))
+				data[ok.dialect] = std::string("classic");
+			if (data.contains(ok.passphrase))
 			{
-				const std::string &k = it.key();
-				if (k.compare(0, tgPrefix.size(), tgPrefix) != 0 || k.size() == tgPrefix.size() || !std::isdigit((unsigned char)k[tgPrefix.size()]))
-					continue;
-				const std::string tg = k.substr(tgPrefix.size());
-				std::string val = it.value().get<std::string>();
-				if (val.size() >= 1 && std::string::npos == mods.find(val[0]))
-				{
-					std::cerr << "ERROR: [" << name << "] TG" << tg << " module " << val[0] << " is not a configured module" << std::endl;
-					rval = true;
-				}
-				else if (val.size() >= 1 && std::string::npos == tcmods.find(val[0]))
-					std::cout << "NOTE: [" << name << "] TG" << tg << " is on module " << val[0] << ", which is not transcoded: only DMR, YSF and NXDN reach it and come from it" << std::endl;
-				const std::string tgKey = network + "/" + tg;
-				if (usedTG.count(tgKey))
-				{
-					std::cerr << "ERROR: [" << name << "] TG" << tg << " is mapped by [" << usedTG[tgKey].name << "] in the same network " << network << " already" << std::endl;
-					rval = true;
-				}
-				else
-					usedTG[tgKey] = { network, name };
+				const std::string pass = GetString(ok.passphrase);
+				if (pass.size() > 20)
+					std::cerr << "WARNING: [" << JOPENBRIDGE << "] Passphrase is longer than 20 characters: HBlink3 and FreeDMR use its first 20 only, HBlink4 all of it; with 20 or fewer it works with all of them" << std::endl;
+				if (std::any_of(pass.begin(), pass.end(), [](char ch) { return (unsigned char)ch > 0x7E || (unsigned char)ch < 0x20; }))
+					std::cerr << "WARNING: [" << JOPENBRIDGE << "] Passphrase has characters beyond ASCII: the other end may count them otherwise, keep to ASCII" << std::endl;
 			}
+			// a network given by its address alone is that address: an MMDVMClient into
+			// the same network by its host name would count as another one, and calls
+			// would go round between them
+			if (data.contains(ok.address) && !data.contains(ok.network))
+			{
+				const std::string a = GetString(ok.address);
+				if (!a.empty() && (std::all_of(a.begin(), a.end(), [](char ch) { return std::isdigit((unsigned char)ch) || ch == '.'; }) || a.find(':') != std::string::npos))
+					std::cerr << "WARNING: [" << JOPENBRIDGE << "] TargetAddress " << a << " is an address: set Network to the network's name (as in the MMDVMClient connections into it), else urfd takes the address as the network and cannot keep calls from going round between the link and those connections" << std::endl;
+			}
+			for (const auto *key : { &ok.address, &ok.passphrase })
+				if (data.contains(*key) && GetString(*key).empty())
+				{
+					std::cerr << "ERROR: [" << JOPENBRIDGE << "] " << (key == &ok.address ? "TargetAddress" : "Passphrase") << " is empty" << std::endl;
+					rval = true;
+				}
+			if (data.contains(ok.networkid) && GetUnsigned(ok.networkid) == 0)
+			{
+				std::cerr << "ERROR: [" << JOPENBRIDGE << "] NetworkId is not a number above 0" << std::endl;
+				rval = true;
+			}
+			// FreeDMR checks the source server of a call: 4 or 5 digits from its list
+			// of servers, 6 or 7 a DMR ID it knows (a link may turn FreeDMR by itself)
+			const bool maybeFreeDmr = GetString(ok.dialect) == "freedmr" || !data.contains(ok.autoupgrade) || GetBoolean(ok.autoupgrade);
+			if (maybeFreeDmr && data.contains(ok.networkid) && !data.contains(ok.sourceserver))
+			{
+				const auto digits = std::to_string(GetUnsigned(ok.networkid)).size();
+				if (digits < 4 || digits > 7)
+					std::cerr << "WARNING: [" << JOPENBRIDGE << "] NetworkId " << GetUnsigned(ok.networkid) << " is FreeDMR's source server of our calls too, and FreeDMR takes 4 to 7 digits only: set SourceServer for a FreeDMR end" << std::endl;
+			}
+			if (data.contains(ok.peerid) && data.contains(ok.preservesourcepeer) && GetBoolean(ok.preservesourcepeer))
+				std::cout << "NOTE: [" << JOPENBRIDGE << "] PeerId and PreserveSourcePeer: an end with a PeerId check of its own takes only our NetworkId" << std::endl;
+			const std::string network = MmdvmClientNetwork(data.contains(ok.network) ? GetString(ok.network) : "",
+				data.contains(ok.address) ? GetString(ok.address) : "");
+			checkTGs("obpTG", JOPENBRIDGE, network);
 		}
 	}
 

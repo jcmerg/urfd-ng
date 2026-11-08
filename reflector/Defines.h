@@ -68,7 +68,7 @@
 
 // protocols ---------------------------------------------------
 
-enum class EProtocol { any, none, dextra, dplus, dcs, g3, xlxpeer, urf, dmrplus, dmrmmdvm, nxdn, p25, usrp, ysf, m17, mmdvmclient, svxreflector, svx, dcsclient, ysfclient, dextraclient, dplusclient, plugin };
+enum class EProtocol { any, none, dextra, dplus, dcs, g3, xlxpeer, urf, dmrplus, dmrmmdvm, nxdn, p25, usrp, ysf, m17, mmdvmclient, svxreflector, svx, dcsclient, ysfclient, dextraclient, dplusclient, openbridge, plugin };
 // the protocols of plugins (Plugin.h) follow EProtocol::plugin, one each
 inline EProtocol PluginProtocolId(unsigned index) { return EProtocol(int(EProtocol::plugin) + int(index)); }
 inline bool IsPluginProtocol(EProtocol p) { return int(p) >= int(EProtocol::plugin); }

@@ -25,7 +25,7 @@
 // the version of urfd, g_Version (Main.cpp); a plugin (Plugin.h) is built for exactly this one.
 // The major byte should only change if the interlink packet changes! [URF] InterlinkVersion = 3 still announces 3
 #define URFD_VERSION_MAJOR    4
-#define URFD_VERSION_MINOR    39
+#define URFD_VERSION_MINOR    40
 #define URFD_VERSION_REVISION 0
 // the firmware an MMDVMClient link reports without [MMDVMClient] Firmware (and config/urfd.ini names)
 #define URFD_DEFAULT_FIRMWARE "20261108_URFD"
