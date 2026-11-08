@@ -1069,6 +1069,22 @@ void CMonitorServer::StatsThread()
 ////////////////////////////////////////////////////////////////////////////////
 // Save config to ini file
 
+// the key of a line of tcd.ini as CConfigure reads it: white space around it
+// does not count, a comment (# after leading white space) has none. Without the
+// leading white space a key in an indented line was not found, it stayed as it
+// was and was written once more at the end
+static std::string IniKey(const std::string &line)
+{
+	const auto start = line.find_first_not_of(" \t\r");
+	if (start == std::string::npos || line[start] == '#')
+		return "";
+	const auto eq = line.find('=', start);
+	if (eq == std::string::npos || eq == start)
+		return "";
+	auto end = line.find_last_not_of(" \t", eq - 1);
+	return (end == std::string::npos || end < start) ? "" : line.substr(start, end - start + 1);
+}
+
 bool CMonitorServer::SaveConfig(const std::string &ini_path)
 {
 	// Read existing ini, update gain/AGC values, write back
@@ -1092,9 +1108,8 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 		std::string l;
 		while (std::getline(in, l))
 		{
-			if (l.empty() || l[0] == '#') continue;
-			std::string k = l.substr(0, l.find('='));
-			while (!k.empty() && k.back() == ' ') k.pop_back();
+			const std::string k = IniKey(l);
+			if (k.empty()) continue;
 			for (auto &a : profile)
 				if (k == a.key) a.present = true;
 			if (k == "OutputGainDMRBitstream") bitstreamPresent = true;
@@ -1119,65 +1134,56 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 	while (std::getline(in, line))
 	{
 		// Check if this line matches a configurable key
-		std::string trimmed = line;
-		// skip comments
-		if (!trimmed.empty() && trimmed[0] != '#')
+		const std::string key = IniKey(line);
+		if (!key.empty())
 		{
-			auto eq = trimmed.find('=');
-			if (eq != std::string::npos)
+			if (key == "DStarGainIn")       { out << key << " = " << g_Stats.config.gain_dstar_in.load() << "\n"; continue; }
+			if (key == "DStarGainOut")      { out << key << " = " << g_Stats.config.gain_dstar_out.load() << "\n"; continue; }
+			if (key == "DmrGainIn")         { out << key << " = " << g_Stats.config.gain_dmr_in.load() << "\n"; continue; }
+			if (key == "DmrGainOut")        { out << key << " = " << g_Stats.config.gain_dmr_out.load() << "\n"; continue; }
+			if (key == "DmrReencodeGain")   { out << key << " = " << g_Stats.config.gain_dmr_reencode.load() << "\n"; continue; }
+			if (key == "OutputGainDStar")   { out << key << " = " << g_Stats.config.outgain_dstar.load() << "\n"; continue; }
+			if (key == "OutputGainDMR")
 			{
-				std::string key = trimmed.substr(0, eq);
-				// trim key
-				while (!key.empty() && key.back() == ' ') key.pop_back();
-
-				if (key == "DStarGainIn")       { out << key << " = " << g_Stats.config.gain_dstar_in.load() << "\n"; continue; }
-				if (key == "DStarGainOut")      { out << key << " = " << g_Stats.config.gain_dstar_out.load() << "\n"; continue; }
-				if (key == "DmrGainIn")         { out << key << " = " << g_Stats.config.gain_dmr_in.load() << "\n"; continue; }
-				if (key == "DmrGainOut")        { out << key << " = " << g_Stats.config.gain_dmr_out.load() << "\n"; continue; }
-				if (key == "DmrReencodeGain")   { out << key << " = " << g_Stats.config.gain_dmr_reencode.load() << "\n"; continue; }
-				if (key == "OutputGainDStar")   { out << key << " = " << g_Stats.config.outgain_dstar.load() << "\n"; continue; }
-				if (key == "OutputGainDMR")
-				{
-					out << key << " = " << g_Stats.config.outgain_dmr.load() << "\n";
-					if (!bitstreamPresent)
-						out << "OutputGainDMRBitstream = " << g_Stats.config.outgain_dmr_bitstream.load() << "\n";
-					continue;
-				}
-				if (key == "OutputGainDMRBitstream") { out << key << " = " << g_Stats.config.outgain_dmr_bitstream.load() << "\n"; continue; }
-				if (key == "OutputGainUSRP")   { out << key << " = " << g_Stats.config.outgain_usrp.load() << "\n"; continue; }
-				if (key == "OutputGainIMBE")   { out << key << " = " << g_Stats.config.outgain_imbe.load() << "\n"; continue; }
-				if (key == "OutputGainM17")    { out << key << " = " << g_Stats.config.outgain_m17.load() << "\n"; continue; }
-				if (key == "DmrGainMode")      { int m = g_Stats.config.dmr_gain_mode.load(); out << key << " = " << (m==2 ? "reencode" : m==1 ? "ambe" : "off") << "\n"; continue; }
-				if (key == "AmbeGainDb")       { out << key << " = " << g_Stats.config.ambe_gain_db.load() << "\n"; continue; }
-				if (key == "Transcode")        { out << key << " = " << (direct ? "direct" : "audio") << "\n"; transcodeWritten = true; continue; }
-				if (key == "MonitorView") { out << key << " = " << views[view] << "\n"; viewWritten = true; continue; }
-				// without devices at this start the setting is not in use: the line stays
-				if (key == "DeviceChannels" && g_Stats.pool_available.load()) { out << key << " = " << (pool ? "pool" : "fixed") << "\n"; poolWritten = true; continue; }
-				if (key == "DeviceCompand" && g_Stats.pool_available.load()) { out << key << " = " << CompandName(compand) << "\n"; compandWritten = true; continue; }
-				const int k = ChoiceOfIni(key);
-				if (k >= 0 && g_Stats.codec_options[k].size() > (g_CodecChoices[k].own ? 1u : 0u))
-				{
-					out << key << " = " << codecLine(k) << "\n";
-					codecWritten[k] = true;
-					continue;
-				}
-				if (key == "AGC")               { out << key << " = " << (g_Stats.config.agc_enabled.load() ? "true" : "false") << "\n"; continue; }
-				if (key == "AGCTarget")         { out << key << " = " << g_Stats.config.agc_target.load() << "\n"; continue; }
-				if (key == "AGCAttack")         { out << key << " = " << g_Stats.config.agc_attack.load() << "\n"; continue; }
-				if (key == "AGCRelease")        { out << key << " = " << g_Stats.config.agc_release.load() << "\n"; continue; }
-				if (key == "AGCMaxGainDown")
-				{
-					out << key << " = " << g_Stats.config.agc_maxgain_down.load() << "\n";
-					// the per-profile settings follow it when the ini doesn't have them yet
-					for (auto &a : profile)
-						if (!a.present && !a.written) { out << a.key << " = " << a.value << "\n"; a.written = true; }
-					continue;
-				}
-				bool done = false;
+				out << key << " = " << g_Stats.config.outgain_dmr.load() << "\n";
+				if (!bitstreamPresent)
+					out << "OutputGainDMRBitstream = " << g_Stats.config.outgain_dmr_bitstream.load() << "\n";
+				continue;
+			}
+			if (key == "OutputGainDMRBitstream") { out << key << " = " << g_Stats.config.outgain_dmr_bitstream.load() << "\n"; continue; }
+			if (key == "OutputGainUSRP")   { out << key << " = " << g_Stats.config.outgain_usrp.load() << "\n"; continue; }
+			if (key == "OutputGainIMBE")   { out << key << " = " << g_Stats.config.outgain_imbe.load() << "\n"; continue; }
+			if (key == "OutputGainM17")    { out << key << " = " << g_Stats.config.outgain_m17.load() << "\n"; continue; }
+			if (key == "DmrGainMode")      { int m = g_Stats.config.dmr_gain_mode.load(); out << key << " = " << (m==2 ? "reencode" : m==1 ? "ambe" : "off") << "\n"; continue; }
+			if (key == "AmbeGainDb")       { out << key << " = " << g_Stats.config.ambe_gain_db.load() << "\n"; continue; }
+			if (key == "Transcode")        { out << key << " = " << (direct ? "direct" : "audio") << "\n"; transcodeWritten = true; continue; }
+			if (key == "MonitorView") { out << key << " = " << views[view] << "\n"; viewWritten = true; continue; }
+			// without devices at this start the setting is not in use: the line stays
+			if (key == "DeviceChannels" && g_Stats.pool_available.load()) { out << key << " = " << (pool ? "pool" : "fixed") << "\n"; poolWritten = true; continue; }
+			if (key == "DeviceCompand" && g_Stats.pool_available.load()) { out << key << " = " << CompandName(compand) << "\n"; compandWritten = true; continue; }
+			const int k = ChoiceOfIni(key);
+			if (k >= 0 && g_Stats.codec_options[k].size() > (g_CodecChoices[k].own ? 1u : 0u))
+			{
+				out << key << " = " << codecLine(k) << "\n";
+				codecWritten[k] = true;
+				continue;
+			}
+			if (key == "AGC")               { out << key << " = " << (g_Stats.config.agc_enabled.load() ? "true" : "false") << "\n"; continue; }
+			if (key == "AGCTarget")         { out << key << " = " << g_Stats.config.agc_target.load() << "\n"; continue; }
+			if (key == "AGCAttack")         { out << key << " = " << g_Stats.config.agc_attack.load() << "\n"; continue; }
+			if (key == "AGCRelease")        { out << key << " = " << g_Stats.config.agc_release.load() << "\n"; continue; }
+			if (key == "AGCMaxGainDown")
+			{
+				out << key << " = " << g_Stats.config.agc_maxgain_down.load() << "\n";
+				// the per-profile settings follow it when the ini doesn't have them yet
 				for (auto &a : profile)
-					if (key == a.key) { out << key << " = " << a.value << "\n"; a.written = true; done = true; }
-				if (done) continue;
-				}
+					if (!a.present && !a.written) { out << a.key << " = " << a.value << "\n"; a.written = true; }
+				continue;
+			}
+			bool done = false;
+			for (auto &a : profile)
+				if (key == a.key) { out << key << " = " << a.value << "\n"; a.written = true; done = true; }
+			if (done) continue;
 		}
 		out << line << "\n";
 	}
