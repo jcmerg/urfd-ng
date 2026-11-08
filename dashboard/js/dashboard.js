@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.3';
+var DASHBOARD_VERSION = '3.1.4';
 
 var $ = function (id) { return document.getElementById(id); };
 
@@ -397,7 +397,10 @@ function audioCell(a, v) {
     var fill = a.speech_percent ? Math.max(4, meterPos(a.level_in_db)) : 0, peak = meterPos(a.peak_in_db);
     // two causes: frames the FEC could not repair (bad), frames lost on the way (lost)
     var bad = a.fec ? a.fec.uncorrectable : 0, lost = a.network_lost || 0, muted = a.decoder ? a.decoder.muted : 0;
-    return '<span class="lvl' + (v.short ? ' short' : SEV[v.sev] + ' lv' + v.level) + '" title="' + h(audioDetails(a)) + '">'
+    // a short one is not rated: the empty track keeps the column in line, the values are in the tooltip
+    if (v.short)
+        return '<span class="lvl short" title="' + h(audioDetails(a)) + '"><span class="lvl-bar" aria-hidden="true"></span><span class="lvl-w">' + v.w + '</span></span>';
+    return '<span class="lvl' + SEV[v.sev] + ' lv' + v.level + '" title="' + h(audioDetails(a)) + '">'
         + '<span class="lvl-bar" aria-hidden="true"><i style="width:' + fill.toFixed(0) + '%"></i><b style="left:' + peak.toFixed(0) + '%"></b></span>'
         + '<span class="lvl-w">' + v.w + '</span>'
         + '<span class="lvl-n">' + [audioLevel(a, v), a.agc_db && Math.abs(a.agc_db.avg) >= 0.5 ? 'AGC ' + dB(a.agc_db.avg) : '',
