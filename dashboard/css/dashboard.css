@@ -230,7 +230,7 @@ tr.live td { background: color-mix(in srgb, var(--lcd) 18%, transparent); }
 .empty td { text-align: center; color: var(--graphite); padding-block: 2rem; }
 .ip { font-stretch: 85%; color: var(--graphite); }
 #log td.meta { display: none; }
-/* the audio of a transmission (transcoded modules): a small level meter, -40 to 0 dBFS, with its peak;
+/* the audio of a transmission (transcoded modules): a small level meter, -50 to 0 dBFS, with its peak;
    green fine, orange to look at, red bad (as a colour only: the filled red tag stays for transmitting) */
 .au { white-space: nowrap; }
 .lvl { display: inline-grid; grid-template-columns: 4.5rem auto; grid-template-areas: "bar w" "bar n"; column-gap: 0.5rem; align-items: center; cursor: help; }

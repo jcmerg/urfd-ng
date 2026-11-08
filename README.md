@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.39.0** | tcd 0.21.0 | Dashboard v3.1.2
+**urfd 4.39.0** | tcd 0.21.0 | Dashboard v3.1.3
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -717,7 +717,7 @@ Since 4.38.0 urfd writes no XML or JSON status file any more (`[Files] XmlPath` 
 
 Module names are configured once in `urfd.ini` and automatically available in the dashboard.
 
-### Dashboard v3.1.2
+### Dashboard v3.1.3
 Since v3.0.0 (urfd 4.38.0) a static page, HTML and plain JavaScript without PHP: it gets the state live over urfd's WebSocket and shows a change the moment it happens, the admin page sends its commands the same way. The pages and the look are those of v2.14; old links (`index.php?show=...`) lead to the same pages. Settings are `[Dashboard]` in `urfd.ini`; `setup.sh update` carries those of the old `config.inc.php` over once.
 
 Redesigned in v2.9.0 as the front panel of a radio: an amber LCD shows who is on the air, the modules are a keypad, the rest are plain tables. Before that: dark mode (v2.6.0), hardened against directory outages (v2.6.1), M17 positions in the last-heard list (v2.7.0), directory registration moved to the reflector (v2.8.0), security fixes (v2.8.1, v2.8.2), status file and admin socket fixes (v2.8.3). Since v2.10.0 the operator's first name stands next to the callsign, from the ID databases urfd loads (urfd 4.12.0 and later).
@@ -1016,6 +1016,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.6.0**: Dark mode redesign, admin panel, module overview with TG mappings and NXDN RAN, protocol-specific columns hidden when disabled, protocol list, QuadNet Live proxy, reflector list with search/pagination
 - **Dashboard v2.6.1**: Survives an outage of the XLX directory. Explicit timeouts on every outbound request, CallingHome failures logged instead of aborting the page render, reflector and peer lists served from an on-disk cache, admin API no longer serialized behind the PHP session lock
 - **Dashboard v2.7.0**: Locator column for stations that send an M17 GNSS position, also in `/json/stations`
+- **Dashboard v3.1.3 (urfd 4.39.0)**: the level meter starts at -50 dBFS, where a frame counts as speech, instead of -40 dBFS, so a "Too quiet" transmission (below -40 dBFS) shows its red bar; a level with speech always shows at least a sliver
 - **Dashboard v3.1.2 (urfd 4.39.0)**: a dashboard tab left open loads itself again after an update: at every connect it asks the server for the version of its script and reloads once when it differs (once per version, so a cache in between cannot make it loop). Before, it reconnected to the new urfd with the old page until a forced reload
 - **Dashboard v3.1.1 (urfd 4.39.0)**: a transmission too short to rate its level (under 1.5 s, or under 1 s of speech: a kerchunk, a quick "ok") shows "Short" in grey without a level, its values in the tooltip; "No speech" in orange only from 3 s without any speech (a stuck PTT, a dead microphone); bit errors and packet loss count from 50 frames on, so one bad frame of a kerchunk does not turn it red
 - **Dashboard v3.1.0 (urfd 4.39.0)**: the last heard list shows on transcoded modules how each transmission sounded: a small meter of the input level with its peak, a word for it in green, orange or red (Good; Loud, Quiet, No speech; Overdriven, Too quiet; Bit errors, Packet loss), what the AGC changed and the frames the FEC could not repair (bad), lost on the way (lost) or muted; the details (clipped share, level after the AGC, FEC repaired and lost, decoder repeats and mutes, network losses) in the tooltip, the LCD shows it for the last station heard. Red is only a colour there: the filled red tag stays the one for transmitting
