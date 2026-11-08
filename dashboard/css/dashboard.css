@@ -242,6 +242,8 @@ tr.live td { background: color-mix(in srgb, var(--lcd) 18%, transparent); }
 .lvl-w { grid-area: w; font-size: var(--fs-xs); font-weight: 600; color: var(--ok); line-height: 1.1; }
 .lvl.warn .lvl-w, .lvl-m.warn { color: var(--warn); font-weight: 600; }
 .lvl.bad .lvl-w, .lvl-m.bad { color: var(--tx); font-weight: 600; }
+.lvl.short .lvl-bar i { background: var(--rule); }
+.lvl.short .lvl-w, .lvl-m.short { color: var(--graphite); }
 .lvl-n { grid-area: n; font-size: var(--fs-xs); color: var(--graphite); font-stretch: 85%; line-height: 1.1; }
 .tag { display: inline-block; font-size: var(--fs-xs); border: 1px solid var(--rule); border-radius: 2px; padding: 0 0.35rem; margin: 0.1rem 0.25rem 0.1rem 0; white-space: nowrap; }
 .tag.dyn { border-style: dashed; }
