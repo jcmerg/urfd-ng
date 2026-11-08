@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.38.10** | tcd 0.20.16 | Dashboard v3.0.1
+**urfd 4.38.10** | tcd 0.20.17 | Dashboard v3.0.1
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -1040,6 +1040,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.20.17**: Die Monitor-Seite übernimmt nach einem Neustart des tcd dessen Einstellungen, ohne neu geladen zu werden: Nach dem Einstecken von AMBE-Sticks und dem Neustart erscheinen „AMBE channels“ und „AMBE speech“ (und „AGC and re-encode“) im offenen Tab, bisher erst nach einem Neuladen der Seite
 - **tcd 0.20.16**: Die Monitor-Seite schreibt ihre Zahlen wie die Sprache des Browsers, tcdmon wie die Locale des Terminals (LANG, LC_NUMERIC): 134.853 und -12,3 dB auf Deutsch, 134,853 und -12.3 dB auf Englisch; tcdmon gruppiert in der C-Locale nicht und zeigt ein Trennzeichen aus mehreren Bytes (Französisch, Russisch) als Leerzeichen
 - **tcd 0.20.15**: Jeder Zähler der Monitor-Seite und von tcdmon hat seine Tausender getrennt, auch die Pakete der Module und der Reflektor-Verbindung (134 853 auf der Seite, 134,853 in tcdmon, dessen einfaches ncurses-Terminal das schmale Leerzeichen nicht zeigen kann)
 - **tcd 0.20.14**: Die Monitor-Seite zeigt jeden Zähler exakt, mit schmalen Leerzeichen zwischen den Tausendern (102 345, ab 100 Mio in Millionen), ein laufender Zähler bewegt sich also mit jedem Frame; das gerundete 102k stand 20 s Audio lang still und wirkte hängengeblieben
