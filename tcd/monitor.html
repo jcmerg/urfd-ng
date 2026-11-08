@@ -596,11 +596,14 @@ function render() {
   var rows = '';
   var hw = data.hw_channels || {};
   // a counter with its label; bad: red when it is not zero
-  // large counts short (462k, 6834k, 68.34M, 683.4M), six characters below 1000M,
-  // and still moving: a step of 1000 frames is 20 s of audio up to 10M, of
-  // 10000 frames 200 s up to 100M; the exact count in the tooltip
-  var short = function (n) { return n < 100000 ? String(n) : n < 9999500 ? Math.round(n / 1000) + 'k' : n < 99995000 ? (n / 1000000).toFixed(2) + 'M' : (n / 1000000).toFixed(1) + 'M'; };
-  var cnt = function (n, lbl, bad) { n = n || 0; return '<span class="cnt' + (bad && n > 0 ? ' bad' : '') + '"' + (n >= 100000 ? ' title="' + n + ' ' + lbl + '"' : '') + '>' + short(n) + '<span class="lbl">' + lbl + '</span></span>'; };
+  // the exact count with thin spaces between the thousands (102 345), so a
+  // running counter moves with every frame; a rounded one (102k) stood still for
+  // 20 s of audio and looked stuck. From 100M (23 days of one stream) in
+  // millions, the exact count in the tooltip; a table too wide for a column per
+  // counter falls back to the narrow layout (fitTable)
+  var thousands = function (n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '\u202f'); };
+  var short = function (n) { return n < 100000000 ? thousands(n) : (n / 1000000).toFixed(2) + 'M'; };
+  var cnt = function (n, lbl, bad) { n = n || 0; return '<span class="cnt' + (bad && n > 0 ? ' bad' : '') + '"' + (n >= 100000000 ? ' title="' + n + ' ' + lbl + '"' : '') + '>' + short(n) + '<span class="lbl">' + lbl + '</span></span>'; };
   // wide: each counter in a column of its own (the table lines them up), as
   // many as the row with the most has; narrow: two counters one below the
   // other per column, frames: dec and enc on the right as in every row, direct
