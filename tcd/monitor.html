@@ -427,7 +427,9 @@ applyTheme();
 function connect() {
   // relative to the page, so it works behind a reverse proxy under a path (/tcd/)
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + location.pathname.replace(/[^\/]*$/, '') + 'ws');
-  ws.onopen = function () { $('conn').className = 'link-state ok'; $('conn').textContent = 'Live'; };
+  // a new connection may be a restarted tcd with other devices (sticks plugged in
+  // since): its first stats set up the settings again, not only those of the first one
+  ws.onopen = function () { $('conn').className = 'link-state ok'; $('conn').textContent = 'Live'; configLoaded = false; };
   ws.onclose = function () {
     $('conn').className = 'link-state bad'; $('conn').textContent = 'No connection to tcd, retrying';
     // a refused WebSocket may mean the session is gone: ask before trying again
@@ -447,9 +449,10 @@ function connect() {
     if (!configLoaded) {
       loadConfig(data.config);
       loadCodecs(data.codecs);
-      if (!data.reencode_available) {
-        var o = document.querySelector('#dmr_gain_mode option[value="reencode"]'); if (o) o.remove();
-      }
+      // hidden, not removed: a restarted tcd may have it again
+      var o = document.querySelector('#dmr_gain_mode option[value="reencode"]');
+      o.hidden = o.disabled = !data.reencode_available;
+      if (o.disabled && $('dmr_gain_mode').value === 'reencode') $('dmr_gain_mode').value = 'off';
       updateDmrGainMode();
       $('transcode_group').hidden = !data.transcode_available;
       configLoaded = true;
