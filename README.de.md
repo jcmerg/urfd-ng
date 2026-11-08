@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.39.0** | tcd 0.21.0 | Dashboard v3.1.2
+**urfd 4.39.0** | tcd 0.21.0 | Dashboard v3.1.3
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -702,7 +702,7 @@ Seit 4.38.0 schreibt urfd keine XML- oder JSON-Statusdatei mehr (`[Files] XmlPat
 
 Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Dashboard zur Verfügung.
 
-### Dashboard v3.1.2
+### Dashboard v3.1.3
 Seit v3.0.0 (urfd 4.38.0) eine statische Seite, HTML und einfaches JavaScript ohne PHP: Sie bekommt den Stand live über den WebSocket von urfd und zeigt eine Änderung in dem Moment, in dem sie passiert; die Admin-Seite schickt ihre Befehle auf demselben Weg. Seiten und Aussehen sind die von v2.14; alte Links (`index.php?show=...`) führen auf dieselben Seiten. Die Einstellungen stehen in `[Dashboard]` in `urfd.ini`; `setup.sh update` übernimmt die der alten `config.inc.php` einmal.
 
 In v2.9.0 neu gestaltet als Frontplatte eines Funkgeräts: Ein bernsteinfarbenes LCD zeigt, wer gerade sendet, die Module sind ein Tastenfeld, der Rest sind schlichte Tabellen. Davor: dunkles Design (v2.6.0), robust gegen Ausfälle des Verzeichnisses (v2.6.1), M17-Positionen in der Last-Heard-Liste (v2.7.0), Eintrag ins Verzeichnis an den Reflektor abgegeben (v2.8.0), Sicherheitskorrekturen (v2.8.1, v2.8.2), Korrekturen an Statusdatei und Admin-Socket (v2.8.3). Seit v2.10.0 steht der Vorname neben dem Rufzeichen, aus den ID-Datenbanken, die urfd lädt (ab urfd 4.12.0).
@@ -1001,6 +1001,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v3.1.3 (urfd 4.39.0)**: Die Pegelanzeige beginnt bei -50 dBFS, wo ein Frame als Sprache zählt, statt bei -40 dBFS, so zeigt ein „Too quiet“-Durchgang (unter -40 dBFS) seinen roten Balken; ein Pegel mit Sprache zeigt immer wenigstens einen schmalen Rest
 - **Dashboard v3.1.2 (urfd 4.39.0)**: Ein offen gelassener Dashboard-Tab lädt sich nach einem Update neu: Bei jeder Verbindung fragt er den Server nach der Version seines Skripts und lädt sich einmal neu, wenn sie abweicht (einmal je Version, ein Cache dazwischen kann also keine Schleife auslösen). Bisher verband er sich mit der alten Seite zum neuen urfd, bis zu einem erzwungenen Neuladen
 - **Dashboard v3.1.1 (urfd 4.39.0)**: Ein Durchgang, der zu kurz ist, um seinen Pegel zu bewerten (unter 1,5 s oder unter 1 s Sprache: ein Kerchunk, ein kurzes „ok“), zeigt grau „Short“ ohne Pegel, seine Werte im Tooltip; „No speech“ in Orange erst ab 3 s ganz ohne Sprache (hängende PTT, defektes Mikrofon); Bitfehler und Paketverlust zählen ab 50 Frames, ein schlechter Frame eines Kerchunks färbt ihn also nicht rot
 - **Dashboard v3.1.0 (urfd 4.39.0)**: Die Last-Heard-Liste zeigt auf transkodierten Modulen, wie jeder Durchgang klang: eine kleine Anzeige des Eingangspegels mit seiner Spitze, ein Wort dafür in Grün, Orange oder Rot (Good; Loud, Quiet, No speech; Overdriven, Too quiet; Bit errors, Packet loss), was die AGC änderte und die Frames, die die FEC nicht retten konnte (bad), die unterwegs verloren gingen (lost) oder stummgeschaltet wurden; die Einzelheiten (übersteuerter Anteil, Pegel nach der AGC, FEC repariert und verloren, Wiederholungen und Stummschaltungen des Decoders, Netzverluste) im Tooltip, das LCD zeigt es für die zuletzt gehörte Station. Rot ist dort nur eine Farbe: Das gefüllte rote Kästchen bleibt dem Senden vorbehalten

@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.2';
+var DASHBOARD_VERSION = '3.1.3';
 
 var $ = function (id) { return document.getElementById(id); };
 
@@ -387,11 +387,14 @@ function audioDetails(a) {
     return lines.join('\n');
 }
 
-// the log's cell: a small meter of the input level (-40 to 0 dBFS), the verdict and the AGC
+// the log's cell: a small meter of the input level, the verdict and the AGC. The meter
+// starts at -50 dBFS, where a frame counts as speech, so a level with speech always
+// shows (a "Too quiet" one below -40 dBFS too), at least a sliver of it
+function meterPos(db) { return Math.max(0, Math.min(100, (db + 50) / 50 * 100)); }
+
 function audioCell(a, v) {
     if (!a) return '';
-    var fill = Math.max(0, Math.min(100, (a.level_in_db + 40) / 40 * 100));
-    var peak = Math.max(0, Math.min(100, (a.peak_in_db + 40) / 40 * 100));
+    var fill = a.speech_percent ? Math.max(4, meterPos(a.level_in_db)) : 0, peak = meterPos(a.peak_in_db);
     // two causes: frames the FEC could not repair (bad), frames lost on the way (lost)
     var bad = a.fec ? a.fec.uncorrectable : 0, lost = a.network_lost || 0, muted = a.decoder ? a.decoder.muted : 0;
     return '<span class="lvl' + (v.short ? ' short' : SEV[v.sev] + ' lv' + v.level) + '" title="' + h(audioDetails(a)) + '">'
