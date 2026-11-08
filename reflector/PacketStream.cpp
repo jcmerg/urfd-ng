@@ -74,7 +74,7 @@ bool CPacketStream::OpenPacketStream(const CDvHeaderPacket &DvHeader, std::share
 			std::lock_guard<std::mutex> lock(m_UserMutex);
 			m_DvHeader = DvHeader;
 		}
-		m_OwnerClient = client;
+		std::atomic_store(&m_OwnerClient, client);
 		m_Dprs.Reset();
 		m_LastPacketTime.start();
 		// with [Transcoder] Modules = auto a module is transcoded only while tcd is connected for it;
@@ -92,7 +92,7 @@ void CPacketStream::ClosePacketStream(void)
 	// update status
 	m_bOpen = false;
 	m_uiStreamId = 0;
-	m_OwnerClient.reset();
+	std::atomic_store(&m_OwnerClient, std::shared_ptr<CClient>());
 	if (m_Transcode)
 		m_CodecStream->ReportStats();
 	if (m_uiLostFrames)
@@ -319,9 +319,10 @@ void CPacketStream::PushEndPacket(void)
 
 const CIp *CPacketStream::GetOwnerIp(void)
 {
-	if ( m_OwnerClient != nullptr )
+	auto owner = std::atomic_load(&m_OwnerClient);
+	if ( owner != nullptr )
 	{
-		return &(m_OwnerClient->GetIp());
+		return &(owner->GetIp());
 	}
 	return nullptr;
 }

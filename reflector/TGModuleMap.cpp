@@ -56,27 +56,27 @@ bool CTGModuleMap::LoadFromConfig(const std::string &prefix, const std::string &
 					if (isPrimary)
 					{
 						m_ModuleToTG[mod] = tg;
-						std::cout << label << " TG mapping: TG" << tg << " <-> Module " << mod << (label == "OpenBridge" ? std::string() : " on TS" + std::to_string(ts)) << " (primary)" << std::endl;
+						std::cout << label << " TG mapping: TG" << tg << " <-> Module " << mod << (m_Timeslots ? " on TS" + std::to_string(ts) : std::string()) << " (primary)" << std::endl;
 					}
 					else
 					{
-						std::cout << label << " TG mapping: TG" << tg << " -> Module " << mod << (label == "OpenBridge" ? std::string() : " on TS" + std::to_string(ts)) << " (secondary, inbound only)" << std::endl;
+						std::cout << label << " TG mapping: TG" << tg << " -> Module " << mod << (m_Timeslots ? " on TS" + std::to_string(ts) : std::string()) << " (secondary, inbound only)" << std::endl;
 					}
 				}
 				else
 				{
-					std::cerr << "MMDVMClient: invalid module '" << val << "' for TG" << tg << std::endl;
+					std::cerr << label << ": invalid module '" << val << "' for TG" << tg << std::endl;
 				}
 			}
 			catch (const std::exception &e)
 			{
-				std::cerr << "MMDVMClient: failed to parse TG mapping key '" << key << "': " << e.what() << std::endl;
+				std::cerr << label << ": failed to parse TG mapping key '" << key << "': " << e.what() << std::endl;
 			}
 		}
 	}
 
 	if (m_TGtoEntry.empty())
-		std::cout << "MMDVMClient: no static TG mappings configured (dynamic mappings can be added via admin API)" << std::endl;
+		std::cout << label << ": no static TG mappings configured" << (m_Timeslots ? " (dynamic mappings can be added via admin API)" : "") << std::endl;
 
 	return true;
 }

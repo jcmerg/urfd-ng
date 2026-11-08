@@ -57,7 +57,8 @@ public:
 	void Tickle(void)                               { m_LastPacketTime.start(); }
 
 	// get
-	std::shared_ptr<CClient> GetOwnerClient(void)   { return m_OwnerClient; }
+	// read by other protocols' threads while the stream opens and closes
+	std::shared_ptr<CClient> GetOwnerClient(void)   { return std::atomic_load(&m_OwnerClient); }
 	const CIp       *GetOwnerIp(void);
 	bool             IsExpired(void) const          { return (m_LastPacketTime.time() > STREAM_TIMEOUT); }
 	// its last packet has been pushed / has been routed to the protocols

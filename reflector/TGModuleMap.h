@@ -33,6 +33,8 @@ public:
 	// prefix: config key prefix, e.g. "mmdvmcli" for MMDVMClient or "mmdvm" for MMDVM server
 	// label: human-readable name for log output (e.g. "MMDVMClient", "MMDVM")
 	bool LoadFromConfig(const std::string &prefix = "mmdvmcli", const std::string &label = "MMDVMClient");
+	// a map of a protocol without timeslots (OpenBridge): its log names none
+	void NoTimeslots(void) { m_Timeslots = false; }
 	void ReloadStaticFromConfig(const std::string &prefix = "mmdvmcli", const std::string &label = "MMDVMClient");
 
 	// Lookups (thread-safe)
@@ -80,4 +82,5 @@ private:
 	std::map<uint32_t, STGMapEntry> m_TGtoEntry;       // TG -> entry (all TGs)
 	std::map<char, uint32_t> m_ModuleToTG;              // module -> primary TG only
 	std::map<char, std::set<uint32_t>> m_ModuleToAllTGs; // module -> all TGs (primary + secondary)
+	bool m_Timeslots = true;
 };
