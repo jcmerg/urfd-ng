@@ -209,6 +209,45 @@ A station at the head of the last heard list, with the fields of `station_starte
 
 An entry left the last heard list: the talker was renamed during the stream (the new callsign follows as `user_heard`). Fields and key as `user_heard`.
 
+### `user_report`
+
+The audio of a transmission on a transcoded module, as tcd measured it: the entry with the key of `user_heard`, now with `audio`. tcd reports about 0.3 s after the stream's last frame (2 s when that got lost); urfd sends `user_report` then, or, when the report came before the stream closed, right before that stream's `station_stopped`. It always follows the `user_heard` of its transmission. The last heard entries of `state_snapshot` carry it as well once it came. A module without transcoding, a transmission shorter than 0.1 s, or a tcd before 0.21.0 gives none.
+
+tcd tells urfd only the module and the stream id, so urfd matches a report to the module's streams in order. A report that comes more than 10 s after its stream stopped is dropped, and so is one whose talker has a newer entry on the module by then (a later transmission gets its own report).
+
+- `duration_ms`, `speech_percent`: the length, and the share of its 20 ms frames with speech (input above -50 dBFS)
+- `level_in_db`, `peak_in_db`: the mean level and the highest peak of the speech frames in dBFS, as the station sent them (decoded, before the AGC); without speech the peak of all frames, the level -100
+- `clipped_percent`: the share of the speech frames with a peak of -1 dBFS or more, overdriven
+- `level_out_db`: the mean level after the AGC
+- `agc_db`: the AGC's gain over the speech frames, `avg`, `min`, `max`; only with the AGC on
+- `fec`: AMBE streams only (D-Star, DMR, YSF, NXDN): the `frames` checked, of them `corrected` (bit errors the FEC repaired) and `uncorrectable` (the decoder repeated or muted them), and the corrected `bits`
+- `decoder`: only when a codec plugin decoded the stream (a DVSI device does not say): the frames it played as a `repeated` last good one, and those it `muted`; the frames of `network_lost` are among them
+- `network_lost`: voice frames lost on the way to the reflector, which urfd filled in (D-Star, DMR) with the vocoder's lost-frame code; their FEC is valid, so `fec` does not count them; left out when none
+
+Nothing in it names the vocoder.
+
+```json
+{
+  "callsign": "N0CALL  ",
+  "via_node": "N0CALL  B",
+  "via_peer": "URF123  ",
+  "on_module": "A",
+  "protocol": "DExtra",
+  "last_heard_time": 1730000000,
+  "audio": {
+    "duration_ms": 4180,
+    "speech_percent": 86.1,
+    "level_in_db": -14.2,
+    "peak_in_db": -2.9,
+    "clipped_percent": 0.0,
+    "level_out_db": -16.1,
+    "agc_db": { "avg": -1.9, "min": -4.0, "max": 1.2 },
+    "fec": { "frames": 209, "corrected": 3, "uncorrectable": 0, "bits": 3 },
+    "decoder": { "repeated": 0, "muted": 0 }
+  }
+}
+```
+
 ### `last_heard_cleared`
 
 The admin page cleared the last heard list; empty payload.

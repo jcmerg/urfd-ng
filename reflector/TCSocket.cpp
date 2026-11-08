@@ -339,9 +339,23 @@ bool CTCServer::Receive(char module, STCPacket *packet, int ms)
 		return false;
 
 	if(packet->codec_in == ECodecType::ping)
-		return false; 
-	else 
+	{
+		if (!rv)
+			KeepReport(*packet);
+		return false;
+	}
+	else
 		return !rv;
+}
+
+void CTCServer::KeepReport(const STCPacket &packet)
+{
+	STCReport report;
+	if (!GetTCReport(packet, report))
+		return;	// a plain ping
+	std::lock_guard<std::mutex> lock(m_ReportMutex);
+	if (m_Reports.size() < 256)	// taken every 100 ms (MaintenanceThread): one report per stream is far fewer
+		m_Reports.push_back({ packet.module, packet.streamid, report });
 }
 
 bool CTCServer::ReceiveNoPoll(char module, STCPacket *packet)
@@ -359,7 +373,10 @@ bool CTCServer::ReceiveNoPoll(char module, STCPacket *packet)
 		return false;
 	}
 	if (packet->codec_in == ECodecType::ping)
+	{
+		KeepReport(*packet);
 		return false;
+	}
 	return true;
 }
 
@@ -992,7 +1009,7 @@ void CTCClient::ReConnect() // and sometimes ping
 	{
 		if (m_Pfd.size() > 0 && m_Pfd[0].fd >= 0)
 		{
-			STCPacket ping;
+			STCPacket ping{};	// zeroed: never read as a report (TCPacketDef.h)
 			ping.codec_in = ECodecType::ping;
 			Send(&ping);
 		}

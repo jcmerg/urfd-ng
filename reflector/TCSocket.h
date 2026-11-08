@@ -82,6 +82,10 @@ public:
 	// which of the modules a tcd may connect for now (urfd: [Transcoder] Modules, reloadable);
 	// without a filter every module given to Open
 	void SetAcceptFilter(std::function<bool(char)> filter) { m_Accept = filter; }
+	// the stream reports tcd sent (STCReport, TCPacketDef.h) since the last call; they
+	// come in as pings, which Receive() does not return
+	struct SReport { char module; uint16_t streamid; STCReport report; };
+	void TakeReports(std::vector<SReport> &reports) { std::lock_guard<std::mutex> lock(m_ReportMutex); reports.swap(m_Reports); }
 
 private:
 	// a new connection in its handshake, see TryAccept()
@@ -98,6 +102,9 @@ private:
 	};
 
 	CIp m_Ip;
+	std::mutex m_ReportMutex;
+	std::vector<SReport> m_Reports;
+	void KeepReport(const STCPacket &packet);
 	int m_ListenFd;
 	std::function<bool(char)> m_Accept;
 	std::vector<SPending> m_Pending;

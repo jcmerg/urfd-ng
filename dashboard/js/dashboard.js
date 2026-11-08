@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.0.1';
+var DASHBOARD_VERSION = '3.1.0';
 
 var $ = function (id) { return document.getElementById(id); };
 
@@ -102,6 +102,7 @@ function station(u) {
         cs: my.base, suffix: u.suffix || '', name: u.name || '', module: u.on_module || '',
         protocol: u.protocol || '', via: via, time: u.last_heard_time | 0,
         locator: u.locator || '', lat: u.latitude, lon: u.longitude,
+        audio: u.audio || null, verdict: u.audio ? audioVerdict(u.audio) : null,
         key: [u.callsign, u.suffix || '', u.via_node, u.on_module, u.via_peer].join('|')
     };
 }
@@ -186,6 +187,11 @@ var handlers = {
         S.lastHeard = S.lastHeard.filter(function (u) { return u.key !== key; });
     },
     last_heard_cleared: function () { S.lastHeard = []; },
+    // the transcoder's report of a transmission, after it: its entry gets the audio
+    user_report: function (p) {
+        var st = station(p);
+        for (var i = 0; i < S.lastHeard.length; i++) if (S.lastHeard[i].key === st.key) { S.lastHeard[i].audio = st.audio; S.lastHeard[i].verdict = st.verdict; break; }
+    },
     module_mappings: function (p) {
         Object.keys(p.modules || {}).forEach(function (m) { if (S.modules[m]) S.modules[m].mappings = p.modules[m]; });
     }
@@ -311,6 +317,63 @@ function waiting() {
 }
 
 // ---------------------------------------------------------------------------
+// the audio of a transmission, as the transcoder reported it (transcoded modules
+// only): how loud it came in, how much of it clipped, what the AGC did and how
+// many AMBE frames the FEC could not save. Green fine, orange to look at, red
+// bad; red only as the colour of the meter and the word, the filled red tag
+// stays the one for transmitting
+
+function dB(v) { return (v > 0 ? '+' : v < 0 ? '\u2212' : '') + Math.abs(v).toFixed(1) + ' dB'; }
+
+// sev: 0 fine, 1 to look at, 2 bad, for the word; level: that of the level alone, for the meter
+// the input level for the log and the LCD: none without speech (it would read -100 dB)
+function audioLevel(a) { return a.speech_percent ? dB(a.level_in_db) : ''; }
+
+function audioVerdict(a) {
+    var lost = a.fec && a.fec.frames ? a.fec.uncorrectable / a.fec.frames * 100 : 0;
+    var level = 0, w = 'Good';
+    if (!a.speech_percent) { level = 1; w = 'No speech'; }	// a carrier without modulation, or all of it muted
+    else if (a.clipped_percent >= 5 || a.level_in_db > -8) { level = 2; w = 'Overdriven'; }
+    else if (a.level_in_db < -40) { level = 2; w = 'Too quiet'; }
+    else if (a.clipped_percent >= 1 || a.level_in_db > -12) { level = 1; w = 'Loud'; }
+    else if (a.level_in_db < -32) { level = 1; w = 'Quiet'; }
+    var fec = lost >= 5 ? 2 : lost >= 2 ? 1 : 0;
+    var net = a.network_lost && a.fec && a.fec.frames ? a.network_lost / a.fec.frames * 100 : 0;
+    var loss = net >= 5 ? 2 : net >= 2 ? 1 : 0;
+    if (fec > level && fec >= loss) w = 'Bit errors';
+    else if (loss > level) w = 'Packet loss';
+    var sev = Math.max(level, fec, loss);
+    return { w: w, sev: sev, level: level, warn: sev > 0 };
+}
+
+var SEV = ['', ' warn', ' bad'];
+
+function audioDetails(a) {
+    var lines = ['Input ' + dB(a.level_in_db) + 'FS, peak ' + dB(a.peak_in_db) + 'FS, ' + a.clipped_percent + ' % clipped'];
+    if (a.agc_db) lines.push('AGC ' + dB(a.agc_db.avg) + ' (' + dB(a.agc_db.min) + ' to ' + dB(a.agc_db.max) + '), out ' + dB(a.level_out_db) + 'FS');
+    else lines.push('Out ' + dB(a.level_out_db) + 'FS, no AGC');
+    if (a.fec) lines.push('FEC: ' + a.fec.frames + ' frames, ' + a.fec.corrected + ' repaired, ' + a.fec.uncorrectable + ' beyond repair');
+    if (a.decoder) lines.push('Decoder: ' + a.decoder.repeated + ' repeated, ' + a.decoder.muted + ' muted');
+    if (a.network_lost) lines.push('Network: ' + a.network_lost + ' frames lost on the way, filled in');
+    lines.push((a.duration_ms / 1000).toFixed(1) + ' s, ' + a.speech_percent + ' % speech');
+    return lines.join('\n');
+}
+
+// the log's cell: a small meter of the input level (-40 to 0 dBFS), the verdict and the AGC
+function audioCell(a, v) {
+    if (!a) return '';
+    var fill = Math.max(0, Math.min(100, (a.level_in_db + 40) / 40 * 100));
+    var peak = Math.max(0, Math.min(100, (a.peak_in_db + 40) / 40 * 100));
+    // two causes: frames the FEC could not repair (bad), frames lost on the way (lost)
+    var bad = a.fec ? a.fec.uncorrectable : 0, lost = a.network_lost || 0, muted = a.decoder ? a.decoder.muted : 0;
+    return '<span class="lvl' + SEV[v.sev] + ' lv' + v.level + '" title="' + h(audioDetails(a)) + '">'
+        + '<span class="lvl-bar" aria-hidden="true"><i style="width:' + fill.toFixed(0) + '%"></i><b style="left:' + peak.toFixed(0) + '%"></b></span>'
+        + '<span class="lvl-w">' + v.w + '</span>'
+        + '<span class="lvl-n">' + [audioLevel(a), a.agc_db && Math.abs(a.agc_db.avg) >= 0.5 ? 'AGC ' + dB(a.agc_db.avg) : '',
+            bad ? bad + ' bad' : '', lost ? lost + ' lost' : '', muted ? muted + ' muted' : ''].filter(Boolean).join(', ') + '</span></span>';
+}
+
+// ---------------------------------------------------------------------------
 // Last heard: the LCD with who is on the air, the module keypad and the log
 
 var filter = { m: null, cs: '' }, lastCall = null;
@@ -338,7 +401,9 @@ function lcdPanel(key, air, last, hidden) {
             + '<div class="lcd-ch"><span>Module</span><b>' + h(mod) + '</b></div><dl class="lcd-fields">'
             + '<div><dt>Mode</dt><dd>' + (st.protocol ? h(st.protocol) : 'unknown') + '</dd></div>'
             + '<div><dt>Via</dt><dd>' + h(st.via) + '</dd></div>'
-            + (st.locator ? '<div><dt>Locator</dt><dd>' + h(st.locator) + '</dd></div>' : '') + '</dl>';
+            + (st.locator ? '<div><dt>Locator</dt><dd>' + h(st.locator) + '</dd></div>' : '')
+            + (!air && st.audio ? '<div title="' + h(audioDetails(st.audio)) + '"><dt>Audio</dt><dd>' + st.verdict.w + (st.audio.speech_percent ? ', ' + audioLevel(st.audio) : '') + '</dd></div>'
+                + (st.audio.agc_db ? '<div><dt>AGC</dt><dd>' + dB(st.audio.agc_db.avg) + '</dd></div>' : '') : '') + '</dl>';
     } else {
         out += '<p class="lcd-call">' + (key ? 'Quiet so far' : 'Waiting for the first call') + '</p>'
             + (key ? '<div class="lcd-ch"><span>Module</span><b>' + h(key) + '</b></div>' : '');
@@ -354,7 +419,7 @@ URF.pages.users = {
             + '<div><div class="keys-head"><h2>Modules</h2>' + (f ? '<p class="hint">Tap one to follow it in the display and the log</p>' : '') + '</div><div class="keys" id="keys"></div></div></section>'
             + '<section aria-labelledby="log-title"><div class="tbl-head"><h2 id="log-title">Last heard</h2>'
             + (f ? '<div class="filters"><label for="f-call">Callsign</label><input class="field" id="f-call" type="search" placeholder="DL*, *JC" autocomplete="off" spellcheck="false"><button class="chip" id="f-clear" type="button" hidden>Clear filters</button></div>' : '')
-            + '</div><div class="scroll"><table class="t" id="log"><thead><tr><th class="state"><span class="sr">State</span></th><th>Callsign</th><th>Module</th><th>Mode</th><th>Via</th><th class="opt">Position</th><th class="r">Heard</th></tr></thead><tbody id="log-body"></tbody></table></div></section></div>';
+            + '</div><div class="scroll"><table class="t" id="log"><thead><tr><th class="state"><span class="sr">State</span></th><th>Callsign</th><th>Module</th><th>Mode</th><th>Via</th><th class="opt">Position</th><th class="opt">Audio</th><th class="r">Heard</th></tr></thead><tbody id="log-body"></tbody></table></div></section></div>';
         if (!f) filter = { m: null, cs: '' };
         el.addEventListener('click', function (e) {
             var k = e.target.closest('#keys button.key');
@@ -402,7 +467,8 @@ URF.pages.users = {
                 + (st.suffix ? '<span class="sfx">/' + h(st.suffix) + '</span>' : '') + (st.name ? '<span class="op">' + h(st.name) + '</span>' : '') + countryTag(st.cs) + '</td>'
                 + '<td class="m"><span class="mod' + (isLive ? ' on' : '') + '">' + h(st.module) + '</span></td>'
                 + '<td class="p">' + h(st.protocol) + '</td><td class="v">' + h(st.via) + '</td>'
-                + '<td class="meta">' + h((st.protocol + (st.via ? ' via ' + st.via : '')).trim()) + '</td><td class="opt">';
+                + '<td class="meta">' + h((st.protocol + (st.via ? ' via ' + st.via : '')).trim())
+                + (st.audio && !isLive ? ' \u00b7 <span class="lvl-m' + SEV[st.verdict.sev] + '">' + st.verdict.w + (st.audio.speech_percent ? ', ' + audioLevel(st.audio) : '') + '</span>' : '') + '</td><td class="opt">';
             if (st.locator) {
                 // position sent along with the transmission (M17 GNSS, D-Star DPRS, YSF GPS), rounded to its locator
                 var lat = Number(st.lat), lon = Number(st.lon);
@@ -410,10 +476,10 @@ URF.pages.users = {
             } else {
                 rows += '<a class="muted" href="https://aprs.fi/' + encodeURIComponent(st.cs) + '" target="_blank" rel="noopener">aprs.fi</a>';
             }
-            rows += '</td><td class="r when" title="' + h(formatDate(st.time)) + '">' + (isLive ? 'on the air' : formatAgo(st.time)) + '</td></tr>';
+            rows += '</td><td class="opt au">' + (isLive ? '' : audioCell(st.audio, st.verdict)) + '</td><td class="r when" title="' + h(formatDate(st.time)) + '">' + (isLive ? 'on the air' : formatAgo(st.time)) + '</td></tr>';
         });
-        if (!list.length) rows += '<tr class="empty"><td colspan="7">' + (S.info ? 'Nobody heard since the reflector started. Calls show up here as soon as someone keys up.' : 'Connecting to the reflector') + '</td></tr>';
-        rows += '<tr class="empty" id="log-none" hidden><td colspan="7">Nobody in the log matches these filters. Clear the filters to see all stations.</td></tr>';
+        if (!list.length) rows += '<tr class="empty"><td colspan="8">' + (S.info ? 'Nobody heard since the reflector started. Calls show up here as soon as someone keys up.' : 'Connecting to the reflector') + '</td></tr>';
+        rows += '<tr class="empty" id="log-none" hidden><td colspan="8">Nobody in the log matches these filters. Clear the filters to see all stations.</td></tr>';
         $('log-body').innerHTML = rows;
         applyFilter();
     }

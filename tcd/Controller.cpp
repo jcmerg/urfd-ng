@@ -40,6 +40,7 @@
 #include "StatsLogger.h"
 #include "AmbeGain.h"
 #include "AmbeFrameCheck.h"
+#include "StreamReport.h"
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
@@ -49,6 +50,21 @@
 extern CTcdStats g_Stats;
 
 extern CConfigure g_Conf;
+
+// a frame's levels, after the AGC (UpdateLevelsIn/Out, UpdateAGC): to the CSV log
+// (StatsLog) and the stream's report
+static void FrameLevels(const std::shared_ptr<CTranscoderPacket> &packet, const char *codec)
+{
+	const int i = packet->GetModule() - 'A';
+	if (i < 0 || i >= CTcdStats::MAX_MODULES)
+		return;
+	const auto &ms = g_Stats.modules[i];
+	g_StatsLog.LogFrame(packet->GetModule(), packet->GetStreamId(), codec,
+		ms.rms_in.load(), ms.peak_in.load(), ms.rms_out.load(), ms.peak_out.load(),
+		ms.agc_gain_db.load(), ms.agc_gate.load());
+	g_Reports.Levels(packet->GetModule(), packet->GetStreamId(), ms.rms_in.load(), ms.peak_in.load(), ms.rms_out.load(),
+		ms.agc_gain_db.load(), g_Stats.config.agc_enabled.load(std::memory_order_relaxed));
+}
 
 struct SSerialDevice
 {
@@ -402,10 +418,13 @@ static void SwStat(const CSoftCodec *sw, char module, std::atomic<uint32_t> SwVo
 		Stat(sw->stats, module, counter);
 }
 
-// counts a decode of a codec plugin and how the frame came out for the monitor
-static void SwDecodeStat(const CSoftCodec *sw, char module, const tcd_frame_info &info)
+// counts a decode of a codec plugin and how the frame came out, for the monitor and the stream's report
+static void SwDecodeStat(const CSoftCodec *sw, char module, uint16_t streamid, const tcd_frame_info &info)
 {
-	if (!sw || sw->stats < 0)
+	if (!sw)
+		return;
+	g_Reports.Decoded(module, streamid, info.flags & TCD_FRAME_REPEAT, info.flags & TCD_FRAME_MUTE);
+	if (sw->stats < 0)
 		return;
 	Stat(sw->stats, module, &SwVocoderStats::decodes);
 	auto &st = g_Stats.sw[sw->stats];
@@ -1169,6 +1188,8 @@ void CController::ReadReflectorThread()
 		std::queue<std::unique_ptr<STCPacket>> queue;
 		// wait up to 100 ms to read something on the unix port
 		tcClient.Receive(queue, 100);
+		// the streams whose audio is through: their reports to the reflector
+		g_Reports.Flush([this](const STCPacket &report) { if (tcClient.GetFD(report.module) >= 0) tcClient.Send(&report); });
 		// If no module is connected, poll returns instantly (all FDs -1).
 		// Sleep to avoid busy-spinning the loop.
 		if (queue.empty())
@@ -1186,6 +1207,18 @@ void CController::ReadReflectorThread()
 			auto packet = std::make_shared<CTranscoderPacket>(*queue.front());
 			queue.pop();
 			g_Stats.PacketIn(packet->GetModule(), packet->GetStreamId(), packet->GetCodecIn());
+			{
+				// the FEC of an AMBE frame as it came, for the stream's report
+				int fec = -1;
+				bool unc = false;
+				if (ECodecType::dstar == packet->GetCodecIn() || ECodecType::dmr == packet->GetCodecIn())
+				{
+					const SAmbeFec r = ECodecType::dstar == packet->GetCodecIn() ? AmbeFrameCheck::DStar(packet->GetDStarData()) : AmbeFrameCheck::Dmr(packet->GetDMRData());
+					fec = r.errors;
+					unc = r.uncorrectable;
+				}
+				g_Reports.FrameIn(packet->GetModule(), packet->GetStreamId(), packet->GetCodecIn(), packet->IsLast(), fec, unc);
+			}
 			g_Stats.reflector.packets_rx.fetch_add(1, std::memory_order_relaxed);
 			// Idle reset is handled by 2s timeout in reconf loop
 			// (not here, because the packet still flows through the pipeline
@@ -1319,7 +1352,7 @@ void CController::DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, co
 		tcd_frame_info info;
 		if (!sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), bits, pcm, &info))
 			memset(pcm, 0, (is1600 ? 320 : 160) * sizeof(int16_t));
-		SwDecodeStat(sw, packet->GetModule(), info);
+		SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
 		return;
 	}
 	Codec2For(packet, is1600).codec2_decode(pcm, bits);
@@ -1386,15 +1419,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 		}
 	}
 	g_Stats.UpdateLevelsOut(packet->GetModule(), packet->GetAudioSamples(), 160);
-	{
-		int i = packet->GetModule() - 'A';
-		if (i >= 0 && i < CTcdStats::MAX_MODULES) {
-			auto &ms = g_Stats.modules[i];
-			g_StatsLog.LogFrame(packet->GetModule(), packet->GetStreamId(), "codec2",
-				ms.rms_in.load(), ms.peak_in.load(), ms.rms_out.load(), ms.peak_out.load(),
-				ms.agc_gain_db.load(), ms.agc_gate.load());
-		}
-	}
+	FrameLevels(packet, "codec2");
 	// IMBE/P25 and USRP first: the packet goes to the reflector when its last codec
 	// is set, and a codec plugin sets D-Star and DMR at once, before these would be
 	// (the packet was never sent; with the DVSI devices only when one answered fast)
@@ -1489,7 +1514,7 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	auto *sw = SwCodec(TCD_CODEC_DMR, packet);
 	tcd_frame_info info;
 	const bool decoded = sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDMRData(), tmp, &info, sw->HasTranscode());
-	SwDecodeStat(sw, packet->GetModule(), info);
+	SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
 	const int32_t out_num = ambe_out_num;	// one value for the frame, the monitor may change it
 	if (out_num != 256)
 	{
@@ -1515,15 +1540,7 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 		packet->SetDMRData(dmr_data);
 	}
 	g_Stats.UpdateLevelsOut(packet->GetModule(), tmp, 160);
-	{
-		int i = packet->GetModule() - 'A';
-		if (i >= 0 && i < CTcdStats::MAX_MODULES) {
-			auto &ms = g_Stats.modules[i];
-			g_StatsLog.LogFrame(packet->GetModule(), packet->GetStreamId(), "dmr",
-				ms.rms_in.load(), ms.peak_in.load(), ms.rms_out.load(), ms.peak_out.load(),
-				ms.agc_gain_db.load(), ms.agc_gate.load());
-		}
-	}
+	FrameLevels(packet, "dmr");
 	// D-Star and P25 from the DMR frame itself, where the plugin can
 	uint8_t direct = 0;
 	const float source_db = agc_db + GainDb(out_num);
@@ -1600,7 +1617,7 @@ void CController::SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet)
 	auto *sw = SwCodec(TCD_CODEC_DSTAR, packet);
 	tcd_frame_info info;
 	const bool decoded = sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDStarData(), pcm, &info, sw->HasTranscode());
-	SwDecodeStat(sw, packet->GetModule(), info);
+	SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
 	ApplyGain(pcm, 160, dstar_out_num);
 	packet->SetAudioSamples(pcm, false);
 	dstar_mux.lock();
@@ -2313,7 +2330,7 @@ CSoftCodec *CController::DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &pa
 			memset(pcm, 0, 160 * sizeof(int16_t));
 		if (decoded)
 			*decoded = ok;
-		SwDecodeStat(sw, packet->GetModule(), info);
+		SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
 		return sw;
 	}
 	std::lock_guard<std::mutex> lock(p25vocoder_mux);
@@ -2360,15 +2377,7 @@ void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	}
 	packet->SetAudioSamples(tmp, false);
 	g_Stats.UpdateLevelsOut(packet->GetModule(), tmp, 160);
-	{
-		int i = packet->GetModule() - 'A';
-		if (i >= 0 && i < CTcdStats::MAX_MODULES) {
-			auto &ms = g_Stats.modules[i];
-			g_StatsLog.LogFrame(packet->GetModule(), packet->GetStreamId(), "imbe",
-				ms.rms_in.load(), ms.peak_in.load(), ms.rms_out.load(), ms.peak_out.load(),
-				ms.agc_gain_db.load(), ms.agc_gate.load());
-		}
-	}
+	FrameLevels(packet, "imbe");
 	// D-Star and DMR from the IMBE frame itself, where the plugin that decoded it can
 	uint8_t direct = 0;
 	Transcode(TCD_CODEC_DSTAR, decoded ? from : nullptr, agc_db, packet, &direct);
@@ -2441,15 +2450,7 @@ void CController::USRPtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	}
 	packet->SetAudioSamples(tmp, false);
 	g_Stats.UpdateLevelsOut(packet->GetModule(), tmp, 160);
-	{
-		int i = packet->GetModule() - 'A';
-		if (i >= 0 && i < CTcdStats::MAX_MODULES) {
-			auto &ms = g_Stats.modules[i];
-			g_StatsLog.LogFrame(packet->GetModule(), packet->GetStreamId(), "usrp",
-				ms.rms_in.load(), ms.peak_in.load(), ms.rms_out.load(), ms.peak_out.load(),
-				ms.agc_gain_db.load(), ms.agc_gate.load());
-		}
-	}
+	FrameLevels(packet, "usrp");
 	ToDStar(packet);
 	codec2_queue.push(packet);
 
@@ -2505,15 +2506,7 @@ void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
 	}
 	packet->SetAudioSamples(tmp, false);
 	g_Stats.UpdateLevelsOut(packet->GetModule(), tmp, 160);
-	{
-		int i = packet->GetModule() - 'A';
-		if (i >= 0 && i < CTcdStats::MAX_MODULES) {
-			auto &ms = g_Stats.modules[i];
-			g_StatsLog.LogFrame(packet->GetModule(), packet->GetStreamId(), "svx",
-				ms.rms_in.load(), ms.peak_in.load(), ms.rms_out.load(), ms.peak_out.load(),
-				ms.agc_gain_db.load(), ms.agc_gate.load());
-		}
-	}
+	FrameLevels(packet, "svx");
 	ToDStar(packet);
 	codec2_queue.push(packet);
 
@@ -2559,15 +2552,7 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSof
 			g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 		}
 		g_Stats.UpdateLevelsOut(packet->GetModule(), packet->GetAudioSamples(), 160);
-		{
-			int i = packet->GetModule() - 'A';
-			if (i >= 0 && i < CTcdStats::MAX_MODULES) {
-				auto &ms = g_Stats.modules[i];
-				g_StatsLog.LogFrame(packet->GetModule(), packet->GetStreamId(), "dstar",
-					ms.rms_in.load(), ms.peak_in.load(), ms.rms_out.load(), ms.peak_out.load(),
-					ms.agc_gain_db.load(), ms.agc_gate.load());
-			}
-		}
+		FrameLevels(packet, "dstar");
 		// DMR and P25 from the D-Star frame itself, where the plugin that decoded it can
 		uint8_t direct = 0;
 		if (from)
@@ -2612,15 +2597,7 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 			g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 		}
 		g_Stats.UpdateLevelsOut(packet->GetModule(), packet->GetAudioSamples(), 160);
-		{
-			int i = packet->GetModule() - 'A';
-			if (i >= 0 && i < CTcdStats::MAX_MODULES) {
-				auto &ms = g_Stats.modules[i];
-				g_StatsLog.LogFrame(packet->GetModule(), packet->GetStreamId(), "dmr",
-					ms.rms_in.load(), ms.peak_in.load(), ms.rms_out.load(), ms.peak_out.load(),
-					ms.agc_gain_db.load(), ms.agc_gate.load());
-			}
-		}
+		FrameLevels(packet, "dmr");
 		// Output gains applied in encode functions and DVSI FeedDevice
 		// Re-encode DMR from AGC'd PCM with the codec plugin
 		// Always re-encode when AGC or OutputGainDMR is active, otherwise the

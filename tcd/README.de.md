@@ -2,7 +2,7 @@
 
 [English](README.md) | **Deutsch**
 
-**Version 0.20.17** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.21.0** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF/NXDN (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25 (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF/NXDN in Software ergänzen, seit 0.14.0 auch P25 als Wahl neben dem eingebauten IMBE-Vocoder. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
@@ -390,6 +390,10 @@ Die AGC arbeitet pro Stream (pro Aussendung):
 Die Grenzen sind absichtlich ungleich: Absenken ist unkritisch, Anheben hebt auch das Rauschen. Typisches DMR-Audio liegt um -35 dBFS, für ein Ziel von -16 dBFS braucht es also etwa +20 dB.
 
 ## Überwachung
+
+### Bericht jedes Durchgangs an urfd
+
+Seit 0.21.0 meldet tcd urfd nach jedem Durchgang, wie er klang: Pegel und Spitze vor der AGC, den Anteil der Sprach-Frames ab -1 dBFS (übersteuert), den Pegel nach der AGC und deren Verstärkung, die FEC der ankommenden AMBE-Frames und, von einem Codec-Plugin dekodiert, die wiederholten oder stummgeschalteten Frames. urfd zeigt ihn ab 4.39.0 in der Last-Heard-Liste seines Dashboards, so sieht eine Station, ob sie übersteuert; ein älterer urfd verwirft ihn ungelesen. Er nennt keinen Vocoder. Das Format ist `STCReport` in `reflector/TCPacketDef.h`, die Felder in [docs/WEBSOCKET.md](../docs/WEBSOCKET.md#user_report).
 
 ### Web-Dashboard
 

@@ -562,13 +562,14 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 		std::cout << std::noshowbase << std::dec;
 
 		// and push header packet
+		const uint16_t streamid = DvHeader->GetStreamId();
 		stream->Push(std::move(DvHeader));
 
 		// WebSocket clients see the station on the module; via_peer like Hearing():
 		// the peer for a stream from an interlinked reflector, else this one
 		CCallsign moduleCs;
 		moduleCs.SetCSModule(module);
-		GetUsers()->StationStarted(stream->GetUserCallsign(), client->GetCallsign(), moduleCs, client->IsPeer() ? client->GetCallsign() : m_Callsign, client->GetProtocolName());
+		GetUsers()->StationStarted(stream->GetUserCallsign(), client->GetCallsign(), moduleCs, client->IsPeer() ? client->GetCallsign() : m_Callsign, client->GetProtocolName(), streamid);
 		ReleaseUsers();
 		return stream;
 	}
@@ -629,7 +630,7 @@ void CReflector::CloseStream(std::shared_ptr<CPacketStream> stream)
 		}
 
 		// also without an owner, or the module stays on air in the dashboards
-		GetUsers()->StationStopped(GetStreamModule(stream));
+		GetUsers()->StationStopped(GetStreamModule(stream), stream->GetLostFrames());
 		ReleaseUsers();
 
 		// release clients
@@ -918,6 +919,14 @@ void CReflector::MaintenanceThread()
 			if (tcport)
 			{
 				g_TCServer.TryAccept(100); // probe dead sockets + non-blocking accept
+				// tcd's reports of the streams it had: to their last heard entries
+				std::vector<CTCServer::SReport> reports;
+				g_TCServer.TakeReports(reports);
+				for (const auto &r : reports)
+				{
+					GetUsers()->Report(r.module, r.streamid, r.report);
+					ReleaseUsers();
+				}
 			}
 			else
 			{

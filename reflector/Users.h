@@ -18,11 +18,13 @@
 
 #pragma once
 
+#include <deque>
 #include <list>
 #include <map>
 #include <mutex>
 
 #include "User.h"
+#include "TCPacketDef.h"
 
 class CUsers
 {
@@ -52,8 +54,11 @@ public:
 	void   Hearing(const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "");
 	void   Hearing(const CCallsign &, const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "");
 	// WebSocket station_started/station_stopped, from OpenStream and CloseStream
-	void   StationStarted(const CCallsign &, const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "");
-	void   StationStopped(char module);
+	void   StationStarted(const CCallsign &, const CCallsign &, const CCallsign &, const CCallsign &, const std::string &proto = "", uint16_t streamid = 0);
+	// tcd's report of the audio of a stream (STCReport), after it: to the stream's last
+	// heard entry, and a user_report to the WebSocket clients
+	void   Report(char module, uint16_t streamid, const STCReport &report);
+	void   StationStopped(char module, uint32_t lost_frames = 0);	// lost_frames: those the stream had filled in, for Report()
 	// the talker on a module turned out to be someone else: the live station
 	// and its last heard entry take the new callsign
 	void   StationRenamed(char module, const CCallsign &from, const CCallsign &to);
@@ -66,4 +71,13 @@ protected:
 	std::mutex                       m_Mutex;
 	std::list<CUser>                 m_Users;
 	std::map<char, CUser>            m_ActiveStations;	// by module
+	// the streams of a module waiting for tcd's report, oldest first: a report comes
+	// about 0.3 s after its stream, when the next one may have started (a quick
+	// round), and one waits for its stream to stop, which brings the lost frames.
+	// A stream stopped more than 10 s ago gets none any more (not transcoded, or
+	// too short for tcd to report), so a stream id DMR+ reuses cannot match it
+	struct SReportWait { uint16_t streamid; CCallsign talker; std::time_t started, stopped; uint32_t lost_frames; nlohmann::json audio; };
+	std::map<char, std::deque<SReportWait>> m_ReportWait;
+	void ExpireReportWait(std::deque<SReportWait> &wait);
+	void ApplyReport(char module, const SReportWait &wait);
 };

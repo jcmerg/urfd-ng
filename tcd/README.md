@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.20.17** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.21.0** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF/NXDN (AMBE2+), and software vocoders for M17 (Codec2) and P25 (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF/NXDN in software, and since 0.14.0 P25 as a choice next to the built-in IMBE vocoder. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -390,6 +390,10 @@ The AGC works per stream (per transmission):
 The gain limits are asymmetric on purpose: attenuating is safe, amplifying also lifts noise. Typical DMR input sits around -35 dBFS, so about +20 dB are needed to reach a -16 dBFS target.
 
 ## Monitoring
+
+### Report of each transmission to urfd
+
+Since 0.21.0 tcd tells urfd after every transmission how it sounded: the level and peak before the AGC, the share of speech frames at -1 dBFS or more (overdriven), the level after the AGC and the AGC's gain, the FEC of the incoming AMBE frames and, decoded by a codec plugin, the frames it repeated or muted. urfd 4.39.0 and later shows it in the last heard list of its dashboard, so a station sees whether it overdrives; an older urfd drops it unread. It names no vocoder. The format is `STCReport` in `reflector/TCPacketDef.h`, the fields in [docs/WEBSOCKET.md](../docs/WEBSOCKET.md#user_report).
 
 ### Web dashboard
 
