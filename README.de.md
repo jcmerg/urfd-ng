@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.39.0** | tcd 0.21.0 | Dashboard v3.1.4
+**urfd 4.39.0** | tcd 0.21.0 | Dashboard v3.1.5
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -702,7 +702,7 @@ Seit 4.38.0 schreibt urfd keine XML- oder JSON-Statusdatei mehr (`[Files] XmlPat
 
 Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Dashboard zur Verfügung.
 
-### Dashboard v3.1.4
+### Dashboard v3.1.5
 Seit v3.0.0 (urfd 4.38.0) eine statische Seite, HTML und einfaches JavaScript ohne PHP: Sie bekommt den Stand live über den WebSocket von urfd und zeigt eine Änderung in dem Moment, in dem sie passiert; die Admin-Seite schickt ihre Befehle auf demselben Weg. Seiten und Aussehen sind die von v2.14; alte Links (`index.php?show=...`) führen auf dieselben Seiten. Die Einstellungen stehen in `[Dashboard]` in `urfd.ini`; `setup.sh update` übernimmt die der alten `config.inc.php` einmal.
 
 In v2.9.0 neu gestaltet als Frontplatte eines Funkgeräts: Ein bernsteinfarbenes LCD zeigt, wer gerade sendet, die Module sind ein Tastenfeld, der Rest sind schlichte Tabellen. Davor: dunkles Design (v2.6.0), robust gegen Ausfälle des Verzeichnisses (v2.6.1), M17-Positionen in der Last-Heard-Liste (v2.7.0), Eintrag ins Verzeichnis an den Reflektor abgegeben (v2.8.0), Sicherheitskorrekturen (v2.8.1, v2.8.2), Korrekturen an Statusdatei und Admin-Socket (v2.8.3). Seit v2.10.0 steht der Vorname neben dem Rufzeichen, aus den ID-Datenbanken, die urfd lädt (ab urfd 4.12.0).
@@ -1001,6 +1001,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v3.1.5 (urfd 4.39.0)**: „Quiet“ erst unter -36 dBFS (bisher -32), „Too quiet“ erst unter -46 dBFS (bisher -40): Die Codec-Tests von 3GPP nehmen -26 dBov als Sollpegel und -16 bis -36 dBov als normal; DMR-Funkgeräte kommen meist um -32 dBFS an, und die AGC hebt sie ohne Mühe an
 - **Dashboard v3.1.4 (urfd 4.39.0)**: Ein „Short“-Durchgang zeigt nur die leere Anzeige und das Wort, ohne Pegelbalken, Spitzenmarke und AGC-Zeile, da er nicht bewertet wird; seine Werte bleiben im Tooltip
 - **Dashboard v3.1.3 (urfd 4.39.0)**: Die Pegelanzeige beginnt bei -50 dBFS, wo ein Frame als Sprache zählt, statt bei -40 dBFS, so zeigt ein „Too quiet“-Durchgang (unter -40 dBFS) seinen roten Balken; ein Pegel mit Sprache zeigt immer wenigstens einen schmalen Rest
 - **Dashboard v3.1.2 (urfd 4.39.0)**: Ein offen gelassener Dashboard-Tab lädt sich nach einem Update neu: Bei jeder Verbindung fragt er den Server nach der Version seines Skripts und lädt sich einmal neu, wenn sie abweicht (einmal je Version, ein Cache dazwischen kann also keine Schleife auslösen). Bisher verband er sich mit der alten Seite zum neuen urfd, bis zu einem erzwungenen Neuladen

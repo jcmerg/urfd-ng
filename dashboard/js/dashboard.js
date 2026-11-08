@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.4';
+var DASHBOARD_VERSION = '3.1.5';
 
 var $ = function (id) { return document.getElementById(id); };
 
@@ -353,7 +353,9 @@ function audioLevel(a, v) { return a.speech_percent && !v.short ? dB(a.level_in_
 
 // sev: 0 fine, 1 to look at, 2 bad, for the word; level: that of the level alone, for
 // the meter; short: no level verdict, grey. Bit errors and packet loss count from
-// MIN_FEC_FRAMES on, so one bad frame of a kerchunk is not "33 %"
+// MIN_FEC_FRAMES on, so one bad frame of a kerchunk is not "33 %". The level bands
+// follow the codec tests of 3GPP (-26 dBov nominal, -16 to -36 dBov as normal): Quiet
+// below that, Too quiet from 20 dB below nominal, where the AGC comes to its limit
 function audioVerdict(a) {
     var rated = a.fec && a.fec.frames >= MIN_FEC_FRAMES;
     var lost = rated ? a.fec.uncorrectable / a.fec.frames * 100 : 0;
@@ -361,9 +363,9 @@ function audioVerdict(a) {
     if (!a.speech_percent && a.duration_ms >= NO_SPEECH_MS) { level = 1; w = 'No speech'; }	// a carrier without modulation, or all of it muted
     else if (a.duration_ms < SHORT_MS || speechMs(a) < SHORT_SPEECH_MS) { short = true; w = 'Short'; }
     else if (a.clipped_percent >= 5 || a.level_in_db > -8) { level = 2; w = 'Overdriven'; }
-    else if (a.level_in_db < -40) { level = 2; w = 'Too quiet'; }
+    else if (a.level_in_db < -46) { level = 2; w = 'Too quiet'; }
     else if (a.clipped_percent >= 1 || a.level_in_db > -12) { level = 1; w = 'Loud'; }
-    else if (a.level_in_db < -32) { level = 1; w = 'Quiet'; }
+    else if (a.level_in_db < -36) { level = 1; w = 'Quiet'; }
     var fec = lost >= 5 ? 2 : lost >= 2 ? 1 : 0;
     var net = a.network_lost && rated ? a.network_lost / a.fec.frames * 100 : 0;
     var loss = net >= 5 ? 2 : net >= 2 ? 1 : 0;
@@ -389,7 +391,7 @@ function audioDetails(a) {
 
 // the log's cell: a small meter of the input level, the verdict and the AGC. The meter
 // starts at -50 dBFS, where a frame counts as speech, so a level with speech always
-// shows (a "Too quiet" one below -40 dBFS too), at least a sliver of it
+// shows (a "Too quiet" one below -46 dBFS too), at least a sliver of it
 function meterPos(db) { return Math.max(0, Math.min(100, (db + 50) / 50 * 100)); }
 
 function audioCell(a, v) {
