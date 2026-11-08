@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.38.10** | tcd 0.20.14 | Dashboard v3.0.1
+**urfd 4.38.10** | tcd 0.20.15 | Dashboard v3.0.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1055,6 +1055,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.20.15**: every count of the monitor page and of tcdmon has its thousands grouped, the packets of the modules and the reflector link too (134 853 on the page, 134,853 in tcdmon, whose plain ncurses terminal cannot show the thin space)
 - **tcd 0.20.14**: the monitor page shows every counter exactly, with thin spaces between the thousands (102 345, from 100M in millions), so a running counter moves with every frame; the rounded 102k stood still for 20 s of audio and looked stuck
 - **tcd 0.20.13**: the monitor page shows large counters finer (1234k up to 10M, then 12.34M), so a running counter visibly moves; before it showed 1.2M, which stood still for half an hour of audio
 - **tcd 0.20.12**: the monitor page acknowledges each update and tcd sends a page the next one only then; a frozen browser tab (Chrome freezes hidden ones) took none, so the updates piled up in the socket buffers of tcd and every proxy in between (megabytes, minutes behind), and the proxies passed them on in tiny pieces as the window opened: a TLS nginx on a Raspberry Pi used 14 % CPU for one such tab
