@@ -81,6 +81,7 @@ Leite diese Ports in deinem Router auf den Rechner weiter, oder gib sie in der F
 | 30001/udp | DExtra | D-Star (DExtra) |
 | 30051/udp | DCS | D-Star (DCS) |
 | 62030/udp | MMDVM | DMR-Hotspots, erst nachdem `[MMDVM]` in `urfd.ini` eingeschaltet ist (siehe unten) |
+| 62035/udp | OpenBridge | der Server eines DMR-Netzes, erst nachdem `[OpenBridge]` in `urfd.ini` eingeschaltet ist |
 | 8880/udp | DMR+ | DMR+ |
 | 42000/udp | YSF | Fusion (YSF) |
 | 41000/udp | P25 | P25 |

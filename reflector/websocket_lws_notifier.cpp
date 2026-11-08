@@ -155,6 +155,7 @@ static nlohmann::json BuildInitialConnectPayload()
 			continue;
 		addProtocol(MmdvmClientName(n), ck.enable, g_Configure.Contains(ck.localport) ? std::optional<uint32_t>(g_Configure.GetUnsigned(ck.localport)) : std::nullopt);
 	}
+	addProtocol("OpenBridge", g_Keys.openbridge.enable, g_Configure.Contains(g_Keys.openbridge.localport) ? std::optional<uint32_t>(g_Configure.GetUnsigned(g_Keys.openbridge.localport)) : std::nullopt);
 	addProtocol("DCSClient", g_Keys.dcsclient.enable, std::nullopt);
 	addProtocol("DExtraClient", g_Keys.dextraclient.enable, std::nullopt);
 	addProtocol("DPlusClient", g_Keys.dplusclient.enable, std::nullopt);

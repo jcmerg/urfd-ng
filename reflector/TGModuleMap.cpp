@@ -56,11 +56,11 @@ bool CTGModuleMap::LoadFromConfig(const std::string &prefix, const std::string &
 					if (isPrimary)
 					{
 						m_ModuleToTG[mod] = tg;
-						std::cout << label << " TG mapping: TG" << tg << " <-> Module " << mod << " on TS" << (int)ts << " (primary)" << std::endl;
+						std::cout << label << " TG mapping: TG" << tg << " <-> Module " << mod << (label == "OpenBridge" ? std::string() : " on TS" + std::to_string(ts)) << " (primary)" << std::endl;
 					}
 					else
 					{
-						std::cout << label << " TG mapping: TG" << tg << " -> Module " << mod << " on TS" << (int)ts << " (secondary, inbound only)" << std::endl;
+						std::cout << label << " TG mapping: TG" << tg << " -> Module " << mod << (label == "OpenBridge" ? std::string() : " on TS" + std::to_string(ts)) << " (secondary, inbound only)" << std::endl;
 					}
 				}
 				else

@@ -28,6 +28,7 @@
 #include "XLXPeerProtocol.h"
 #include "MMDVMClientProtocol.h"
 #include "MmdvmClientConfig.h"
+#include "OpenBridgeProtocol.h"
 #include "P25Protocol.h"
 #include "NXDNProtocol.h"
 #include "USRPProtocol.h"
@@ -192,6 +193,13 @@ bool CProtocols::Init(void)
 			auto cli = std::unique_ptr<CMMDVMClientProtocol>(new CMMDVMClientProtocol(n));
 			m_Protocols.emplace_back(std::move(cli));
 			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::mmdvmclient, localport, DMR_IPV4, false))
+				return false;
+		}
+
+		if (g_Configure.Contains(g_Keys.openbridge.enable) && g_Configure.GetBoolean(g_Keys.openbridge.enable))
+		{
+			m_Protocols.emplace_back(std::unique_ptr<COpenBridgeProtocol>(new COpenBridgeProtocol));
+			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::openbridge, uint16_t(g_Configure.GetUnsigned(g_Keys.openbridge.localport)), DMR_IPV4, false))
 				return false;
 		}
 

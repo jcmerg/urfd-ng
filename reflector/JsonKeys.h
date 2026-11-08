@@ -95,6 +95,9 @@ struct SJsonKeys {
 	// [MMDVMClient]; [MMDVMClient2] to [MMDVMClient9] use MmdvmClientKeys() in MmdvmClientConfig.h
 	struct MMDVMCLIENT { const std::string enable, address, port, localport, dmrid, password, callsign, latitude, longitude, location, description, url, rxfreq, txfreq, software, firmware, fallbackdmrid, blockprotocols, bmapikey, network; }
 	mmdvmclient { "mmdvmcliEnable", "mmdvmcliAddress", "mmdvmcliPort", "mmdvmcliLocalPort", "mmdvmcliDmrId", "mmdvmcliPassword", "mmdvmcliCallsign", "mmdvmcliLatitude", "mmdvmcliLongitude", "mmdvmcliLocation", "mmdvmcliDescription", "mmdvmcliUrl", "mmdvmcliRxFreq", "mmdvmcliTxFreq", "mmdvmcliSoftware", "mmdvmcliFirmware", "mmdvmcliFallbackDmrId", "mmdvmcliBlockProtocols", "mmdvmcliBmApiKey", "mmdvmcliNetwork" };
+	// [OpenBridge]: a DMR network linked server to server (OpenBridgeProtocol.h)
+	struct OPENBRIDGE { const std::string enable, address, port, localport, networkid, sourceserver, peerid, passphrase, dialect, autoupgrade, preservesourcepeer, fallbackdmrid, blockprotocols, network; }
+	openbridge { "obpEnable", "obpAddress", "obpPort", "obpLocalPort", "obpNetworkId", "obpSourceServer", "obpPeerId", "obpPassphrase", "obpDialect", "obpAutoUpgrade", "obpPreserveSourcePeer", "obpFallbackDmrId", "obpBlockProtocols", "obpNetwork" };
 	struct SVX { const std::string enable, host, port, callsign, password, blockprotocols, rxgain, txgain, software; }
 	svx { "svxEnable", "svxHost", "svxPort", "svxCallsign", "svxPassword", "svxBlockProtocols", "svxRxGain", "svxTxGain", "svxSoftware" };
 	struct SVXS { const std::string enable, port, blockprotocols, rxgain, txgain; }

@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.39.0** | tcd 0.21.0 | Dashboard v3.1.5
+**urfd 4.40.0** | tcd 0.21.0 | Dashboard v3.1.5
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -156,6 +156,29 @@ TS2 = D,R                           # several modules on one timeslot
 - **Modules without transcoding.** An MMDVMClient TG may sit on a module tcd does not transcode. Only AMBE+2 streams (DMR, YSF, NXDN) go to the master from there, judged by their first frame; D-Star, M17, SVX and the others stay local, they would reach the network as silence.
 - **Admin.** `tg_add`, `tg_remove`, `reconnect` and `kerchunk` take `"client": 2` or `"client": "MMDVMClient.50"` (or the protocol `mmdvmclient2`); without it they mean `[MMDVMClient]`, for a TG the connection that has it, and `reconnect` all of them. `tg_list` and `status` list every connection with its network. The dashboard (v2.13.0) offers each connection when adding a TG and has a reconnect button for each.
 
+### OpenBridge (4.40.0)
+Links urfd server to server with a DMR network: HBlink3, HBlink4, FreeDMR and BrandMeister (a bridge to BrandMeister needs a ticket and their review). There is no login and no timeslot: every talkgroup the link maps runs at the same time as the others, one call per module, so one link carries as many calls as it has modules mapped, where an MMDVMClient hotspot carries two. Both ends configure the link: the other end needs urfd's address, `LocalPort`, `NetworkId` and the passphrase. See `[OpenBridge]` in `config/urfd.ini`.
+
+```ini
+[OpenBridge]
+Enable = true
+TargetAddress = obp.example.net
+TargetPort = 62035
+NetworkId = 1234567
+Passphrase = secret
+TGs = auto                     # every module with [Modules] TG<M>
+TG26363 = F                    # and more TGs
+```
+
+- **Dialects.** `classic` (the default) is what HBlink3, HBlink4 and BrandMeister speak: the 53 bytes of an MMDVM DMRD packet with the slot bit clear and `NetworkId` as the repeater ID, followed by an HMAC-SHA1 with the passphrase. `freedmr` is FreeDMR's protocol version 5, which FreeDMR uses by default and which refuses classic packets: DMRE packets with a timestamp, the source server and repeater and a hop count, keyed with BLAKE2b, and the bridge control packets: a keepalive every 10 s (FreeDMR sends nothing to a peer without one), its version every 60 s, source quench (the other end stops a call it does not want) and stun. A classic link turns `freedmr` (until a restart) when the other end shows it speaks that (a DMRE packet, a keepalive or its version), as FreeDMR itself does; `AutoUpgrade = false` keeps it classic. Set `Dialect = freedmr` for a FreeDMR end all the same: until its first keepalive (10 s at most) FreeDMR drops the classic packets, and a call in that time loses its start.
+- **IDs.** `NetworkId` goes into every packet, as the `NETWORK_ID` the other end has for urfd. FreeDMR takes it as the source server of urfd's calls too (`SourceServer` sets another) and checks that: a server ID of its list (4 or 5 digits) or a DMR ID it knows (6 or 7 digits), else it drops the calls; so use a DMR ID registered to you, not a made up number. `PeerId` makes urfd take packets with that repeater ID only (HBlink's `NETWORK_ID`, FreeDMR's `SERVER_ID`). `PreserveSourcePeer = true` (classic only) puts the ID of the hotspot a call comes from there instead, as HBlink4's `preserve_source_peer`; BrandMeister and FreeDMR expect `NetworkId`. HBlink4 does that by default: with a `PeerId` for an HBlink4 end set its `preserve_source_peer = false`, else urfd drops its calls.
+- **Passphrase.** HBlink3 and FreeDMR use its first 20 characters only, HBlink4 all of it: keep it at 20 or fewer. urfd warns about a longer one.
+- **Talkgroups.** `TG<number> = <Module>`, `TGs = auto` for every module with a talkgroup in `[Modules]`, or `Modules = <modules>` for some of them; TG lines win. A talkgroup on a module without transcoding carries DMR, YSF and NXDN only. Talkgroups the link does not map are dropped both ways, private calls too. FreeDMR drops TGs up to 79 and some ranges above on its own.
+- **Network.** The link belongs to a network like an MMDVMClient connection: its target's host, `brandmeister.network` for a BrandMeister host, or `Network`, which a target given by its IP address needs (urfd warns). It shares no TG with a connection in that network, and calls never go between them; between networks a module both map is bridged, `BlockProtocols` switches that off (`OpenBridge` in the BlockProtocols of the others).
+- **Checks.** Packets come from the target's address only (any port) and must pass their HMAC or BLAKE2b. FreeDMR packets older than 5 s or with more than 20 hops are dropped and quenched: the clocks need NTP. A call urfd sent that comes back, or a stream that ended, is dropped.
+- **Firewall.** The other end sends to `LocalPort` (default 62035), open it for UDP. IPv4 only.
+- **Admin.** The admin page lists the link's TGs (from `urfd.ini`, a SIGHUP reloads them; no dynamic ones) and `status` has an `openbridge` entry: target, network, dialect, when the other end was last heard, whether it stunned the link.
+
 ### SvxReflector Client
 Connect to SvxLink SvxReflector servers (e.g. FM-Funknetz) for bidirectional FM audio bridging. Uses TCP for signaling and UDP for OPUS-encoded audio. Requires transcoded modules. Dynamic TGs can be added at runtime via the Admin interface.
 
@@ -176,7 +199,7 @@ Password = changeme                 # Authentication password
 # TG26363 = S
 ```
 
-**BlockProtocols**: Supported on MMDVMClient, SvxReflector, SVXServer, DCSClient, DExtraClient, DPlusClient, and YSFClient. Prevents audio from the listed source protocols from being routed through this connector. Each client protocol also always blocks self-routing (e.g. DCSClient never routes DCSClient-originated audio back out). Available protocol names (one table for all of them since 4.20.0): `MMDVM`, `MMDVMClient` (every connection) or `MMDVMClient1` to `MMDVMClient9` (one), `SvxReflector`, `SVX` or `SVXServer`, `DExtra`, `DExtraClient`, `DPlus`, `DPlusClient`, `DCS`, `DCSClient`, `DMRPlus`, `YSF`, `YSFClient`, `M17`, `NXDN`, `P25`, `USRP`, `URF`, `XLXPeer`, `G3`, and the name of a loaded [plugin](#plugins). Comma-separated.
+**BlockProtocols**: Supported on MMDVMClient, OpenBridge, SvxReflector, SVXServer, DCSClient, DExtraClient, DPlusClient, and YSFClient. Prevents audio from the listed source protocols from being routed through this connector. Each client protocol also always blocks self-routing (e.g. DCSClient never routes DCSClient-originated audio back out). Available protocol names (one table for all of them since 4.20.0): `MMDVM`, `MMDVMClient` (every connection) or `MMDVMClient1` to `MMDVMClient9` (one), `OpenBridge`, `SvxReflector`, `SVX` or `SVXServer`, `DExtra`, `DExtraClient`, `DPlus`, `DPlusClient`, `DCS`, `DCSClient`, `DMRPlus`, `YSF`, `YSFClient`, `M17`, `NXDN`, `P25`, `USRP`, `URF`, `XLXPeer`, `G3`, and the name of a loaded [plugin](#plugins). Comma-separated.
 
 **One TG at a time**: An SvxReflector node has one selected TG; it gets the audio of that TG only, and its audio goes there. urfd selects the first static TG (the lowest number, the home TG) and monitors all mapped TGs (`MsgTgMonitor`, like SvxLink's `MONITOR_TGS`). A talker on a monitored TG selects that TG when urfd has had no traffic for 3 s; audio from a urfd module whose TG isn't selected selects it unless a talker is on the selected one, then that module's transmission is not sent. After 30 s without traffic urfd goes back to the home TG. With one TG mapped nothing changes.
 
@@ -656,7 +679,7 @@ DescriptionP = Closed group
 ProtocolsP = MMDVM,M17     # module P: these protocols only
 ```
 
-- **Names**: as in `BlockProtocols` (`DExtra`, `DPlus`, `DCS`, `G3`, `MMDVM`, `DMRPlus`, `YSF`, `NXDN`, `P25`, `M17`, `USRP`, `SVXServer`, `SvxReflector`, `URF`, `XLXPeer`, `MMDVMClient`, the client connectors) and the names of loaded plugins; comma or space separated. `MMDVMClient` means all its connections, one connection cannot be named here. An unknown name stops urfd, as an error in `urfd.ini`.
+- **Names**: as in `BlockProtocols` (`DExtra`, `DPlus`, `DCS`, `G3`, `MMDVM`, `DMRPlus`, `YSF`, `NXDN`, `P25`, `M17`, `USRP`, `SVXServer`, `SvxReflector`, `URF`, `XLXPeer`, `MMDVMClient`, `OpenBridge`, the client connectors) and the names of loaded plugins; comma or space separated. `MMDVMClient` means all its connections, one connection cannot be named here. An unknown name stops urfd, as an error in `urfd.ini`.
 - **Link**: a DExtra, DCS, M17 or G3 link to the module, a Wires-X connect and an MMDVM module change by TG are refused (`Module P is closed to DCS, link refused`).
 - **Send**: a stream from a protocol the module is closed to is not taken (`Module P is closed to DPlus, rejecting stream from ...`), whichever way it was addressed (TG, DG-ID, connector).
 - **Receive**: the module's streams go to the open protocols only; the others get nothing, interlinks included unless `URF` or `XLXPeer` is listed.
@@ -924,6 +947,7 @@ Open ports are found by internet scanners within hours. urfd turns them away and
 | 41400 | UDP | NXDN | NXDN | `[NXDN] Port` |
 | 42000 | UDP | YSF | YSF and Wires-X | `[YSF] Port` |
 | 62030 | UDP | MMDVM | DMR hotspots and repeaters | `[MMDVM] Port` |
+| 62035 | UDP | OpenBridge | the DMR network's server of the link | `[OpenBridge] LocalPort` |
 
 Local only, do not open: the admin socket (`[Admin] Port`, 10101) and the WebSocket (`[WebSocket] Port`, 10102, reached through the dashboard's `/ws`).
 
@@ -936,6 +960,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **OpenBridge (4.40.0)**: a link server to server with a DMR network (HBlink3, HBlink4, FreeDMR, BrandMeister), every mapped talkgroup at the same time, classic (HMAC-SHA1) or FreeDMR's version 5 (DMRE, BLAKE2b, keepalives, source quench), turning FreeDMR by itself, see [OpenBridge](#openbridge-4400)
 - **Connectors without DNS (4.37.3)**: DCSClient, DExtraClient, DPlusClient and YSFClient look the reflector's host up again before every try; when that failed (DNS down) the address was emptied, the try went nowhere with a `Wrong family: 0` line, and `connecting to` was logged all the same. Now the last address is kept and tried, `cannot resolve <host>` is logged once until the host resolves again, and a connector that never had an address sends nothing
 - **D-Star client links kept (4.37.1)**: DCSClient answers the reflector's polls as ircDDBGateway does and names the reflector in link and unlink (a DCS reflector dropped the link some 40 s after each relink); DCSClient, DExtraClient and DPlusClient retry after 5, 10, 20, 40 and every 60 s; a link is lost after 60 s without a poll (DPlus 30 s); DCS packets with stream id 0 are dropped, see [Keeping the link](#d-star-client-connectors-dcs-dextra-dplus)
 - **No log floods from a broken stream** (4.37.1): a header with stream id 0 is logged once a minute with a count instead of once per packet

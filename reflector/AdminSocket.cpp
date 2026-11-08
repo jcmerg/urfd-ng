@@ -18,6 +18,7 @@
 #include "AdminSocket.h"
 #include "LogBuffer.h"
 #include "MMDVMClientProtocol.h"
+#include "OpenBridgeProtocol.h"
 #include "DMRMMDVMProtocol.h"
 #include "SvxReflectorProtocol.h"
 #include "SvxProtocol.h"
@@ -89,7 +90,7 @@ static CMMDVMClientProtocol *FindMmdvmClient(CProtocols &protocols, const std::s
 }
 
 static const std::map<EProtocol, std::string> s_BuiltinProtoToName = {
-	{EProtocol::mmdvmclient, "MMDVMClient"}, {EProtocol::svxreflector, "SvxReflector"}, {EProtocol::svx, "SVX"},
+	{EProtocol::mmdvmclient, "MMDVMClient"}, {EProtocol::openbridge, "OpenBridge"}, {EProtocol::svxreflector, "SvxReflector"}, {EProtocol::svx, "SVX"},
 	{EProtocol::dcsclient, "DCSClient"}, {EProtocol::dextraclient, "DExtraClient"},
 	{EProtocol::dplusclient, "DPlusClient"}, {EProtocol::ysfclient, "YSFClient"},
 	{EProtocol::dextra, "DExtra"}, {EProtocol::dplus, "DPlus"},
@@ -768,6 +769,26 @@ nlohmann::json CAdminSocket::CmdTGList(const nlohmann::json &cmd)
 		}
 	}
 
+	// OpenBridge: its TGs come from urfd.ini only (SIGHUP reloads them)
+	if (protocol == "all" || protocol == "openbridge")
+	{
+		if (auto *proto = protocols.FindByType(EProtocol::openbridge))
+		{
+			auto *obp = static_cast<COpenBridgeProtocol *>(proto);
+			for (const auto &m : obp->GetTGMap().GetAllMappings())
+				result["mappings"].push_back({
+					{"protocol", "openbridge"},
+					{"client_name", obp->GetName()},
+					{"network", obp->GetNetwork()},
+					{"tg", m.tg},
+					{"module", std::string(1, m.module)},
+					{"static", true},
+					{"primary", m.is_primary},
+					{"remaining", 0}
+				});
+		}
+	}
+
 	if (protocol == "all" || protocol == "svxreflector")
 	{
 		auto *proto = protocols.FindByType(EProtocol::svxreflector);
@@ -926,6 +947,11 @@ nlohmann::json CAdminSocket::CmdStatus(void)
 	status["mmdvm_server_active"] = (protocols.FindByType(EProtocol::dmrmmdvm) != nullptr);
 	status["svx_active"] = (protocols.FindByType(EProtocol::svxreflector) != nullptr);
 	status["svxs_active"] = (protocols.FindByType(EProtocol::svx) != nullptr);
+	if (auto *proto = protocols.FindByType(EProtocol::openbridge))
+	{
+		auto *obp = static_cast<COpenBridgeProtocol *>(proto);
+		status["openbridge"] = obp->Status();
+	}
 	// the plugins: name, whether they run, and what they add themselves (after the lock)
 	std::vector<CProtocol *> pluginProtos;
 	status["plugins"] = nlohmann::json::array();

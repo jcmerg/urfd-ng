@@ -116,7 +116,7 @@ This includes the current dynamic state of the reflector:
 - `current_time`: Unix timestamp at the moment the snapshot was built
 - `uptime_seconds`: elapsed time since start
 - `transcoded`: the modules transcoded right now, e.g. `"AD"` (with `[Transcoder] Modules = auto` they follow tcd)
-- `links`: the nodes linked to the reflector, as `client_added` has them: not the pseudo clients of the connectors and bridges (MMDVMClient, SvxReflector, DCS/DExtra/DPlus/YSF clients, USRP; those are in the module's `mappings`) and not the clients of interlinked peers (those are in `peers`); `client_added` and `client_removed` cover the same nodes
+- `links`: the nodes linked to the reflector, as `client_added` has them: not the pseudo clients of the connectors and bridges (MMDVMClient, OpenBridge, SvxReflector, DCS/DExtra/DPlus/YSF clients, USRP; those are in the module's `mappings`) and not the clients of interlinked peers (those are in `peers`); `client_added` and `client_removed` cover the same nodes
 - `last_heard`: recent heard stations, newest first, as `user_heard` has them
 - `open_channels`: active streams currently transmitting on a module, with the operator's `name`
 - `peers`: linked peer reflectors with their clients, like `peer_added`
@@ -270,11 +270,12 @@ The bridges of every module, sent when one changed: a TG mapping added, removed 
 }
 ```
 
-- `protocol`: `YSF`, `NXDN`, `P25` (`type` `AutoLink`), `USRP` (`Bridge`), `MMDVM`, `MMDVMClient`, `SvxReflector`, `SVX` (`TG`), `DCSClient`, `DExtraClient`, `DPlusClient` (`Module`), `YSFClient` (`DG-ID`); only enabled protocols
+- `protocol`: `YSF`, `NXDN`, `P25` (`type` `AutoLink`), `USRP` (`Bridge`), `MMDVM`, `MMDVMClient`, `OpenBridge`, `SvxReflector`, `SVX` (`TG`), `DCSClient`, `DExtraClient`, `DPlusClient` (`Module`), `YSFClient` (`DG-ID`); only enabled protocols
 - `id`: the TG, the reflector ID, the remote module letter or the DG-ID, when there is one
 - `timeslot`: DMR timeslot, for `MMDVM` and `MMDVMClient`
 - `expires`: Unix time a dynamic TG ends unless it is used again; static ones have none
-- `remote_name`: the remote reflector or server, for connectors `host:port`
+- `remote_name`: the remote reflector or server, for connectors `host:port`, for `OpenBridge` the target's host
+- `network`: for `MMDVMClient` and `OpenBridge`, the DMR network the connection belongs to
 - `connected`: for connectors, whether the link is up
 
 ## Ping / pong behavior

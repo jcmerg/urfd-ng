@@ -81,6 +81,7 @@ Forward these ports from your router to the machine, or open them in the firewal
 | 30001/udp | DExtra | D-Star (DExtra) |
 | 30051/udp | DCS | D-Star (DCS) |
 | 62030/udp | MMDVM | DMR hotspots, only after enabling `[MMDVM]` in `urfd.ini` (see below) |
+| 62035/udp | OpenBridge | a DMR network's server, only after enabling `[OpenBridge]` in `urfd.ini` |
 | 8880/udp | DMR+ | DMR+ |
 | 42000/udp | YSF | Fusion (YSF) |
 | 41000/udp | P25 | P25 |
