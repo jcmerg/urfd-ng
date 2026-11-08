@@ -35,6 +35,7 @@ COpenBridgeProtocol::COpenBridgeProtocol() : CMMDVMClientProtocol(std::string("O
 COpenBridgeProtocol::~COpenBridgeProtocol()
 {
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
+	EVP_MAC_CTX_free(m_BlakeKeyed);
 	EVP_MAC_free(m_Blake);
 #endif
 }
@@ -49,6 +50,8 @@ bool COpenBridgeProtocol::Initialize(const char *type, const EProtocol ptype, co
 	m_SourceServer = g_Configure.Contains(k.sourceserver) ? g_Configure.GetUnsigned(k.sourceserver) : m_NetworkId;
 	m_PeerId = g_Configure.Contains(k.peerid) ? g_Configure.GetUnsigned(k.peerid) : 0;
 	m_Passphrase = g_Configure.GetString(k.passphrase);
+	m_Key20 = m_Passphrase.substr(0, 20);
+	m_Key20.resize(20, '\0');
 	m_FreeDmr = g_Configure.Contains(k.dialect) && g_Configure.GetString(k.dialect) == "freedmr";
 	m_AutoUpgrade = !g_Configure.Contains(k.autoupgrade) || g_Configure.GetBoolean(k.autoupgrade);
 	m_PreserveSourcePeer = g_Configure.Contains(k.preservesourcepeer) && g_Configure.GetBoolean(k.preservesourcepeer);
@@ -65,12 +68,24 @@ bool COpenBridgeProtocol::Initialize(const char *type, const EProtocol ptype, co
 
 	ParseBlockProtocols(k.blockprotocols, m_Name);
 	SaveBlockDefaults();
+	m_TGMap.NoTimeslots();
 	m_TGMap.LoadFromConfig("obp", m_Name);
 
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
 	m_Blake = EVP_MAC_fetch(nullptr, "BLAKE2BMAC", nullptr);
+	if (m_Blake)
+	{
+		size_t size = 16;
+		OSSL_PARAM params[] = { OSSL_PARAM_construct_size_t(OSSL_MAC_PARAM_SIZE, &size), OSSL_PARAM_construct_end() };
+		m_BlakeKeyed = EVP_MAC_CTX_new(m_Blake);
+		if (m_BlakeKeyed && !EVP_MAC_init(m_BlakeKeyed, (const unsigned char *)m_Key20.data(), m_Key20.size(), params))
+		{
+			EVP_MAC_CTX_free(m_BlakeKeyed);
+			m_BlakeKeyed = nullptr;
+		}
+	}
 #endif
-	if (!m_Blake && (m_FreeDmr || m_AutoUpgrade))
+	if (!m_BlakeKeyed && (m_FreeDmr || m_AutoUpgrade))
 	{
 		std::cerr << m_Name << ": OpenSSL has no BLAKE2BMAC (OpenSSL 3 is needed) for FreeDMR, the link stays classic" << std::endl;
 		m_FreeDmr = m_AutoUpgrade = false;
@@ -85,18 +100,6 @@ bool COpenBridgeProtocol::Initialize(const char *type, const EProtocol ptype, co
 	std::cout << m_Name << ": network ID " << m_NetworkId << ", " << (m_FreeDmr ? "FreeDMR" : "classic")
 	          << ", target " << m_MasterAddress << ":" << m_MasterPort << ", local port " << port << ", network " << m_Network << std::endl;
 	return CProtocol::Initialize(type, ptype, port, has_ipv4, has_ipv6);
-}
-
-bool COpenBridgeProtocol::IsSourceClientBlocked(const CClient &client) const
-{
-	if (client.GetProtocol() != EProtocol::mmdvmclient && client.GetProtocol() != EProtocol::openbridge)
-		return false;
-	const auto *src = dynamic_cast<const CMMDVMClientProtocol *>(client.GetOwnerProtocol());
-	if (!src || src == this)
-		return true;	// our own call back to the other end
-	if (src->GetNetwork() == m_Network)
-		return true;	// the network has it already
-	return client.GetProtocol() == EProtocol::mmdvmclient && IsMmdvmConnectionBlocked(src->GetInstance());
 }
 
 nlohmann::json COpenBridgeProtocol::Status(void) const
@@ -137,7 +140,9 @@ void COpenBridgeProtocol::Task(void)
 	}
 	// the target looked up again only while nothing comes from it: a lookup blocks
 	// this thread, and a host with more addresses must not switch in a call
-	if (m_ResolveTimer.time() >= OBP_RESOLVE_PERIOD && m_AliveTimer.time() >= OBP_ALIVE_TIMEOUT)
+	// (every 10 s while the first lookup has not gone through: DNS not up yet at boot)
+	if ((m_MasterIp.AddressIsZero() && m_ResolveTimer.time() >= OBP_RESOLVE_RETRY)
+		|| (m_ResolveTimer.time() >= OBP_RESOLVE_PERIOD && m_AliveTimer.time() >= OBP_ALIVE_TIMEOUT))
 	{
 		ResolveMaster();
 		m_ResolveTimer.start();
@@ -204,22 +209,12 @@ void COpenBridgeProtocol::Upgrade(const char *why)
 ////////////////////////////////////////////////////////////////////////////////////////
 // authentication
 
-std::string COpenBridgeProtocol::Key(void) const
+void COpenBridgeProtocol::Sha1(const uint8_t *data, size_t len, uint8_t *digest) const
 {
 	// FreeDMR (and HBlink3) cut the passphrase to 20 bytes and pad it with NULs.
 	// The padding changes nothing for HMAC-SHA1 (it pads every key shorter than
-	// its 64 byte block with NULs itself), the cut does for a longer passphrase;
-	// for BLAKE2b, whose key length counts, both do
-	if (!m_FreeDmr)
-		return m_Passphrase;
-	std::string key = m_Passphrase.substr(0, 20);
-	key.resize(20, '\0');
-	return key;
-}
-
-void COpenBridgeProtocol::Sha1(const uint8_t *data, size_t len, uint8_t *digest) const
-{
-	const std::string key = Key();
+	// its 64 byte block with NULs itself), the cut does for a longer passphrase
+	const std::string &key = Key();
 	unsigned int dlen = 20;
 	HMAC(EVP_sha1(), key.data(), int(key.size()), data, len, digest, &dlen);
 }
@@ -233,9 +228,8 @@ bool COpenBridgeProtocol::Sha1Ok(const uint8_t *data, size_t len, const uint8_t 
 	if (m_Passphrase.size() <= 20)
 		return false;
 	// a classic link to HBlink3 or FreeDMR, which use the first 20 characters only
-	const std::string key = m_Passphrase.substr(0, 20);
 	unsigned int dlen = 20;
-	HMAC(EVP_sha1(), key.data(), int(key.size()), data, len, digest, &dlen);
+	HMAC(EVP_sha1(), m_Key20.data(), int(m_Key20.size()), data, len, digest, &dlen);
 	return 0 == CRYPTO_memcmp(digest, hash, 20);
 }
 
@@ -245,20 +239,12 @@ bool COpenBridgeProtocol::Blake2b(const uint8_t *data, size_t len, uint8_t *dige
 	(void)data; (void)len; (void)digest;
 	return false;
 #else
-	if (!m_Blake)
+	// the key's length counts for BLAKE2b: FreeDMR's 20 bytes, set up once
+	if (!m_BlakeKeyed)
 		return false;
-	std::string key = m_Passphrase.substr(0, 20);
-	key.resize(20, '\0');
-	size_t size = 16, out = 0;
-	OSSL_PARAM params[] = {
-		OSSL_PARAM_construct_size_t(OSSL_MAC_PARAM_SIZE, &size),
-		OSSL_PARAM_construct_end()
-	};
-	EVP_MAC_CTX *ctx = EVP_MAC_CTX_new(m_Blake);
-	const bool ok = ctx
-		&& EVP_MAC_init(ctx, (const unsigned char *)key.data(), key.size(), params)
-		&& EVP_MAC_update(ctx, data, len)
-		&& EVP_MAC_final(ctx, digest, &out, 16) && out == 16;
+	size_t out = 0;
+	EVP_MAC_CTX *ctx = EVP_MAC_CTX_dup(m_BlakeKeyed);
+	const bool ok = ctx && EVP_MAC_update(ctx, data, len) && EVP_MAC_final(ctx, digest, &out, 16) && out == 16;
 	EVP_MAC_CTX_free(ctx);
 	return ok;
 #endif

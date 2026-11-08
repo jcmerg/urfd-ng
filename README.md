@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.0** | tcd 0.21.0 | Dashboard v3.1.5
+**urfd 4.40.1** | tcd 0.21.0 | Dashboard v3.1.5
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -960,6 +960,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **OpenBridge review fixes (4.40.1)**: a DMR call that joins a module late (no header) went to the master or the OpenBridge with its first burst numbered 0 again after the header, and FreeDMR dropped it; the owner of a module's stream is read and set atomically, as other protocols' threads read it while it opens and closes; OpenBridge looks up a target that did not resolve at the start every 10 s (DNS not up yet), keeps its keys and its BLAKE2b set up once instead of per packet and records no frames for an echo check it never makes; an invalid `SourceServer` or `PeerId` stays unset with a warning (it became 0, which turned the default or the check off); `[OpenBridge]` in `urfd.ini` is a commented block like `[MMDVM]`, off without the section
 - **OpenBridge (4.40.0)**: a link server to server with a DMR network (HBlink3, HBlink4, FreeDMR, BrandMeister), every mapped talkgroup at the same time, classic (HMAC-SHA1) or FreeDMR's version 5 (DMRE, BLAKE2b, keepalives, source quench), turning FreeDMR by itself, see [OpenBridge](#openbridge-4400)
 - **Connectors without DNS (4.37.3)**: DCSClient, DExtraClient, DPlusClient and YSFClient look the reflector's host up again before every try; when that failed (DNS down) the address was emptied, the try went nowhere with a `Wrong family: 0` line, and `connecting to` was logged all the same. Now the last address is kept and tried, `cannot resolve <host>` is logged once until the host resolves again, and a connector that never had an address sends nothing
 - **D-Star client links kept (4.37.1)**: DCSClient answers the reflector's polls as ircDDBGateway does and names the reflector in link and unlink (a DCS reflector dropped the link some 40 s after each relink); DCSClient, DExtraClient and DPlusClient retry after 5, 10, 20, 40 and every 60 s; a link is lost after 60 s without a poll (DPlus 30 s); DCS packets with stream id 0 are dropped, see [Keeping the link](#d-star-client-connectors-dcs-dextra-dplus)

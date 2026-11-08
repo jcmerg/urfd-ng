@@ -809,10 +809,18 @@ bool CConfigure::ReadData(const std::string &path)
 					data[ok.localport] = getUnsigned(value, "OpenBridge LocalPort", 1, 65535, 62035);
 				else if (0 == key.compare("NetworkId"))
 					data[ok.networkid] = getUnsigned(value, "OpenBridge NetworkId", 1, 4294967295U, 0);
+				// an ID that is no number or out of range stays unset, with a warning:
+				// 0 would turn the NetworkId default or the PeerId check off
 				else if (0 == key.compare("SourceServer"))
-					data[ok.sourceserver] = getUnsigned(value, "OpenBridge SourceServer", 1000, 9999999, 0);
+				{
+					if (unsigned v = getUnsigned(value, "OpenBridge SourceServer", 1000, 9999999, 0))
+						data[ok.sourceserver] = v;
+				}
 				else if (0 == key.compare("PeerId"))
-					data[ok.peerid] = getUnsigned(value, "OpenBridge PeerId", 0, 4294967295U, 0);
+				{
+					if (unsigned v = getUnsigned(value, "OpenBridge PeerId", 1, 4294967295U, 0))
+						data[ok.peerid] = v;
+				}
 				else if (0 == key.compare("Passphrase"))
 					data[ok.passphrase] = value;
 				else if (0 == key.compare("Dialect"))
@@ -1243,46 +1251,32 @@ bool CConfigure::ReadData(const std::string &path)
 					return true;
 			return false;
 		};
+		// <listKey> = <modules> of a section: each module's talkgroup as a TG line
+		// "<prefix>TG<number> = <module><suffix>" unless the section maps the
+		// module or the number already
+		auto resolveModules = [&](const std::string &listKey, const char *section, const std::string &name, const std::string &prefix, const std::string &suffix) {
+			if (!data.contains(listKey))
+				return;
+			const std::string list = data[listKey].get<std::string>();
+			data.erase(listKey);
+			for (char m : list)
+			{
+				if (!std::isalpha((unsigned char)m))
+					continue;
+				m = char(std::toupper((unsigned char)m));
+				if (!data.contains(ModuleTGKey(m)))
+				{
+					std::cerr << "ERROR: [" << section << "] " << name << " = " << list << ": module " << m << " has no talkgroup, give it TG" << m << " = <number> in [" << JMODULES << "]" << std::endl;
+					rval = true;
+				}
+				else if (!mapsModule(prefix + "TG", m) && !data.contains(prefix + "TG" + std::to_string(data[ModuleTGKey(m)].get<unsigned>())))
+					data[prefix + "TG" + std::to_string(data[ModuleTGKey(m)].get<unsigned>())] = std::string(1, m) + suffix;
+			}
+		};
 		for (const char *ts : { "TS1", "TS2" })
-		{
-			const std::string key = std::string("mmdvm") + ts;
-			if (!data.contains(key))
-				continue;
-			const std::string list = data[key].get<std::string>();
-			data.erase(key);
-			for (char m : list)
-			{
-				if (!std::isalpha((unsigned char)m))
-					continue;
-				m = char(std::toupper((unsigned char)m));
-				if (!data.contains(ModuleTGKey(m)))
-				{
-					std::cerr << "ERROR: [" << JMMDVM << "] " << ts << " = " << list << ": module " << m << " has no talkgroup, give it TG" << m << " = <number> in [" << JMODULES << "]" << std::endl;
-					rval = true;
-				}
-				else if (!mapsModule("mmdvmTG", m) && !data.contains("mmdvmTG" + std::to_string(data[ModuleTGKey(m)].get<unsigned>())))
-					data["mmdvmTG" + std::to_string(data[ModuleTGKey(m)].get<unsigned>())] = std::string(1, m) + "," + ts;
-			}
-		}
-		// [OpenBridge] Modules = <modules>: their talkgroups, as TS1 = above without a timeslot
-		if (data.contains("obpModules"))
-		{
-			const std::string list = data["obpModules"].get<std::string>();
-			data.erase("obpModules");
-			for (char m : list)
-			{
-				if (!std::isalpha((unsigned char)m))
-					continue;
-				m = char(std::toupper((unsigned char)m));
-				if (!data.contains(ModuleTGKey(m)))
-				{
-					std::cerr << "ERROR: [" << JOPENBRIDGE << "] Modules = " << list << ": module " << m << " has no talkgroup, give it TG" << m << " = <number> in [" << JMODULES << "]" << std::endl;
-					rval = true;
-				}
-				else if (!mapsModule("obpTG", m) && !data.contains("obpTG" + std::to_string(data[ModuleTGKey(m)].get<unsigned>())))
-					data["obpTG" + std::to_string(data[ModuleTGKey(m)].get<unsigned>())] = std::string(1, m);
-			}
-		}
+			resolveModules(std::string("mmdvm") + ts, JMMDVM, ts, "mmdvm", std::string(",") + ts);
+		// [OpenBridge] Modules = <modules>: as TS1 = above without a timeslot
+		resolveModules("obpModules", JOPENBRIDGE, "Modules", "obp", "");
 		const std::pair<const char *, const char *> autoSections[] = { { "mmdvm", JMMDVM }, { "svxs", JSVXSERVER }, { "obp", JOPENBRIDGE } };
 		for (const auto &[prefix, section] : autoSections)
 		{
@@ -1877,7 +1871,8 @@ bool CConfigure::ReadData(const std::string &path)
 
 		// OpenBridge: one more connection into a network, with its TGs among the others
 		const auto &ok = g_Keys.openbridge;
-		if (isDefined(ErrorLevel::mild, JOPENBRIDGE, JENABLE, ok.enable, rval) && GetBoolean(ok.enable))
+		// off without the section, as [MMDVM]: no warning for its Enable then
+		if (data.contains(ok.enable) && data[ok.enable].is_boolean() && GetBoolean(ok.enable))
 		{
 			isDefined(ErrorLevel::fatal, JOPENBRIDGE, "TargetAddress", ok.address, rval);
 			isDefined(ErrorLevel::fatal, JOPENBRIDGE, "TargetPort", ok.port, rval);

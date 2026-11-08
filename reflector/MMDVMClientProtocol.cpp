@@ -131,13 +131,9 @@ bool CMMDVMClientProtocol::Transcoded(char module) const
 
 bool CMMDVMClientProtocol::IsSourceClientBlocked(const CClient &client) const
 {
-	// an OpenBridge link into the same network: the network has the call already
-	if (client.GetProtocol() == EProtocol::openbridge)
-	{
-		const auto *src = dynamic_cast<const CMMDVMClientProtocol *>(client.GetOwnerProtocol());
-		return src && src->GetNetwork() == m_Network;
-	}
-	if (client.GetProtocol() != EProtocol::mmdvmclient)
+	// the DMR network connections: MMDVMClient ones and OpenBridge (instance 0, no
+	// name to block it by)
+	if (client.GetProtocol() != EProtocol::mmdvmclient && client.GetProtocol() != EProtocol::openbridge)
 		return false;
 	const auto *src = dynamic_cast<const CMMDVMClientProtocol *>(client.GetOwnerProtocol());
 	if (!src || src == this)
@@ -981,15 +977,18 @@ void CMMDVMClientProtocol::OnDMRDVoiceFrameIn(const CBuffer &Buffer, uint32_t sr
 		return;
 
 	// the call's last frames, to know its echo
-	auto &recent = m_RecentCalls[CallKey(stream->GetOwnerClient()->GetReflectorModule(), srcId)];
-	recent.last.start();
-	for (int i = 0; i < 3; i++)
+	if (m_EchoCheck)
 	{
-		recent.frames.emplace_back();
-		::memcpy(recent.frames.back().data(), &dmr3ambe[i * 9], 9);
+		auto &recent = m_RecentCalls[CallKey(stream->GetOwnerClient()->GetReflectorModule(), srcId)];
+		recent.last.start();
+		for (int i = 0; i < 3; i++)
+		{
+			recent.frames.emplace_back();
+			::memcpy(recent.frames.back().data(), &dmr3ambe[i * 9], 9);
+		}
+		while (recent.frames.size() > MMDVMCLI_ECHO_TAIL)
+			recent.frames.pop_front();
 	}
-	while (recent.frames.size() > MMDVMCLI_ECHO_TAIL)
-		recent.frames.pop_front();
 
 	for (int i = 0; i < 3; i++)
 	{
@@ -1206,7 +1205,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 
 				CBuffer buf;
 				buf.Set((uint8_t *)"DMRD", 4);
-				buf.Append(cache.pktSeqNo++);
+				buf.Append(it->second.pktSeqNo++);	// the stored copy's: the first burst follows with 1
 				buf.Append((uint8_t)(srcId >> 16));
 				buf.Append((uint8_t)(srcId >> 8));
 				buf.Append((uint8_t)(srcId));

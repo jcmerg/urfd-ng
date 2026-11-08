@@ -43,6 +43,7 @@
 #define OBP_ENDED_WINDOW         180	// seconds a stream ID stays ended, as FreeDMR keeps it
 #define OBP_QUENCH_WINDOW        900	// seconds a quenched call of ours stays quenched without its end
 #define OBP_RESOLVE_PERIOD       300	// seconds between lookups of the target
+#define OBP_RESOLVE_RETRY        10	// seconds between lookups while it has no address
 #define OBP_STREAM_QUIET         5	// seconds a stream of the other end may pause
 
 class COpenBridgeProtocol : public CMMDVMClientProtocol
@@ -53,10 +54,6 @@ public:
 
 	bool Initialize(const char *type, const EProtocol ptype, const uint16_t port, const bool has_ipv4, const bool has_ipv6) override;
 	void Task(void) override;
-
-	// a call from a DMR network connection into the same network, or our own,
-	// does not go back
-	bool IsSourceClientBlocked(const CClient &client) const override;
 
 	bool IsFreeDmr(void) const { return m_FreeDmr; }
 	// for the admin status: target, network, dialect, when the other end was last heard
@@ -75,7 +72,7 @@ private:
 	void Alive(void);
 
 	// authentication
-	std::string Key(void) const;	// the passphrase as this dialect uses it
+	const std::string &Key(void) const { return m_FreeDmr ? m_Key20 : m_Passphrase; }	// the passphrase as this dialect uses it
 	void Sha1(const uint8_t *data, size_t len, uint8_t *digest) const;
 	bool Blake2b(const uint8_t *data, size_t len, uint8_t *digest) const;
 	bool Sha1Ok(const uint8_t *data, size_t len, const uint8_t *hash) const;
@@ -87,6 +84,7 @@ private:
 	void SendQuench(const uint8_t *tg, const uint8_t *streamId);
 
 	std::string m_Passphrase;
+	std::string m_Key20;	// cut or padded to 20 bytes, as HBlink3 and FreeDMR keep it
 	uint32_t    m_NetworkId = 0;
 	uint32_t    m_SourceServer = 0;	// FreeDMR's source server of our calls, NetworkId by default
 	uint32_t    m_PeerId = 0;		// 0: any repeater ID from the other end
@@ -96,8 +94,10 @@ private:
 	std::atomic<bool> m_Stunned{false};	// the other end sent BCST: nothing goes to it any more
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
 	EVP_MAC    *m_Blake = nullptr;	// BLAKE2b for FreeDMR, OpenSSL 3 and later
+	EVP_MAC_CTX *m_BlakeKeyed = nullptr;	// with its key and size set, copied for each packet
 #else
 	void       *m_Blake = nullptr;	// none before OpenSSL 3: classic only
+	void       *m_BlakeKeyed = nullptr;
 #endif
 
 	CTimer      m_KeepaliveTimer, m_VersionTimer, m_AliveTimer, m_ResolveTimer, m_HousekeepingTimer;
