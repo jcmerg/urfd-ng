@@ -395,6 +395,8 @@ var $ = function (id) { return document.getElementById(id); };
 
 function esc(v) { return String(v).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 function db(v) { return v > -99 ? v.toFixed(1) : '-∞'; }
+// a count with thin spaces between the thousands (102 345), every counter of the page
+function thousands(n) { return String(n || 0).replace(/\B(?=(\d{3})+(?!\d))/g, '\u202f'); }
 function signed(v) { return (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1); }
 function ago(s) { return s < 120 ? Math.round(s) + ' s ago' : s < 7200 ? Math.round(s / 60) + ' min ago' : Math.round(s / 3600) + ' h ago'; }
 
@@ -587,7 +589,7 @@ function render() {
         (m.direct ? ' <span class="arr">|</span> <b>' + esc(m.codec_in) + '</b><span class="arr">→</span>frames ' +
           (cfg.agc_enabled ? 'AGC ' + signed(m.agc_gain) + ' dB' : 'no AGC') + ' + output gains<span class="arr">→</span>' + esc(m.direct) : '')
       : '<span>No signal path while idle</span>';
-    p.flow.innerHTML = flow + '<span class="pkts">' + m.pkts_in + ' in, ' + m.pkts_out + ' out</span>';
+    p.flow.innerHTML = flow + '<span class="pkts">' + thousands(m.pkts_in) + ' in, ' + thousands(m.pkts_out) + ' out</span>';
   });
   $('mods-quiet').hidden = !compact || shown > 0 || !mods.length;
 
@@ -601,7 +603,6 @@ function render() {
   // 20 s of audio and looked stuck. From 100M (23 days of one stream) in
   // millions, the exact count in the tooltip; a table too wide for a column per
   // counter falls back to the narrow layout (fitTable)
-  var thousands = function (n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '\u202f'); };
   var short = function (n) { return n < 100000000 ? thousands(n) : (n / 1000000).toFixed(2) + 'M'; };
   var cnt = function (n, lbl, bad) { n = n || 0; return '<span class="cnt' + (bad && n > 0 ? ' bad' : '') + '"' + (n >= 100000000 ? ' title="' + n + ' ' + lbl + '"' : '') + '>' + short(n) + '<span class="lbl">' + lbl + '</span></span>'; };
   // wide: each counter in a column of its own (the table lines them up), as
@@ -681,7 +682,7 @@ function render() {
   var r = data.reflector;
   $('reflector').innerHTML =
     '<dt>Link</dt><dd>' + (r.connected ? '<span class="state-ok">connected</span>' : '<span class="state-bad">not connected, tcd retries on its own</span>') + '</dd>' +
-    '<dt>Packets in</dt><dd>' + r.pkts_rx + '</dd><dt>Packets out</dt><dd>' + r.pkts_tx + '</dd>';
+    '<dt>Packets in</dt><dd>' + thousands(r.pkts_rx) + '</dd><dt>Packets out</dt><dd>' + thousands(r.pkts_tx) + '</dd>';
 }
 
 // settings

@@ -59,6 +59,17 @@ static int json_int(const std::string &json, const std::string &key)
 	return (int)json_num(json, key);
 }
 
+// a count with commas between the thousands (102,345), as the web monitor
+// groups them (with thin spaces, which a plain ncurses terminal cannot show)
+static std::string thousands(long long v)
+{
+	std::string s = std::to_string(v < 0 ? -v : v);
+	for (int i = int(s.size()) - 3; i > 0; i -= 3)
+		s.insert(size_t(i), ",");
+	return v < 0 ? "-" + s : s;
+}
+#define TS(v) thousands(v).c_str()
+
 // Extract a JSON sub-object by key
 static std::string json_obj(const std::string &json, const std::string &key)
 {
@@ -515,7 +526,7 @@ int main(int argc, char *argv[])
 		int ref_tx = json_int(ref_json, "pkts_tx");
 		{
 			char counts[48];
-			const int n = snprintf(counts, sizeof(counts), "RX:%d TX:%d", ref_rx, ref_tx);
+			const int n = snprintf(counts, sizeof(counts), "RX:%s TX:%s", TS(ref_rx), TS(ref_tx));
 			const char *state = ref_conn ? "Reflector: CONNECTED" : "Reflector: DISCONNECTED";
 			const int x = cols - n - 1;
 			attron(ref_conn ? COLOR_PAIR(1) : (COLOR_PAIR(3) | A_BOLD));
@@ -566,7 +577,7 @@ int main(int argc, char *argv[])
 			attron(COLOR_PAIR(2));
 			printw("  [%s]", m.codec_in.c_str());
 			attroff(COLOR_PAIR(2));
-			printw("  pkts: %d/%d", m.pkts_in, m.pkts_out);
+			printw("  pkts: %s/%s", TS(m.pkts_in), TS(m.pkts_out));
 			row++;
 
 			// Signal flow
@@ -656,19 +667,19 @@ int main(int argc, char *argv[])
 				attroff(COLOR_PAIR(7));
 			}
 			// answers lost on the serial line, a silent frame instead
-			if (errs > 0) { attron(COLOR_PAIR(3)); printw("  lost:%d", errs); attroff(COLOR_PAIR(3)); }
+			if (errs > 0) { attron(COLOR_PAIR(3)); printw("  lost:%s", TS(errs)); attroff(COLOR_PAIR(3)); }
 			// its frames by their FEC, like the software rows: decoded with corrected
 			// errors / uncorrectable (repeated), encoded that fail their FEC
 			{
 				const int dec = json_int(dj, "decodes"), enc = json_int(dj, "encodes");
 				const int fec = json_int(dj, "error_frames"), unc = json_int(dj, "uncorrectable"), bad = json_int(dj, "bad_out");
 				attron(COLOR_PAIR(5));
-				printw("  dec:%d enc:%d", dec, enc);
+				printw("  dec:%s enc:%s", TS(dec), TS(enc));
 				attroff(COLOR_PAIR(5));
 				if (fec || unc || bad)
 				{
 					attron(COLOR_PAIR(3));
-					printw("  fec:%d unc:%d bad:%d", fec, unc, bad);
+					printw("  fec:%s unc:%s bad:%s", TS(fec), TS(unc), TS(bad));
 					attroff(COLOR_PAIR(3));
 				}
 			}
@@ -715,11 +726,11 @@ int main(int argc, char *argv[])
 				attroff(COLOR_PAIR(7));
 			}
 			attron(COLOR_PAIR(5));
-			printw("  dec:%d enc:%d", dec, enc);
+			printw("  dec:%s enc:%s", TS(dec), TS(enc));
 			if (codec == "dmr")
-				printw(" re:%d", re);
+				printw(" re:%s", TS(re));
 			if (direct)
-				printw(" direct:%d", direct);
+				printw(" direct:%s", TS(direct));
 			attroff(COLOR_PAIR(5));
 			// how the decoded frames came out (plugins of codec API 3 report it)
 			{
@@ -727,7 +738,7 @@ int main(int argc, char *argv[])
 				if (fec || rep || mute)
 				{
 					attron(COLOR_PAIR(3));
-					printw("  fec:%d rep:%d mute:%d", fec, rep, mute);
+					printw("  fec:%s rep:%s mute:%s", TS(fec), TS(rep), TS(mute));
 					attroff(COLOR_PAIR(3));
 				}
 			}
