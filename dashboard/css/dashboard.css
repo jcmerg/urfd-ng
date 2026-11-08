@@ -2,7 +2,8 @@
  * URF dashboard: a radio front panel.
  * One amber LCD shows who is on the air, the modules are a keypad,
  * everything else is plain tables on an aluminium-grey panel.
- * Red means "transmitting" and nothing else; amber means "nodes linked".
+ * A filled red tag means "transmitting"; amber means "nodes linked".
+ * The audio meters of the log use green, orange and red as a traffic light.
  */
 
 @font-face {
@@ -229,6 +230,19 @@ tr.live td { background: color-mix(in srgb, var(--lcd) 18%, transparent); }
 .empty td { text-align: center; color: var(--graphite); padding-block: 2rem; }
 .ip { font-stretch: 85%; color: var(--graphite); }
 #log td.meta { display: none; }
+/* the audio of a transmission (transcoded modules): a small level meter, -40 to 0 dBFS, with its peak;
+   green fine, orange to look at, red bad (as a colour only: the filled red tag stays for transmitting) */
+.au { white-space: nowrap; }
+.lvl { display: inline-grid; grid-template-columns: 4.5rem auto; grid-template-areas: "bar w" "bar n"; column-gap: 0.5rem; align-items: center; cursor: help; }
+.lvl-bar { grid-area: bar; position: relative; height: 0.5rem; background: var(--panel-sunk); border-radius: 1px; overflow: hidden; }
+.lvl-bar i { position: absolute; inset: 0 auto 0 0; background: var(--ok); }
+.lvl-bar b { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--ink); }
+.lvl.lv1 .lvl-bar i { background: var(--warn); }
+.lvl.lv2 .lvl-bar i { background: var(--tx); }
+.lvl-w { grid-area: w; font-size: var(--fs-xs); font-weight: 600; color: var(--ok); line-height: 1.1; }
+.lvl.warn .lvl-w, .lvl-m.warn { color: var(--warn); font-weight: 600; }
+.lvl.bad .lvl-w, .lvl-m.bad { color: var(--tx); font-weight: 600; }
+.lvl-n { grid-area: n; font-size: var(--fs-xs); color: var(--graphite); font-stretch: 85%; line-height: 1.1; }
 .tag { display: inline-block; font-size: var(--fs-xs); border: 1px solid var(--rule); border-radius: 2px; padding: 0 0.35rem; margin: 0.1rem 0.25rem 0.1rem 0; white-space: nowrap; }
 .tag.dyn { border-style: dashed; }
 .pager { display: flex; flex-wrap: wrap; gap: 0.25rem; justify-content: center; margin-top: 1rem; }

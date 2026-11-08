@@ -51,6 +51,7 @@ public:
 	void HeardNow(void)     { m_LastHeardTime = time(nullptr); }
 	void SetLocation(const CUser &user) { m_Locator = user.m_Locator; m_Latitude = user.m_Latitude; m_Longitude = user.m_Longitude; }
 	void SetLocation(const std::string &loc, double lat, double lon) { m_Locator = loc; m_Latitude = lat; m_Longitude = lon; }
+	void SetAudio(const nlohmann::json &audio) { m_Audio = audio; }	// tcd's report of the transmission (CUsers::Report)
 	// 6 character Maidenhead locator of a position
 	static std::string Locator(double lat, double lon);
 	// the operator's name from the DMR ID database, else the NXDN one, empty if unknown
@@ -77,4 +78,5 @@ protected:
 	std::string m_Locator;
 	double      m_Latitude = 0.0;
 	double      m_Longitude = 0.0;
+	nlohmann::json m_Audio;	// null until tcd reported the transmission
 };

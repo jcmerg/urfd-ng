@@ -68,6 +68,7 @@ public:
 	bool             IsEchoPlayback(void) const     { return m_bEcho; }
 	bool             IsOpen(void) const             { return m_bOpen; }
 	uint16_t         GetStreamId(void) const        { return m_uiStreamId; }
+	uint32_t         GetLostFrames(void) const      { return m_uiLostFrames; }	// voice frames lost on the way and filled in, of the stream so far
 	char             GetModule(void) const          { return m_PSModule; }
 	CCallsign        GetUserCallsign(void) const    { std::lock_guard<std::mutex> lock(m_UserMutex); return m_DvHeader.GetMyCallsign(); }
 	// the talker turned out to be someone else (a DMR ID learned from its talker
@@ -114,7 +115,7 @@ private:
 	// lost frames: the position the next frame should have in its protocol's
 	// frame cycle (-1: unknown) and how many frames this stream got filled in
 	int                 m_iNextWireIdx { -1 };
-	uint32_t            m_uiLostFrames { 0 };
+	std::atomic<uint32_t> m_uiLostFrames { 0 };	// read by CloseStream for the report, written by the router
 	// repeated AMBE+2 frames: the last one that came in, how often in a row, and
 	// how many of this stream were muted
 	uint8_t             m_LastAmbe2[9] {};

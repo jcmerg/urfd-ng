@@ -48,6 +48,7 @@ CUser::CUser(const CUser &user)
 	m_Protocol = user.m_Protocol;
 	m_LastHeardTime = user.m_LastHeardTime;
 	SetLocation(user);
+	m_Audio = user.m_Audio;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -125,5 +126,7 @@ nlohmann::json CUser::ToJson(void) const
 		j["latitude"] = m_Latitude;
 		j["longitude"] = m_Longitude;
 	}
+	if (!m_Audio.is_null())
+		j["audio"] = m_Audio;
 	return j;
 }

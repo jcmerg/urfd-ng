@@ -28,12 +28,14 @@
 #include "StatsLogger.h"
 #include "Version.h"
 #include "CodecPlugins.h"
+#include "StreamReport.h"
 
 // the global objects
 CConfigure     g_Conf;
 CController    g_Cont;
 CTcdStats      g_Stats;
 CMonitorServer g_Monitor;
+CStreamReports g_Reports;
 
 // SIGTERM and SIGINT stop tcd through sigwait() in main. Without that SIGTERM
 // ended tcd at once, without stopping the devices, and in a container, where tcd
