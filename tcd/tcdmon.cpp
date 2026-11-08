@@ -23,6 +23,8 @@
 #include <signal.h>
 #include <fstream>
 #include <algorithm>
+#include <climits>
+#include <clocale>
 
 // Minimal JSON value extraction (no library dependency)
 static std::string json_str(const std::string &json, const std::string &key)
@@ -59,16 +61,60 @@ static int json_int(const std::string &json, const std::string &key)
 	return (int)json_num(json, key);
 }
 
-// a count with commas between the thousands (102,345), as the web monitor
-// groups them (with thin spaces, which a plain ncurses terminal cannot show)
+// numbers as the terminal's locale writes them (LANG, LC_NUMERIC): 134.853 and
+// -12,3 in German, 134,853 and -12.3 in English, ungrouped in the C locale.
+// Read once by numeric_locale(); LC_NUMERIC itself stays "C", so the JSON
+// numbers still parse with their '.'
+static std::string g_thousands_sep;
+static std::string g_grouping;
+static char g_decimal_point = '.';
+
+static void numeric_locale()
+{
+	if (setlocale(LC_NUMERIC, ""))
+	{
+		const struct lconv *lc = localeconv();
+		g_thousands_sep = lc->thousands_sep ? lc->thousands_sep : "";
+		g_grouping = lc->grouping ? lc->grouping : "";
+		if (lc->decimal_point && lc->decimal_point[0] && !lc->decimal_point[1])
+			g_decimal_point = lc->decimal_point[0];
+	}
+	setlocale(LC_NUMERIC, "C");
+	// a separator of more than one byte (the no-break spaces of French or
+	// Russian) as a plain space: this ncurses terminal shows single bytes
+	if (g_thousands_sep.size() > 1)
+		g_thousands_sep = " ";
+}
+
+// a count with its thousands grouped by the locale
 static std::string thousands(long long v)
 {
 	std::string s = std::to_string(v < 0 ? -v : v);
-	for (int i = int(s.size()) - 3; i > 0; i -= 3)
-		s.insert(size_t(i), ",");
+	if (!g_thousands_sep.empty() && !g_grouping.empty())
+	{
+		size_t g = 0;
+		int size = g_grouping[0];
+		for (long i = long(s.size()) - size; size > 0 && size != CHAR_MAX && i > 0; i -= size)
+		{
+			s.insert(size_t(i), g_thousands_sep);
+			if (g + 1 < g_grouping.size())
+				size = g_grouping[++g];
+		}
+	}
 	return v < 0 ? "-" + s : s;
 }
 #define TS(v) thousands(v).c_str()
+
+// a printf of a number with a fraction, its decimal point as the locale has it
+static std::string fraction(const char *format, double v)
+{
+	char buf[32];
+	snprintf(buf, sizeof(buf), format, v);
+	std::string s = buf;
+	if (g_decimal_point != '.')
+		std::replace(s.begin(), s.end(), '.', g_decimal_point);
+	return s;
+}
 
 // Extract a JSON sub-object by key
 static std::string json_obj(const std::string &json, const std::string &key)
@@ -223,7 +269,7 @@ static void draw_vu(int y, int x, int width, const char *label, double rms, doub
 	}
 
 	char val[16];
-	if (rms > -99) snprintf(val, sizeof(val), "%5.1f", rms);
+	if (rms > -99) snprintf(val, sizeof(val), "%s", fraction("%5.1f", rms).c_str());
 	else snprintf(val, sizeof(val), " -inf");
 	mvprintw(y, x + 8 + bar_w, "%s", val);
 }
@@ -279,7 +325,7 @@ static void draw_flow(int y, int x, int /*width*/, const ModuleData &m, const st
 		else
 		{
 			attron(COLOR_PAIR(6) | A_BOLD);
-			snprintf(buf, sizeof(buf), "AGC %+.1fdB", m.agc_gain);
+			snprintf(buf, sizeof(buf), "AGC %sdB", fraction("%+.1f", m.agc_gain).c_str());
 			mvprintw(y, col, "%s", buf);
 			attroff(COLOR_PAIR(6) | A_BOLD);
 			col += strlen(buf);
@@ -347,6 +393,7 @@ static int StatsPortOf(const char *path)
 
 int main(int argc, char *argv[])
 {
+	numeric_locale();
 	const char *host = "127.0.0.1";
 	int port = 8081;
 	// without a port: the one of this machine's tcd.ini ($TCD_INI, the Docker
