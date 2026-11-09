@@ -89,7 +89,8 @@ protected:
 	// (dcs001.xreflector.net -> DCS001, xlx262 -> DCS262 as ircDDBGateway does)
 	std::string ReflectorName(const SDcsClientMapping &) const;
 	// stream id 0 (a reflector's broken loop sends nothing else): dropped, logged once a minute
-	unsigned m_ZeroSid = 0;
+	unsigned m_ZeroSid = 0;        // packets with stream id 0 dropped since the last line
+	bool     m_ZeroSidLogged = false;
 	CTimer   m_ZeroSidTimer;
 	void EncodeDCSPacket(const CDvHeaderPacket &, const CDvFramePacket &, uint32_t seq, CBuffer *) const;
 	void EncodeLastDCSPacket(const CDvHeaderPacket &, const CDvFramePacket &, uint32_t seq, CBuffer *) const;

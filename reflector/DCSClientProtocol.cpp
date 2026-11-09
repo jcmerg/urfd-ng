@@ -189,13 +189,16 @@ void CDcsClientProtocol::HandleIncoming(const CBuffer &Buffer, const CIp &Ip)
 	if (IsValidDvPacket(Buffer, Header, Frame))
 	{
 		// stream id 0: no stream can be opened for it. A reflector caught in a loop sent
-		// nothing else, 120 packets a second; one line a minute says so
+		// nothing else, 120 packets a second: the first one is logged at once, then one
+		// line a minute at most with the count dropped since the last line
 		if (0U == Header->GetStreamId())
 		{
-			if (0U == m_ZeroSid++ || m_ZeroSidTimer.time() >= 60)
+			++m_ZeroSid;
+			if (!m_ZeroSidLogged || m_ZeroSidTimer.time() >= 60)
 			{
-				std::cout << "DCSClient: " << m_ZeroSid << " packet(s) with stream id 0 from " << Ip << " dropped" << (m_ZeroSid > 1 ? " since the last such line" : "") << std::endl;
+				std::cout << "DCSClient: " << m_ZeroSid << " packet(s) with stream id 0 from " << Ip << " dropped" << (m_ZeroSidLogged ? " since the last such line" : "") << std::endl;
 				m_ZeroSid = 0;
+				m_ZeroSidLogged = true;
 				m_ZeroSidTimer.start();
 			}
 			return;
