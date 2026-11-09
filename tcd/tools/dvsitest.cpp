@@ -4,9 +4,13 @@
 //   dvsitest <device node> enc <dstar|dmr> <in.raw> <out.frames>
 //   dvsitest <device node> dec <dstar|dmr> <in.frames> <out.raw>
 //   dvsitest <device node> info
+//   dvsitest <device node> batch <jobs>
 //
-// Raw PCM is 8 kHz s16le, frames are 9 bytes as tcd has them. Channel 0 only,
-// one frame at a time. tcd must not run (it holds the device). Every mode prints
+// Raw PCM is 8 kHz s16le, frames are 9 bytes as tcd has them. enc/dec use channel 0,
+// one frame at a time. batch (DV3003 only) reads one job per line from <jobs>
+// ("enc|dec dstar|dmr <in> <out>", "-" for stdin) and runs three of them at a time,
+// one per channel, each channel with one frame in flight; a channel is set up again
+// for each job it takes, so every file starts from a reset vocoder as with enc/dec. tcd must not run (it holds the device). Every mode prints
 // the product ID and version of the chip, "info" only that.
 //
 // A DV3003 (921600 baud) by default; DVSI_TYPE=3000 in the environment for a single
@@ -23,6 +27,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 #include <chrono>
 
 #include "DeviceIO.h"
@@ -65,7 +70,18 @@ static bool Put(const SDV_Packet &p)
 	return dev->Write(&p, n) == n;
 }
 
+static bool SetupDevice(const std::string &node);
+static bool SetupChannel(int ch, bool dstar);
+
 static bool Setup(const std::string &node, bool dstar)
+{
+	if (!SetupDevice(node)) return false;
+	if (!SetupChannel(0, dstar)) return false;
+	fprintf(stderr, "%s channel 0: %s\n", node.c_str(), dstar ? "D-Star" : "DMR");
+	return true;
+}
+
+static bool SetupDevice(const std::string &node)
 {
 	dev.reset(CreatePosixDevice());
 	std::string desc;
@@ -112,8 +128,16 @@ static bool Setup(const std::string &node, bool dstar)
 		if (dev->Write(&c, 5) != 5 || !Get(r) || r.field_id != f) { fprintf(stderr, "product ID/version query failed\n"); return false; }
 		fprintf(stderr, "%s %s: %s\n", node.c_str(), f == PKT_PRODID ? "product ID" : "version", r.payload.ctrl.data.version);
 	}
+	return true;
+}
 
-	// channel 0 as tcd's ConfigureVocoder sets it, gains 0
+// channel ch as tcd's ConfigureVocoder sets it, gains 0
+static bool SetupChannel(int ch, bool dstar)
+{
+	SDV_Packet c, r;
+	c.start_byte = PKT_HEADER;
+	c.header.packet_type = PKT_CONTROL;
+
 	const uint8_t ecmode[] { PKT_ECMODE, 0x0, 0x0 };
 	const uint8_t dcmode[] { PKT_DCMODE, 0x0, 0x0 };
 	const uint8_t  rdstar[] { PKT_RATEP, 0x01U, 0x30U, 0x07U, 0x63U, 0x40U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x48U };
@@ -123,7 +147,7 @@ static bool Setup(const std::string &node, bool dstar)
 	const uint8_t   gain[] { PKT_GAIN, 0, 0 };
 	const uint8_t   init[] { PKT_INIT, 0x3U };
 	c.header.payload_length = htons(1 + sizeof(SDV_Packet::payload.codec));
-	c.field_id = PKT_CHANNEL0;	// tcd sends it to a DV3000 too
+	c.field_id = PKT_CHANNEL0 + ch;	// tcd sends it to a DV3000 too
 	memcpy(c.payload.codec.ecmode, ecmode, 3);
 	memcpy(c.payload.codec.dcmode, dcmode, 3);
 	memcpy(c.payload.codec.ratep, dstar ? rdstar : rdmr, 13);
@@ -131,7 +155,7 @@ static bool Setup(const std::string &node, bool dstar)
 	memcpy(c.payload.codec.spfmt, spfmt, 3);
 	memcpy(c.payload.codec.gain, gain, 3);
 	memcpy(c.payload.codec.init, init, 2);
-	if (!Put(c) || !Get(r) || r.field_id != PKT_CHANNEL0) { fprintf(stderr, "channel config failed\n"); return false; }
+	if (!Put(c) || !Get(r) || r.field_id != PKT_CHANNEL0 + ch) { fprintf(stderr, "channel %d config failed\n", ch); return false; }
 
 	// linear PCM, as tcd forces it on a DV3003
 	if (!dv3000)
@@ -141,16 +165,130 @@ static bool Setup(const std::string &node, bool dstar)
 		c.payload.ctrl.data.paritymode[1] = 0x0;
 		if (dev->Write(&c, 7) != 7 || !Get(r)) { fprintf(stderr, "compand off failed\n"); return false; }
 	}
-	fprintf(stderr, "%s channel 0: %s\n", node.c_str(), dstar ? "D-Star" : "DMR");
 	return true;
+}
+
+// batch: up to three jobs at a time, one per DV3003 channel, in lock step: every
+// busy channel gets its next frame, then all answers are read and routed by channel.
+// Channels are only set up between rounds, when nothing is in flight.
+struct SJob { bool enc, dstar; std::string in, out; };
+struct SChan { FILE *in = nullptr, *out = nullptr; bool enc = false; int frames = 0; std::string name; };
+
+static int Batch(const std::string &node, const char *list)
+{
+	FILE *jf = strcmp(list, "-") ? fopen(list, "r") : stdin;
+	if (!jf) { perror(list); return 1; }
+	std::vector<SJob> jobs;
+	char line[4096], m[8], c[8], in[2048], out[2048];
+	while (fgets(line, sizeof(line), jf))
+	{
+		if (sscanf(line, "%7s %7s %2047s %2047s", m, c, in, out) != 4) continue;
+		jobs.push_back({ !strcmp(m, "enc"), !strcmp(c, "dstar"), in, out });
+	}
+	if (jf != stdin) fclose(jf);
+	if (!SetupDevice(node)) return 1;
+	SChan ch[3];
+	size_t next = 0;
+	int failed = 0, done = 0, total = 0;
+	auto t0 = std::chrono::steady_clock::now();
+	for (;;)
+	{
+		for (int k = 0; k < 3; k++)
+			while (!ch[k].in && next < jobs.size())
+			{
+				const SJob &j = jobs[next++];
+				if (!SetupChannel(k, j.dstar)) return 1;
+				ch[k].in = fopen(j.in.c_str(), "rb");
+				ch[k].out = ch[k].in ? fopen(j.out.c_str(), "wb") : nullptr;
+				if (!ch[k].in || !ch[k].out) { perror(j.in.c_str()); if (ch[k].in) fclose(ch[k].in); ch[k].in = nullptr; failed++; continue; }
+				ch[k].enc = j.enc; ch[k].frames = 0; ch[k].name = j.out;
+			}
+		int sent = 0;
+		for (int k = 0; k < 3; k++)
+		{
+			if (!ch[k].in) continue;
+			SDV_Packet p;
+			p.start_byte = PKT_HEADER;
+			p.field_id = PKT_CHANNEL0 + k;
+			if (ch[k].enc)
+			{
+				int16_t pcm[160];
+				if (fread(pcm, sizeof(int16_t), 160, ch[k].in) == 160)
+				{
+					p.header.packet_type = PKT_SPEECH;
+					p.header.payload_length = htons(1 + sizeof(p.payload.audio));
+					p.payload.audio.speechd = PKT_SPEECHD;
+					p.payload.audio.num_samples = 160;
+					for (int i = 0; i < 160; i++) p.payload.audio.samples[i] = htons(pcm[i]);
+					if (!Put(p)) { fprintf(stderr, "write failed\n"); return 1; }
+					sent++;
+					continue;
+				}
+			}
+			else
+			{
+				uint8_t f[9];
+				if (fread(f, 1, 9, ch[k].in) == 9)
+				{
+					p.header.packet_type = PKT_CHANNEL;
+					p.header.payload_length = htons(1 + sizeof(p.payload.ambe));
+					p.payload.ambe.chand = PKT_CHAND;
+					p.payload.ambe.num_bits = 72;
+					memcpy(p.payload.ambe.data, f, 9);
+					if (!Put(p)) { fprintf(stderr, "write failed\n"); return 1; }
+					sent++;
+					continue;
+				}
+			}
+			fclose(ch[k].in); fclose(ch[k].out); ch[k].in = nullptr;
+			fprintf(stderr, "ch%d: %d frames -> %s\n", k, ch[k].frames, ch[k].name.c_str());
+			done++;
+		}
+		if (!sent)
+		{
+			if (next >= jobs.size()) break;
+			continue;
+		}
+		for (int n = 0; n < sent; n++)
+		{
+			SDV_Packet r;
+			if (!Get(r)) { fprintf(stderr, "no answer (%d of %d)\n", n, sent); return 1; }
+			const int k = r.field_id - PKT_CHANNEL0;
+			if (k < 0 || k > 2 || !ch[k].in) { fprintf(stderr, "answer for channel field 0x%02x\n", r.field_id); return 1; }
+			if (ch[k].enc)
+			{
+				if (r.header.packet_type != PKT_CHANNEL) { fprintf(stderr, "ch%d: no AMBE back\n", k); return 1; }
+				fwrite(r.payload.ambe.data, 1, 9, ch[k].out);
+			}
+			else
+			{
+				if (r.header.packet_type != PKT_SPEECH) { fprintf(stderr, "ch%d: no speech back\n", k); return 1; }
+				int16_t pcm[160];
+				for (int i = 0; i < 160; i++) pcm[i] = ntohs(r.payload.audio.samples[i]);
+				fwrite(pcm, sizeof(int16_t), 160, ch[k].out);
+			}
+			ch[k].frames++;
+			total++;
+		}
+	}
+	const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+	fprintf(stderr, "%d jobs, %d failed, %d frames, %.2f ms per frame\n", done, failed, total, total ? ms / total : 0);
+	dev->Close();
+	return failed ? 1 : 0;
 }
 
 int main(int argc, char *argv[])
 {
 	const bool info = argc == 3 && !strcmp(argv[2], "info");
-	if (argc != 6 && !info) { fprintf(stderr, "usage: %s <device> enc|dec dstar|dmr <in> <out>\n       %s <device> info\n       (DVSI_TYPE=3000 for a DV3000)\n", argv[0], argv[0]); return 1; }
+	const bool batch = argc == 4 && !strcmp(argv[2], "batch");
+	if (argc != 6 && !info && !batch) { fprintf(stderr, "usage: %s <device> enc|dec dstar|dmr <in> <out>\n       %s <device> batch <jobs|->   (DV3003, three channels)\n       %s <device> info\n       (DVSI_TYPE=3000 for a DV3000)\n", argv[0], argv[0], argv[0]); return 1; }
 	const char *t = getenv("DVSI_TYPE");
 	dv3000 = t && !strcmp(t, "3000");
+	if (batch)
+	{
+		if (dv3000) { fprintf(stderr, "batch needs a DV3003\n"); return 1; }
+		return Batch(argv[1], argv[3]);
+	}
 	const bool enc = !strcmp(argv[2], "enc"), dstar = info || !strcmp(argv[3], "dstar");
 	if (!Setup(argv[1], dstar)) return 1;
 	if (info) { dev->Close(); return 0; }
