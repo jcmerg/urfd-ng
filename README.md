@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.2** | tcd 0.21.0 | Dashboard v3.1.5
+**urfd 4.40.2** | tcd 0.21.0 | Dashboard v3.1.6
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -740,7 +740,7 @@ Since 4.38.0 urfd writes no XML or JSON status file any more (`[Files] XmlPath` 
 
 Module names are configured once in `urfd.ini` and automatically available in the dashboard.
 
-### Dashboard v3.1.5
+### Dashboard v3.1.6
 Since v3.0.0 (urfd 4.38.0) a static page, HTML and plain JavaScript without PHP: it gets the state live over urfd's WebSocket and shows a change the moment it happens, the admin page sends its commands the same way. The pages and the look are those of v2.14; old links (`index.php?show=...`) lead to the same pages. Settings are `[Dashboard]` in `urfd.ini`; `setup.sh update` carries those of the old `config.inc.php` over once.
 
 Redesigned in v2.9.0 as the front panel of a radio: an amber LCD shows who is on the air, the modules are a keypad, the rest are plain tables. Before that: dark mode (v2.6.0), hardened against directory outages (v2.6.1), M17 positions in the last-heard list (v2.7.0), directory registration moved to the reflector (v2.8.0), security fixes (v2.8.1, v2.8.2), status file and admin socket fixes (v2.8.3). Since v2.10.0 the operator's first name stands next to the callsign, from the ID databases urfd loads (urfd 4.12.0 and later).
@@ -964,7 +964,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **OpenBridge (4.40.0)**: a link server to server with a DMR network (HBlink3, HBlink4, FreeDMR, BrandMeister), every mapped talkgroup at the same time, classic (HMAC-SHA1) or FreeDMR's version 5 (DMRE, BLAKE2b, keepalives, source quench), turning FreeDMR by itself, see [OpenBridge](#openbridge-4400)
 - **Connectors without DNS (4.37.3)**: DCSClient, DExtraClient, DPlusClient and YSFClient look the reflector's host up again before every try; when that failed (DNS down) the address was emptied, the try went nowhere with a `Wrong family: 0` line, and `connecting to` was logged all the same. Now the last address is kept and tried, `cannot resolve <host>` is logged once until the host resolves again, and a connector that never had an address sends nothing
 - **D-Star client links kept (4.37.1)**: DCSClient answers the reflector's polls as ircDDBGateway does and names the reflector in link and unlink (a DCS reflector dropped the link some 40 s after each relink); DCSClient, DExtraClient and DPlusClient retry after 5, 10, 20, 40 and every 60 s; a link is lost after 60 s without a poll (DPlus 30 s); DCS packets with stream id 0 are dropped, see [Keeping the link](#d-star-client-connectors-dcs-dextra-dplus)
-- **No log floods from a broken stream** (4.37.1): a header with stream id 0 is logged once a minute with a count instead of once per packet
+- **No log floods from a broken stream** (4.37.1): a header with stream id 0 is logged once a minute with a count instead of once per packet (4.40.2: the limit reset itself after every line, so every packet was logged again; now the first at once, then one line a minute)
 - **Module access by protocol (4.37.0)**: `[Modules] Protocols<M>` opens a module to the protocols listed only: the others cannot link to it, send to it or hear it; `[Modules] HideUnlisted` keeps talkers without an ID database entry off the dashboard, see [Module Access by Protocol](#module-access-by-protocol-4370)
 - **Echo check with another ID in between (4.35.4)**: the MMDVMClient knew only the last call on each module, so an echo did not count as one when another ID keyed up briefly between the call and its echo. It keeps the calls of every ID of the last 3 s on a module now and compares a new stream with its own ID's call. Checked against an hour of BrandMeister TG 262: all 33 echoes dropped, no other stream
 - **A master's echo of a call's end dropped (4.35.3)**: BrandMeister (TG 262, from many stations) sends after most calls a second stream from the same ID, 0.6 to 1.2 s later, with the call's last 36 to 66 frames again (a bit or two different per frame), as from a second way in with a delay that the master holds back while the call runs; everyone heard the last second twice. The MMDVMClient holds a new stream from the ID that spoke on the module in the 3 s before until its first voice frames (60 ms mostly, at most 360 ms): when they are frames of that call's last 3 seconds, it drops the stream and logs `echo of the end of the call from ... dropped`. A new call from that ID with other speech, and every other ID, go through as before. The muting of repeated frames (4.35.0) stays: it is for another thing, the same voice frame many times at a call's end
@@ -1042,6 +1042,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.6.0**: Dark mode redesign, admin panel, module overview with TG mappings and NXDN RAN, protocol-specific columns hidden when disabled, protocol list, QuadNet Live proxy, reflector list with search/pagination
 - **Dashboard v2.6.1**: Survives an outage of the XLX directory. Explicit timeouts on every outbound request, CallingHome failures logged instead of aborting the page render, reflector and peer lists served from an on-disk cache, admin API no longer serialized behind the PHP session lock
 - **Dashboard v2.7.0**: Locator column for stations that send an M17 GNSS position, also in `/json/stations`
+- **Dashboard v3.1.6 (urfd 4.40.2)**: the version in the top bar reads "urfd-ng" and links to the GitHub release the reflector runs; the footer links there as well, with the GitHub mark (also on phones, where the top bar hides the version)
 - **Dashboard v3.1.5 (urfd 4.39.0)**: "Quiet" from below -36 dBFS (was -32), "Too quiet" from below -46 dBFS (was -40): the codec tests of 3GPP take -26 dBov as nominal and -16 to -36 dBov as normal; DMR radios commonly arrive around -32 dBFS and the AGC brings them up without trouble
 - **Dashboard v3.1.4 (urfd 4.39.0)**: a "Short" transmission shows only the empty meter and the word, without level bar, peak mark or AGC line, as it is not rated; its values stay in the tooltip
 - **Dashboard v3.1.3 (urfd 4.39.0)**: the level meter starts at -50 dBFS, where a frame counts as speech, instead of -40 dBFS, so a "Too quiet" transmission (below -40 dBFS) shows its red bar; a level with speech always shows at least a sliver

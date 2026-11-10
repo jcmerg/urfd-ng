@@ -6,7 +6,8 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.5';
+var DASHBOARD_VERSION = '3.1.6';
+var REPO_URL = 'https://github.com/jcmerg/urfd-ng';
 
 var $ = function (id) { return document.getElementById(id); };
 
@@ -265,7 +266,12 @@ function shell() {
     var name = reflectorName(), d = options();
     $('brand-name').textContent = name || 'URF';
     document.title = (name ? name + ' ' : '') + 'Universal Reflector';
-    $('version').textContent = (S.info && S.info.version ? 'urfd ' + S.info.version + ', ' : '') + 'dashboard ' + DASHBOARD_VERSION;
+    // the release this reflector runs, or the repository while the version is not known yet
+    var ver = S.info && S.info.version ? String(S.info.version) : '';
+    var url = ver ? REPO_URL + '/releases/tag/v' + encodeURIComponent(ver) : REPO_URL;
+    $('version').innerHTML = (ver ? '<a href="' + h(url) + '" target="_blank" rel="noopener">urfd-ng ' + h(ver) + '</a>, ' : '') + 'dashboard ' + DASHBOARD_VERSION;
+    $('source-link').href = url;
+    $('source-text').textContent = 'urfd-ng' + (ver ? ' ' + ver : '') + ' on GitHub';
     var motd = String(d.motd || '').trim();
     $('motd').hidden = !motd;
     $('motd-text').textContent = motd;
