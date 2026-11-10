@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.2** | tcd 0.22.2 | Dashboard v3.1.7
+**urfd 4.40.2** | tcd 0.22.3 | Dashboard v3.1.7
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1090,6 +1090,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.22.3**: the stream log (`StreamLog`) counted every frame of a D-Star or DMR stream twice when a codec plugin decoded it ("1304 frames in 13.0 s"); the line now has the frames that came in
 - **tcd 0.22.2**: a codec plugin that cannot open a state for a stream says so once per stream instead of at every frame; when the M17 plugin chosen has no Codec2 1600, the log at start says that its voice+data streams go to `codec2`; the version in the monitor's top bar has a tooltip naming the urfd-ng release it links to; `embed_html.sh` takes the urfd version from `URFD_DIR` when the Makefile has it set (before always `../reflector`)
 - **tcd 0.22.1**: `DmrGainIn` and `DmrGainOut` apply to the codec plugins from the start; without an AMBE device (or with the devices doing DMR) they did only from the first settings update a second later, so a transmission in the first second after the start had 0 dB there
 - **tcd 0.22.0**: tcd's own vocoders, OP25 for P25 and Codec2 for M17, are codec plugins built into tcd and loaded like the others, by `CodecPlugin = op25` and `CodecPlugin = codec2`; with a plugin that does P25 and M17 they can be left out (drop the line, name the plugin in `CodecP25` / `CodecM17`). Without its line tcd's own is still loaded unless a plugin that does the codec is chosen there, so an existing `tcd.ini` works as before; one that names a plugin in `CodecP25` / `CodecM17` no longer offers OP25 / Codec2 in the monitor until the line is added. A `tcd.ini` with these lines needs tcd 0.22.0 or later (an older tcd takes them for paths of a plugin and does not start). One code path for every vocoder in software; Save in the monitor writes the lines of tcd's own it has loaded. Every state tcd keeps per stream (vocoder, AGC, the gain in the AMBE bitstream, the vocoder chosen for it, the stream log) is kept by module and stream id: two modules with the same stream id at once (random, or made from the sender's address) mixed their vocoder and AGC state, also on the codec plugins. `docker/build.sh` counts only plugins of a shared object when it decides whether the container gets the AMBE sticks
