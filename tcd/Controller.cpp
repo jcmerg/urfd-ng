@@ -783,12 +783,6 @@ bool CController::InitVocoders()
 			std::cerr << "       or one DV3000 + one DV3003 (mixed mode)." << std::endl;
 			return true;
 		}
-		if (!device_does_dmr)
-		{
-			// the DMR plugin gets DmrGainIn/Out in software
-			ambe_in_num = calcNumerator(g_Conf.GetGain(EGainType::dmrin));
-			ambe_out_num = calcNumerator(g_Conf.GetGain(EGainType::dmrout));
-		}
 		// with the other codec chosen in software every device does this one, by name
 		const int k = device_does_dmr ? kChoiceDMR : kChoiceDStar;
 		for (const auto &dev : SortedDevices(deviceset))
@@ -944,8 +938,12 @@ bool CController::InitVocoders()
 	// codec; P25 and M17: tcd's own OP25 vocoder or Codec2 first when loaded, then
 	// the plugins. The monitor switches between them, CodecDStar/CodecDMR/CodecP25/
 	// CodecM17 is the start
+	// DStarGainIn/Out and DmrGainIn/Out for the plugins, in software as a device
+	// applies them, from the first stream on (ReconfigureAGC keeps them current)
 	dstar_in_num = calcNumerator(g_Conf.GetGain(EGainType::dstarin));
 	dstar_out_num = calcNumerator(g_Conf.GetGain(EGainType::dstarout));
+	ambe_in_num = calcNumerator(g_Conf.GetGain(EGainType::dmrin));
+	ambe_out_num = calcNumerator(g_Conf.GetGain(EGainType::dmrout));
 	for (int k = 0; k < kNumChoices; k++)
 	{
 		const auto &ch = g_CodecChoices[k];
