@@ -338,15 +338,15 @@ private:
 
 public:
 	// Process without monitoring output
-	void Process(int16_t *samples, int count, uint16_t streamId)
+	void Process(int16_t *samples, int count, uint32_t streamKey)
 	{
 		float gain_db;
 		bool gate;
-		Process(samples, count, streamId, gain_db, gate);
+		Process(samples, count, streamKey, gain_db, gate);
 	}
 
 	// Process with monitoring output
-	void Process(int16_t *samples, int count, uint16_t streamId, float &gain_db_out, bool &gate_out)
+	void Process(int16_t *samples, int count, uint32_t streamKey, float &gain_db_out, bool &gate_out)
 	{
 		gate_out = false;
 		gain_db_out = 0.0f;
@@ -354,11 +354,11 @@ public:
 		if (!m_enabled) return;
 
 		const auto now = std::chrono::steady_clock::now();
-		auto it = m_streams.find(streamId);
+		auto it = m_streams.find(streamKey);
 		if (it == m_streams.end())
 		{
 			DropEndedStreams(now);
-			it = m_streams.emplace(streamId, AGCState{}).first;
+			it = m_streams.emplace(streamKey, AGCState{}).first;
 		}
 		it->second.lastUsed = now;
 
@@ -393,6 +393,6 @@ private:
 	float m_releaseAlpha = 0.04f;
 	float m_noiseGateDb = -55.0f;
 	float m_gateFloor = 1.0f;          // gain limit with the gate closed (0 dB)
-	std::unordered_map<uint16_t, AGCState> m_streams;
+	std::unordered_map<uint32_t, AGCState> m_streams;	// by CTranscoderPacket::GetStreamKey
 	mutable std::mutex m_mutex;
 };

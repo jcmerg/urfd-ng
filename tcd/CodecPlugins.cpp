@@ -1,13 +1,15 @@
-// CodecPlugins -- the software vocoders of the CodecPlugin lines in tcd.ini
+// CodecPlugins -- the software vocoders: tcd's own and those of the CodecPlugin lines in tcd.ini
 //
 // Copyright (C) 2026
 // Licensed under the GNU General Public License v3 or later
 
+#include <algorithm>
 #include <unordered_set>
 #include <dlfcn.h>
 #include <iostream>
 
 #include "CodecPlugins.h"
+#include "BuiltinCodecs.h"
 
 CCodecPlugins g_Codecs;
 
@@ -26,6 +28,7 @@ CSoftCodec::~CSoftCodec()
 CSoftCodec::SState *CSoftCodec::State(uint32_t key, uint32_t sequence)
 {
 	const uint16_t streamid = uint16_t(key);
+	const char module = char((key >> 16) & 0xffu);
 	const auto now = std::chrono::steady_clock::now();
 	auto it = m_States.find(key);
 	if (it == m_States.end())
@@ -53,7 +56,7 @@ CSoftCodec::SState *CSoftCodec::State(uint32_t key, uint32_t sequence)
 		void *state = m_Plugin->open(m_Codec);
 		if (!state)
 		{
-			std::cerr << "Codec plugin " << m_Plugin->name << ": no state for stream " << streamid << ", its frames stay empty" << std::endl;
+			std::cerr << "Codec plugin " << m_Plugin->name << ": no state for stream " << streamid << " of module " << module << ", its frames stay empty" << std::endl;
 			return nullptr;
 		}
 		it = m_States.emplace(key, SState{ state, now, sequence, false, kUnused }).first;
@@ -82,10 +85,10 @@ void CSoftCodec::Stop(SState *s, bool last)
 	}
 }
 
-bool CSoftCodec::Encode(uint16_t streamid, uint32_t sequence, bool last, const int16_t *pcm, uint8_t *frame)
+bool CSoftCodec::Encode(uint32_t stream, uint32_t sequence, bool last, const int16_t *pcm, uint8_t *frame)
 {
 	std::lock_guard<std::mutex> lock(*m_Mutex);
-	SState *s = State(Key(streamid, true), sequence);
+	SState *s = State(Key(stream, true), sequence);
 	if (s && (s->use == kTranscode || s->use == kAudio) && m_Plugin->start)
 		m_Plugin->start(s->state);	// from transcode to encode mid-transmission: afresh
 	if (s)
@@ -95,10 +98,10 @@ bool CSoftCodec::Encode(uint16_t streamid, uint32_t sequence, bool last, const i
 	return ok;
 }
 
-bool CSoftCodec::Decode(uint16_t streamid, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm, tcd_frame_info *info, bool hold)
+bool CSoftCodec::Decode(uint32_t stream, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm, tcd_frame_info *info, bool hold)
 {
 	std::lock_guard<std::mutex> lock(*m_Mutex);
-	SState *s = State(Key(streamid, false), sequence);
+	SState *s = State(Key(stream, false), sequence);
 	tcd_frame_info none{ 0, 0 };
 	if (!info)
 		info = &none;
@@ -110,15 +113,15 @@ bool CSoftCodec::Decode(uint16_t streamid, uint32_t sequence, bool last, const u
 	return ok;
 }
 
-bool CSoftCodec::Transcode(uint16_t streamid, uint32_t sequence, bool last, CSoftCodec *to, float gain_db, uint8_t *frame)
+bool CSoftCodec::Transcode(uint32_t stream, uint32_t sequence, bool last, CSoftCodec *to, float gain_db, uint8_t *frame)
 {
 	if (!CanTranscode(to))
 		return false;
 	std::lock_guard<std::mutex> lock(*m_Mutex);	// the plugin's, shared by both codecs
-	auto it = m_States.find(Key(streamid, false));
+	auto it = m_States.find(Key(stream, false));
 	if (it == m_States.end())
 		return false;	// nothing decoded on this stream
-	SState *s = to->State(Key(streamid, true), sequence);
+	SState *s = to->State(Key(stream, true), sequence);
 	if (!s || s->use == kEncode || s->use == kAudio)
 		return false;	// the transmission is encoded from the audio: it stays so
 	if (s->use == kUnused && sequence != 0)
@@ -136,10 +139,10 @@ bool CSoftCodec::Transcode(uint16_t streamid, uint32_t sequence, bool last, CSof
 	return ok;
 }
 
-void CSoftCodec::End(uint16_t streamid, bool encode)
+void CSoftCodec::End(uint32_t stream, bool encode)
 {
 	std::lock_guard<std::mutex> lock(*m_Mutex);
-	auto it = m_States.find(Key(streamid, encode));
+	auto it = m_States.find(Key(stream, encode));
 	if (it != m_States.end())
 		Stop(&it->second, true);
 }
@@ -150,10 +153,10 @@ int CSoftCodec::Streams(void)
 	// after its stream ended, and a transmission whose last frame got lost gets no stop
 	std::lock_guard<std::mutex> lock(*m_Mutex);
 	const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(2);
-	std::unordered_set<uint16_t> active;	// a stream decoded and encoded counts once
+	std::unordered_set<uint32_t> active;	// a stream decoded and encoded counts once
 	for (const auto &s : m_States)
 		if (s.second.running && s.second.last_used > cutoff)
-			active.insert(uint16_t(s.first));
+			active.insert(s.first & 0x7fffffffu);
 	return int(active.size());
 }
 
@@ -168,10 +171,37 @@ CCodecPlugins::~CCodecPlugins()
 			l.plugin->shutdown();
 }
 
-bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vector<std::pair<std::string, std::string>> &options)
+bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vector<std::pair<std::string, std::string>> &options, const std::map<uint32_t, std::string> &choices)
 {
+	// tcd's own vocoders, by a CodecPlugin line with their name instead of a path,
+	// and the codec each is for
+	const std::pair<const tcd_codec_plugin *, uint32_t> builtins[] = { { &g_BuiltinOp25, TCD_CODEC_P25 }, { &g_BuiltinCodec2, TCD_CODEC_M17 } };
+	auto builtin = [&](const std::string &name) -> const tcd_codec_plugin * {
+		for (const auto &b : builtins)
+			if (name == b.first->name)
+				return b.first;
+		return nullptr;
+	};
+	// the name chooses the vocoder (CodecDStar ... CodecM17, the monitor), so it must be unique
+	auto loaded = [&](const std::string &name) -> const SLoaded * {
+		for (const auto &l : m_Loaded)
+			if (name == l.plugin->name)
+				return &l;
+		return nullptr;
+	};
+	auto add_builtin = [&](const tcd_codec_plugin *plugin) { m_Loaded.push_back({ "built in", nullptr, plugin, false, std::make_shared<std::mutex>() }); };
 	for (const auto &path : paths)
 	{
+		if (const auto *plugin = builtin(path))
+		{
+			if (loaded(path))
+			{
+				std::cerr << "ERROR: CodecPlugin " << path << " is there twice" << std::endl;
+				return true;
+			}
+			add_builtin(plugin);
+			continue;
+		}
 		void *handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
 		if (!handle)
 		{
@@ -225,16 +255,45 @@ bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vecto
 				return true;
 			}
 		}
-		// the name chooses the plugin (CodecDStar/CodecDMR, the monitor), so it must be unique
-		for (const auto &l : m_Loaded)
-			if (std::string(l.plugin->name) == plugin->name)
-			{
-				std::cerr << "ERROR: CodecPlugin " << path << ": a plugin named " << plugin->name << " is loaded already (from " << l.path << ")" << std::endl;
-				dlclose(handle);
-				return true;
-			}
+		const SLoaded *other = loaded(plugin->name);
+		if (other || builtin(plugin->name))
+		{
+			std::cerr << "ERROR: CodecPlugin " << path << ": " << plugin->name << (other && other->handle ? " is loaded already (from " + other->path + ")" : std::string(" is the name of one of tcd's own vocoders")) << std::endl;
+			dlclose(handle);
+			return true;
+		}
 		m_Loaded.push_back({ path, handle, plugin, false, std::make_shared<std::mutex>() });
 	}
+
+	// without its line tcd's own is left out only where CodecP25/CodecM17 names a
+	// plugin that does all of the codec (for M17 Codec2 1600 too, else codec2
+	// decodes the voice+data streams); so a tcd.ini of before 0.22.0, without
+	// the op25 and codec2 lines, keeps P25 and M17 on them as before
+	for (const auto &[plugin, codec] : builtins)
+	{
+		if (loaded(plugin->name))
+			continue;
+		const auto c = choices.find(codec);
+		const SLoaded *chosen = c == choices.end() || c->second.empty() ? nullptr : loaded(c->second);
+		const uint32_t all = plugin->codecs;	// P25, or M17 and M17 1600
+		if (!chosen || (chosen->plugin->codecs & all) != all)
+		{
+			const char *ini = codec == TCD_CODEC_P25 ? "CodecP25" : "CodecM17";
+			const std::string named = c == choices.end() ? std::string() : c->second;
+			std::cout << "CodecPlugin " << plugin->name << " is loaded without its line: ";
+			if (named.empty())
+				std::cout << ini << " chooses no plugin" << std::endl;
+			else if (named == plugin->name)
+				std::cout << ini << " chooses it" << std::endl;
+			else if (chosen)
+				std::cout << ini << " = " << named << " does not do all of " << (codec == TCD_CODEC_P25 ? "P25" : "M17 (Codec2 1600)") << std::endl;
+			else
+				std::cout << ini << " = " << named << " is no loaded plugin" << std::endl;
+			add_builtin(plugin);
+		}
+	}
+	// tcd's own first in every list, whatever the order of the lines
+	std::stable_partition(m_Loaded.begin(), m_Loaded.end(), [](const SLoaded &l) { return !l.handle; });
 
 	// the lines tcd does not know, to the plugins
 	bool rval = false;
@@ -269,6 +328,11 @@ bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vecto
 			return true;
 		}
 		l.ready = true;
+		if (!l.handle)
+		{
+			std::cout << "CodecPlugin " << l.plugin->name << ": " << l.plugin->description << std::endl;
+			continue;
+		}
 		std::string codecs;
 		for (const auto &[bit, name] : { std::make_pair(TCD_CODEC_DSTAR, "D-Star"), std::make_pair(TCD_CODEC_DMR, "DMR"), std::make_pair(TCD_CODEC_P25, "P25"),
 		                                 std::make_pair(TCD_CODEC_M17, "M17"), std::make_pair(TCD_CODEC_M17_1600, "M17 1600") })
@@ -297,7 +361,7 @@ CSoftCodec *CCodecPlugins::Get(uint32_t codec, const std::string &name)
 		for (auto *c : m_Codecs)
 			if (c->GetPlugin() == l.plugin && c->GetCodec() == codec)
 				return c;
-		m_Codecs.push_back(new CSoftCodec(l.plugin, codec, l.mutex));
+		m_Codecs.push_back(new CSoftCodec(l.plugin, codec, l.mutex, !l.handle));
 		return m_Codecs.back();
 	}
 	return nullptr;

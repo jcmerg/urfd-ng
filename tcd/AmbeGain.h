@@ -115,15 +115,15 @@ public:
 	// next frame lets the gain alternate between two of them, a 25-50 Hz level
 	// modulation that sounds like crackling on quiet passages. Limited, the gain
 	// follows within a few frames on speech and no longer jumps on quiet frames
-	void Process(uint8_t *ambe, uint16_t streamId, float gainDb, float maxStepDb = 0.0f)
+	void Process(uint8_t *ambe, uint32_t streamKey, float gainDb, float maxStepDb = 0.0f)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		const auto now = std::chrono::steady_clock::now();
-		auto it = m_streams.find(streamId);
+		auto it = m_streams.find(streamKey);
 		if (it == m_streams.end())
 		{
 			DropEndedStreams(now);
-			it = m_streams.emplace(streamId, SState{}).first;
+			it = m_streams.emplace(streamKey, SState{}).first;
 		}
 		SState &st = it->second;
 		st.lastUsed = now;
@@ -184,7 +184,7 @@ private:
 	}
 
 	std::mutex m_mutex;
-	std::unordered_map<uint16_t, SState> m_streams;
+	std::unordered_map<uint32_t, SState> m_streams;	// by CTranscoderPacket::GetStreamKey
 };
 
 #undef AMBE_READ_BIT

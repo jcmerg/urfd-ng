@@ -4,7 +4,8 @@
 #
 #   urfd   config/urfd.ini
 #   tcd    tcd/tcd.ini (tcd in Docker, see "tcd in Docker" in tcd/README.md); with a
-#          DeviceSerial or without a CodecPlugin it uses AMBE sticks and the
+#          DeviceSerial or without a codec plugin (a CodecPlugin line other than
+#          tcd's own op25 and codec2) it uses AMBE sticks and the
 #          container gets them (docker-compose.tcd-sticks.yml), with
 #          DeviceSerial = none never
 #
@@ -28,7 +29,8 @@ if [ -f "$TCD_INI" ]; then
     SERVICES+=(tcd)
     if grep -qE '^[[:space:]]*DeviceSerial[[:space:]]*=[[:space:]]*none([[:space:]#]|$)' "$TCD_INI"; then
         echo "=== tcd without AMBE sticks (DeviceSerial = none) ==="
-    elif grep -qE '^[[:space:]]*DeviceSerial[[:space:]]*=' "$TCD_INI" || ! grep -qE '^[[:space:]]*CodecPlugin[[:space:]]*=' "$TCD_INI"; then
+    # a codec plugin of a shared object, not tcd's own op25 and codec2 (tcd 0.22.0)
+    elif grep -qE '^[[:space:]]*DeviceSerial[[:space:]]*=' "$TCD_INI" || ! grep -E '^[[:space:]]*CodecPlugin[[:space:]]*=' "$TCD_INI" | grep -qvE '=[[:space:]]*(op25|codec2)[[:space:]]*(#.*)?$'; then
         echo "=== tcd with AMBE sticks: the container gets /dev (docker-compose.tcd-sticks.yml) ==="
         FILES+=(-f docker-compose.tcd-sticks.yml)
     fi

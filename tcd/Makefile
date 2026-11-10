@@ -29,7 +29,7 @@ LDFLAGS = -L$(BREW)/lib -lspeexdsp -lwebsockets -pthread -ldl -framework IOKit -
 endif
 
 # Explicit source list (includes urfd shared files)
-SRCS = CodecPlugins.cpp Configure.cpp Controller.cpp DV3000.cpp DV3003.cpp DVSIDevice.cpp \
+SRCS = BuiltinCodecs.cpp CodecPlugins.cpp Configure.cpp Controller.cpp DV3000.cpp DV3003.cpp DVSIDevice.cpp \
 		 IP.cpp Main.cpp RejectLog.cpp SHA256.cpp TCSocket.cpp TranscoderPacket.cpp \
 		 DeviceIO_posix.cpp \
        MonitorServer.cpp StatsLogger.cpp monitor_html.cpp Golay24128.cpp \

@@ -511,7 +511,8 @@ ask_tcd_serials() {
     echo "Enter the serial number(s) of the AMBE device(s), separated by spaces."
     if [ "$TCD_DOCKER" = true ] && [ -n "$(built_codec_plugins)" ]; then
         # docker/build.sh gives the container the sticks for a tcd.ini with a DeviceSerial,
-        # or one without a CodecPlugin; next to a plugin only the serials tell it
+        # or one without a codec plugin (op25 and codec2 are tcd's own); next to a
+        # plugin only the serials tell it
         echo "Next to a codec plugin the container gets the sticks only when tcd.ini names them."
         ask TCD_SERIALS "Serial numbers" "" '^ *[A-Za-z0-9]+( +[A-Za-z0-9]+)* *$' "At least one serial number, letters and digits."
     else

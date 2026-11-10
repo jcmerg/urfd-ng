@@ -8,7 +8,9 @@
 //   CodecPlugin = ...                         (as many as needed)
 //
 // tcd does the codecs it can do itself (Codec2, IMBE, PCM) and uses DVSI
-// hardware for AMBE. A plugin brings a codec in software, for a codec tcd has no
+// hardware for AMBE. Since tcd 0.22.0 its own Codec2 and IMBE vocoders are
+// codec plugins too, built in (BuiltinCodecs.h) and loaded by name:
+// CodecPlugin = op25, CodecPlugin = codec2. A plugin brings a codec in software, for a codec tcd has no
 // device for: with one DVSI device for D-Star, a plugin with TCD_CODEC_DMR does
 // DMR/YSF (and DmrGainMode = reencode). Since tcd 0.14.0 a plugin with
 // TCD_CODEC_P25 can do P25 instead of tcd's own OP25 vocoder (CodecP25), since
