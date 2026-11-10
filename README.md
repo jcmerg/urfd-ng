@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.2** | tcd 0.21.0 | Dashboard v3.1.6
+**urfd 4.40.2** | tcd 0.21.1 | Dashboard v3.1.6
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1089,6 +1089,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.21.1**: the version in the monitor page's top bar links to the GitHub release of urfd-ng this tcd came with; the footer links there as well, with the GitHub mark (also on phones, where the top bar hides the version). The release is named by the urfd version of the same checkout, which `embed_html.sh` takes from `reflector/Version.h`
 - **tcd 0.21.0**: a report of every transmission to urfd (4.39.0 and later shows it in the dashboard): the input level and peak before the AGC, the share of speech frames with a peak of -1 dBFS or more (clipped), the level after the AGC and the AGC's gain (mean, min, max), the FEC of the incoming AMBE frames (corrected, uncorrectable) and, decoded by a codec plugin, the frames it repeated or muted; sent 300 ms after the last frame, as a ping that older urfd versions drop. It names no vocoder. Saving the settings from the monitor finds a key in an indented line of `tcd.ini` (spaces or tabs before it), as reading does; before, such a line stayed as it was and the key was written once more at the end
 - **tcd 0.20.17**: the monitor page takes the settings of a restarted tcd without being reloaded: after plugging in AMBE sticks and restarting, "AMBE channels" and "AMBE speech" (and "AGC and re-encode") show up in the open tab, before only after reloading the page
 - **tcd 0.20.16**: the monitor page writes its numbers as the browser's language does and tcdmon as the terminal's locale (LANG, LC_NUMERIC) does: 134.853 and -12,3 dB in German, 134,853 and -12.3 dB in English; tcdmon groups nothing in the C locale and shows a separator of more than one byte (French, Russian) as a space

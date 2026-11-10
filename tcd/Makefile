@@ -56,7 +56,7 @@ $(MON) : tcdmon.o
 tcdmon.o : tcdmon.cpp
 	$(GCC) $(CFLAGS) -c $< -o $@
 
-monitor_html.cpp : monitor.html embed_html.sh $(wildcard ../dashboard/fonts/saira-latin.woff2)
+monitor_html.cpp : monitor.html embed_html.sh $(wildcard ../dashboard/fonts/saira-latin.woff2) $(wildcard $(URFD_DIR)/Version.h)
 	bash embed_html.sh
 
 %.o : %.cpp

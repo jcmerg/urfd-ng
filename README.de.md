@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.40.2** | tcd 0.21.0 | Dashboard v3.1.6
+**urfd 4.40.2** | tcd 0.21.1 | Dashboard v3.1.6
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -1074,6 +1074,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.21.1**: Die Version oben auf der Monitor-Seite verlinkt auf das GitHub-Release von urfd-ng, mit dem dieser tcd kam; die Fußzeile verlinkt mit dem GitHub-Logo ebenfalls dorthin (auch auf dem Handy, wo die Kopfzeile die Version ausblendet). Das Release heißt nach der urfd-Version desselben Checkouts, die `embed_html.sh` aus `reflector/Version.h` nimmt
 - **tcd 0.21.0**: Ein Bericht jedes Durchgangs an urfd (ab 4.39.0 im Dashboard zu sehen): Eingangspegel und Spitze vor der AGC, der Anteil der Sprach-Frames mit einer Spitze ab -1 dBFS (übersteuert), der Pegel nach der AGC und deren Verstärkung (Mittel, Minimum, Maximum) die FEC der ankommenden AMBE-Frames (korrigiert, nicht korrigierbar) und, von einem Codec-Plugin dekodiert, die wiederholten oder stummgeschalteten Frames; gesendet 300 ms nach dem letzten Frame, als Ping, den ältere urfd-Versionen verwerfen. Er nennt keinen Vocoder. Das Speichern der Einstellungen im Monitor findet einen Schlüssel auch in einer eingerückten Zeile der `tcd.ini` (Leerzeichen oder Tabs davor), wie schon das Lesen; bisher blieb so eine Zeile stehen, und der Schlüssel wurde am Ende ein zweites Mal geschrieben
 - **tcd 0.20.17**: Die Monitor-Seite übernimmt nach einem Neustart des tcd dessen Einstellungen, ohne neu geladen zu werden: Nach dem Einstecken von AMBE-Sticks und dem Neustart erscheinen „AMBE channels“ und „AMBE speech“ (und „AGC and re-encode“) im offenen Tab, bisher erst nach einem Neuladen der Seite
 - **tcd 0.20.16**: Die Monitor-Seite schreibt ihre Zahlen wie die Sprache des Browsers, tcdmon wie die Locale des Terminals (LANG, LC_NUMERIC): 134.853 und -12,3 dB auf Deutsch, 134,853 und -12.3 dB auf Englisch; tcdmon gruppiert in der C-Locale nicht und zeigt ein Trennzeichen aus mehreren Bytes (Französisch, Russisch) als Leerzeichen
