@@ -154,7 +154,7 @@ protected:
 	std::mutex pinned_mux;
 	std::unordered_map<uint32_t, SPinned> pinned[kNumChoices];	// by GetStreamKey
 	// the modules the devices do D-Star and DMR for; the other modules go to a
-	// plugin (empty for the choices with an own vocoder, which does every module)
+	// plugin (empty for P25 and M17, which have no device)
 	std::string hw_modules[kNumChoices];
 	// the index of a stream's choice k (CodecChoice.h) into a list of
 	// list_size, pinned for the stream; for a device its AMBE channel in

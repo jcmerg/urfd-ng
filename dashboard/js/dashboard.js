@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.6';
+var DASHBOARD_VERSION = '3.1.7';
 var REPO_URL = 'https://github.com/jcmerg/urfd-ng';
 
 var $ = function (id) { return document.getElementById(id); };
@@ -270,8 +270,10 @@ function shell() {
     var ver = S.info && S.info.version ? String(S.info.version) : '';
     var url = ver ? REPO_URL + '/releases/tag/v' + encodeURIComponent(ver) : REPO_URL;
     $('version').innerHTML = (ver ? '<a href="' + h(url) + '" target="_blank" rel="noopener">urfd-ng ' + h(ver) + '</a>, ' : '') + 'dashboard ' + DASHBOARD_VERSION;
-    $('source-link').href = url;
-    $('source-text').textContent = 'urfd-ng' + (ver ? ' ' + ver : '') + ' on GitHub';
+    // missing in an index.html of before 3.1.6 a cache may still hand out
+    var link = $('source-link'), text = $('source-text');
+    if (link) link.href = url;
+    if (text) text.textContent = 'urfd-ng' + (ver ? ' ' + ver : '') + ' on GitHub';
     var motd = String(d.motd || '').trim();
     $('motd').hidden = !motd;
     $('motd-text').textContent = motd;

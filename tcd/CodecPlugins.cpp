@@ -14,7 +14,8 @@
 CCodecPlugins g_Codecs;
 
 // a stream quiet this long loses its state; at most this many states are kept,
-// more than streams can run at once (one per module and direction)
+// more than streams can run at once (one per stream and direction, on every
+// module); beyond it the one quiet longest goes first
 #define STATE_TIMEOUT std::chrono::seconds(30)
 #define STATE_MAX     128	// a stream decoded and encoded has two
 
@@ -56,9 +57,14 @@ CSoftCodec::SState *CSoftCodec::State(uint32_t key, uint32_t sequence)
 		void *state = m_Plugin->open(m_Codec);
 		if (!state)
 		{
-			std::cerr << "Codec plugin " << m_Plugin->name << ": no state for stream " << streamid << " of module " << module << ", its frames stay empty" << std::endl;
+			// asked again at every frame: said once per stream and direction
+			if (m_Failed.size() >= STATE_MAX)
+				m_Failed.clear();
+			if (m_Failed.insert(key).second)
+				std::cerr << "Codec plugin " << m_Plugin->name << ": no state for stream " << streamid << " of module " << module << ", its frames stay empty" << std::endl;
 			return nullptr;
 		}
+		m_Failed.erase(key);
 		it = m_States.emplace(key, SState{ state, now, sequence, false, kUnused }).first;
 	}
 	if (it->second.running && NewTransmission(it->second.sequence, sequence))

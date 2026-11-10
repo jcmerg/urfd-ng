@@ -13,6 +13,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -79,6 +80,7 @@ private:
 	std::shared_ptr<std::mutex> m_Mutex;	// the plugin's: one call at a time, for all its codecs
 	bool m_Builtin;
 	std::unordered_map<uint32_t, SState> m_States;	// by Key()
+	std::unordered_set<uint32_t> m_Failed;	// the keys whose open failed, logged once
 };
 
 class CCodecPlugins

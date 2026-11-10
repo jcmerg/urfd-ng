@@ -984,11 +984,15 @@ bool CController::InitVocoders()
 	for (auto *sw : choices[kChoiceM17])
 	{
 		CSoftCodec *sw1600 = sw ? g_Codecs.Get(TCD_CODEC_M17_1600, sw->GetName()) : nullptr;
+		// one CSoftCodec per plugin and codec: the same entry each time, so it
+		// does not matter how often this runs
 		if (sw1600)
 			sw1600->stats = sw->stats;
 		m17_1600_choices.push_back(sw1600 ? sw1600 : own1600);
 		if (sw && !sw1600 && !own1600)
 			std::cout << "WARNING: " << sw->GetName() << " has no Codec2 1600 and codec2 is not loaded: M17 voice+data streams on it stay silent" << std::endl;
+		else if (sw && !sw1600)
+			std::cout << "M17: " << sw->GetName() << " has no Codec2 1600, its voice+data streams go to " << own1600->GetName() << std::endl;
 	}
 	// the modules beyond the devices' channels go to a plugin
 	for (int k : { kChoiceDStar, kChoiceDMR })

@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.40.2** | tcd 0.22.1 | Dashboard v3.1.6
+**urfd 4.40.2** | tcd 0.22.2 | Dashboard v3.1.7
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -725,7 +725,7 @@ Seit 4.38.0 schreibt urfd keine XML- oder JSON-Statusdatei mehr (`[Files] XmlPat
 
 Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Dashboard zur Verfügung.
 
-### Dashboard v3.1.6
+### Dashboard v3.1.7
 Seit v3.0.0 (urfd 4.38.0) eine statische Seite, HTML und einfaches JavaScript ohne PHP: Sie bekommt den Stand live über den WebSocket von urfd und zeigt eine Änderung in dem Moment, in dem sie passiert; die Admin-Seite schickt ihre Befehle auf demselben Weg. Seiten und Aussehen sind die von v2.14; alte Links (`index.php?show=...`) führen auf dieselben Seiten. Die Einstellungen stehen in `[Dashboard]` in `urfd.ini`; `setup.sh update` übernimmt die der alten `config.inc.php` einmal.
 
 In v2.9.0 neu gestaltet als Frontplatte eines Funkgeräts: Ein bernsteinfarbenes LCD zeigt, wer gerade sendet, die Module sind ein Tastenfeld, der Rest sind schlichte Tabellen. Davor: dunkles Design (v2.6.0), robust gegen Ausfälle des Verzeichnisses (v2.6.1), M17-Positionen in der Last-Heard-Liste (v2.7.0), Eintrag ins Verzeichnis an den Reflektor abgegeben (v2.8.0), Sicherheitskorrekturen (v2.8.1, v2.8.2), Korrekturen an Statusdatei und Admin-Socket (v2.8.3). Seit v2.10.0 steht der Vorname neben dem Rufzeichen, aus den ID-Datenbanken, die urfd lädt (ab urfd 4.12.0).
@@ -1027,6 +1027,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v3.1.7 (urfd 4.40.2)**: Eine Seite, deren `index.html` aus einem Cache von vor 3.1.6 kommt, ohne den Link in der Fußzeile, startet trotzdem; vorher brach das Setzen des Links den Start des Dashboards ab
 - **Dashboard v3.1.6 (urfd 4.40.2)**: Die Version oben heißt „urfd-ng“ und verlinkt auf das GitHub-Release, das der Reflektor fährt; die Fußzeile verlinkt mit dem GitHub-Logo ebenfalls dorthin (auch auf dem Handy, wo die Kopfzeile die Version ausblendet)
 - **Dashboard v3.1.5 (urfd 4.39.0)**: „Quiet“ erst unter -36 dBFS (bisher -32), „Too quiet“ erst unter -46 dBFS (bisher -40): Die Codec-Tests von 3GPP nehmen -26 dBov als Sollpegel und -16 bis -36 dBov als normal; DMR-Funkgeräte kommen meist um -32 dBFS an, und die AGC hebt sie ohne Mühe an
 - **Dashboard v3.1.4 (urfd 4.39.0)**: Ein „Short“-Durchgang zeigt nur die leere Anzeige und das Wort, ohne Pegelbalken, Spitzenmarke und AGC-Zeile, da er nicht bewertet wird; seine Werte bleiben im Tooltip
@@ -1074,6 +1075,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.22.2**: Ein Codec-Plugin, das für einen Stream keinen Zustand öffnen kann, meldet das einmal pro Stream statt bei jedem Frame; hat das gewählte M17-Plugin kein Codec2 1600, sagt das Log beim Start, dass seine Voice+Data-Streams an `codec2` gehen; die Version in der Kopfzeile des Monitors hat einen Tooltip mit dem urfd-ng-Release, auf das sie verlinkt; `embed_html.sh` nimmt die urfd-Version aus `URFD_DIR`, wenn das Makefile es gesetzt hat (vorher immer `../reflector`)
 - **tcd 0.22.1**: `DmrGainIn` und `DmrGainOut` gelten für die Codec-Plugins ab dem Start; ohne AMBE-Gerät (oder wenn die Geräte DMR machen) galten sie erst ab der ersten Übernahme der Einstellungen eine Sekunde später, ein Durchgang in der ersten Sekunde nach dem Start hatte dort 0 dB
 - **tcd 0.22.0**: Die eigenen Vocoder von tcd, OP25 für P25 und Codec2 für M17, sind in tcd eingebaute Codec-Plugins und werden wie die anderen geladen, mit `CodecPlugin = op25` und `CodecPlugin = codec2`; mit einem Plugin, das P25 und M17 kann, lassen sie sich weglassen (Zeile heraus, das Plugin in `CodecP25` / `CodecM17` nennen). Ohne seine Zeile wird der eigene trotzdem geladen, außer dort ist ein Plugin gewählt, das den Codec kann, eine bestehende `tcd.ini` läuft also wie bisher; eine, die in `CodecP25` / `CodecM17` ein Plugin nennt, bietet OP25 / Codec2 erst wieder im Monitor an, wenn die Zeile dazukommt. Eine `tcd.ini` mit diesen Zeilen braucht tcd 0.22.0 oder neuer (ein älterer hält sie für Pfade eines Plugins und startet nicht). Ein Weg im Code für jeden Vocoder in Software; „Save“ im Monitor schreibt die Zeilen der eigenen, die geladen sind. Alles, was tcd je Stream führt (Vocoder, AGC, die Verstärkung im AMBE-Bitstrom, der für ihn gewählte Vocoder, das Stream-Log), führt er nach Modul und Stream-ID: Zwei Module mit derselben Stream-ID zur selben Zeit (zufällig oder aus der Adresse des Senders gebildet) mischten ihren Vocoder- und AGC-Zustand, auch auf den Codec-Plugins. `docker/build.sh` zählt nur Plugins aus einer Shared Library, wenn es entscheidet, ob der Container die AMBE-Sticks bekommt
 - **tcd 0.21.1**: Die Version oben auf der Monitor-Seite verlinkt auf das GitHub-Release von urfd-ng, mit dem dieser tcd kam; die Fußzeile verlinkt mit dem GitHub-Logo ebenfalls dorthin (auch auf dem Handy, wo die Kopfzeile die Version ausblendet). Das Release heißt nach der urfd-Version desselben Checkouts, die `embed_html.sh` aus `reflector/Version.h` nimmt
