@@ -22,8 +22,9 @@ struct SCodecChoice
 	const char *ini;        // the line of tcd.ini, e.g. CodecDStar
 	const char *name;       // short, for the start-up errors
 	const char *label;      // for the log and the monitor
-	// tcd's own vocoder for every module ("op25", "codec2") and its row in the
-	// monitor's vocoder table; nullptr: the AMBE devices ("dvsi") for theirs
+	// tcd's own vocoder ("op25", "codec2", BuiltinCodecs.h, loaded by a
+	// CodecPlugin line with its name) and its row in the monitor's vocoder
+	// table; nullptr: the AMBE devices ("dvsi") for theirs
 	const char *own;
 	const char *own_row;
 };

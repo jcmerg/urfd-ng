@@ -27,9 +27,7 @@
 #include <mutex>
 #include <list>
 #include <utility>
-#include <imbe_vocoder_api.h>
 
-#include "codec2.h"
 #include "DV3000.h"
 #include "DV3003.h"
 #include "TCSocket.h"
@@ -62,15 +60,6 @@ protected:
 	std::unordered_map<char, int16_t[160]> audio_store;
 	std::unordered_map<char, uint8_t[8]> data_store;
 	CTCClient tcClient;
-	std::unordered_map<char, std::unique_ptr<CCodec2>> c2_16, c2_32;
-	// the stream and frame tcd's own Codec2 and IMBE encoder and decoder last did
-	// per module: a new stream id or a lower count is a new transmission, which
-	// starts the vocoder afresh (Begin: true when it did)
-	struct SStreamPos { bool known; uint16_t streamid; uint32_t sequence; };
-	std::unordered_map<char, SStreamPos> c2_16_stream, c2_32_stream, imbe_enc_stream, imbe_dec_stream;
-	static bool Begin(std::unordered_map<char, SStreamPos> &pos, const std::shared_ptr<CTranscoderPacket> &packet);
-	// the module's Codec2 of the mode the packet needs, afresh for a new transmission
-	CCodec2 &Codec2For(const std::shared_ptr<CTranscoderPacket> &packet, bool is1600);
 	// an AMBE device in use: how to open it again, its channels' codecs, and
 	// whether it answers. A lost device is left to the codec plugins and opened
 	// again when it is back (DeviceWatchThread)
@@ -138,13 +127,12 @@ protected:
 	CPacketQueue imbe_queue;
 	CPacketQueue usrp_queue;
 	std::mutex send_mux;
-	std::mutex p25vocoder_mux;
-	// per vocoder choice (CodecChoice.h), what may do it: nullptr = the device or
-	// tcd's own vocoder (OP25, Codec2), else a codec plugin's codec (CodecPlugin.h),
-	// as g_Stats.codec_options names them; a stream keeps the one it started with
-	// (Pick), config.codec_choice is for new streams. m17_1600_choices runs
-	// alongside choices[kChoiceM17]: the same plugin's M17 1600 codec, nullptr
-	// where tcd's own Codec2 decodes 1600
+	// per vocoder choice (CodecChoice.h), what may do it: nullptr = the AMBE
+	// devices, else a codec of tcd's own vocoders (OP25, Codec2) or of a codec
+	// plugin (CodecPlugins.h), as g_Stats.codec_options names them; a stream keeps
+	// the one it started with (Pick), config.codec_choice is for new streams.
+	// m17_1600_choices runs alongside choices[kChoiceM17]: the same plugin's M17
+	// 1600 codec, else tcd's own Codec2 when it is loaded, else nullptr
 	std::vector<class CSoftCodec *> choices[kNumChoices], m17_1600_choices;
 	// hw: the stream's AMBE channel (hw_channels[k]), -1 for none
 	struct SPinned { int choice; int hw; std::chrono::steady_clock::time_point last; };
@@ -157,14 +145,14 @@ protected:
 	// is done, or when the stream has been quiet for 5 s (its last frame lost)
 	struct SStreamPart { int k; std::string by; bool device, decode, done; uint32_t frames, fec, unc, bad; };
 	struct SStreamLog { char module; std::chrono::steady_clock::time_point first, last; std::vector<SStreamPart> parts; };
-	std::unordered_map<uint16_t, SStreamLog> stream_log;	// under pinned_mux
+	std::unordered_map<uint32_t, SStreamLog> stream_log;	// by GetStreamKey, under pinned_mux
 	SStreamPart *StreamLogPart(int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw, bool note);
 	void StreamLogCount(int k, const std::shared_ptr<CTranscoderPacket> &packet);
-	void StreamLogFlush(uint16_t streamid);
+	void StreamLogFlush(uint32_t key);
 	void DeviceFrameIn(int k, int hw, const std::shared_ptr<CTranscoderPacket> &packet);
 	void DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket> &packet);
 	std::mutex pinned_mux;
-	std::unordered_map<uint16_t, SPinned> pinned[kNumChoices];
+	std::unordered_map<uint32_t, SPinned> pinned[kNumChoices];	// by GetStreamKey
 	// the modules the devices do D-Star and DMR for; the other modules go to a
 	// plugin (empty for the choices with an own vocoder, which does every module)
 	std::string hw_modules[kNumChoices];
@@ -183,10 +171,10 @@ protected:
 		const auto &list = codec == TCD_CODEC_M17_1600 ? m17_1600_choices : choices[k];
 		return list.empty() ? nullptr : list[Pick(k, list.size(), packet, dev, ch, count)];
 	}
-	// P25 with the stream's choice: OP25 or a plugin. A plugin's error gives IMBE
+	// P25 with the stream's choice: OP25 or a plugin. An error gives IMBE
 	// silence (encode) or silent samples (decode)
 	void EncodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *imbe);
-	// the plugin codec that decoded, nullptr for OP25; decoded: the plugin's decode succeeded
+	// the codec that decoded, nullptr for none; decoded: its decode succeeded
 	class CSoftCodec *DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm, bool *decoded = nullptr);
 	// Transcode = direct: the frame `from` (a plugin codec) just decoded, coded into
 	// codec `to` by the same plugin from the frame itself, when the stream's choice
@@ -197,22 +185,17 @@ protected:
 	bool Transcode(uint32_t to, class CSoftCodec *from, float source_db, const std::shared_ptr<CTranscoderPacket> &packet, uint8_t *direct);
 	// M17 with the stream's choice: tcd's own Codec2 or a plugin. Encode: 3200,
 	// 160 samples into 8 bytes; decode: 8 bytes into 160 samples (3200) or 320
-	// (1600). A plugin's error gives Codec2 silence or silent samples
+	// (1600). An error gives Codec2 silence or silent samples
 	void EncodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *bits);
 	void DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const uint8_t *bits, bool is1600, int16_t *pcm);
 	void PurgePinned(void);
 	// the DMR plugin for DmrGainMode = reencode, nullptr without one
 	class CSoftCodec *dmr_sw = nullptr;
-	// the monitor's entries of tcd's own vocoders (OP25, Codec2), -1 without one
-	int own_stats[kNumChoices];	// set to -1 in the constructor
 	// the gains as numerators (256 = 0 dB): written by ReconfigureAGC (the monitor's
 	// changes, from the reflector thread) and read by every codec thread
 	std::atomic<int32_t> dstar_in_num{256}, dstar_out_num{256};	// DStarGainIn/Out for a D-Star plugin
 	std::atomic<int32_t> ambe_in_num{256}, ambe_out_num{256}, dmr_reencode_num{256};
 	std::atomic<int32_t> outgain_dstar_num{256}, outgain_dmr_num{256}, outgain_usrp_num{256}, outgain_imbe_num{256}, outgain_m17_num{256};
-	// P25: IMBE quantises each frame against the one before, so every module has its
-	// own encoder and decoder (streams of two modules must not share one state)
-	std::unordered_map<char, std::unique_ptr<imbe_vocoder>> imbe_enc, imbe_dec;
 	// P25 to M17: a 300 Hz high-pass in front of the Codec2 encoder, per module
 	struct SHighPass { float z[2][2]; uint16_t streamid; };
 	std::unordered_map<char, SHighPass> c2_highpass;
@@ -226,7 +209,7 @@ protected:
 	static void ApplyGain(int16_t *samples, int count, int32_t num);
 	int BitstreamDmrDb(void) const;
 	int32_t PcmDmrGainNum(void) const;
-	void BitstreamDmrGain(uint8_t *ambe2, uint16_t streamId);
+	void BitstreamDmrGain(uint8_t *ambe2, uint32_t streamKey);
 	bool DiscoverFtdiDevices(std::list<std::pair<std::string, std::string>> &found);
 	bool IsAmbeDevice(const std::string &desc);
 	bool InitVocoders();

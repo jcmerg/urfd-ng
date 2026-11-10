@@ -1085,6 +1085,15 @@ static std::string IniKey(const std::string &line)
 	return (end == std::string::npos || end < start) ? "" : line.substr(start, end - start + 1);
 }
 
+// the value of a line of tcd.ini, without a comment after it
+static std::string IniValue(const std::string &line)
+{
+	auto v = line.substr(line.find('=') + 1);
+	v = v.substr(0, v.find('#'));
+	const auto b = v.find_first_not_of(" \t\r"), e = v.find_last_not_of(" \t\r");
+	return b == std::string::npos ? "" : v.substr(b, e - b + 1);
+}
+
 bool CMonitorServer::SaveConfig(const std::string &ini_path)
 {
 	// Read existing ini, update gain/AGC values, write back
@@ -1104,12 +1113,24 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 		{ "AGCAnalogGateFloor", g_Stats.config.agc_analog_gatefloor.load(), false, false },
 		{ "AGCAnalogNoiseSuppress", g_Stats.config.agc_analog_noisesuppress.load(), false, false },
 	};
+	// tcd's own vocoders loaded now get their CodecPlugin line, also where they
+	// were loaded without it: a choice of a plugin saved here would leave them
+	// out at the next start (CCodecPlugins::Load)
+	std::vector<std::string> own_lines;
+	for (int k = 0; k < kNumChoices; k++)
+	{
+		const auto &o = g_Stats.codec_options[k];
+		if (g_CodecChoices[k].own && std::find(o.begin(), o.end(), g_CodecChoices[k].own) != o.end())
+			own_lines.push_back(g_CodecChoices[k].own);
+	}
 	{
 		std::string l;
 		while (std::getline(in, l))
 		{
 			const std::string k = IniKey(l);
 			if (k.empty()) continue;
+			if (k == "CodecPlugin")
+				own_lines.erase(std::remove(own_lines.begin(), own_lines.end(), IniValue(l)), own_lines.end());
 			for (auto &a : profile)
 				if (k == a.key) a.present = true;
 			if (k == "OutputGainDMRBitstream") bitstreamPresent = true;
@@ -1124,6 +1145,7 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 	// (a device's codec: any), and appended when there was none and there are two;
 	// the module view is replaced where it stands, else written when it is not auto
 	bool codecWritten[kNumChoices] = {};
+	bool ownWritten = own_lines.empty();
 	auto codecLine = [](int k) { return g_Stats.codec_options[k][g_Stats.config.codec_choice[k].load()]; };
 	bool viewWritten = false, poolWritten = false, compandWritten = false, transcodeWritten = false;
 	const bool direct = g_Stats.config.transcode_direct.load();
@@ -1135,6 +1157,12 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 	{
 		// Check if this line matches a configurable key
 		const std::string key = IniKey(line);
+		if (!ownWritten && key == "CodecPlugin")
+		{
+			for (const auto &n : own_lines)
+				out << "CodecPlugin = " << n << "\n";
+			ownWritten = true;
+		}
 		if (!key.empty())
 		{
 			if (key == "DStarGainIn")       { out << key << " = " << g_Stats.config.gain_dstar_in.load() << "\n"; continue; }
@@ -1190,6 +1218,9 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 	in.close();
 	for (auto &a : profile)
 		if (!a.written) out << a.key << " = " << a.value << "\n";
+	if (!ownWritten)
+		for (const auto &n : own_lines)
+			out << "CodecPlugin = " << n << "\n";
 	for (int k = 0; k < kNumChoices; k++)
 		if (!codecWritten[k] && g_Stats.codec_options[k].size() > 1)
 			out << g_CodecChoices[k].ini << " = " << codecLine(k) << "\n";

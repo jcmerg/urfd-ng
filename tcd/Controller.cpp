@@ -423,7 +423,10 @@ static void SwDecodeStat(const CSoftCodec *sw, char module, uint16_t streamid, c
 {
 	if (!sw)
 		return;
-	g_Reports.Decoded(module, streamid, info.flags & TCD_FRAME_REPEAT, info.flags & TCD_FRAME_MUTE);
+	// a codec plugin's decode goes into the report (TC_REPORT_DEC); tcd's own
+	// vocoders were never reported and say nothing of repeats and mutes
+	if (!sw->IsBuiltin())
+		g_Reports.Decoded(module, streamid, info.flags & TCD_FRAME_REPEAT, info.flags & TCD_FRAME_MUTE);
 	if (sw->stats < 0)
 		return;
 	Stat(sw->stats, module, &SwVocoderStats::decodes);
@@ -451,9 +454,10 @@ static void ModuleDirect(const std::shared_ptr<CTranscoderPacket> &packet, uint8
 }
 
 // the plugin codec a stream's target goes to, without the side effects of Pick
-// on a device's channel or the stream's counts: nullptr for an AMBE device or
-// tcd's own vocoder. A stream not pinned yet gets its pin here when its choice
-// is a plugin (Pick would give it the same); a device choice is left to Pick
+// on a device's channel or the stream's counts (tcd's own vocoders count as
+// plugins): nullptr for an AMBE device. A stream not pinned yet gets its pin
+// here when its choice is a plugin (Pick would give it the same); a device
+// choice is left to Pick
 CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet)
 {
 	const int k = ChoiceOfCodec(codec);
@@ -462,7 +466,7 @@ CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTra
 	const auto &list = choices[k];
 	{
 		std::lock_guard<std::mutex> lock(pinned_mux);
-		auto it = pinned[k].find(packet->GetStreamId());
+		auto it = pinned[k].find(packet->GetStreamKey());
 		if (it != pinned[k].end())
 			return (it->second.choice >= 0 && it->second.choice < int(list.size())) ? list[it->second.choice] : nullptr;
 		int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
@@ -474,7 +478,7 @@ CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTra
 			// goes to the first plugin, as Pick sends it (in the pool a free
 			// channel is only known by taking it, so such a stream takes the
 			// audio path for its whole transmission)
-			const bool device = (k == kChoiceDStar || k == kChoiceDMR) && !g_CodecChoices[k].own;
+			const bool device = k == kChoiceDStar || k == kChoiceDMR;
 			if (!device || Pool() || std::string::npos != hw_modules[k].find(packet->GetModule()))
 				return nullptr;
 			if (std::none_of(list.begin(), list.end(), [](CSoftCodec *sw) { return sw != nullptr; }))
@@ -500,7 +504,7 @@ bool CController::Transcode(uint32_t to, CSoftCodec *from, float source_db, cons
 	default: return false;
 	}
 	uint8_t frame[11] = {};
-	if (!from->Transcode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), sw, gain_db, frame))
+	if (!from->Transcode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), sw, gain_db, frame))
 		return false;
 	switch (to)
 	{
@@ -513,21 +517,8 @@ bool CController::Transcode(uint32_t to, CSoftCodec *from, float source_db, cons
 	return true;
 }
 
-// a monitor entry for one of tcd's own vocoders, -1 when all are taken
-static int BuiltinStats(const char *name, const char *codec)
-{
-	if (g_Stats.num_sw >= CTcdStats::MAX_SW)
-		return -1;
-	auto &st = g_Stats.sw[g_Stats.num_sw];
-	st.name = name;
-	st.codec = codec;
-	st.builtin = true;
-	return g_Stats.num_sw++;
-}
-
 CController::CController() : keep_running(true), ambe_in_num(256), ambe_out_num(256), dmr_reencode_num(256), outgain_dstar_num(256), outgain_dmr_num(256), outgain_usrp_num(256), outgain_imbe_num(256), outgain_m17_num(256)
 {
-	std::fill(std::begin(own_stats), std::end(own_stats), -1);
 }
 
 bool CController::Start()
@@ -694,7 +685,6 @@ bool CController::DiscoverFtdiDevices(std::list<std::pair<std::string, std::stri
 
 bool CController::InitVocoders()
 {
-	// M17 "devices", one for each module
 	const std::string modules(g_Conf.GetTCMods());
 	for (unsigned int i=0; i<modules.size(); i++)
 	{
@@ -703,20 +693,17 @@ bool CController::InitVocoders()
 			std::cerr << "Transcoded modules[" << i << "] is not an uppercase letter!" << std::endl;
 			return true;
 		}
-		c2_16[c] = std::unique_ptr<CCodec2>(new CCodec2(false));
-		c2_32[c] = std::unique_ptr<CCodec2>(new CCodec2(true));
-		imbe_enc[c] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
-		imbe_dec[c] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
 		c2_highpass[c] = SHighPass{ {{0.0f, 0.0f}, {0.0f, 0.0f}}, 0 };
 	}
 
-	// the plugin each vocoder choice names in tcd.ini, empty for the default: the
-	// device ("dvsi") or tcd's own vocoder ("op25", "codec2")
+	// the vocoder each choice names in tcd.ini, empty for the default: the
+	// device ("dvsi") for D-Star and DMR, tcd's own (op25, codec2) or else the
+	// first plugin for P25 and M17
 	std::string names[kNumChoices];
 	for (int k = 0; k < kNumChoices; k++)
 	{
 		names[k] = g_Conf.GetCodecChoice(k);
-		if (names[k] == (g_CodecChoices[k].own ? g_CodecChoices[k].own : "dvsi"))
+		if (!g_CodecChoices[k].own && names[k] == "dvsi")
 			names[k].clear();
 	}
 	// the software vocoders of the codec plugins: CodecDStar / CodecDMR in tcd.ini
@@ -738,13 +725,14 @@ bool CController::InitVocoders()
 		std::cerr << "ERROR: CodecDStar/CodecDMR names no loaded codec plugin that does that codec" << std::endl;
 		return true;
 	}
-	// P25 and M17: tcd's own vocoder, else a plugin that does the codec
+	// P25 and M17: tcd's own vocoder or a plugin that does the codec (tcd's own is
+	// loaded unless its line is missing and a plugin is chosen, see CCodecPlugins::Load)
 	for (int k = 0; k < kNumChoices; k++)
 	{
 		const auto &ch = g_CodecChoices[k];
 		if (ch.own && !names[k].empty() && !g_Codecs.Get(ch.codec, names[k]))
 		{
-			std::cerr << "ERROR: " << ch.ini << " = " << names[k] << ": no loaded codec plugin of that name does " << ch.name << " (" << ch.own << " is tcd's own)" << std::endl;
+			std::cerr << "ERROR: " << ch.ini << " = " << names[k] << ": no loaded vocoder of that name does " << ch.name << " (" << ch.own << " is tcd's own)" << std::endl;
 			return true;
 		}
 	}
@@ -953,8 +941,9 @@ bool CController::InitVocoders()
 	}
 
 	// what may do D-Star and DMR: the device first, then every plugin that has the
-	// codec; P25 and M17: tcd's own OP25 vocoder or Codec2 first. The monitor
-	// switches between them, CodecDStar/CodecDMR/CodecP25/CodecM17 is the start
+	// codec; P25 and M17: tcd's own OP25 vocoder or Codec2 first when loaded, then
+	// the plugins. The monitor switches between them, CodecDStar/CodecDMR/CodecP25/
+	// CodecM17 is the start
 	dstar_in_num = calcNumerator(g_Conf.GetGain(EGainType::dstarin));
 	dstar_out_num = calcNumerator(g_Conf.GetGain(EGainType::dstarout));
 	for (int k = 0; k < kNumChoices; k++)
@@ -962,12 +951,10 @@ bool CController::InitVocoders()
 		const auto &ch = g_CodecChoices[k];
 		auto &options = g_Stats.codec_options[k];
 		const bool device = (k == kChoiceDStar || k == kChoiceDMR) && HwAny(k);
-		if (ch.own || device)
+		if (device)
 		{
 			choices[k].push_back(nullptr);
-			options.push_back(ch.own ? ch.own : "dvsi");
-			if (ch.own)
-				own_stats[k] = BuiltinStats(ch.own_row, ch.key);
+			options.push_back("dvsi");
 		}
 		for (auto *sw : g_Codecs.All(ch.codec))
 		{
@@ -976,8 +963,9 @@ bool CController::InitVocoders()
 			if (g_Stats.num_sw < CTcdStats::MAX_SW)
 			{
 				auto &st = g_Stats.sw[g_Stats.num_sw];
-				st.name = sw->GetName();
+				st.name = sw->IsBuiltin() && ch.own_row ? ch.own_row : sw->GetName();
 				st.codec = ch.key;
+				st.builtin = sw->IsBuiltin();
 				sw->stats = g_Stats.num_sw++;
 			}
 		}
@@ -992,13 +980,17 @@ bool CController::InitVocoders()
 		std::cout << ch.label << ": " << list << std::endl;
 	}
 	// M17 1600 goes with the M17 choice: the plugin's 1600 codec when it has one,
-	// else tcd's own Codec2; it counts in the plugin's M17 entry
+	// it counts in the plugin's M17 entry; else tcd's own Codec2, when loaded
+	// (counted in its own entry)
+	CSoftCodec *own1600 = g_Codecs.Get(TCD_CODEC_M17_1600, g_CodecChoices[kChoiceM17].own);
 	for (auto *sw : choices[kChoiceM17])
 	{
 		CSoftCodec *sw1600 = sw ? g_Codecs.Get(TCD_CODEC_M17_1600, sw->GetName()) : nullptr;
 		if (sw1600)
 			sw1600->stats = sw->stats;
-		m17_1600_choices.push_back(sw1600);
+		m17_1600_choices.push_back(sw1600 ? sw1600 : own1600);
+		if (sw && !sw1600 && !own1600)
+			std::cout << "WARNING: " << sw->GetName() << " has no Codec2 1600 and codec2 is not loaded: M17 voice+data streams on it stay silent" << std::endl;
 	}
 	// the modules beyond the devices' channels go to a plugin
 	for (int k : { kChoiceDStar, kChoiceDMR })
@@ -1160,11 +1152,14 @@ void CController::ReadReflectorThread()
 					for (size_t i = 0; i < choices[k].size(); i++)
 					{
 						auto *sw = choices[k][i];
-						if (!sw || sw->stats < 0)
-							continue;
+						if (!sw || sw->stats < 0 || sw->IsBuiltin())
+							continue;	// tcd's own show no stream count (every module)
 						auto &st = g_Stats.sw[sw->stats];
 						// a plugin's M17 entry counts its M17 1600 streams as well
+						// (not those of tcd's Codec2 standing in for it)
 						auto *sw1600 = k == kChoiceM17 ? m17_1600_choices[i] : nullptr;
+						if (sw1600 && sw1600->GetPlugin() != sw->GetPlugin())
+							sw1600 = nullptr;
 						st.cached_streams.store(sw->Streams() + (sw1600 ? sw1600->Streams() : 0), std::memory_order_relaxed);
 						st.reencode_active.store(reencode && sw == dmr_sw, std::memory_order_relaxed);
 					}
@@ -1316,47 +1311,21 @@ void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 	send_mux.unlock();
 }
 
-bool CController::Begin(std::unordered_map<char, SStreamPos> &pos, const std::shared_ptr<CTranscoderPacket> &packet)
-{
-	auto &s = pos[packet->GetModule()];
-	const bool begin = !s.known || s.streamid != packet->GetStreamId() || CSoftCodec::NewTransmission(s.sequence, packet->GetSequence());
-	s = SStreamPos{ true, packet->GetStreamId(), packet->GetSequence() };
-	return begin;
-}
-
-CCodec2 &CController::Codec2For(const std::shared_ptr<CTranscoderPacket> &packet, bool is1600)
-{
-	auto &codec = (is1600 ? c2_16 : c2_32)[packet->GetModule()];
-	if (Begin(is1600 ? c2_16_stream : c2_32_stream, packet))
-		codec = std::unique_ptr<CCodec2>(new CCodec2(!is1600));
-	return *codec;
-}
-
 void CController::EncodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *bits)
 {
-	if (auto *sw = SwCodec(TCD_CODEC_M17, packet))
-	{
-		if (!sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), gained, bits))
-			memcpy(bits, C2_3200_SILENCE, sizeof(C2_3200_SILENCE));
-		SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
-		return;
-	}
-	Codec2For(packet, false).codec2_encode(bits, gained);
-	Stat(own_stats[kChoiceM17], packet->GetModule(), &SwVocoderStats::encodes);
+	auto *sw = SwCodec(TCD_CODEC_M17, packet);
+	if (!sw || !sw->Encode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), gained, bits))
+		memcpy(bits, C2_3200_SILENCE, sizeof(C2_3200_SILENCE));
+	SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 }
 
 void CController::DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const uint8_t *bits, bool is1600, int16_t *pcm)
 {
-	if (auto *sw = SwCodec(is1600 ? TCD_CODEC_M17_1600 : TCD_CODEC_M17, packet))
-	{
-		tcd_frame_info info;
-		if (!sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), bits, pcm, &info))
-			memset(pcm, 0, (is1600 ? 320 : 160) * sizeof(int16_t));
-		SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
-		return;
-	}
-	Codec2For(packet, is1600).codec2_decode(pcm, bits);
-	Stat(own_stats[kChoiceM17], packet->GetModule(), &SwVocoderStats::decodes);
+	auto *sw = SwCodec(is1600 ? TCD_CODEC_M17_1600 : TCD_CODEC_M17, packet);
+	tcd_frame_info info{ 0, 0 };
+	if (!sw || !sw->Decode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), bits, pcm, &info))
+		memset(pcm, 0, (is1600 ? 320 : 160) * sizeof(int16_t));
+	SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
 }
 
 // The original incoming coded was M17, so we will calculate the audio and then
@@ -1373,12 +1342,12 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 			// learns here that the transmission ended
 			if (packet->IsLast())
 				if (auto *sw = SwCodec(TCD_CODEC_M17_1600, packet))
-					sw->End(packet->GetStreamId(), false);
+					sw->End(packet->GetStreamKey(), false);
 			int16_t tmp[160];
 			memcpy(tmp, audio_store[packet->GetModule()], sizeof(tmp));
 			g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 			float agc_db; bool agc_gate;
-			m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
+			m_agcDigital.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
 			g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 			packet->SetAudioSamples(tmp, false);
 		}
@@ -1388,7 +1357,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 			DecodeM17(packet, packet->GetM17Data()+8, false, tmp);
 			g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 			float agc_db; bool agc_gate;
-			m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
+			m_agcDigital.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
 			g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 			packet->SetAudioSamples(tmp, false);
 		}
@@ -1401,7 +1370,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 			DecodeM17(packet, packet->GetM17Data(), true, tmp);
 			g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 			float agc_db; bool agc_gate;
-			m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
+			m_agcDigital.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
 			g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 			packet->SetAudioSamples(tmp, false);
 			// the second half goes through the AGC with the second packet
@@ -1413,7 +1382,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 			DecodeM17(packet, packet->GetM17Data(), false, tmp);
 			g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 			float agc_db; bool agc_gate;
-			m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
+			m_agcDigital.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
 			g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 			packet->SetAudioSamples(tmp, false);
 		}
@@ -1497,9 +1466,9 @@ void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 			gained[i] = int16_t((gained[i] * in_num) >> 8);
 	}
 	auto *sw = SwCodec(TCD_CODEC_DMR, packet, nullptr, nullptr, false);	// ToDmr counted the frame
-	sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), gained, ambe2);
+	sw->Encode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), gained, ambe2);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
-	BitstreamDmrGain(ambe2, packet->GetStreamId());
+	BitstreamDmrGain(ambe2, packet->GetStreamKey());
 	packet->SetDMRData(ambe2);
 
 	// we might be all done...
@@ -1513,7 +1482,7 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	int16_t tmp[160] = {};
 	auto *sw = SwCodec(TCD_CODEC_DMR, packet);
 	tcd_frame_info info;
-	const bool decoded = sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDMRData(), tmp, &info, sw->HasTranscode());
+	const bool decoded = sw->Decode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), packet->GetDMRData(), tmp, &info, sw->HasTranscode());
 	SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
 	const int32_t out_num = ambe_out_num;	// one value for the frame, the monitor may change it
 	if (out_num != 256)
@@ -1525,7 +1494,7 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	float agc_db = 0.0f;
 	{
 		bool agc_gate;
-		m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
+		m_agcDigital.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
 		g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 	}
 	packet->SetAudioSamples(tmp, false);
@@ -1536,7 +1505,7 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 			+ (float)g_Stats.config.outgain_dmr.load(std::memory_order_relaxed);
 		uint8_t dmr_data[9];
 		memcpy(dmr_data, packet->GetDMRData(), 9);
-		m_ambeGain.Process(dmr_data, packet->GetStreamId(), gain_db);
+		m_ambeGain.Process(dmr_data, packet->GetStreamKey(), gain_db);
 		packet->SetDMRData(dmr_data);
 	}
 	g_Stats.UpdateLevelsOut(packet->GetModule(), tmp, 160);
@@ -1547,7 +1516,7 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	Transcode(TCD_CODEC_DSTAR, decoded ? sw : nullptr, source_db, packet, &direct);
 	Transcode(TCD_CODEC_P25, decoded ? sw : nullptr, source_db, packet, &direct);
 	if (packet->IsLast())
-		sw->End(packet->GetStreamId(), false);
+		sw->End(packet->GetStreamKey(), false);
 	if (decoded)	// a failed decode keeps the marks: no flicker
 		ModuleDirect(packet, direct);
 	ToDStar(packet);
@@ -1603,7 +1572,7 @@ void CController::AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 	ApplyGain(pcm, 160, dstar_in_num);
 	uint8_t frame[9] = {};
 	auto *sw = SwCodec(TCD_CODEC_DSTAR, packet, nullptr, nullptr, false);	// ToDStar counted the frame
-	sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), pcm, frame);
+	sw->Encode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), pcm, frame);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 	packet->SetDStarData(frame);
 	dstar_mux.lock();
@@ -1616,7 +1585,7 @@ void CController::SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet)
 	int16_t pcm[160] = {};
 	auto *sw = SwCodec(TCD_CODEC_DSTAR, packet);
 	tcd_frame_info info;
-	const bool decoded = sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetDStarData(), pcm, &info, sw->HasTranscode());
+	const bool decoded = sw->Decode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), packet->GetDStarData(), pcm, &info, sw->HasTranscode());
 	SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
 	ApplyGain(pcm, 160, dstar_out_num);
 	packet->SetAudioSamples(pcm, false);
@@ -1659,14 +1628,14 @@ CController::SStreamPart *CController::StreamLogPart(int k, const std::shared_pt
 {
 	if (!g_Conf.GetStreamLog())
 		return nullptr;
-	auto &log = stream_log[packet->GetStreamId()];
+	auto &log = stream_log[packet->GetStreamKey()];
 	if (log.parts.empty())
 	{
 		// a stream's last frame comes by again after its line went out (the DMR
 		// re-encode picks it a second time): no line of one frame for it
 		if (packet->IsLast())
 		{
-			stream_log.erase(packet->GetStreamId());
+			stream_log.erase(packet->GetStreamKey());
 			return nullptr;
 		}
 		log.module = packet->GetModule();
@@ -1678,10 +1647,13 @@ CController::SStreamPart *CController::StreamLogPart(int k, const std::shared_pt
 	const auto &list = choices[k];
 	std::string by;
 	bool device = false;
-	if (choice >= 0 && choice < int(list.size()) && list[choice])
-		by = list[choice]->GetName();
-	else if (g_CodecChoices[k].own)
-		by = g_CodecChoices[k].own_row;
+	// an M17 voice+data stream: the codec that decodes its 1600 frames, tcd's own
+	// Codec2 where the chosen plugin has none
+	const CSoftCodec *by_sw = choice >= 0 && choice < int(list.size()) ? list[choice] : nullptr;
+	if (by_sw && k == kChoiceM17 && packet->GetCodecIn() == ECodecType::c2_1600 && m17_1600_choices[choice])
+		by_sw = m17_1600_choices[choice];
+	if (by_sw)
+		by = by_sw->IsBuiltin() && g_CodecChoices[k].own_row ? g_CodecChoices[k].own_row : by_sw->GetName();
 	else if (hw >= 0)
 	{
 		by = ChannelName(k, size_t(hw));
@@ -1708,7 +1680,7 @@ void CController::StreamLogCount(int k, const std::shared_ptr<CTranscoderPacket>
 {
 	if (!g_Conf.GetStreamLog())
 		return;
-	auto it = stream_log.find(packet->GetStreamId());
+	auto it = stream_log.find(packet->GetStreamKey());
 	if (it == stream_log.end())
 		return;
 	auto &log = it->second;
@@ -1721,13 +1693,13 @@ void CController::StreamLogCount(int k, const std::shared_ptr<CTranscoderPacket>
 				p.done = true;
 		}
 	if (std::all_of(log.parts.begin(), log.parts.end(), [](const SStreamPart &p) { return p.done; }))
-		StreamLogFlush(packet->GetStreamId());
+		StreamLogFlush(packet->GetStreamKey());
 }
 
 // the stream's line, under pinned_mux
-void CController::StreamLogFlush(uint16_t streamid)
+void CController::StreamLogFlush(uint32_t key)
 {
-	auto it = stream_log.find(streamid);
+	auto it = stream_log.find(key);
 	if (it == stream_log.end())
 		return;
 	const auto &log = it->second;
@@ -1736,7 +1708,7 @@ void CController::StreamLogFlush(uint16_t streamid)
 		frames = std::max(frames, p.frames);
 	const double secs = std::chrono::duration<double>(log.last - log.first).count() + 0.02;
 	char head[64];
-	snprintf(head, sizeof(head), "Stream 0x%04x module %c: %u frames in %.1f s", streamid, log.module, frames, secs);
+	snprintf(head, sizeof(head), "Stream 0x%04x module %c: %u frames in %.1f s", unsigned(key & 0xffffu), log.module, frames, secs);
 	std::ostringstream line;
 	line << head;
 	for (const auto &p : log.parts)
@@ -1775,7 +1747,7 @@ void CController::DeviceFrameIn(int k, int hw, const std::shared_ptr<CTranscoder
 		if (r.uncorrectable)
 			d.uncorrectable.fetch_add(1, std::memory_order_relaxed);
 	}
-	auto it = stream_log.find(packet->GetStreamId());
+	auto it = stream_log.find(packet->GetStreamKey());
 	if (it == stream_log.end())
 		return;
 	for (auto &p : it->second.parts)
@@ -1796,7 +1768,7 @@ void CController::DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket>
 	if (k != kChoiceDStar && k != kChoiceDMR)
 		return;
 	std::lock_guard<std::mutex> lock(pinned_mux);
-	auto pin = pinned[k].find(packet->GetStreamId());
+	auto pin = pinned[k].find(packet->GetStreamKey());
 	if (pin == pinned[k].end() || pin->second.hw < 0 || choices[k][pin->second.choice])
 		return;	// not on an AMBE device
 	const SAmbeFec r = (k == kChoiceDStar) ? AmbeFrameCheck::DStar(packet->GetDStarData()) : AmbeFrameCheck::Dmr(packet->GetDMRData());
@@ -1808,7 +1780,7 @@ void CController::DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket>
 		if (r.errors || r.uncorrectable)
 			d.bad_out.fetch_add(1, std::memory_order_relaxed);
 	}
-	auto it = stream_log.find(packet->GetStreamId());
+	auto it = stream_log.find(packet->GetStreamKey());
 	if (it == stream_log.end())
 		return;
 	auto &log = it->second;
@@ -1822,7 +1794,7 @@ void CController::DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket>
 				p.done = true;
 		}
 	if (std::all_of(log.parts.begin(), log.parts.end(), [](const SStreamPart &p) { return p.done; }))
-		StreamLogFlush(packet->GetStreamId());
+		StreamLogFlush(packet->GetStreamKey());
 }
 
 // the choice of a stream, made at its first packet: the one for new streams, but a
@@ -1833,6 +1805,7 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 	auto &pins = pinned[k];
 	const uint16_t streamid = packet->GetStreamId();
 	const char module = packet->GetModule();
+	const uint32_t key = packet->GetStreamKey();
 	std::lock_guard<std::mutex> lock(pinned_mux);
 	const auto now = std::chrono::steady_clock::now();
 	// the first plugin, for a stream no AMBE channel takes; c without one
@@ -1842,10 +1815,10 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 				return int(i);
 		return c;
 	};
-	// tcd's own vocoders do every module; the devices only the streams they have a
-	// channel for (D-Star and DMR, whose list is the one asked for)
-	auto device = [&](int c) { return !list[c] && !g_CodecChoices[k].own; };
-	auto it = pins.find(streamid);
+	// a codec in software does every module; the devices only the streams they
+	// have a channel for (D-Star and DMR, whose list is the one asked for)
+	auto device = [&](int c) { return !list[c]; };
+	auto it = pins.find(key);
 	bool fresh = false, moved = false;
 	if (it == pins.end())
 	{
@@ -1860,7 +1833,7 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 			if (hw < 0)
 				c = plugin(c);
 		}
-		it = pins.emplace(streamid, SPinned{ c, hw, now }).first;
+		it = pins.emplace(key, SPinned{ c, hw, now }).first;
 	}
 	else if (device(it->second.choice) && !HasChannel(k, it->second.hw, module, streamid))
 	{
@@ -1917,7 +1890,7 @@ void CController::PurgePinned(void)
 	// a stream's line whose last frame did not come: out after 5 s of quiet
 	for (auto it = stream_log.begin(); it != stream_log.end(); )
 	{
-		const uint16_t id = it->first;
+		const uint32_t id = it->first;
 		++it;
 		if (now - stream_log[id].last > std::chrono::seconds(5))
 			StreamLogFlush(id);
@@ -2304,41 +2277,23 @@ static const uint8_t IMBE_SILENCE[11] = { 0x04U, 0x0CU, 0xFDU, 0x7BU, 0xFBU, 0x7
 
 void CController::EncodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *imbe)
 {
-	if (auto *sw = SwCodec(TCD_CODEC_P25, packet))
-	{
-		if (!sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), gained, imbe))
-			memcpy(imbe, IMBE_SILENCE, sizeof(IMBE_SILENCE));
-		SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
-		return;
-	}
-	int16_t pcm[160];	// encode_4400 takes a non-const buffer
-	memcpy(pcm, gained, sizeof(pcm));
-	std::lock_guard<std::mutex> lock(p25vocoder_mux);
-	if (Begin(imbe_enc_stream, packet))
-		imbe_enc[packet->GetModule()] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
-	imbe_enc[packet->GetModule()]->encode_4400(pcm, imbe);
-	Stat(own_stats[kChoiceP25], packet->GetModule(), &SwVocoderStats::encodes);
+	auto *sw = SwCodec(TCD_CODEC_P25, packet);
+	if (!sw || !sw->Encode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), gained, imbe))
+		memcpy(imbe, IMBE_SILENCE, sizeof(IMBE_SILENCE));
+	SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 }
 
 CSoftCodec *CController::DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm, bool *decoded)
 {
-	if (auto *sw = SwCodec(TCD_CODEC_P25, packet))
-	{
-		tcd_frame_info info;
-		const bool ok = sw->Decode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), packet->GetP25Data(), pcm, &info, sw->HasTranscode());
-		if (!ok)
-			memset(pcm, 0, 160 * sizeof(int16_t));
-		if (decoded)
-			*decoded = ok;
-		SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
-		return sw;
-	}
-	std::lock_guard<std::mutex> lock(p25vocoder_mux);
-	if (Begin(imbe_dec_stream, packet))
-		imbe_dec[packet->GetModule()] = std::unique_ptr<imbe_vocoder>(new imbe_vocoder());
-	imbe_dec[packet->GetModule()]->decode_4400(pcm, (uint8_t *)packet->GetP25Data());
-	Stat(own_stats[kChoiceP25], packet->GetModule(), &SwVocoderStats::decodes);
-	return nullptr;
+	auto *sw = SwCodec(TCD_CODEC_P25, packet);
+	tcd_frame_info info{ 0, 0 };
+	const bool ok = sw && sw->Decode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), packet->GetP25Data(), pcm, &info, sw->HasTranscode());
+	if (!ok)
+		memset(pcm, 0, 160 * sizeof(int16_t));
+	if (decoded)
+		*decoded = ok;
+	SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
+	return sw;
 }
 
 void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
@@ -2372,7 +2327,7 @@ void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	float agc_db = 0.0f;
 	{
 		bool agc_gate;
-		m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
+		m_agcDigital.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
 		g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 	}
 	packet->SetAudioSamples(tmp, false);
@@ -2383,8 +2338,8 @@ void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	Transcode(TCD_CODEC_DSTAR, decoded ? from : nullptr, agc_db, packet, &direct);
 	Transcode(TCD_CODEC_DMR, decoded ? from : nullptr, agc_db, packet, &direct);
 	if (from && packet->IsLast())
-		from->End(packet->GetStreamId(), false);
-	if (decoded || !from)	// a failed decode keeps the marks: no flicker (OP25 has no direct path)
+		from->End(packet->GetStreamKey(), false);
+	if (decoded || !from)	// a failed decode keeps the marks: no flicker
 		ModuleDirect(packet, direct);
 	ToDStar(packet);
 	codec2_queue.push(packet);
@@ -2445,7 +2400,7 @@ void CController::USRPtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	{
 		float agc_db; bool agc_gate;
 		m_nsAnalog.Process(tmp, packet->GetModule());
-		m_agcAnalog.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
+		m_agcAnalog.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
 		g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 	}
 	packet->SetAudioSamples(tmp, false);
@@ -2501,7 +2456,7 @@ void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
 	{
 		float agc_db; bool agc_gate;
 		m_nsAnalog.Process(tmp, packet->GetModule());
-		m_agcAnalog.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
+		m_agcAnalog.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
 		g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 	}
 	packet->SetAudioSamples(tmp, false);
@@ -2547,7 +2502,7 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSof
 			int16_t tmp[160];
 			bool agc_gate;
 			memcpy(tmp, packet->GetAudioSamples(), sizeof(tmp));
-			m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
+			m_agcDigital.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
 			packet->SetAudioSamples(tmp, false);
 			g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 		}
@@ -2561,7 +2516,7 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSof
 			Transcode(TCD_CODEC_DMR, decoded ? from : nullptr, source_db, packet, &direct);
 			Transcode(TCD_CODEC_P25, decoded ? from : nullptr, source_db, packet, &direct);
 			if (packet->IsLast())
-				from->End(packet->GetStreamId(), false);
+				from->End(packet->GetStreamKey(), false);
 		}
 		if (decoded)	// a failed decode keeps the marks: no flicker
 			ModuleDirect(packet, direct);
@@ -2592,7 +2547,7 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 			int16_t tmp[160];
 			bool agc_gate;
 			memcpy(tmp, packet->GetAudioSamples(), sizeof(tmp));
-			m_agcDigital.Process(tmp, 160, packet->GetStreamId(), agc_db, agc_gate);
+			m_agcDigital.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
 			packet->SetAudioSamples(tmp, false);
 			g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 		}
@@ -2618,7 +2573,7 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 					tmp[i] = (int16_t)((tmp[i] * reencode_num) >> 8);
 			}
 			// the plugin keeps a state per stream; on its error the original frame stays
-			if (dmr_sw->Encode(packet->GetStreamId(), packet->GetSequence(), packet->IsLast(), tmp, ambe2))
+			if (dmr_sw->Encode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), tmp, ambe2))
 				packet->SetDMRData(ambe2);
 			SwStat(dmr_sw, packet->GetModule(), &SwVocoderStats::reencodes);
 		}
@@ -2630,7 +2585,7 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 				+ (float)g_Stats.config.outgain_dmr.load(std::memory_order_relaxed);
 			uint8_t dmr_data[9];
 			memcpy(dmr_data, packet->GetDMRData(), 9);
-			m_ambeGain.Process(dmr_data, packet->GetStreamId(), gain_db);
+			m_ambeGain.Process(dmr_data, packet->GetStreamKey(), gain_db);
 			packet->SetDMRData(dmr_data);
 		}
 		codec2_queue.push(packet);
@@ -2646,7 +2601,7 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 		{
 			uint8_t dmr_data[9];
 			memcpy(dmr_data, packet->GetDMRData(), 9);
-			BitstreamDmrGain(dmr_data, packet->GetStreamId());
+			BitstreamDmrGain(dmr_data, packet->GetStreamKey());
 			packet->SetDMRData(dmr_data);
 		}
 		send_mux.lock();
@@ -2674,11 +2629,11 @@ int32_t CController::PcmDmrGainNum(void) const
 	return bs ? calcNumerator(g_Stats.config.outgain_dmr.load(std::memory_order_relaxed) - bs) : outgain_dmr_num.load();
 }
 
-void CController::BitstreamDmrGain(uint8_t *ambe2, uint16_t streamId)
+void CController::BitstreamDmrGain(uint8_t *ambe2, uint32_t streamKey)
 {
 	const int bs = BitstreamDmrDb();
 	if (bs != 0)
-		m_ambeGain.Process(ambe2, streamId, (float)bs, 1.2f);  // at most 1.2 dB per frame: no crackling on quiet frames
+		m_ambeGain.Process(ambe2, streamKey, (float)bs, 1.2f);  // at most 1.2 dB per frame: no crackling on quiet frames
 }
 
 void CController::Dump(const std::shared_ptr<CTranscoderPacket> p, const std::string &title) const

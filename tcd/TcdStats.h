@@ -112,7 +112,7 @@ public:
 	SwVocoderStats sw[MAX_SW];              // the codecs of the codec plugins and tcd's own vocoders
 	int            num_sw{0};
 	// per vocoder choice (CodecChoice.h), what may do it: "dvsi" (a device) or tcd's
-	// own vocoder ("op25", "codec2"), then the codec plugins' names. Set once at
+	// own vocoder ("op25", "codec2", when loaded), then the codec plugins' names. Set once at
 	// start; config.codec_choice is the one new streams get
 	std::vector<std::string> codec_options[kNumChoices];
 	std::atomic<bool> reencode_available{false};	// a codec plugin for DmrGainMode = reencode

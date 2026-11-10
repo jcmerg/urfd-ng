@@ -52,6 +52,10 @@ public:
 	// state of packet
 	ECodecType GetCodecIn() const;
 	uint16_t GetStreamId() const;
+	// the stream id with the module: two modules may carry the same stream id at
+	// once (it is random or made from the sender's address), and every state tcd
+	// keeps per stream is keyed by this
+	uint32_t GetStreamKey() const { return (uint32_t(uint8_t(GetModule())) << 16) | GetStreamId(); }
 	uint32_t GetSequence() const;
 	bool IsLast() const;
 	bool IsSecond() const;

@@ -72,7 +72,8 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 
 	// the codec plugins, before the controller looks for a DMR codec
-	if (g_Codecs.Load(g_Conf.GetCodecPlugins(), g_Conf.GetUnknownLines()))
+	if (g_Codecs.Load(g_Conf.GetCodecPlugins(), g_Conf.GetUnknownLines(),
+	                  { { TCD_CODEC_P25, g_Conf.GetCodecChoice(kChoiceP25) }, { TCD_CODEC_M17, g_Conf.GetCodecChoice(kChoiceM17) } }))
 		return EXIT_FAILURE;
 
 	if (g_Cont.Start())

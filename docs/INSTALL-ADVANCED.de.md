@@ -45,7 +45,7 @@ Es gibt drei Build-Scripts, eins je Betriebsart:
 | In `$URFD_DATA` | `docker/build.sh` baut und startet |
 |---|---|
 | `config/urfd.ini` | urfd |
-| `tcd/tcd.ini` | tcd; mit `DeviceSerial` oder ohne `CodecPlugin` nimmt es `docker-compose.tcd-sticks.yml` dazu, damit der Container die AMBE-Sticks bekommt |
+| `tcd/tcd.ini` | tcd; mit `DeviceSerial` oder ohne Codec-Plugin (eine `CodecPlugin`-Zeile außer den eigenen `op25` und `codec2` von tcd) nimmt es `docker-compose.tcd-sticks.yml` dazu, damit der Container die AMBE-Sticks bekommt |
 | beides | beides |
 
 Eine Reflektor-Maschine bekommt also `config/urfd.ini` ([Reflektor in Docker](#reflektor-in-docker)), eine Transcoder-Maschine nur `tcd/tcd.ini` ([tcd in Docker](../tcd/README.de.md#tcd-in-docker)), und `docker/build.sh start` baut auf jeder das Richtige. Anderes Datenverzeichnis: `URFD_DATA=/srv/urfd docker/build.sh start`.
