@@ -1482,7 +1482,7 @@ void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t tmp[160] = {};
-	auto *sw = SwCodec(TCD_CODEC_DMR, packet);
+	auto *sw = SwCodec(TCD_CODEC_DMR, packet, nullptr, nullptr, false);	// ToDmr counted the frame
 	tcd_frame_info info;
 	const bool decoded = sw->Decode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), packet->GetDMRData(), tmp, &info, sw->HasTranscode());
 	SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
@@ -1585,7 +1585,7 @@ void CController::AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 void CController::SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
 	int16_t pcm[160] = {};
-	auto *sw = SwCodec(TCD_CODEC_DSTAR, packet);
+	auto *sw = SwCodec(TCD_CODEC_DSTAR, packet, nullptr, nullptr, false);	// ToDStar counted the frame
 	tcd_frame_info info;
 	const bool decoded = sw->Decode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), packet->GetDStarData(), pcm, &info, sw->HasTranscode());
 	SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
