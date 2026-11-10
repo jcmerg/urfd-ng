@@ -6,6 +6,7 @@ GCC = g++
 
 # Shared source files from urfd, in the same repository
 URFD_DIR ?= ../reflector
+export URFD_DIR
 URFD_FILES = IP.cpp IP.h TCPacketDef.h TCSocket.cpp TCSocket.h Timer.h Golay24128.cpp Golay24128.h YSFDefines.h SHA256.cpp SHA256.h RejectLog.cpp RejectLog.h
 
 ifeq ($(debug), true)

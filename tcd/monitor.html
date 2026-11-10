@@ -407,6 +407,8 @@ var pageVersion = null;
 var REPO_URL = 'https://github.com/jcmerg/urfd-ng';
 var URFD_VERSION = '/*URFD_VERSION*/';
 var RELEASE_URL = URFD_VERSION ? REPO_URL + '/releases/tag/v' + encodeURIComponent(URFD_VERSION) : REPO_URL;
+// the link of tcd's version leads to the urfd-ng release, its tooltip says so
+var RELEASE_TITLE = URFD_VERSION ? 'urfd-ng ' + URFD_VERSION + ' release on GitHub' : 'urfd-ng on GitHub';
 var $ = function (id) { return document.getElementById(id); };
 $('source-link').href = RELEASE_URL;
 $('source-text').textContent = 'urfd-ng' + (URFD_VERSION ? ' ' + URFD_VERSION : '') + ' on GitHub';
@@ -463,7 +465,7 @@ function connect() {
       try { reloaded = sessionStorage.getItem('tcd-reloaded-for'); sessionStorage.setItem('tcd-reloaded-for', data.version); } catch (err) {}
       if (reloaded !== data.version) { ws.onclose = null; ws.close(); location.reload(); return; }
     }
-    if (data.version) { pageVersion = pageVersion || data.version; $('ver').innerHTML = '<a href="' + esc(RELEASE_URL) + '" target="_blank" rel="noopener">tcd ' + esc(data.version) + '</a>'; }
+    if (data.version) { pageVersion = pageVersion || data.version; $('ver').innerHTML = '<a href="' + esc(RELEASE_URL) + '" target="_blank" rel="noopener" title="' + esc(RELEASE_TITLE) + '">tcd ' + esc(data.version) + '</a>'; }
     if (!configLoaded) {
       loadConfig(data.config);
       loadCodecs(data.codecs);
