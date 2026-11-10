@@ -14,7 +14,16 @@ if [ -f "$FONT" ]; then
 else
     echo "embed_html.sh: $FONT is missing, the monitor page falls back to other fonts" >&2
 fi
+# the urfd version of the same checkout names the GitHub release this tcd came with
+VERSION_H="../reflector/Version.h"
+URFD_VER=""
+if [ -f "$VERSION_H" ]; then
+    URFD_VER=$(awk '/#define URFD_VERSION_(MAJOR|MINOR|REVISION)/ { v = v (v == "" ? "" : ".") $3 } END { print v }' "$VERSION_H")
+else
+    echo "embed_html.sh: $VERSION_H is missing, the monitor page links to the repository" >&2
+fi
 HTML=$(cat "$INPUT")
+HTML="${HTML//\/\*URFD_VERSION\*\//$URFD_VER}"
 echo -n 'extern const char monitor_html[] = R"RAWHTML(' >> "$OUTPUT"
 printf '%s\n' "${HTML//\/\*SAIRA_WOFF2\*\//$B64}" >> "$OUTPUT"
 echo ')RAWHTML";' >> "$OUTPUT"
