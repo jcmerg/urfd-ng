@@ -1259,7 +1259,9 @@ std::string CReflector::GetExternalIPv6(void) const
 // line), told by two checks in a row, the second 10 s after the first (one odd
 // answer, e.g. of a load-balancing router, changes nothing), is logged and goes to the XLX directory and the DHT at
 // once; G3 and the plugins take it from GetExternalIPv4/6 for the clients that come
-// from then on. A service that does not answer changes nothing.
+// from then on. A service that does not answer changes nothing. An address not known
+// yet (no service answered at the start) is asked for every 10 s, and the first
+// answer counts at once.
 void CReflector::ExternalIpThread(void)
 {
 	const auto urls = ExternalIpUrls(g_Configure.GetString(g_Keys.ip.checkurl));
@@ -1273,9 +1275,11 @@ void CReflector::ExternalIpThread(void)
 	while (keep_running)
 	{
 		{
-			// a new address waits for its confirmation 10 s, not a whole interval
-			const bool pending = !candidate[0].empty() || !candidate[1].empty();
+			// a new address waits for its confirmation 10 s, not a whole interval,
+			// and so does one not known yet (no answer at the start)
 			std::unique_lock<std::mutex> lock(m_ExternalMutex);
+			const bool pending = !candidate[0].empty() || !candidate[1].empty()
+				|| (v4 && m_ExternalIPv4.empty()) || (v6 && m_ExternalIPv6.empty());
 			m_ExternalWake.wait_for(lock, pending ? std::min(interval, std::chrono::seconds(10)) : interval, [this] { return !keep_running; });
 		}
 		if (!keep_running)
@@ -1293,7 +1297,7 @@ void CReflector::ExternalIpThread(void)
 			std::string &seen = candidate[six ? 1 : 0];
 			if (now == known)
 				seen.clear();
-			else if (now != seen)
+			else if (now != seen && !known.empty())
 				seen = now;	// once: confirmed by the next check
 			else
 			{
