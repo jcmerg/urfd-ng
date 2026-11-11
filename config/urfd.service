@@ -1,14 +1,14 @@
 [Unit]
 Description=URFD Universal Digital Voice Reflector
-Requires=network.target
-After=systemd-user-session.service network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/urfd /usr/local/etc/urfd/urfd.ini
 Restart=always
 
-# Voice/Realtime Optimierungen
+# realtime scheduling for steady voice timing
 Nice=-15
 CPUSchedulingPolicy=fifo
 CPUSchedulingPriority=50

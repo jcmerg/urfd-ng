@@ -8,6 +8,6 @@
 #  Examples:
 #    *       deny access to everybody (not recommended)
 #    LX*     deny all callsigns starting with LX
-#    LX3JL   deny LX3JL exactly
+#    N0CALL  deny N0CALL exactly
 #
 ##############################################################################

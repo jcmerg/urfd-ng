@@ -70,10 +70,9 @@ The image is built from the checkout; configuration and state stay outside it in
 git clone https://github.com/jcmerg/urfd-ng.git urfd
 cd urfd
 
-# configuration, the paths in urfd.ini are the ones inside the container
+# configuration; the paths in the template are already the ones inside the container
 sudo mkdir -p /opt/urfd/config
 sudo cp config/urfd.ini config/urfd.interlink config/urfd.whitelist config/urfd.blacklist config/urfd.terminal /opt/urfd/config/
-sudo sed -i 's#/home/user/#/usr/local/etc/urfd/#' /opt/urfd/config/urfd.ini
 
 # urfd.ini holds passwords
 sudo chmod 600 /opt/urfd/config/urfd.ini
@@ -116,7 +115,7 @@ sudo systemctl start urfd
 journalctl -u urfd -f
 ```
 
-Reload: `sudo pkill -HUP -x urfd`, restart: `sudo systemctl restart urfd`. To remove: `cd reflector && sudo make uninstall`, then delete `/usr/local/etc/urfd`.
+Reload: `sudo pkill -HUP -x urfd`, restart: `sudo systemctl restart urfd`. To remove: `cd reflector && sudo make uninstall`, then delete `/usr/local/bin/inicheck`, `/usr/local/bin/dbutil` and `/usr/local/etc/urfd`.
 
 By hand, with the packages installed:
 
@@ -136,6 +135,8 @@ sudo apt install nginx
 sudo cp -r ~/urfd/dashboard /var/www/urfd-dashboard
 
 sudo cp ~/urfd/docker/nginx-dashboard.conf /etc/nginx/sites-available/urfd-dashboard.conf
+# the cache of the reflector list (proxy_cache_path): nginx creates only its last directory
+sudo mkdir -p /var/cache/nginx
 # the resolver for the reflector list and QuadNet (the line marked RESOLVER): this system's
 sudo sed -i "/# RESOLVER/s|resolver [^ ]* |resolver $(awk '/^nameserver/ { print $2; exit }' /etc/resolv.conf) |" /etc/nginx/sites-available/urfd-dashboard.conf
 sudo ln -s /etc/nginx/sites-available/urfd-dashboard.conf /etc/nginx/sites-enabled/

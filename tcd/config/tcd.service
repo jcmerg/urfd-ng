@@ -1,7 +1,7 @@
 [Unit]
 Description=tcd hybrid transcoder
-Requires=network.target
-After=systemd-user-session.service network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple

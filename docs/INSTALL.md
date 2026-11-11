@@ -157,7 +157,7 @@ Without the setup script, or without Docker: [INSTALL-ADVANCED.md](INSTALL-ADVAN
 ## Removing everything
 
 ```bash
-cd ~/urfd/docker && sudo docker compose down --rmi all -v
+cd ~/urfd/docker && sudo docker compose --profile tcd down --rmi all -v
 sudo rm -rf /opt/urfd
 # a native transcoder:
 sudo systemctl disable --now tcd
