@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.2** | tcd 0.22.3 | Dashboard v3.1.7
+**urfd 4.40.2** | tcd 0.22.4 | Dashboard v3.1.8
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -19,7 +19,7 @@ git clone https://github.com/jcmerg/urfd-ng.git urfd && cd urfd && sudo ./setup.
 </picture>
 </p>
 
-*The dashboard (dashboard 3.1.7, sample data): who is on the air, the modules as a keypad, the last heard log with how each transmission sounded. It follows the light or dark theme.*
+*The dashboard (dashboard 3.1.8, sample data): who is on the air, the modules as a keypad, the last heard log with how each transmission sounded. It follows the light or dark theme.*
 
 ## What's New in urfd-ng
 
@@ -755,7 +755,7 @@ Since 4.38.0 urfd writes no XML or JSON status file any more (`[Files] XmlPath` 
 
 Module names are configured once in `urfd.ini` and automatically available in the dashboard.
 
-### Dashboard v3.1.7
+### Dashboard v3.1.8
 Since v3.0.0 (urfd 4.38.0) a static page, HTML and plain JavaScript without PHP: it gets the state live over urfd's WebSocket and shows a change the moment it happens, the admin page sends its commands the same way. The pages and the look are those of v2.14; old links (`index.php?show=...`) lead to the same pages. Settings are `[Dashboard]` in `urfd.ini`; `setup.sh update` carries those of the old `config.inc.php` over once.
 
 
@@ -1065,6 +1065,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.6.0**: Dark mode redesign, admin panel, module overview with TG mappings and NXDN RAN, protocol-specific columns hidden when disabled, protocol list, QuadNet Live proxy, reflector list with search/pagination
 - **Dashboard v2.6.1**: Survives an outage of the XLX directory. Explicit timeouts on every outbound request, CallingHome failures logged instead of aborting the page render, reflector and peer lists served from an on-disk cache, admin API no longer serialized behind the PHP session lock
 - **Dashboard v2.7.0**: Locator column for stations that send an M17 GNSS position, also in `/json/stations`
+- **Dashboard v3.1.8 (urfd 4.40.2)**: on the Modules page the Protocols list has the same space above it as the other parts of a page; before, its heading sat right under the module table
 - **Dashboard v3.1.7 (urfd 4.40.2)**: a page whose `index.html` came from a cache older than 3.1.6, without the footer link, still starts; before, setting the link stopped the dashboard's start
 - **Dashboard v3.1.6 (urfd 4.40.2)**: the version in the top bar reads "urfd-ng" and links to the GitHub release the reflector runs; the footer links there as well, with the GitHub mark (also on phones, where the top bar hides the version)
 - **Dashboard v3.1.5 (urfd 4.39.0)**: "Quiet" from below -36 dBFS (was -32), "Too quiet" from below -46 dBFS (was -40): the codec tests of 3GPP take -26 dBov as nominal and -16 to -36 dBov as normal; DMR radios commonly arrive around -32 dBFS and the AGC brings them up without trouble
@@ -1113,6 +1114,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.22.4**: the error for a `Port` out of range names the range tcd takes, 1025 to 49000 (before ">1024 and <49000", though 49000 is accepted); `make install` starts tcd only when `/usr/local/etc/tcd.ini` is there, `make uninstall` removes `tcdmon` as well
 - **tcd 0.22.3**: the stream log (`StreamLog`) counted every frame of a D-Star or DMR stream twice when a codec plugin decoded it ("1304 frames in 13.0 s"); the line now has the frames that came in
 - **tcd 0.22.2**: a codec plugin that cannot open a state for a stream says so once per stream instead of at every frame; when the M17 plugin chosen has no Codec2 1600, the log at start says that its voice+data streams go to `codec2`; the version in the monitor's top bar has a tooltip naming the urfd-ng release it links to; `embed_html.sh` takes the urfd version from `URFD_DIR` when the Makefile has it set (before always `../reflector`)
 - **tcd 0.22.1**: `DmrGainIn` and `DmrGainOut` apply to the codec plugins from the start; without an AMBE device (or with the devices doing DMR) they did only from the first settings update a second later, so a transmission in the first second after the start had 0 dB there

@@ -2,7 +2,7 @@
 
 [English](README.md) | **Deutsch**
 
-**Version 0.22.3** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
+**Version 0.22.4** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd).
 
 tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Für D-Star (AMBE) und DMR/YSF/NXDN (AMBE2+) nutzt er DVSI-AMBE-Hardware, für M17 (Codec2) und P25 (IMBE) Software-Vocoder. [Codec-Plugins](#codec-plugins) können D-Star und DMR/YSF/NXDN in Software ergänzen, seit 0.14.0 auch P25 als Wahl neben dem eingebauten IMBE-Vocoder und seit 0.16.0 M17 neben dem eingebauten Codec2. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
@@ -11,7 +11,7 @@ tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um
   <img src="../docs/images/tcd-monitor.png" alt="tcd-Monitor: eine Karte pro Modul mit Pegelanzeigen vor und nach der AGC">
 </picture>
 
-*Das Web-Dashboard von tcd (tcd 0.22.3, Beispieldaten): je Modul der Eingangs-Codec, seine Ziele, die Pegel vor und nach der AGC und der Signalweg.*
+*Das Web-Dashboard von tcd (tcd 0.22.4, Beispieldaten): je Modul der Eingangs-Codec, seine Ziele, die Pegel vor und nach der AGC und der Signalweg.*
 
 ## Inhalt
 
@@ -63,7 +63,7 @@ sudo cp config/tcd.ini /usr/local/etc/tcd.ini   # nur bei der ersten Installatio
 sudo make install
 ```
 
-`make install` kopiert `tcd` und `tcdmon` nach `/usr/local/bin` (`BINDIR` in `tcd.mk`, dort baut `debug = true` mit gdb-Symbolen) und installiert, aktiviert und startet die systemd-Unit; anders als `build.sh` installiert es keine `tcd.ini`, kein `agc-analyze` und kein Codec-Plugin.
+`make install` kopiert `tcd` und `tcdmon` nach `/usr/local/bin` (`BINDIR` in `tcd.mk`, dort baut `debug = true` mit gdb-Symbolen) und installiert und aktiviert die systemd-Unit; tcd startet es nur, wenn `/usr/local/etc/tcd.ini` vorhanden ist. Anders als `build.sh` installiert es keine `tcd.ini`, kein `agc-analyze` und kein Codec-Plugin. Vorher `make` als eigener Benutzer laufen lassen: `make install` baut, was fehlt, dann als root. `sudo make uninstall` stoppt und deaktiviert tcd und entfernt die Unit, `tcd` und `tcdmon`.
 
 Codec2 (`codec2/`) und der P25-IMBE-Vocoder aus OP25 (`imbe/`) gehören zum Quelltext, es braucht also keine weitere Bibliothek und kein weiteres Repository. Seit 0.22.0 werden sie wie ein Codec-Plugin geladen, mit `CodecPlugin = op25` und `CodecPlugin = codec2` (siehe [Codec-Plugins](#codec-plugins)).
 

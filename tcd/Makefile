@@ -79,18 +79,26 @@ clean :
 
 -include $(DEPS)
 
-# The install and uninstall targets need to be run by root
+# The install and uninstall targets need to be run by root. install depends on
+# all, as usual: run make as yourself first, then sudo make install only copies
+# (else the build runs as root and leaves root owned files in the checkout).
+# install does not put a tcd.ini in place; without one tcd is not started.
+INI = /usr/local/etc/$(EXE).ini
+
 install : all
 	cp $(EXE) $(MON) $(BINDIR)
 	cp config/$(EXE).service /etc/systemd/system/
-	systemctl enable $(EXE)
 	systemctl daemon-reload
-	systemctl start $(EXE)
+	systemctl enable $(EXE)
+	@if [ -f $(INI) ]; then \
+		echo "systemctl start $(EXE)"; systemctl start $(EXE); \
+	else \
+		echo "$(INI) is missing, tcd is not started: copy config/$(EXE).ini there, edit it, then systemctl start $(EXE)"; \
+	fi
 
 uninstall :
-	systemctl stop $(EXE)
-	systemctl disable $(EXE)
-	systemctl daemon-reload
+	-systemctl stop $(EXE)
+	-systemctl disable $(EXE)
 	rm -f /etc/systemd/system/$(EXE).service
-	rm -f $(BINDIR)/$(EXE)
 	systemctl daemon-reload
+	rm -f $(BINDIR)/$(EXE) $(BINDIR)/$(MON)
