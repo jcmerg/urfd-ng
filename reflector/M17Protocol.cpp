@@ -595,7 +595,7 @@ void CM17Protocol::HandlePeerLinks(void)
 			continue;
 #ifndef NO_DHT
 		// a line with only the modules takes the address from the mrefd's DHT document
-		it->second.UpdateIP(g_Configure.GetString(g_Keys.ip.ipv6address).empty());
+		it->second.UpdateIP(g_Reflector.GetExternalIPv6().empty());
 		if ( it->second.UsesDHT() && !it->second.GetIp().IsSet() )
 		{
 			g_Reflector.GetDHTConfig(it->first);

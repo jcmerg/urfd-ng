@@ -1156,9 +1156,16 @@ bool CConfigure::ReadData(const std::string &path)
 					data[g_Keys.ip.ipv4address] = ipv4;
 					std::cout << "External IPv4 address " << ipv4 << " (detected)" << std::endl;
 				}
+				else if (data[g_Keys.ip.checkinterval].get<unsigned>())
+				{
+					// no DNS or uplink yet (a boot): the reflector starts, and the
+					// address thread asks again every 10 s until a service answers
+					data[g_Keys.ip.ipv4address] = "";
+					std::cerr << "WARNING: could not detect IPv4 address at this time, asking again every 10 s" << std::endl;
+				}
 				else
 				{
-					std::cerr << "ERROR: could not detect IPv4 address at this time" << std::endl;
+					std::cerr << "ERROR: could not detect IPv4 address at this time (IPCheckInterval = 0 does not ask again)" << std::endl;
 					rval = true;
 				}
 			}
@@ -1195,9 +1202,16 @@ bool CConfigure::ReadData(const std::string &path)
 					data[g_Keys.ip.ipv6address] = ipv6;
 					std::cout << "External IPv6 address " << ipv6 << " (detected)" << std::endl;
 				}
+				else if (data[g_Keys.ip.checkinterval].get<unsigned>())
+				{
+					// no DNS or uplink yet (a boot): the reflector starts, and the
+					// address thread asks again every 10 s until a service answers
+					data[g_Keys.ip.ipv6address] = "";
+					std::cerr << "WARNING: could not detect IPv6 address at this time, asking again every 10 s" << std::endl;
+				}
 				else
 				{
-					std::cerr << "ERROR: could not detect IPv6 address at this time" << std::endl;
+					std::cerr << "ERROR: could not detect IPv6 address at this time (IPCheckInterval = 0 does not ask again)" << std::endl;
 					rval = true;
 				}
 			}

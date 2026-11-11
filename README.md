@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.2** | tcd 0.22.4 | Dashboard v3.1.8
+**urfd 4.40.3** | tcd 0.22.4 | Dashboard v3.1.8
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -558,7 +558,7 @@ Everything the dashboard shows comes from here: clients, peers and talking stati
 
 ### External address (NAT, fallback line)
 
-Clients and directories need the address urfd is reached at on the internet, which behind NAT is not the bound one. `[IP Addresses] IPv4External` / `IPv6External` set it by hand, and then it stays as it is. Without them urfd asks a list of services that answer with the caller's address (`IPCheckUrl`, by default icanhazip.com, ifconfig.me, ipify.org and ident.me, each over IPv4 or IPv6; the first well-formed answer wins), at start and, since 4.35.0, every `IPCheckInterval` seconds (default 300, 0 = only at start) while it runs. A changed address, e.g. after a switch to a fallback line with a DNS change, is logged (`External IPv4 address changed from ... to ...`), goes to the XLX directory at once and is published in the DHT; G3 (without `address` in `urfd.terminal`, to terminals on the internet when urfd is behind NAT) and the plugins tell it to their clients from then on. A new address counts when a second check 10 s later tells it too. A check that gets no answer changes nothing.
+Clients and directories need the address urfd is reached at on the internet, which behind NAT is not the bound one. `[IP Addresses] IPv4External` / `IPv6External` set it by hand, and then it stays as it is. Without them urfd asks a list of services that answer with the caller's address (`IPCheckUrl`, by default icanhazip.com, ifconfig.me, ipify.org and ident.me, each over IPv4 or IPv6; the first well-formed answer wins), at start and, since 4.35.0, every `IPCheckInterval` seconds (default 300, 0 = only at start) while it runs. A changed address, e.g. after a switch to a fallback line with a DNS change, is logged (`External IPv4 address changed from ... to ...`), goes to the XLX directory at once and is published in the DHT; G3 (without `address` in `urfd.terminal`, to terminals on the internet when urfd is behind NAT) and the plugins tell it to their clients from then on. A new address counts when a second check 10 s later tells it too. A check that gets no answer changes nothing. When no service answers at the start (no DNS or uplink yet, e.g. right after a boot), urfd starts anyway with a warning and asks every 10 s until one does, and the first answer counts at once; with `IPCheckInterval = 0` that stays an error, as nothing would ask again.
 
 ```ini
 [IP Addresses]
@@ -983,6 +983,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **Start without the external address (4.40.3)**: when none of the `IPCheckUrl` services answered at the start (DNS not up yet after a boot), urfd ended with "could not detect IPv4 address", supervisord gave up after a few tries and the reflector stayed down until restarted by hand; now it starts with a warning and asks every 10 s until a service answers, takes that first answer at once and reports it to the XLX directory and the DHT (with `IPCheckInterval = 0` it is still an error)
 - **OpenBridge review fixes (4.40.1)**: a DMR call that joins a module late (no header) went to the master or the OpenBridge with its first burst numbered 0 again after the header, and FreeDMR dropped it; the owner of a module's stream is read and set atomically, as other protocols' threads read it while it opens and closes; OpenBridge looks up a target that did not resolve at the start every 10 s (DNS not up yet), keeps its keys and its BLAKE2b set up once instead of per packet and records no frames for an echo check it never makes; an invalid `SourceServer` or `PeerId` stays unset with a warning (it became 0, which turned the default or the check off); `[OpenBridge]` in `urfd.ini` is a commented block like `[MMDVM]`, off without the section
 - **OpenBridge (4.40.0)**: a link server to server with a DMR network (HBlink3, HBlink4, FreeDMR, BrandMeister), every mapped talkgroup at the same time, classic (HMAC-SHA1) or FreeDMR's version 5 (DMRE, BLAKE2b, keepalives, source quench), turning FreeDMR by itself, see [OpenBridge](#openbridge-4400)
 - **Connectors without DNS (4.37.3)**: DCSClient, DExtraClient, DPlusClient and YSFClient look the reflector's host up again before every try; when that failed (DNS down) the address was emptied, the try went nowhere with a `Wrong family: 0` line, and `connecting to` was logged all the same. Now the last address is kept and tried, `cannot resolve <host>` is logged once until the host resolves again, and a connector that never had an address sends nothing
