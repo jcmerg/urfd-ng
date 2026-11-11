@@ -338,7 +338,7 @@ bool CConfigure::ReadData(const std::string &path)
 	port = std::strtoul(porttmp.c_str(), nullptr, 10);
 	if (port < 1025 || port > 49000)
 	{
-		std::cerr << "ERROR: Port '" << porttmp << "' must be between >1024 and <49000. Halt." << std::endl;
+		std::cerr << "ERROR: Port '" << porttmp << "' must be between 1025 and 49000. Halt." << std::endl;
 		return true;
 	}
 

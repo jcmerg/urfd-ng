@@ -90,7 +90,7 @@ clean :
 -include $(DEPS)
 
 install :
-	cp -f $(EXE).service /etc/systemd/system/
+	cp -f ../config/$(EXE).service /etc/systemd/system/
 	cp -f $(EXE) $(BINDIR)
 	systemctl enable $(EXE).service
 	systemctl daemon-reload

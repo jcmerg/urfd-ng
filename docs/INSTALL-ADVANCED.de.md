@@ -121,7 +121,7 @@ Von Hand, mit installierten Paketen:
 
 ```bash
 cd urfd/reflector
-cp ../config/urfd.mk ../config/urfd.service .
+cp ../config/urfd.mk .
 make -j$(nproc)          # DHT=false ohne OpenDHT
 sudo make install        # nur urfd und die Unit, und startet ihn; inicheck, dbutil und die Konfiguration vorher selbst kopieren
 ```
@@ -137,8 +137,9 @@ sudo cp -r ~/urfd/dashboard /var/www/urfd-dashboard
 sudo cp ~/urfd/docker/nginx-dashboard.conf /etc/nginx/sites-available/urfd-dashboard.conf
 # der Cache der Reflektorliste (proxy_cache_path): nginx legt nur sein letztes Verzeichnis an
 sudo mkdir -p /var/cache/nginx
-# der Resolver für Reflektorliste und QuadNet (die mit RESOLVER markierte Zeile): der dieses Systems
-sudo sed -i "/# RESOLVER/s|resolver [^ ]* |resolver $(awk '/^nameserver/ { print $2; exit }' /etc/resolv.conf) |" /etc/nginx/sites-available/urfd-dashboard.conf
+# der Resolver für Reflektorliste und QuadNet (die mit RESOLVER markierte Zeile): der dieses Systems (eine IPv6-Adresse in eckigen Klammern)
+r=$(awk '/^nameserver/ { print $2; exit }' /etc/resolv.conf); case "$r" in *:*) r="[$r]";; "") r=127.0.0.53;; esac
+sudo sed -i "/# RESOLVER/s|resolver [^ ]* |resolver $r |" /etc/nginx/sites-available/urfd-dashboard.conf
 sudo ln -s /etc/nginx/sites-available/urfd-dashboard.conf /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
