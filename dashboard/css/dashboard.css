@@ -113,6 +113,9 @@ img { max-width: 100%; }
 main > .wrap { padding-block: 1.75rem 3rem; }
 .page { display: grid; gap: 2.25rem; }
 .page > * { min-width: 0; }
+/* the module table and the protocol list are filled into #mod-body, they are items of the page grid with its gap */
+#mod-body { display: contents; }
+#mod-body > * { min-width: 0; }
 h1, h2, h3 { font-weight: 650; font-stretch: 82%; margin: 0; text-wrap: balance; line-height: 1.2; }
 h1 { font-size: var(--fs-xl); }
 h2 { font-size: var(--fs-l); }
