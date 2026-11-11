@@ -1272,22 +1272,29 @@ void CReflector::ExternalIpThread(void)
 		return;	// both set by hand
 	const auto stop = [this] { return !keep_running; };
 	std::string candidate[2];	// a new address seen once, IPv4 and IPv6
+	auto due = std::chrono::steady_clock::now() + interval;	// the next check of both
 	while (keep_running)
 	{
+		// a new address waits for its confirmation 10 s, not a whole interval,
+		// and so does one not known yet (no answer at the start); only that
+		// one is asked for then, the services limit their callers
+		bool soon[2];
 		{
-			// a new address waits for its confirmation 10 s, not a whole interval,
-			// and so does one not known yet (no answer at the start)
 			std::unique_lock<std::mutex> lock(m_ExternalMutex);
-			const bool pending = !candidate[0].empty() || !candidate[1].empty()
-				|| (v4 && m_ExternalIPv4.empty()) || (v6 && m_ExternalIPv6.empty());
-			m_ExternalWake.wait_for(lock, pending ? std::min(interval, std::chrono::seconds(10)) : interval, [this] { return !keep_running; });
+			soon[0] = v4 && (!candidate[0].empty() || m_ExternalIPv4.empty());
+			soon[1] = v6 && (!candidate[1].empty() || m_ExternalIPv6.empty());
+			const auto wake = (soon[0] || soon[1]) ? std::min(due, std::chrono::steady_clock::now() + std::chrono::seconds(10)) : due;
+			m_ExternalWake.wait_until(lock, wake, [this] { return !keep_running; });
 		}
 		if (!keep_running)
 			break;
+		const bool all = std::chrono::steady_clock::now() >= due;
+		if (all)
+			due = std::chrono::steady_clock::now() + interval;
 		bool changed = false;
 		for (const bool six : { false, true })
 		{
-			if (six ? !v6 : !v4)
+			if ((six ? !v6 : !v4) || !(all || soon[six ? 1 : 0]))
 				continue;
 			const std::string now = DetectExternalIp(six, urls, stop);
 			if (now.empty())

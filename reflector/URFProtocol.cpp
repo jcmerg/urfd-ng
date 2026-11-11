@@ -319,7 +319,7 @@ void CURFProtocol::HandlePeerLinks(void)
 		if ((0 == cs.substr(0, 3).compare("URF")) && (nullptr==peers->FindPeer(callsign, EProtocol::urf)))
 		{
 #ifndef NO_DHT
-			it->second.UpdateIP(g_Configure.GetString(g_Keys.ip.ipv6address).empty());
+			it->second.UpdateIP(g_Reflector.GetExternalIPv6().empty());
 			if (it->second.GetIp().IsSet())
 			{
 				bool ok = true;
