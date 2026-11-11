@@ -4,7 +4,14 @@
 
 **Version 0.22.3** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd).
 
-tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF/NXDN (AMBE2+), and software vocoders for M17 (Codec2) and P25 (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF/NXDN in software, and since 0.14.0 P25 as a choice next to the built-in IMBE vocoder. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
+tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. It uses DVSI AMBE hardware for D-Star (AMBE) and DMR/YSF/NXDN (AMBE2+), and software vocoders for M17 (Codec2) and P25 (IMBE). [Codec plugins](#codec-plugins) can add D-Star and DMR/YSF/NXDN in software, since 0.14.0 P25 as a choice next to the built-in IMBE vocoder and since 0.16.0 M17 next to the built-in Codec2. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/images/tcd-monitor-dark.png">
+  <img src="../docs/images/tcd-monitor.png" alt="tcd monitor: a card per module with level meters before and after the AGC">
+</picture>
+
+*The tcd web dashboard (tcd 0.22.3, sample data): per module the input codec, its targets, the levels before and after the AGC and the signal path.*
 
 ## Contents
 
@@ -41,7 +48,7 @@ cd urfd
 sudo bash tcd/build.sh
 ```
 
-`build.sh` installs the build tools, `libspeexdsp-dev` and `libwebsockets-dev`, builds tcd as the owner of the checkout and installs `tcd`, `tcdmon`, `agc-analyze` and the systemd unit. A codec plugin in `tcd/plugins/<name>/` (a `git clone` of its repository, see [Codec plugins](#codec-plugins)) is built with it against this tcd and installed to `/usr/local/lib/tcd/`. A running tcd is restarted. The first install puts the template at `/usr/local/etc/tcd.ini`; edit it (see [Configuration](#configuration-tcdini)) and start with `sudo systemctl start tcd`.
+`build.sh` installs the build tools, `libspeexdsp-dev`, `libwebsockets-dev` and `libncurses-dev`, builds tcd as the owner of the checkout and installs `tcd`, `tcdmon`, `agc-analyze` and the systemd unit. A codec plugin in `tcd/plugins/<name>/` (a `git clone` of its repository, see [Codec plugins](#codec-plugins)) is built with it against this tcd and installed to `/usr/local/lib/tcd/`. A running tcd is restarted. The first install puts the template at `/usr/local/etc/tcd.ini`; edit it (see [Configuration](#configuration-tcdini)) and start with `sudo systemctl start tcd`.
 
 To update: `sudo ./setup.sh update` (it also pulls the plugin clones in `tcd/plugins/`), or by hand `git pull` in the checkout and in each plugin clone, then `build.sh` again.
 
@@ -52,8 +59,11 @@ With `libspeexdsp-dev`, `libwebsockets-dev` and `libncurses-dev` installed:
 ```bash
 cd urfd/tcd
 make -j$(nproc)
+sudo cp config/tcd.ini /usr/local/etc/tcd.ini   # first install only, then edit it
 sudo make install
 ```
+
+`make install` copies `tcd` and `tcdmon` to `/usr/local/bin` (`BINDIR` in `tcd.mk`, which also has `debug = true` for a build with gdb symbols) and installs, enables and starts the systemd unit; unlike `build.sh` it installs no `tcd.ini`, no `agc-analyze` and no codec plugin.
 
 Codec2 (`codec2/`) and the P25 IMBE vocoder from OP25 (`imbe/`) are part of the source, so no other library and no other repository is needed. Since 0.22.0 they are loaded like a codec plugin, by `CodecPlugin = op25` and `CodecPlugin = codec2` (see [Codec plugins](#codec-plugins)).
 
@@ -191,7 +201,7 @@ P25 here means the IMBE codec: urfd 4.31.0 hands YSF VW (IMBE) to tcd as P25, so
 - **Direct transcoding** (`Transcode = direct`, the default since 0.20.0): when a stream comes in as D-Star, DMR/YSF or P25 and another of the three goes out, both on the same plugin, and the plugin has `transcode` (API 4), tcd hands the plugin the frame it just decoded and gets the outgoing frame back, coded from the vocoder's parameters instead of from the decoded audio; the AGC's gain for the frame and the output gains (the source's `DStarGainOut` or `DmrGainOut`, then the target's `OutputGainDStar` and `DStarGainIn`, all of `OutputGainDMR` and `DmrGainIn`, or `OutputGainIMBE`) go into the frame. The three share the MBE vocoder model, and the second analysis of synthesized speech is what a transcoder loses most to: measured over 19 clips, every one of the six directions gains 0.09 to 0.24 PESQ over decode and encode, confirmed through a DV3000 for D-Star and DMR, at a fifth of the processing time. M17, USRP and SVX still get the decoded audio, and so does every target on an AMBE device, another plugin or tcd's own vocoders; the AGC still measures the audio. The monitor marks the targets a stream is coded into directly ("direct" in the module's card and signal path) and counts the frames per plugin codec. `Transcode = audio` turns it off; the web dashboard switches it at run time ("D-Star, DMR and P25 to each other", shown when a plugin can), and Save writes it: to audio from the next frame on, to direct for the transmissions that start from then on. A transmission joins the direct path only from its first frame (the reflector numbers the frames it sends to tcd per stream from 0); one that began on the audio path, or whose transcode failed, stays there to its end.
 - **Frames**: D-Star as the 9 data bytes of a DV frame, DMR/YSF as the 72 bits of an AMBE2+ frame in air order, MSB first, the formats the DVSI devices use; P25 as the 88 IMBE parameter bits u0..u7 in 11 bytes, MSB first, as tcd's OP25 vocoder has them; M17 as the 64 Codec2 bits of 20 ms (3200, half an M17 payload) or 40 ms (1600, the voice half of a voice+data payload), as Codec2 packs them. tcd encodes M17 as 3200 only. A plugin's error gives IMBE or Codec2 silence (encode) or silent samples (decode) for that frame.
 
-No codec plugin is part of this repository: software implementations of AMBE and AMBE2+ may touch patents (AMBE2+ half rate, US 8,359,197, projected to run until 2028-05-20), so whether to build and use one is the operator's decision. A plugin for D-Star, DMR/YSF and P25 with [mbelib-neo](https://github.com/arancormonk/mbelib-neo) is [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin); read its patent notice first.
+No codec plugin is part of this repository: software implementations of AMBE and AMBE2+ may touch patents (AMBE2+ half rate, US 8,359,197, projected to run until 2028-05-20), so whether to build and use one is the operator's decision. A plugin for D-Star, DMR/YSF and P25 with [mbelib-neo](https://github.com/arancormonk/mbelib-neo) is [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin), since its 1.2.0 with `transcode` for the direct path; read its patent notice first.
 
 `tools/` has test tools for plugins (`make` there): `codectest <plugin.so> dmr|dstar|p25 in.raw out.frames out.raw [option=value ...]` encodes and decodes 8 kHz s16le PCM, prints the time per frame and checks that two interleaved streams stay apart; `decode` decodes a frames file; `codectest <plugin.so> dstar:dmr in.raw out.frames out.raw` (any two of `dstar`, `dmr`, `p25`, since 0.20.0) encodes the audio as the first codec, decodes it and makes the second codec's frames with the plugin's `transcode`, as the direct path does, writes those frames and their decoded audio, and prints the time per frame of `transcode` against encoding the decoded audio; `dvsitest <device> enc|dec dstar|dmr in out` does the same on a DV3003, or with `DVSI_TYPE=3000` on a DV3000 (tcd stopped), to compare a plugin with the hardware; `dvsitest <device> info` prints the chip's product ID and version; `dvsitest <device> batch <jobs>` (DV3003) runs a list of jobs, one `enc|dec dstar|dmr in out` per line, three at a time on the three channels (about 4.4 ms per frame instead of 11), with the same output as one at a time. Instead of stopping tcd, the device can be phased out in the monitor while dvsitest uses it.
 
@@ -210,7 +220,7 @@ sudo nano /opt/urfd/tcd/tcd.ini
 sudo docker/build.sh start
 ```
 
-`docker/build.sh` builds and starts what this machine has a configuration for: urfd with `$URFD_DATA/config/urfd.ini`, tcd with `$URFD_DATA/tcd/tcd.ini`, so it serves a machine with only tcd too. A `tcd.ini` with a `DeviceSerial`, or without a codec plugin (a `CodecPlugin` line other than `op25` and `codec2`), means AMBE sticks: build.sh adds `docker/docker-compose.tcd-sticks.yml`, which gives the container the host's `/dev` read only and the USB serial devices (major 188). tcd finds the sticks by `/dev/serial/by-id` as natively, also after a replug gives a stick another node, and sets their USB latency timer to 1 ms itself (the low latency ioctl, no `/sys` needed; tcd logs the value at start). A lost device goes to the codec plugins until it is back (see [above](#a-device-lost-while-tcd-runs)); without a plugin tcd exits and the container restarts. Inside the container: `docker exec -it tcd tcdmon`.
+`docker/build.sh` builds and starts what this machine has a configuration for: urfd with `$URFD_DATA/config/urfd.ini`, tcd with `$URFD_DATA/tcd/tcd.ini`, so it serves a machine with only tcd too. A `tcd.ini` with a `DeviceSerial` other than `none`, or without a codec plugin (a `CodecPlugin` line other than `op25` and `codec2`), means AMBE sticks: build.sh adds `docker/docker-compose.tcd-sticks.yml`, which gives the container the host's `/dev` read only and the USB serial devices (major 188). tcd finds the sticks by `/dev/serial/by-id` as natively, also after a replug gives a stick another node, and sets their USB latency timer to 1 ms itself (the low latency ioctl, no `/sys` needed; tcd logs the value at start). A lost device goes to the codec plugins until it is back (see [above](#a-device-lost-while-tcd-runs)); without a plugin tcd exits and the container restarts. Inside the container: `docker exec -it tcd tcdmon`.
 
 In `tcd.ini`: `ServerAddress = 127.0.0.1` next to urfd (the container uses the host's network), else the reflector's address; `Modules` as many as wanted; with sticks `DeviceSerial` as natively, in software `CodecPlugin = /usr/local/lib/tcd/mbelib_neo_codec.so` and no `DeviceSerial`; a `MonitorHttpPort` that is free on the host. In `urfd.ini`: `[Transcoder] Modules = auto`, so tcd's list alone decides. The image builds every `tcd/plugins/<name>/` with a `Makefile` (git ignores that directory); `tcd.ini` is writable for the monitor's Save. To update: `sudo ./setup.sh update`, or by hand `git pull` in the checkout and in each plugin clone (`git -C tcd/plugins/<name> pull`), then `docker/build.sh`. The containers carry a label that keeps watchtower from replacing them, as they are built here and not pulled.
 
@@ -263,7 +273,7 @@ A device that cannot be opened or does not answer is left out with a warning, an
 | `Modules` | `FS` | transcoded modules; with the reflector's `[Transcoder] Modules = auto` (urfd 4.25.0) any of its modules, this list alone decides; else the same letters as there |
 | `StandbyModules` | — | modules this tcd takes only while no other tcd has them (since 0.11.0, urfd 4.26.0), see [Standby](#standby-a-second-tcd-for-the-same-modules); not in `Modules` as well |
 | `DeviceSerial` | — | AMBE device to use, one line each (see [above](#selecting-the-ambe-devices)), `none` for none (since 0.20.11); `mixed` after the serial of a DV3003 alone: D-Star and DMR of one module on it, since 0.19.3 also the DMR of a second one (since 0.17.0, see [Single DV3003 in mixed mode](#single-dv3003-in-mixed-mode)) |
-| `CodecPlugin` | — | codec plugin to load, one line each: the path of a shared object, or `op25` / `codec2` for tcd's own (see [Codec plugins](#codec-plugins)) |
+| `CodecPlugin` | `op25`, `codec2` | codec plugin to load, one line each: the path of a shared object, or `op25` / `codec2` for tcd's own (see [Codec plugins](#codec-plugins)) |
 | `CodecDStar` / `CodecDMR` / `CodecP25` / `CodecM17` | — | the vocoder new streams get: `dvsi`, `op25`, `codec2` or a plugin's name (see [Codec plugins](#codec-plugins)); written by Save |
 | `Transcode` | `direct` | `direct`: a plugin that decodes a D-Star, DMR/YSF or P25 stream and codes another of the three makes the outgoing frames from the incoming frames' vocoder parameters (plugin API 4, since 0.20.0, see [Codec plugins](#codec-plugins)); `audio`: every codec from the decoded audio |
 | `DeviceChannels` | — (default `fixed`) | `fixed`: the AMBE channels belong to the first modules; `pool`: a stream takes any free channel (since 0.17.0, see [Channel pool](#channel-pool-devicechannels--pool)) |
@@ -271,7 +281,7 @@ A device that cannot be opened or does not answer is left out with a warning, an
 
 ### Gains
 
-All gains are in dB, -40 to +40.
+All gains are in dB, -40 to +40 (the web dashboard's sliders: output gains -24 to +10, the DVSI gains -24 to +24).
 
 | Key | Template | Applied to |
 |---|---|---|
@@ -281,8 +291,8 @@ All gains are in dB, -40 to +40.
 | `OutputGainM17` | `0` | M17/Codec2 output, after the AGC |
 | `OutputGainIMBE` | `0` | P25 output, after the AGC |
 | `OutputGainUSRP` | `0` | USRP and SVX output, after the AGC (both get the same PCM from tcd) |
-| `DStarGainIn` / `DStarGainOut` | `0` | inside the DVSI chip, D-Star decode / encode |
-| `DmrGainIn` / `DmrGainOut` | `0` | inside the DVSI chip, DMR decode / encode |
+| `DStarGainIn` / `DStarGainOut` | `0` | inside the DVSI chip, D-Star decode / encode; for a codec plugin tcd applies them in software |
+| `DmrGainIn` / `DmrGainOut` | `0` | inside the DVSI chip, DMR decode / encode; for a codec plugin tcd applies them in software |
 
 SVX and USRP gains per connection are set in the reflector's `urfd.ini` (`RxGain`/`TxGain` in `[SvxReflector]`, `[SVXServer]` and `[USRP]`); `OutputGainUSRP` here sets the level of the PCM tcd returns for both.
 
@@ -411,9 +421,27 @@ Since 0.21.0 tcd tells urfd after every transmission how it sounded: the level a
 - hardware and software apart (since 0.18.0): the AMBE channels of D-Star and DMR in use, fixed or pool, then each device: serial, type, role, channels in use and their modules, and since 0.19.0 the columns Frames (decoded, encoded) and Errors for devices and plugins alike (fec: decoded with corrected errors; unc: uncorrectable, the device repeats; bad: encoded by a device but failing their FEC; rep / mute: repeated / muted by a plugin; since 0.19.2 lost: answers of a device lost on the serial line, a silent frame instead); "Phase out" takes a device out of service (since 0.17.1): no new streams, the ones on it run to their end, then tcd closes it and it can be unplugged; "Take back" opens it again. Only for a device whose codecs a codec plugin does; not kept by Save (a restart of tcd uses it again). On a phone held upright the button is left out so the table fits (since 0.19.2; on its side it is there); the table takes the layout that fits the width it has (since 0.20.6): a column per counter, else two counters one below the other in each column; since 0.20.8 the reflector link stands in one line above the table, which takes the whole width; the frames on a device, not answered yet, show when the pointer rests on its channels
 - "AMBE channels": fixed or pool (`DeviceChannels`) for the streams that start from now on (since 0.17.1), written by Save
 - "AMBE speech": `DeviceCompand` (since 0.19.2), linear, µ-law or A-law; each device is opened again for it when its streams are done, written by Save
-- codec plugins: their codec, counters and streams, and which vocoder new D-Star, DMR and P25 streams get (switchable, see [Codec plugins](#codec-plugins)); tcd's own vocoders OP25 (P25, YSF VW) and Codec2 (M17), when loaded, with their counters as "Built in" (since 0.14.1); since 0.15.0 the frames a plugin of API 3 decoded with bit errors, repeated or muted; since 0.20.0 the frames a plugin codec made on the direct path ("direct")
+- codec plugins: their codec, counters and streams, and which vocoder new D-Star, DMR, P25 and M17 streams get (switchable, see [Codec plugins](#codec-plugins)); tcd's own vocoders OP25 (P25, YSF VW) and Codec2 (M17), when loaded, with their counters as "Built in" (since 0.14.1); since 0.15.0 the frames a plugin of API 3 decoded with bit errors, repeated or muted; since 0.20.0 the frames a plugin codec made on the direct path ("direct")
 - reflector connection and packet counters; a standby module shows "standby" while another tcd has it and "taken over" while this tcd has it
+- the footer links to the GitHub release of urfd-ng this tcd was built with (since 0.21.1; `embed_html.sh` takes the version from `reflector/Version.h`, without it the link goes to the repository)
 - behind a reverse proxy under a path (since 0.11.0): the page uses relative paths, so `https://<host>/tcd/` works (see [tcd in Docker](#tcd-in-docker)); behind a proxy on the same machine the failed-login pause counts per address in the last `X-Forwarded-For` entry, and the session cookie is `Secure` when the proxy sends `X-Forwarded-Proto: https`; tcdmon shows standby modules too
+
+<details>
+<summary>More screenshots: compact view, vocoders, settings</summary>
+
+Compact view: a key per module, cards only for the modules on the air.
+
+<img src="../docs/images/tcd-monitor-compact.png" alt="Compact view">
+
+Vocoders: AMBE devices and codec plugins with their frames and errors.
+
+<img src="../docs/images/tcd-monitor-vocoders.png" alt="Vocoder table with AMBE devices, codec plugins and built-in vocoders">
+
+Settings: vocoder choice, gains and AGC, saved to tcd.ini.
+
+<img src="../docs/images/tcd-monitor-settings.png" alt="Settings: vocoder choice, gains and AGC">
+
+</details>
 
 ### tcdmon
 
@@ -490,7 +518,7 @@ journalctl -u tcd -f
 - **Noise suppression for analog input** (0.5.0): SVX and USRP go through the speexdsp preprocessor before the AGC analog (`AGCAnalogNoiseSuppress`, default -15 dB, live in the monitor; 0.5.1 lowered it to -10 dB and `AGCAnalogGateFloor` from -12 to 0, the noise suppression lowers the pauses), so the FM noise under the speech no longer turns into robotic AMBE artifacts on DMR; new build dependency `libspeexdsp-dev`
 - **P25 to M17**: a 300 Hz high-pass (4th order) in front of the Codec2 encoder for P25 audio; the IMBE decoder's extra energy below 120 Hz threw Codec2's pitch estimation off (PESQ about 1.6, now 2.5)
 - **DMR re-encode** (with a DMR codec plugin): `DmrGainMode = reencode` with AGC and `DmrReencodeGain` on DMR → DMR/YSF
-- **Codec plugins** (0.10.0): software vocoders for D-Star and DMR/YSF from shared objects with a plain C interface, a vocoder state per stream; replace the built-in MD380 support. The vocoder for new streams can be switched at run time between the devices and the plugins; since 0.12.0 (`TCD_CODEC_API 2`) a plugin learns where a transmission starts and stops, plugins built for API 1 have to be rebuilt; since 0.15.0 (`TCD_CODEC_API 3`) a plugin reports how each frame came out, for the monitor's counters, API 2 plugins keep working
+- **Codec plugins** (0.10.0): software vocoders for D-Star and DMR/YSF from shared objects with a plain C interface, a vocoder state per stream; replace the built-in MD380 support. The vocoder for new streams can be switched at run time between the devices and the plugins; since 0.12.0 (`TCD_CODEC_API 2`) a plugin learns where a transmission starts and stops, plugins built for API 1 have to be rebuilt; since 0.15.0 (`TCD_CODEC_API 3`) a plugin reports how each frame came out, for the monitor's counters, API 2 plugins keep working; since 0.20.0 (`TCD_CODEC_API 4`) optionally `transcode` for the direct path; since 0.22.0 tcd's own OP25 and Codec2 are built-in plugins (`CodecPlugin = op25`, `codec2`)
 - **Mixed mode output gains** (0.2.3): the DV3003's D-Star channel uses `OutputGainDStar`, not `OutputGainDMR`; M17 at 1600 bit/s no longer runs the second half of each packet through the AGC twice; since 0.2.11 a module missing from the module list is not sent to a DMR channel
 
 ### Monitoring and configuration
@@ -504,7 +532,7 @@ journalctl -u tcd -f
 - **Monitor on loopback by default**: `MonitorBindAddress` (default `127.0.0.1`) for the web dashboard and stats socket; since 0.10.7 with `MonitorPassword` the page and remote `tcdmon` ask for a password
 - **No grey zone in the core** (0.10.0): the MD380 firmware is gone from tcd; without a codec plugin two AMBE devices are needed, and `ambe` covers DMR → DMR/YSF
 - **Performance**: blocking reads with a timeout instead of busy polling; built with `-O2` since 0.2.12, a transcoded stream (Codec2, IMBE and AGC in software) takes about 7 % of one core on a Raspberry Pi 4 and 3 % on a Pi 5, so a Pi 4 is plenty for two modules
-- **Thread safety**: an IMBE encoder and decoder per module (one shared state garbled P25 while two modules transcoded at once), SIGPIPE ignored for clean reconnects
+- **Thread safety**: an IMBE encoder and decoder per module (one shared state garbled P25 while two modules transcoded at once; since 0.22.0 every vocoder and AGC state is kept per module and stream), SIGPIPE ignored for clean reconnects
 - **Error handling**: retries towards the reflector with backoff, dropping on queue overflow
 - **Lost answers** (0.19.2): a byte of a device's answer dropped on the serial line (an FTDI receive overrun) cost a channel 20 ms more delay for good, a held last frame per stream and the first frames of the next one; now it costs at most that one frame, see [Lost answers](#lost-answers-devicecompand). The count of frames on a device no longer goes wrong after an answer that took over 50 ms (it was set to 0 while answers were due, then ran below 0), and a device that lost an answer but still talks is no longer taken for a hung one. `DeviceCompand` (`ulaw`, `alaw`) halves the bytes of the audio on the serial line, which ends the overruns
 - **Reconnect backoff**: 0.5 s growing to 5 s while the reflector is unreachable

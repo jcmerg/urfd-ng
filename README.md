@@ -12,10 +12,19 @@ Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with exten
 git clone https://github.com/jcmerg/urfd-ng.git urfd && cd urfd && sudo ./setup.sh
 ```
 
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard-last-heard-dark.png">
+  <img src="docs/images/dashboard-last-heard.png" alt="urfd-ng dashboard: the station on the air, the module keypad and the last heard log">
+</picture>
+</p>
+
+*The dashboard (dashboard 3.1.7, sample data): who is on the air, the modules as a keypad, the last heard log with how each transmission sounded. It follows the light or dark theme.*
+
 ## What's New in urfd-ng
 
 ### Setup Script and Transcoder
-`setup.sh` installs the reflector (Docker, with the dashboard) and the transcoder (systemd), on one machine or split across two, after a few questions; it also updates them. The transcoder lives in [`tcd/`](tcd/), so reflector and transcoder always come from the same version. tcd uses the AMBE sticks through the kernel's `ftdi_sio` driver with the USB latency timer at 1 ms, so it no longer needs the libftd2xx driver, which ftdichip.com no longer lets scripts download. A tcd on another machine logs in with a shared password since 4.16.0 (`[Transcoder] Password` in `urfd.ini`, `Password` in `tcd.ini`), so the transcoder port can face the internet; the setup script generates one. A connection that stalls in its handshake no longer holds up the reflector's status thread. Since tcd 0.10, [codec plugins](tcd/README.md#codec-plugins) bring D-Star and DMR/YSF in software, so tcd also works with one AMBE stick, with more modules than the sticks have channels, or with no stick at all. Since 4.25.0 `[Transcoder] Modules = auto` leaves the choice to tcd: a module is transcoded while tcd is connected for it, so the list lives in `tcd.ini` alone and a module added there needs no change and no restart of urfd. Since 4.26.0 a second tcd can stand by for modules (`StandbyModules`): it takes them over while their tcd is gone, e.g. a software tcd in Docker next to urfd for the one with the sticks. See [docs/INSTALL.md](docs/INSTALL.md) and [tcd/README.md](tcd/README.md).
+`setup.sh` installs the reflector (Docker, with the dashboard) and the transcoder (Docker or systemd), on one machine or split across two, after a few questions; it also updates them. The transcoder lives in [`tcd/`](tcd/), so reflector and transcoder always come from the same version. tcd uses the AMBE sticks through the kernel's `ftdi_sio` driver with the USB latency timer at 1 ms, so it no longer needs the libftd2xx driver, which ftdichip.com no longer lets scripts download. A tcd on another machine logs in with a shared password since 4.16.0 (`[Transcoder] Password` in `urfd.ini`, `Password` in `tcd.ini`), so the transcoder port can face the internet; the setup script generates one. A connection that stalls in its handshake no longer holds up the reflector's status thread. Since tcd 0.10, [codec plugins](tcd/README.md#codec-plugins) bring D-Star and DMR/YSF in software, so tcd also works with one AMBE stick, with more modules than the sticks have channels, or with no stick at all. Since 4.25.0 `[Transcoder] Modules = auto` leaves the choice to tcd: a module is transcoded while tcd is connected for it, so the list lives in `tcd.ini` alone and a module added there needs no change and no restart of urfd. Since 4.26.0 a second tcd can stand by for modules (`StandbyModules`): it takes them over while their tcd is gone, e.g. a software tcd in Docker next to urfd for the one with the sticks. See [docs/INSTALL.md](docs/INSTALL.md) and [tcd/README.md](tcd/README.md).
 
 ### Even Levels Across All Modes
 tcd's AGC brings every call to the same level, whatever radio or vocoder it came from, and it also covers DMR → DMR/YSF, where the AMBE2+ frames pass through without a vocoder: the AGC's gain goes into the frame's gain parameter (b2) instead of a decode and re-encode, so the audio stays as clean as the original. SvxLink and AllStar (SVX, USRP) go through their own AGC analog: FM audio is not silent between words but carries the receiver's noise, which the AGC for digital sources raised by up to 30 dB; 20 minutes of FM-Funknetz traffic kept 32 dB speech-to-noise with it instead of 19. Two DVSI devices, e.g. DV3000 + DV3003 for two modules, need no codec plugin; a Raspberry Pi 4 is plenty. See [tcd/README.md](tcd/README.md#dmrysf--dmrysf-level-dmrgainmode).
@@ -464,6 +473,11 @@ Both MMDVM and SVX dynamic TGs have a 15-minute inactivity TTL. The timer is ref
 ### Admin Interface
 Runtime management from the dashboard's admin page, which logs in over the [WebSocket](#websocket-4130-bridges-and-names-4140-dashboard-and-admin-4380), and via a JSON-based TCP socket for scripts. Runs in its own thread and does not block audio processing. Each client connection is handled in a separate detached thread with a 5-second idle timeout, so slow or stalled clients cannot block the admin socket.
 
+
+<img src="docs/images/dashboard-admin.png" alt="Admin page with talkgroups and D-Star links">
+
+*The admin page after login: talkgroups, links, users, transcoder statistics and the log.*
+
 ```ini
 [Admin]
 Enable = true
@@ -558,11 +572,12 @@ IPCheckInterval = 60              # check every minute
 The reflector supports hot-reloading configuration without dropping client sessions. Send `SIGHUP` to the urfd process to trigger a reload.
 
 **Reloaded on SIGHUP:**
-- TG mappings (MMDVMClient, SvxReflector and SVXServer) — dynamic TGs are preserved
+- TG mappings (MMDVMClient, OpenBridge, SvxReflector and SVXServer) — dynamic TGs are preserved; the MMDVMClient connections reconnect
 - Whitelist, blacklist, and interlink files
 - Transcoded modules (`[Transcoder] Modules`, also to and from `auto`, since 4.25.1); a tcd connection for a module no longer listed is closed
 - Module access by protocol and hidden talkers (`[Modules] Protocols<M>`, `HideUnlisted`, since 4.37.0)
-- Reflector metadata (sponsor, country, URLs; the callsign only for the XML file and the admin page)
+- The plugins' sections, and logins changed in the credential database (its cache is flushed; `[Credentials]` itself needs a restart)
+- Reflector metadata (sponsor, country, URLs; a new callsign needs a restart)
 
 **Requires full restart:**
 - Callsign, database settings (Mode, URL, RefreshMin)
@@ -654,10 +669,10 @@ M17 listen-only clients (LSTN packets) are accepted and registered on the reques
 - **mrefd interlink**: Modules can be shared with mrefd reflectors, listed as `M17-XXX <address> <modules> [port]` in `urfd.interlink` (a trailing `L`, `M17-XXXL`, for a legacy mrefd < 1.0), or as `M17-XXX <modules>` with the address from the Ham-DHT. urfd links under the M17 designator set in `[M17] Callsign = M17-XXX`; without it M17 interlinking is off. Link, keepalive, voice and packet mode data follow mrefd: data to an mrefd >= 1.0 carries the module as an extra byte, a legacy one is addressed as `M17-XXX <module>` and gets no packet mode data. As in mrefd, a stream from one mrefd is not passed on to another one. Interlinked mrefds show up as M17 peers.
 - **Callsigns**: As on mrefd, a `CONN`, an `LSTN` (more permissive) and the source of voice and packet data must look like a callsign, anything else is dropped. A client put on the blacklist after it linked gets a `DISC` and is removed.
 - **Relinking**: A `CONN`/`LSTN` replaces any earlier link of the same callsign and IP, so switching modules does not leave a stale entry behind.
-- **META**: The META bytes reach other M17 clients with a TYPE that says what they carry (text, GNSS or ECD) and the source's CAN, so a GNSS position is no longer shown as text. A GNSS position is decoded into a Maidenhead locator, shown in the last-heard list (linked to OpenStreetMap) and in `/json/stations`.
+- **META**: The META bytes reach other M17 clients with a TYPE that says what they carry (text, GNSS or ECD) and the source's CAN, so a GNSS position is no longer shown as text. A GNSS position is decoded into a Maidenhead locator, shown in the last-heard list (linked to OpenStreetMap) and sent to the dashboard over the WebSocket.
 
 ### Protocol Enable Flags
-All protocols can be enabled/disabled individually. Without `Enable`, DCS, DExtra, DPlus, DMRPlus, M17, YSF and URF are on (NXDN and P25 when they have a `Port`); MMDVM, SvxReflector, SVXServer, Echo, Admin and the client connectors are off; XLXPeer, G3 and USRP need the line. A disabled protocol still needs its `Port`.
+All protocols can be enabled/disabled individually. Without `Enable`, DCS, DExtra, DPlus, DMRPlus, M17, YSF and URF are on (NXDN and P25 when they have a `Port`); MMDVM, OpenBridge, SvxReflector, SVXServer, Echo, Admin and the client connectors are off; XLXPeer, G3 and USRP need the line. A disabled protocol still needs its `Port`.
 
 ```ini
 [DPlus]
@@ -742,6 +757,14 @@ Module names are configured once in `urfd.ini` and automatically available in th
 
 ### Dashboard v3.1.7
 Since v3.0.0 (urfd 4.38.0) a static page, HTML and plain JavaScript without PHP: it gets the state live over urfd's WebSocket and shows a change the moment it happens, the admin page sends its commands the same way. The pages and the look are those of v2.14; old links (`index.php?show=...`) lead to the same pages. Settings are `[Dashboard]` in `urfd.ini`; `setup.sh update` carries those of the old `config.inc.php` over once.
+
+
+<p>
+  <img src="docs/images/dashboard-modules.png" alt="Modules page with bridges and protocols" width="620">
+  <img src="docs/images/dashboard-mobile.png" alt="Last heard on a phone" width="200">
+</p>
+
+*Left the Modules page with each module's bridges, right Last heard on a phone.*
 
 Redesigned in v2.9.0 as the front panel of a radio: an amber LCD shows who is on the air, the modules are a keypad, the rest are plain tables. Before that: dark mode (v2.6.0), hardened against directory outages (v2.6.1), M17 positions in the last-heard list (v2.7.0), directory registration moved to the reflector (v2.8.0), security fixes (v2.8.1, v2.8.2), status file and admin socket fixes (v2.8.3). Since v2.10.0 the operator's first name stands next to the callsign, from the ID databases urfd loads (urfd 4.12.0 and later).
 
@@ -830,7 +853,7 @@ The reflector and its dashboard run in Docker, the transcoder in Docker or nativ
 
 ### Quick start
 
-`setup.sh` asks a few questions, writes `urfd.ini`, the dashboard config and `tcd.ini`, installs Docker if needed, and builds and starts everything. Run it again, or `sudo ./setup.sh update`, to update while keeping the configuration. The step-by-step guide is [docs/INSTALL.md](docs/INSTALL.md).
+`setup.sh` asks a few questions, writes `urfd.ini` (with the dashboard's `[Dashboard]`) and `tcd.ini`, installs Docker if needed, and builds and starts everything. Run it again, or `sudo ./setup.sh update`, to update while keeping the configuration. The step-by-step guide is [docs/INSTALL.md](docs/INSTALL.md).
 
 ```bash
 git clone https://github.com/jcmerg/urfd-ng.git urfd
@@ -860,7 +883,7 @@ All configuration is in `/opt/urfd/config/` (mounted as volume):
 - `urfd.ini` - Main reflector configuration (supports SIGHUP reload)
 - `urfd.interlink` - Peer linking (URF, XLX, DCS and M17 peers with DNS support)
 - `urfd.blacklist` / `urfd.whitelist` - Access control (reloaded on SIGHUP)
-- `urfd.terminal` - G3 (Icom Terminal/AP mode) configuration. Options: `address <public-ip>` (required behind NAT), `modules <letters>` (allowed reflector modules), `alias <callsign>` (additional reflector callsign accepted from terminals, e.g. to accept both `URFxxx` and `XLXxxx`; repeatable). Hot-reloaded via `stat()` on file change.
+- `urfd.terminal` - G3 (Icom Terminal/AP mode) configuration. Options: `address <public-ip>` (optional: without it a terminal on the internet gets urfd's external IPv4 behind NAT), `modules <letters>` (allowed reflector modules), `alias <callsign>` (additional reflector callsign accepted from terminals, e.g. to accept both `URFxxx` and `XLXxxx`; repeatable). Hot-reloaded via `stat()` on file change.
 
 The dashboard's settings are `[Dashboard]` in `urfd.ini` (banner, rows, IP addresses); the footer names `[Names] SysopEmail`.
 
@@ -877,7 +900,7 @@ sudo bash tcd/build.sh         # tcd
 
 ### setup.sh
 
-Besides installing and updating, `setup.sh` handles the day-to-day work on the reflector (Docker container `urfd`) and the transcoder (systemd service `tcd`), whichever of the two runs on the machine.
+Besides installing and updating, `setup.sh` handles the day-to-day work on the reflector (Docker container `urfd`) and the transcoder (Docker container or systemd service `tcd`), whichever of the two runs on the machine.
 
 ```bash
 sudo ./setup.sh status              # what runs here, in which version
@@ -896,6 +919,7 @@ Validates `urfd.ini` syntax and cross-references (e.g. TG modules must exist in 
 
 ```bash
 cd reflector
+cp -n ../config/urfd.mk .   # the Makefile needs it
 make inicheck
 ./inicheck -q urfd.ini   # Errors and warnings only
 ./inicheck -n urfd.ini   # Also print public config keys
@@ -929,9 +953,8 @@ Open ports are found by internet scanners within hours. urfd turns them away and
 
 | Port | Transport | Protocol | Purpose | Key |
 |------|-----------|----------|---------|-----|
-| 80 | TCP | HTTP | Dashboard (native install) | – |
 | 5300 | TCP + UDP | SVXServer | SvxLink nodes connect here | `[SVXServer] Port` |
-| 8363 | TCP | HTTP | Dashboard (Docker) | `docker-compose.yml` |
+| 8363 | TCP | HTTP | Dashboard (Docker, or natively with the shipped nginx configuration) | `listen` in `docker/nginx-dashboard.conf` |
 | 8880 | UDP | DMR+ | DMR+ DMO mode | `[DMRPlus] Port` |
 | 10002 | UDP | XLXPeer | XLX and BrandMeister peering | `[XLXPeer] Port` |
 | 10017 | UDP | URF | URF interlinking | `[URF] Port` |

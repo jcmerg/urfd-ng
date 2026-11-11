@@ -25,6 +25,11 @@ for arg in "$@"; do
     esac
 done
 
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run as root: sudo bash $0"
+    exit 1
+fi
+
 TCD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/usr/local/bin"
 PLUGIN_DIR="/usr/local/lib/tcd"

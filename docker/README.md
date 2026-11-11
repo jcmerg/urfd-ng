@@ -47,7 +47,8 @@ defines no `unix_http_server` socket. Restart with `docker restart urfd`.
 |---|---|
 | `Dockerfile` | Multi-stage build (Ubuntu 24.04) |
 | `docker-compose.yml` | Compose file, builds from this checkout, data in `$URFD_DATA` |
-| `Dockerfile.dockerignore` | Keeps `.git`, `tcd/` and build output out of the build context |
+| `Dockerfile.dockerignore` | Keeps `.git`, `tcd/`, `docs/` and build output out of the build context |
+| `Dockerfile.tcd`, `Dockerfile.tcd.dockerignore` | The tcd image (service `tcd`, profile `tcd`), see [tcd in Docker](../tcd/README.md#tcd-in-docker) |
 | `build.sh` | Build + restart helper for urfd and/or tcd, whichever has its configuration in `$URFD_DATA` |
 | `docker-compose.tcd-sticks.yml` | Added by `build.sh` for tcd with AMBE sticks: `/dev` read only and the USB serial devices |
 | `supervisord.conf` | Process manager (urfd, nginx) |

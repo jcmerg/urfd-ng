@@ -157,7 +157,7 @@ Ohne Setup-Script oder ohne Docker: [INSTALL-ADVANCED.de.md](INSTALL-ADVANCED.de
 ## Alles entfernen
 
 ```bash
-cd ~/urfd/docker && sudo docker compose down --rmi all -v
+cd ~/urfd/docker && sudo docker compose --profile tcd down --rmi all -v
 sudo rm -rf /opt/urfd
 # ein nativer Transcoder:
 sudo systemctl disable --now tcd

@@ -629,8 +629,9 @@ PY
     set_ini "$ini" CallingHome Country "$country"
     set_ini "$ini" CallingHome Comment "${comment//#/}"
     [ -n "$overrideip" ] && set_ini "$ini" CallingHome OverrideIP "$overrideip"
-    # the directory entry keeps the URL it had
-    [ -n "$url" ] && set_ini "$ini" Names DashboardUrl "$url"
+    # the directory entry keeps the URL it had (an if: the last command of the
+    # function, a false test would end setup.sh under set -e)
+    if [ -n "$url" ]; then set_ini "$ini" Names DashboardUrl "$url"; fi
 }
 
 # Since dashboard 3.0 (urfd 4.38) the dashboard reads everything from urfd's
@@ -650,7 +651,8 @@ import re, sys
 s = open(sys.argv[1]).read()
 m = re.search(r'^\[WebSocket\]\s*$(.*?)(?=^\[|\Z)', s, re.M | re.S)
 e = re.search(r'^\s*Enable\s*=\s*(\S+)', m.group(1), re.M) if m else None
-sys.exit(0 if not e or e.group(1)[0] not in 'tT1yY' else 1)
+# urfd takes only t, T or 1 as true
+sys.exit(0 if not e or e.group(1)[0] not in 'tT1' else 1)
 PY
     then
         info "Enabling the WebSocket, the dashboard reads everything from it ([WebSocket] Enable in urfd.ini)"
