@@ -86,7 +86,6 @@ if [ ! -f "$CFG_DIR/urfd.ini" ]; then
     FIRST=true
     mkdir -p "$CFG_DIR"
     cp "$REPO_DIR/config/urfd.ini" "$CFG_DIR/urfd.ini"
-    sed -i "s#/home/user/#$CFG_DIR/#" "$CFG_DIR/urfd.ini"
     chmod 600 "$CFG_DIR/urfd.ini"   # holds the admin, hotspot and BrandMeister passwords
 fi
 for f in urfd.interlink urfd.whitelist urfd.blacklist urfd.terminal; do
