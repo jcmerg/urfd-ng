@@ -359,9 +359,10 @@ function speechMs(a) { return a.duration_ms * (a.speech_percent || 0) / 100; }
 // (audioVerdict), or, on a module without one, one shorter than SHORT_MS by urfd's length
 function hideable(st) {
     if (st.verdict) return !!st.verdict.hide;
-    // a transcoded module waits for tcd's report, which measures the length its own way
+    // a transcoded module waits for tcd's report, which measures the length its own way;
+    // it sends none for one under 0.1 s
     var m = S.modules[st.module];
-    return !(m && m.transcoded) && st.duration > 0 && st.duration < SHORT_MS;
+    return st.duration > 0 && st.duration < (m && m.transcoded ? 100 : SHORT_MS);
 }
 // the entries the log has room for
 function logList() { return S.lastHeard.slice(0, options().last_heard_rows || 40); }

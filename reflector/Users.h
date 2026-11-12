@@ -84,4 +84,5 @@ protected:
 	std::map<char, std::deque<SReportWait>> m_ReportWait;
 	void ExpireReportWait(std::deque<SReportWait> &wait);
 	void ApplyReport(char module, const SReportWait &wait);
+	CUser *StreamEntry(char module, const CCallsign &talker, std::time_t started);
 };
