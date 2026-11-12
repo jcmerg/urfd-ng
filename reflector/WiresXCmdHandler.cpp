@@ -65,6 +65,7 @@ bool CWiresxCmdHandler::Init(void)
 
 	// reset stop flag
 	keep_running = true;
+	m_CmdQueue.Start();
 
 	try
 	{
@@ -84,6 +85,7 @@ bool CWiresxCmdHandler::Init(void)
 void CWiresxCmdHandler::Close(void)
 {
 	keep_running = false;
+	m_CmdQueue.Stop();	// out of its wait
 	if ( m_Future.valid() )
 	{
 		m_Future.get();
@@ -213,8 +215,8 @@ void CWiresxCmdHandler::Task(void)
 	}
 	else
 	{
-		// if nothing to do, sleep a bit
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		// nothing due: wait for a command, or for the first one to be due
+		m_CmdQueue.Wait(WIRESX_REPLY_DELAY);
 	}
 
 }
