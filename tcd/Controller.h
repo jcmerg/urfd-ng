@@ -115,8 +115,12 @@ protected:
 	bool SlotBusy(int slot);
 	bool SlotBusyLocked(int slot);	// with pinned_mux
 	int UncoveredChoice(int slot) const;
-	// the channel of codec k for a stream, -1 for none (under pinned_mux)
+	// the channel of codec k for a stream, -1 for none (under pinned_mux):
+	// FindChannel only looks, TakeChannel takes it
+	int FindChannel(int k, char module) const;
 	int TakeChannel(int k, char module, uint16_t streamid);
+	// a channel whose device is up and not phased out takes new streams
+	bool Usable(const SHwChannel &c) const { return slots[c.slot]->up && !slots[c.slot]->draining; }
 	bool HasChannel(int k, int hw, char module, uint16_t streamid) const;
 	bool HwAny(int k) const { return !hw_channels[k].empty(); }
 	// a name for channel c of codec k in the log: DV3003 ch1
@@ -160,6 +164,8 @@ protected:
 	// list_size, pinned for the stream; for a device its AMBE channel in
 	// dev and ch (dev stays empty for a plugin or tcd's own vocoder)
 	// count: the frame counts for the stream's log (false for a lookup besides the frame's own)
+	// A stream whose choice is a device but no channel is free for goes to the
+	// plugin that decoded its source, when that one has the codec, else to the first
 	int Pick(int k, size_t list_size, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev = nullptr, uint8_t *ch = nullptr, bool count = true);
 	class CSoftCodec *PluginChoice(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet);
 	// codec: TCD_CODEC_DSTAR, _DMR, _P25, _M17 or _M17_1600 (the two M17 share the choice)
@@ -176,13 +182,15 @@ protected:
 	void EncodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *imbe);
 	// the codec that decoded, nullptr for none; decoded: its decode succeeded
 	class CSoftCodec *DecodeIMBE(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *pcm, bool *decoded = nullptr);
-	// Transcode = direct: the frame `from` (a plugin codec) just decoded, coded into
-	// codec `to` by the same plugin from the frame itself, when the stream's choice
-	// for `to` is that plugin and it can (CodecPlugin.h api 4); the AGC's gain and
-	// the source's output gain in source_db, the target's gains added here. Sets
-	// the packet's frame of `to` and its bit in direct; false leaves `to` to the
-	// audio path
-	bool Transcode(uint32_t to, class CSoftCodec *from, float source_db, const std::shared_ptr<CTranscoderPacket> &packet, uint8_t *direct);
+	// Transcode = direct: the frame `from` (a plugin codec) just decoded (decoded:
+	// it did), coded into codec `to` by the same plugin from the frame itself, when
+	// the stream's choice for `to` is that plugin and it can (CodecPlugin.h api 4);
+	// the AGC's gain and the source's output gain in source_db, the target's gains
+	// added here. Sets the packet's frame of `to` and its bit in direct; false
+	// leaves `to` to the audio path. Called in the decoder's thread for every frame
+	// (a transmission is coded directly from its first frame on, and after a frame
+	// that was not, its rest goes the audio path: CSoftCodec::Transcode)
+	bool Transcode(uint32_t to, class CSoftCodec *from, bool decoded, float source_db, const std::shared_ptr<CTranscoderPacket> &packet, uint8_t *direct);
 	// M17 with the stream's choice: tcd's own Codec2 or a plugin. Encode: 3200,
 	// 160 samples into 8 bytes; decode: 8 bytes into 160 samples (3200) or 320
 	// (1600). An error gives Codec2 silence or silent samples

@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.5** | tcd 0.22.5 | Dashboard v3.1.8
+**urfd 4.40.5** | tcd 0.22.6 | Dashboard v3.1.8
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1115,6 +1115,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.22.6**: with `Transcode = direct` a transmission whose target codec went the audio path (D-Star from DMR with the AMBE devices phased out, while D-Star and DMR were set to `dvsi`) came out broken: the decoder's thread touched the encoder's state with its newer frame, and the encoder, still on an older one, took that for a new transmission and started afresh at nearly every frame. The direct path now has an encoder state of its own, used by the decoder's thread only; the audio path's encoder is the codec thread's alone. A transmission joins the direct path at its first frame only, and after a frame that was not coded directly (not decoded, Transcode switched to audio, a failed transcode) its rest goes the audio path. A frame 0 always starts a transmission afresh, and so does a frame after more than two seconds without one (before, a transmission whose last frame got lost could leave its history to the next on the same stream). And a transmission set to `dvsi` that no AMBE channel is free for (the devices phased out or lost, its fixed channel gone, the pool full) goes to the codec plugin that decoded its source (before: the first plugin), from its first frame on, so it is coded directly, and with `Transcode = audio` one plugin does the whole transmission; tcd decides that by the same rule as when it takes a channel, and a device back in the meantime takes the transmission whole
 - **tcd 0.22.5**: the monitor's vocoder table sat in two scroll boxes; with scrollbars always shown (a mouse on macOS) the outer one got a vertical scrollbar that took the width of the last column (its `mute` cut off). The table scrolls sideways in one box now, the legend wraps under it
 - **tcd 0.22.4**: the error for a `Port` out of range names the range tcd takes, 1025 to 49000 (before ">1024 and <49000", though 49000 is accepted); `make install` starts tcd only when `/usr/local/etc/tcd.ini` is there, `make uninstall` removes `tcdmon` as well
 - **tcd 0.22.3**: the stream log (`StreamLog`) counted every frame of a D-Star or DMR stream twice when a codec plugin decoded it ("1304 frames in 13.0 s"); the line now has the frames that came in
