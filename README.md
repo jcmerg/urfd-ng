@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.5** | tcd 0.22.6 | Dashboard v3.1.8
+**urfd 4.40.5** | tcd 0.22.6 | Dashboard v3.1.9
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -19,7 +19,7 @@ git clone https://github.com/jcmerg/urfd-ng.git urfd && cd urfd && sudo ./setup.
 </picture>
 </p>
 
-*The dashboard (dashboard 3.1.8, sample data): who is on the air, the modules as a keypad, the last heard log with how each transmission sounded. It follows the light or dark theme.*
+*The dashboard (dashboard 3.1.9, sample data): who is on the air, the modules as a keypad, the last heard log with how each transmission sounded. It follows the light or dark theme.*
 
 ## What's New in urfd-ng
 
@@ -755,7 +755,7 @@ Since 4.38.0 urfd writes no XML or JSON status file any more (`[Files] XmlPath` 
 
 Module names are configured once in `urfd.ini` and automatically available in the dashboard.
 
-### Dashboard v3.1.8
+### Dashboard v3.1.9
 Since v3.0.0 (urfd 4.38.0) a static page, HTML and plain JavaScript without PHP: it gets the state live over urfd's WebSocket and shows a change the moment it happens, the admin page sends its commands the same way. The pages and the look are those of v2.14; old links (`index.php?show=...`) lead to the same pages. Settings are `[Dashboard]` in `urfd.ini`; `setup.sh update` carries those of the old `config.inc.php` over once.
 
 
@@ -769,7 +769,7 @@ Since v3.0.0 (urfd 4.38.0) a static page, HTML and plain JavaScript without PHP:
 Redesigned in v2.9.0 as the front panel of a radio: an amber LCD shows who is on the air, the modules are a keypad, the rest are plain tables. Before that: dark mode (v2.6.0), hardened against directory outages (v2.6.1), M17 positions in the last-heard list (v2.7.0), directory registration moved to the reflector (v2.8.0), security fixes (v2.8.1, v2.8.2), status file and admin socket fixes (v2.8.3). Since v2.10.0 the operator's first name stands next to the callsign, from the ID databases urfd loads (urfd 4.12.0 and later).
 
 **Pages:**
-- **Last heard** - The LCD shows the station transmitting right now with its module, mode, route and a running timer, or the last station heard, dimmed. Next to it a key per module: amber when nodes are linked, a red mark while someone transmits. A key switches the LCD and the log to its module; without a key the LCD shows the transmission that started last and names the other modules on the air; the callsign filter takes wildcards (`DL*`). Both filters survive the page refresh. On a transcoded module each entry shows how the transmission sounded (input level, overdriven or not, what the AGC changed, FEC), as tcd reported it.
+- **Last heard** - The LCD shows the station transmitting right now with its module, mode, route and a running timer, or the last station heard, dimmed. Next to it a key per module: amber when nodes are linked, a red mark while someone transmits. A key switches the LCD and the log to its module; without a key the LCD shows the transmission that started last and names the other modules on the air; the callsign filter takes wildcards (`DL*`). Both filters survive the page refresh. On a transcoded module each entry shows how the transmission sounded (input level, overdriven or not, what the AGC changed, FEC), as tcd reported it. "Hide short calls" leaves out the ended transmissions under 1.5 s (kerchunks), and longer ones with under 1 s of speech unless bit errors or packet loss muted them; a station on the air always shows, and so does an entry tcd sent no report for (a module that is not transcoded). The choice is kept in the browser.
 - **Modules** - One table per module: name, linked nodes (expandable), DMR+ TG, YSF DG-ID, NXDN RAN and destination ID, transcoding and bridges (static, and dashed for runtime ones). Protocol columns are hidden when the protocol is off. Below it the server protocols with their ports; client protocols that connect outbound are left out. `?show=modulesd` from older links lands here.
 - **Links**, **Peers** - Linked nodes and peer reflectors, with how long they have been linked and the IP as far as `[Dashboard] LinksIP` / `PeersIP` allow.
 - **Reflector list** - The XLX directory with search and 25 per page.
@@ -1066,6 +1066,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.6.0**: Dark mode redesign, admin panel, module overview with TG mappings and NXDN RAN, protocol-specific columns hidden when disabled, protocol list, QuadNet Live proxy, reflector list with search/pagination
 - **Dashboard v2.6.1**: Survives an outage of the XLX directory. Explicit timeouts on every outbound request, CallingHome failures logged instead of aborting the page render, reflector and peer lists served from an on-disk cache, admin API no longer serialized behind the PHP session lock
 - **Dashboard v2.7.0**: Locator column for stations that send an M17 GNSS position, also in `/json/stations`
+- **Dashboard v3.1.9 (urfd 4.40.5)**: "Hide short calls" on Last heard leaves out the ended transmissions under 1.5 s (kerchunks), and longer ones with under 1 s of speech unless bit errors or packet loss muted them, as the dashboard rates tcd's report, on transcoded modules; the stations on the air stay, the choice is kept in the browser
 - **Dashboard v3.1.8 (urfd 4.40.2)**: on the Modules page the Protocols list has the same space above it as the other parts of a page; before, its heading sat right under the module table
 - **Dashboard v3.1.7 (urfd 4.40.2)**: a page whose `index.html` came from a cache older than 3.1.6, without the footer link, still starts; before, setting the link stopped the dashboard's start
 - **Dashboard v3.1.6 (urfd 4.40.2)**: the version in the top bar reads "urfd-ng" and links to the GitHub release the reflector runs; the footer links there as well, with the GitHub mark (also on phones, where the top bar hides the version)

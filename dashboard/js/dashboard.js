@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.8';
+var DASHBOARD_VERSION = '3.1.9';
 var REPO_URL = 'https://github.com/jcmerg/urfd-ng';
 
 var $ = function (id) { return document.getElementById(id); };
@@ -319,12 +319,12 @@ function strip(show) {
         return;
     }
     el.className = 'strip idle';
-    var st = S.lastHeard[0];
+    var st = visibleHeard()[0];
     el.innerHTML = st
         ? '<div class="strip-in"><span>Last heard</span><b>' + h(st.cs) + '</b>' + (st.name ? '<span>' + h(st.name) + '</span>' : '')
             + '<span>Module ' + h(st.module) + '</span>' + (st.protocol ? '<span>' + h(st.protocol) + '</span>' : '')
             + '<span class="t">' + formatAgo(st.time) + '</span></div>'
-        : '<div class="strip-in"><span>Nobody heard yet</span></div>';
+        : '<div class="strip-in"><span>' + (onlyShort('') ? 'Short calls hidden' : 'Nobody heard yet') + '</span></div>';
 }
 
 // running transmit timers, against urfd's clock
@@ -354,6 +354,19 @@ function dB(v) { return (v > 0 ? '+' : v < 0 ? '\u2212' : '') + Math.abs(v).toFi
 // key for 2 s, a longer silent one is a stuck PTT or a dead microphone
 var SHORT_MS = 1500, SHORT_SPEECH_MS = 1000, NO_SPEECH_MS = 3000, MIN_FEC_FRAMES = 50;
 function speechMs(a) { return a.duration_ms * (a.speech_percent || 0) / 100; }
+// what "Hide short calls" leaves out: an ended transmission rated short (a kerchunk, also
+// one with bit errors) or without any speech; one tcd sent no report for stays
+function hideable(st) { return !!(st.verdict && st.verdict.hide); }
+// the last heard entries a visitor sees: as many as the log shows, without the short
+// calls when they are hidden
+function visibleHeard() {
+    var list = S.lastHeard.slice(0, options().last_heard_rows || 40);
+    return hideShort ? list.filter(function (st) { return !hideable(st); }) : list;
+}
+// short calls hidden where nothing else was heard (all modules for key '')
+function onlyShort(key) {
+    return hideShort && S.lastHeard.slice(0, options().last_heard_rows || 40).some(function (st) { return (!key || st.module === key) && hideable(st); });
+}
 
 // the input level for the log and the LCD: none without speech (it would read -100 dB)
 // and none for a short transmission (it would be rated by a few frames)
@@ -368,8 +381,10 @@ function audioVerdict(a) {
     var rated = a.fec && a.fec.frames >= MIN_FEC_FRAMES;
     var lost = rated ? a.fec.uncorrectable / a.fec.frames * 100 : 0;
     var level = 0, w = 'Good', short = false;
+    // for "Hide short calls", whatever else is wrong with it
+    var tooShort = a.duration_ms < SHORT_MS || speechMs(a) < SHORT_SPEECH_MS;
     if (!a.speech_percent && a.duration_ms >= NO_SPEECH_MS) { level = 1; w = 'No speech'; }	// a carrier without modulation, or all of it muted
-    else if (a.duration_ms < SHORT_MS || speechMs(a) < SHORT_SPEECH_MS) { short = true; w = 'Short'; }
+    else if (tooShort) { short = true; w = 'Short'; }
     else if (a.clipped_percent >= 5 || a.level_in_db > -8) { level = 2; w = 'Overdriven'; }
     else if (a.level_in_db < -46) { level = 2; w = 'Too quiet'; }
     else if (a.clipped_percent >= 1 || a.level_in_db > -12) { level = 1; w = 'Loud'; }
@@ -380,7 +395,10 @@ function audioVerdict(a) {
     if (fec > level && fec >= loss) w = 'Bit errors';
     else if (loss > level) w = 'Packet loss';
     var sev = Math.max(level, fec, loss);
-    return { w: w, sev: sev, level: level, warn: sev > 0, short: short && sev === 0 };
+    // for "Hide short calls": under SHORT_MS whatever else is wrong with it (a kerchunk);
+    // a longer one with little or no speech only when the FEC or the network did not mute it
+    var hide = a.duration_ms < SHORT_MS || ((!a.speech_percent || speechMs(a) < SHORT_SPEECH_MS) && Math.max(fec, loss) === 0);
+    return { w: w, sev: sev, level: level, warn: sev > 0, short: short && sev === 0, hide: hide };
 }
 
 var SEV = ['', ' warn', ' bad'];
@@ -422,6 +440,17 @@ function audioCell(a, v) {
 
 var filter = { m: null, cs: '' }, lastCall = null;
 try { var saved = JSON.parse(sessionStorage.getItem('urf-filter') || 'null'); if (saved) filter = saved; } catch (e) {}
+// the visitor's choice to leave out short transmissions (kerchunks), kept in the browser;
+// only a transmission tcd reported on can be told short (a transcoded module)
+var hideShort = false;
+try { hideShort = localStorage.getItem('urf-hide-short') === '1'; } catch (e) {}
+// switched in another tab of this dashboard
+window.addEventListener('storage', function (e) {
+    if (e.key !== 'urf-hide-short') return;
+    hideShort = e.newValue === '1';
+    lastCall = null;
+    if (S.info) render();
+});
 
 function glob(pat, s) {
     if (!pat) return true;
@@ -435,6 +464,7 @@ function lcdPanel(key, air, last, hidden) {
     var out = '<div class="' + cls + '" data-lcd="' + h(key) + '" data-call="' + h(st ? mod + st.cs : mod) + '"' + (hidden ? ' hidden' : '') + '><div class="lcd-top">';
     if (air) out += '<span class="ann">TX</span><span>Transmitting</span>';
     else if (last) out += '<span>Last heard ' + formatAgo(last.time) + '</span>';
+    else if (onlyShort(key)) out += '<span>Short calls hidden</span>';
     else out += '<span>' + (key ? 'Nothing heard on module ' + h(key) + ' yet' : 'Nobody heard yet') + '</span>';
     out += alsoOnAir(otherOnAir(air ? air.module : key));
     if (air) out += '<span class="lcd-timer" data-since="' + air.time + '"></span>';
@@ -449,7 +479,7 @@ function lcdPanel(key, air, last, hidden) {
             + (!air && st.audio ? '<div title="' + h(audioDetails(st.audio)) + '"><dt>Audio</dt><dd>' + st.verdict.w + (audioLevel(st.audio, st.verdict) ? ', ' + audioLevel(st.audio, st.verdict) : '') + '</dd></div>'
                 + (st.audio.agc_db ? '<div><dt>AGC</dt><dd>' + dB(st.audio.agc_db.avg) + '</dd></div>' : '') : '') + '</dl>';
     } else {
-        out += '<p class="lcd-call">' + (key ? 'Quiet so far' : 'Waiting for the first call') + '</p>'
+        out += '<p class="lcd-call">' + (onlyShort(key) ? 'Only short calls' : key ? 'Quiet so far' : 'Waiting for the first call') + '</p>'
             + (key ? '<div class="lcd-ch"><span>Module</span><b>' + h(key) + '</b></div>' : '');
     }
     return out + '</div>';
@@ -462,23 +492,32 @@ URF.pages.users = {
         el.innerHTML = '<div class="page"><section class="deck" aria-label="On the air"><div class="bezel" id="lcds" aria-live="polite"></div>'
             + '<div><div class="keys-head"><h2>Modules</h2>' + (f ? '<p class="hint">Tap one to follow it in the display and the log</p>' : '') + '</div><div class="keys" id="keys"></div></div></section>'
             + '<section aria-labelledby="log-title"><div class="tbl-head"><h2 id="log-title">Last heard</h2>'
-            + (f ? '<div class="filters"><label for="f-call">Callsign</label><input class="field" id="f-call" type="search" placeholder="DL*, *JC" autocomplete="off" spellcheck="false"><button class="chip" id="f-clear" type="button" hidden>Clear filters</button></div>' : '')
+            + '<div class="filters">' + (f ? '<label for="f-call">Callsign</label><input class="field" id="f-call" type="search" placeholder="DL*, *JC" autocomplete="off" spellcheck="false"><button class="chip" id="f-clear" type="button" hidden>Clear filters</button>' : '')
+            + '<button class="chip" id="f-short" type="button" aria-pressed="false" title="Leave out ended transmissions under ' + SHORT_MS / 1000 + ' s (kerchunks), and longer ones with under ' + SHORT_SPEECH_MS / 1000 + ' s of speech unless bit errors or packet loss muted them. Known on transcoded modules only">Hide short calls</button></div>'
             + '</div><div class="scroll"><table class="t" id="log"><thead><tr><th class="state"><span class="sr">State</span></th><th>Callsign</th><th>Module</th><th>Mode</th><th>Via</th><th class="opt">Position</th><th class="opt">Audio</th><th class="r">Heard</th></tr></thead><tbody id="log-body"></tbody></table></div></section></div>';
         if (!f) filter = { m: null, cs: '' };
         el.addEventListener('click', function (e) {
             var k = e.target.closest('#keys button.key');
             if (k) { filter.m = (filter.m === k.dataset.m) ? null : k.dataset.m; applyFilter(); return; }
             if (e.target.closest('#f-clear')) { filter = { m: null, cs: '' }; $('f-call').value = ''; applyFilter(); }
+            if (e.target.closest('#f-short')) {
+                hideShort = !hideShort;
+                try { localStorage.setItem('urf-hide-short', hideShort ? '1' : '0'); } catch (e2) {}
+                lastCall = null;	// the display changes, no new call: no flick
+                render();
+            }
         });
         el.addEventListener('input', function (e) { if (e.target.id === 'f-call') { filter.cs = e.target.value.trim(); applyFilter(); } });
     },
     update: function () {
         var f = options().filter, mods = Object.keys(S.modules).sort();
         var air = onAirAll();
-        var lcd = lcdPanel('', air[0] || null, S.lastHeard[0] || null, false);
+        // the last heard as the log shows it: without the short calls it hides
+        var heard = visibleHeard();
+        var lcd = lcdPanel('', air[0] || null, heard[0] || null, false);
         if (f) mods.forEach(function (m) {
             var last = null;
-            for (var i = 0; i < S.lastHeard.length; i++) if (S.lastHeard[i].module === m) { last = S.lastHeard[i]; break; }
+            for (var i = 0; i < heard.length; i++) if (heard[i].module === m) { last = heard[i]; break; }
             lcd += lcdPanel(m, S.onAir[m] || null, last, true);
         });
         $('lcds').innerHTML = lcd;
@@ -505,7 +544,8 @@ URF.pages.users = {
         list.forEach(function (st) {
             var on = S.onAir[st.module], isLive = !!on && on.cs === st.cs && !live[st.module];
             if (isLive) live[st.module] = true;
-            rows += '<tr' + (isLive ? ' class="live"' : '') + ' data-m="' + h(st.module) + '" data-cs="' + h(st.cs) + '">'
+            rows += '<tr' + (isLive ? ' class="live"' : '') + ' data-m="' + h(st.module) + '" data-cs="' + h(st.cs) + '"'
+                + (!isLive && hideable(st) ? ' data-short="1"' : '') + '>'
                 + '<td class="state">' + (isLive ? '<span class="txtag">TX</span>' : '') + '</td>'
                 + '<td class="cs"><a href="https://www.qrz.com/db/' + encodeURIComponent(st.cs) + '" target="_blank" rel="noopener">' + h(st.cs) + '</a>'
                 + (st.suffix ? '<span class="sfx">/' + h(st.suffix) + '</span>' : '') + (st.name ? '<span class="op">' + h(st.name) + '</span>' : '') + countryTag(st.cs) + '</td>'
@@ -523,7 +563,7 @@ URF.pages.users = {
             rows += '</td><td class="opt au">' + (isLive ? '' : audioCell(st.audio, st.verdict)) + '</td><td class="r when" title="' + h(formatDate(st.time)) + '">' + (isLive ? 'on the air' : formatAgo(st.time)) + '</td></tr>';
         });
         if (!list.length) rows += '<tr class="empty"><td colspan="8">' + (S.info ? 'Nobody heard since the reflector started. Calls show up here as soon as someone keys up.' : 'Connecting to the reflector') + '</td></tr>';
-        rows += '<tr class="empty" id="log-none" hidden><td colspan="8">Nobody in the log matches these filters. Clear the filters to see all stations.</td></tr>';
+        rows += '<tr class="empty" id="log-none" hidden><td colspan="8"></td></tr>';
         $('log-body').innerHTML = rows;
         applyFilter();
     }
@@ -533,12 +573,22 @@ function applyFilter() {
     var input = $('f-call');
     if (input && input !== document.activeElement) input.value = filter.cs;
     document.querySelectorAll('#keys button.key').forEach(function (k) { k.setAttribute('aria-pressed', String(k.dataset.m === filter.m)); });
-    var shown = 0, rows = document.querySelectorAll('#log tbody tr[data-m]');
+    var shown = 0, short = 0, rows = document.querySelectorAll('#log tbody tr[data-m]');
     rows.forEach(function (tr) {
-        var ok = (!filter.m || tr.dataset.m === filter.m) && glob(filter.cs, tr.dataset.cs);
+        var match = (!filter.m || tr.dataset.m === filter.m) && glob(filter.cs, tr.dataset.cs);
+        var ok = match && !(hideShort && tr.dataset.short === '1');
+        if (match && !ok) short++;
         tr.hidden = !ok; if (ok) shown++;
     });
-    var none = $('log-none'); if (none) none.hidden = !(rows.length && !shown);
+    var sh = $('f-short'); if (sh) sh.setAttribute('aria-pressed', String(hideShort));
+    var none = $('log-none');
+    if (none) {
+        none.hidden = !(rows.length && !shown);
+        var fl = filter.m || filter.cs;
+        none.firstChild.textContent = !fl ? 'Only short calls in the log. Turn off "Hide short calls" to see them.'
+            : short ? 'Only short calls match these filters. Turn off "Hide short calls", or clear the filters, to see them.'
+            : 'Nobody in the log matches these filters. Clear the filters to see all stations.';
+    }
     var clear = $('f-clear'); if (clear) clear.hidden = !(filter.m || filter.cs);
     try { sessionStorage.setItem('urf-filter', JSON.stringify(filter)); } catch (e) {}
 

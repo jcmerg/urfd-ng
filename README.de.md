@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.40.5** | tcd 0.22.6 | Dashboard v3.1.8
+**urfd 4.40.5** | tcd 0.22.6 | Dashboard v3.1.9
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -19,7 +19,7 @@ git clone https://github.com/jcmerg/urfd-ng.git urfd && cd urfd && sudo ./setup.
 </picture>
 </p>
 
-*Das Dashboard (Dashboard 3.1.8, Beispieldaten): wer auf Sendung ist, die Module als Tastenfeld, die Last-Heard-Liste mit dem Klang jedes Durchgangs. Es folgt dem hellen oder dunklen Design.*
+*Das Dashboard (Dashboard 3.1.9, Beispieldaten): wer auf Sendung ist, die Module als Tastenfeld, die Last-Heard-Liste mit dem Klang jedes Durchgangs. Es folgt dem hellen oder dunklen Design.*
 
 ## Neu in urfd-ng
 
@@ -740,7 +740,7 @@ Seit 4.38.0 schreibt urfd keine XML- oder JSON-Statusdatei mehr (`[Files] XmlPat
 
 Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Dashboard zur Verfügung.
 
-### Dashboard v3.1.8
+### Dashboard v3.1.9
 Seit v3.0.0 (urfd 4.38.0) eine statische Seite, HTML und einfaches JavaScript ohne PHP: Sie bekommt den Stand live über den WebSocket von urfd und zeigt eine Änderung in dem Moment, in dem sie passiert; die Admin-Seite schickt ihre Befehle auf demselben Weg. Seiten und Aussehen sind die von v2.14; alte Links (`index.php?show=...`) führen auf dieselben Seiten. Die Einstellungen stehen in `[Dashboard]` in `urfd.ini`; `setup.sh update` übernimmt die der alten `config.inc.php` einmal.
 
 
@@ -754,7 +754,7 @@ Seit v3.0.0 (urfd 4.38.0) eine statische Seite, HTML und einfaches JavaScript oh
 In v2.9.0 neu gestaltet als Frontplatte eines Funkgeräts: Ein bernsteinfarbenes LCD zeigt, wer gerade sendet, die Module sind ein Tastenfeld, der Rest sind schlichte Tabellen. Davor: dunkles Design (v2.6.0), robust gegen Ausfälle des Verzeichnisses (v2.6.1), M17-Positionen in der Last-Heard-Liste (v2.7.0), Eintrag ins Verzeichnis an den Reflektor abgegeben (v2.8.0), Sicherheitskorrekturen (v2.8.1, v2.8.2), Korrekturen an Statusdatei und Admin-Socket (v2.8.3). Seit v2.10.0 steht der Vorname neben dem Rufzeichen, aus den ID-Datenbanken, die urfd lädt (ab urfd 4.12.0).
 
 **Seiten:**
-- **Last heard**: Das LCD zeigt die Station, die gerade sendet, mit Modul, Betriebsart, Weg und laufender Sendezeit, sonst gedimmt die zuletzt gehörte. Daneben eine Taste pro Modul: bernsteinfarben, wenn Knoten verbunden sind, mit roter Markierung, solange jemand sendet. Eine Taste schaltet LCD und Log auf ihr Modul; ohne Taste zeigt das LCD die zuletzt begonnene Aussendung und nennt die weiteren Module auf Sendung; der Rufzeichenfilter versteht Platzhalter (`DL*`). Beide Filter überstehen das Neuladen. Auf einem transkodierten Modul zeigt jeder Eintrag, wie der Durchgang klang (Eingangspegel, übersteuert oder nicht, was die AGC änderte, FEC), wie tcd ihn meldete.
+- **Last heard**: Das LCD zeigt die Station, die gerade sendet, mit Modul, Betriebsart, Weg und laufender Sendezeit, sonst gedimmt die zuletzt gehörte. Daneben eine Taste pro Modul: bernsteinfarben, wenn Knoten verbunden sind, mit roter Markierung, solange jemand sendet. Eine Taste schaltet LCD und Log auf ihr Modul; ohne Taste zeigt das LCD die zuletzt begonnene Aussendung und nennt die weiteren Module auf Sendung; der Rufzeichenfilter versteht Platzhalter (`DL*`). Beide Filter überstehen das Neuladen. Auf einem transkodierten Modul zeigt jeder Eintrag, wie der Durchgang klang (Eingangspegel, übersteuert oder nicht, was die AGC änderte, FEC), wie tcd ihn meldete. „Hide short calls“ blendet beendete Durchgänge unter 1,5 s aus (Kerchunks), und längere mit weniger als 1 s Sprache, außer Bitfehler oder Paketverlust haben sie stummgeschaltet; eine Station auf Sendung bleibt immer sichtbar, ebenso ein Eintrag ohne Bericht von tcd (ein nicht transkodiertes Modul). Die Wahl merkt sich der Browser.
 - **Modules**: Eine Tabelle mit einer Zeile pro Modul: Name, verbundene Knoten (aufklappbar), DMR+-TG, YSF-DG-ID, NXDN-RAN und -Ziel-ID, Transcoding und Brücken (statisch, und gestrichelt für die zur Laufzeit angelegten). Spalten ausgeschalteter Protokolle werden ausgeblendet. Darunter die Server-Protokolle mit ihren Ports; Client-Protokolle, die nach außen verbinden, fehlen. `?show=modulesd` aus alten Links landet hier.
 - **Links**, **Peers**: Verbundene Knoten und Partner-Reflektoren, mit Verbindungsdauer und der IP, soweit `[Dashboard] LinksIP` / `PeersIP` es erlauben.
 - **Reflector list**: Das XLX-Verzeichnis mit Suche und 25 pro Seite.
@@ -1051,6 +1051,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v3.1.9 (urfd 4.40.5)**: „Hide short calls“ auf Last heard blendet beendete Durchgänge unter 1,5 s aus (Kerchunks), und längere mit weniger als 1 s Sprache, außer Bitfehler oder Paketverlust haben sie stummgeschaltet, wie das Dashboard den Bericht von tcd bewertet, auf transkodierten Modulen; Stationen auf Sendung bleiben, die Wahl merkt sich der Browser
 - **Dashboard v3.1.8 (urfd 4.40.2)**: Auf der Seite Modules hat die Protokoll-Liste („Protocols“) denselben Abstand nach oben wie die übrigen Teile einer Seite; vorher saß ihre Überschrift direkt unter der Modul-Tabelle
 - **Dashboard v3.1.7 (urfd 4.40.2)**: Eine Seite, deren `index.html` aus einem Cache von vor 3.1.6 kommt, ohne den Link in der Fußzeile, startet trotzdem; vorher brach das Setzen des Links den Start des Dashboards ab
 - **Dashboard v3.1.6 (urfd 4.40.2)**: Die Version oben heißt „urfd-ng“ und verlinkt auf das GitHub-Release, das der Reflektor fährt; die Fußzeile verlinkt mit dem GitHub-Logo ebenfalls dorthin (auch auf dem Handy, wo die Kopfzeile die Version ausblendet)

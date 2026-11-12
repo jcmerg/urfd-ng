@@ -211,6 +211,8 @@ button.key.busy:hover { background: var(--lcd-press); }
 .chip { font: inherit; font-size: var(--fs-xs); background: var(--panel-sunk); color: var(--ink);
         border: 0; border-radius: 3px; padding: 0.3rem 0.6rem; cursor: pointer; }
 .chip:hover { background: var(--rule); }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--panel-raised); }
+.chip[aria-pressed="true"]:hover { opacity: 0.85; }
 .scroll { overflow-x: auto; }
 table.t { width: 100%; border-collapse: collapse; font-size: var(--fs-s); }
 .t th { text-align: left; font-weight: 500; font-size: var(--fs-xs); color: var(--graphite); padding: 0 0.75rem 0.4rem; border-bottom: 1px solid var(--rule); white-space: nowrap; }
