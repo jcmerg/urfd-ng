@@ -53,7 +53,7 @@ public:
 	bool Initialize(const char *type, const EProtocol ptype, const uint16_t port, const bool has_ipv4, const bool has_ipv6);
 	void Task(void);
 
-	void RequestReconnect(void) { m_ReconnectRequested = true; }
+	void RequestReconnect(void) { m_ReconnectRequested = true; Wake(); }
 	bool AddMapping(const std::string &host, uint16_t port, char remoteMod, char localMod);
 	bool RemoveMapping(char localMod);
 	std::vector<SDPlusClientMapping> GetMappings(void) const;

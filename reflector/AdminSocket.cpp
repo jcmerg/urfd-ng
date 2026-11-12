@@ -597,16 +597,19 @@ nlohmann::json CAdminSocket::CmdTGAdd(const nlohmann::json &cmd)
 		if (!ok)
 			return {{"status", "error"}, {"message", "failed to add TG (module in use or static conflict)"}};
 
-		// BM API / kerchunk / reconnect outside lock (HTTP I/O)
+		// BM API / kerchunk / reconnect outside lock (HTTP I/O): the reconnect
+		// after the API has the TG, before the kerchunk, which goes out on the
+		// new login
 		if (mmdvm->GetBmApi().IsConfigured())
 		{
 			mmdvm->GetBmApi().AddStaticTG(tg, timeslot);
+			mmdvm->RequestReconnect();
 		}
 		else
 		{
+			mmdvm->RequestReconnect();
 			mmdvm->RequestKerchunk(tg);
 		}
-		mmdvm->RequestReconnect();
 
 		std::string method = mmdvm->GetBmApi().IsConfigured() ? "API" : "kerchunk";
 		return {{"status", "ok"}, {"message", mmdvm->GetName() + " TG" + std::to_string(tg) + " -> Module " + module + " added via " + method}};

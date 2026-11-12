@@ -148,12 +148,12 @@ void CDmrmmdvmProtocol::Task(void)
 	// handle incoming packets
 #if DMR_IPV6==true
 #if DMR_IPV4==true
-	if ( ReceiveDS(Buffer, Ip, 20) )
+	if ( ReceiveDS(Buffer, Ip, WaitTime()) )
 #else
-	if ( Receive6(Buffer, Ip, 20) )
+	if ( Receive6(Buffer, Ip, WaitTime()) )
 #endif
 #else
-	if ( Receive4(Buffer, Ip, 20) )
+	if ( Receive4(Buffer, Ip, WaitTime()) )
 #endif
 	{
 		//Buffer.DebugDump(g_Reflector.m_DebugFile);

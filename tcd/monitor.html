@@ -143,7 +143,6 @@ section > header { display: flex; flex-wrap: wrap; justify-content: space-betwee
 .flow .pkts { margin-left: auto; }
 
 /* tables */
-.scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: var(--fs-s); }
 th { text-align: left; font-weight: 500; font-size: var(--fs-xs); color: var(--graphite); padding: 0 0.7rem 0.4rem; border-bottom: 1px solid var(--rule); white-space: nowrap; }
 td { padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--rule); vertical-align: baseline; }
@@ -163,7 +162,9 @@ td.slot.first { padding-left: 0.7rem; }
 /* wide: the frames and the errors set apart from what stands left of them */
 table:not(.narrow) td.slot.first { padding-left: 1.4rem; }
 .nowrap { white-space: nowrap; }
-.tbl { overflow-x: auto; }
+/* the one scroll box of the vocoder table, sideways only: overflow-x alone makes
+   overflow-y auto as well, and a vertical scrollbar takes the width of the last column */
+.tbl { overflow-x: auto; overflow-y: hidden; }
 .legend { margin: 0.5rem 0 0; font-size: var(--fs-xs); color: var(--graphite); }
 .cnt .lbl { font-size: var(--fs-xs); color: var(--graphite); margin-left: 0.15rem; }
 .cnt.bad, .cnt.bad .lbl { color: var(--tx); font-weight: 600; }
@@ -301,13 +302,11 @@ table.measure tr.grp { display: none; }
 
     <section aria-labelledby="h-dev">
       <header><h2 id="h-dev">Vocoders</h2></header>
-      <div class="scroll">
-        <div class="tbl"><table>
-          <thead id="devices-head"><tr><th>Vocoder</th><th class="opt">Type</th><th>State</th><th>Channels</th><th class="r opt">Frames</th><th class="r">Errors</th><th class="act"><span class="sr">Action</span></th></tr></thead>
-          <tbody id="devices"><tr><td colspan="7" class="empty">No report yet</td></tr></tbody>
-        </table></div>
-        <p class="legend">Frames: decoded and encoded. Errors: fec = decoded frames with bit errors the FEC corrected; unc = uncorrectable, an AMBE device repeats its last frame; bad = encoded by an AMBE device but failing their FEC (the device gives no AMBE frames, the radios mute the stream); rep / mute = repeated / muted by a codec plugin; lost = answers of an AMBE device lost on the serial line (a receive overrun of its USB adapter), a silent frame went out instead.</p>
-      </div>
+      <div class="tbl"><table>
+        <thead id="devices-head"><tr><th>Vocoder</th><th class="opt">Type</th><th>State</th><th>Channels</th><th class="r opt">Frames</th><th class="r">Errors</th><th class="act"><span class="sr">Action</span></th></tr></thead>
+        <tbody id="devices"><tr><td colspan="7" class="empty">No report yet</td></tr></tbody>
+      </table></div>
+      <p class="legend">Frames: decoded and encoded. Errors: fec = decoded frames with bit errors the FEC corrected; unc = uncorrectable, an AMBE device repeats its last frame; bad = encoded by an AMBE device but failing their FEC (the device gives no AMBE frames, the radios mute the stream); rep / mute = repeated / muted by a codec plugin; lost = answers of an AMBE device lost on the serial line (a receive overrun of its USB adapter), a silent frame went out instead.</p>
     </section>
 
     <section aria-labelledby="h-set">

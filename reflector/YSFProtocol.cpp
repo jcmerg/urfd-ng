@@ -55,7 +55,8 @@ bool CYsfProtocol::Initialize(const char *type, const EProtocol ptype, const uin
 	if (! CProtocol::Initialize(type, ptype, port, has_ipv4, has_ipv6))
 		return false;
 
-	// init the wiresx cmd handler
+	// init the wiresx cmd handler, whose replies wake the task
+	m_WiresxCmdHandler.SetWake([this] { Wake(); });
 	if (! m_WiresxCmdHandler.Init())
 		return false;
 
@@ -107,12 +108,12 @@ void CYsfProtocol::Task(void)
 	// handle incoming packets
 #if YSF_IPV6==true
 #if YSF_IPV4==true
-	if ( ReceiveDS(Buffer, Ip, 20) )
+	if ( ReceiveDS(Buffer, Ip, WaitTime()) )
 #else
-	if ( Receive6(Buffer, Ip, 20) )
+	if ( Receive6(Buffer, Ip, WaitTime()) )
 #endif
 #else
-	if ( Receive4(Buffer, Ip, 20) )
+	if ( Receive4(Buffer, Ip, WaitTime()) )
 #endif
 	{
 		// crack the packet

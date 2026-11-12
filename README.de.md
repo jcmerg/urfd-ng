@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.40.3** | tcd 0.22.4 | Dashboard v3.1.8
+**urfd 4.40.4** | tcd 0.22.5 | Dashboard v3.1.8
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -1100,6 +1100,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.22.5**: Die Vocoder-Tabelle des Monitors steckte in zwei Scroll-Boxen; mit immer sichtbaren Scrollleisten (eine Maus unter macOS) bekam die äußere eine senkrechte Leiste, die der letzten Spalte die Breite nahm (ihr `mute` abgeschnitten). Die Tabelle scrollt jetzt in einer Box seitwärts, die Legende bricht darunter um
 - **tcd 0.22.4**: Die Fehlermeldung zu einem `Port` außerhalb des Bereichs nennt den Bereich, den tcd annimmt, 1025 bis 49000 (vorher „>1024 and <49000“, obwohl 49000 angenommen wird); `make install` startet tcd nur, wenn `/usr/local/etc/tcd.ini` vorhanden ist, `make uninstall` entfernt auch `tcdmon`
 - **tcd 0.22.3**: Das Stream-Log (`StreamLog`) zählte jeden Frame eines D-Star- oder DMR-Streams doppelt, wenn ein Codec-Plugin ihn decodierte („1304 frames in 13.0 s“); die Zeile nennt jetzt die Frames, die ankamen
 - **tcd 0.22.2**: Ein Codec-Plugin, das für einen Stream keinen Zustand öffnen kann, meldet das einmal pro Stream statt bei jedem Frame; hat das gewählte M17-Plugin kein Codec2 1600, sagt das Log beim Start, dass seine Voice+Data-Streams an `codec2` gehen; die Version in der Kopfzeile des Monitors hat einen Tooltip mit dem urfd-ng-Release, auf das sie verlinkt; `embed_html.sh` nimmt die urfd-Version aus `URFD_DIR`, wenn das Makefile es gesetzt hat (vorher immer `../reflector`)
@@ -1152,6 +1153,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Mischbetrieb, Codec-Plugins, AGC und Verstärkung**: siehe [tcd/README.de.md](tcd/README.de.md)
 
 ### Infrastruktur
+- **Protokolle warten auf Pakete (4.40.4)**: Jeder Protokoll-Thread wachte alle 20 ms auf, um nach einem Paket zu sehen, auch ohne etwas zu tun (je etwa 50 Mal in der Sekunde, ein paar Prozent einer kleinen CPU für urfd allein); er wartet jetzt 100 ms, solange keiner seiner Streams offen ist, da dann nur Timer im Sekundenbereich fällig sind, und 20 ms, solange einer offen ist. Die Pakete des Routers wecken ihn wie bisher sofort, jetzt auch bei G3 (das bis zu 20 ms wartete), ebenso die Wires-X-Antworten von YSF, die Anfragen des Admins (Reconnect, Kerchunk, SvxReflector-TGs) und das Beenden; der SVXServer und der SvxReflector-Client warten in derselben Wartezeit auf ihre TCP-Verbindungen und lesen sie direkt vor ihrem UDP noch einmal, so wird ein Talker-Start über TCP sofort gelesen und weiterhin vor seinem Audio; der SVXServer nimmt bis zu 16 neue Verbindungen je Runde an; ein Protokoll ohne Socket wartet ebenfalls, statt durchzulaufen. Der Kerchunk des MMDVMClient für eine vom Admin hinzugefügte TG geht nach dem Reconnect hinaus, den sie anstößt, auf der neuen Anmeldung (vorher konnte er noch auf der alten hinausgehen), auch wenn in derselben Runde eine dynamische TG abläuft. Der SVXServer öffnet seinen TCP-Port, bevor seine Task startet, und überspringt Client-IDs, die noch vergeben sind, wenn der 16-Bit-Zähler herum ist (eine neue Verbindung ersetzte dann einen Node); eine Flut von Verbindungen ohne Anmeldung wird einmal je Stunde und Adresse geloggt
 - **Ruhigeres Log bei Scannern (4.22.0)**: Eine abgewiesene Verbindung wird pro Adresse und Art einmal in der Stunde geloggt, der Rest in einer Zeile zusammengefasst
 - **DMR-Talker-Alias in UTF-16 (4.10.2)**: Unser Alias ist UTF-16 wie der von BrandMeister, höchstens 13 Zeichen; Motorola-Funkgeräte (R7) zeigten den in ISO 8 Bit nicht an
 - **MMDVMClient-Sprecherwechsel (4.10.2)**: Ein BrandMeister-Sprecher, der anfängt, während das Modul noch den vorigen Stream hält (der schließt kurz nach seinem letzten Frame), steigt ein, sobald das Modul frei ist, statt für den ganzen Ruf verworfen zu werden

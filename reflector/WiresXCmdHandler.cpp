@@ -699,6 +699,9 @@ void CWiresxCmdHandler::SendPacket(const CIp &Ip, uint8_t *Buffer)
 		m_PacketQueue.push(CWiresxPacket(CBuffer(Buffer, 155), Ip));
 	}
 	m_PacketQueue.Unlock();
+	// the protocol's task sends it, at once rather than after its wait
+	if (m_Wake)
+		m_Wake();
 }
 
 

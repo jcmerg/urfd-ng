@@ -201,15 +201,23 @@ bool CSvxProtocol::TcpListen(void)
 	return true;
 }
 
-void CSvxProtocol::TcpAccept(void)
+bool CSvxProtocol::TcpAccept(void)
 {
 	struct pollfd pfd = { m_TcpListenFd, POLLIN, 0 };
-	if (poll(&pfd, 1, 0) <= 0) return;
+	if (poll(&pfd, 1, 0) <= 0)
+	{
+		m_AcceptStuck = false;	// nothing waiting
+		return false;
+	}
 
 	struct sockaddr_in clientAddr{};
 	socklen_t addrLen = sizeof(clientAddr);
 	int fd = accept(m_TcpListenFd, (struct sockaddr *)&clientAddr, &addrLen);
-	if (fd < 0) return;
+	// failed other than for an empty backlog: the connection may still wait there
+	m_AcceptStuck = (fd < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR);
+	if (m_AcceptStuck && RejectLog("SVXServer: accept failed", "listener"))
+		std::cerr << "SVXServer: accept failed, nodes cannot connect: " << strerror(errno) << std::endl;
+	if (fd < 0) return false;
 
 	char ipstr[INET_ADDRSTRLEN];
 	inet_ntop(AF_INET, &clientAddr.sin_addr, ipstr, sizeof(ipstr));
@@ -221,24 +229,33 @@ void CSvxProtocol::TcpAccept(void)
 			pending++;
 	if (pending >= SVXS_MAX_PENDING)
 	{
-		std::cerr << "SVXServer: too many connections without login, refusing " << ipstr << std::endl;
+		// the first of an address each hour: a flood would fill the log else
+		if (RejectLog("SVXServer: too many connections without login", ipstr))
+			std::cerr << "SVXServer: too many connections without login, refusing " << ipstr << std::endl;
 		close(fd);
-		return;
+		return true;
 	}
 
 	// Set non-blocking
 	fcntl(fd, F_SETFL, O_NONBLOCK);
 
-	// Assign client ID; it goes into the 16 bit UDP header, 0 stands for urfd as talker
-	uint32_t clientId = m_NextClientId++;
-	if ((clientId & 0xFFFF) == 0)
-		clientId = m_NextClientId++;
+	// Assign client ID; it goes into the 16 bit UDP header, 0 stands for urfd as
+	// talker, and one still in use when the counter came round is skipped
+	uint32_t clientId = 0;
+	for (int tries = 0; tries <= 0xFFFF && (clientId == 0 || m_Peers.count(clientId)); tries++)
+		clientId = m_NextClientId++ & 0xFFFF;
+	if (clientId == 0 || m_Peers.count(clientId))
+	{
+		std::cerr << "SVXServer: no client ID free, refusing " << ipstr << std::endl;
+		close(fd);
+		return true;
+	}
 
 	SSvxPeer peer;
 	peer.tcpFd = fd;
 	peer.tcpAddr = CIp(AF_INET, 0, ipstr);
 	peer.connectTimer.start();
-	peer.clientId = clientId & 0xFFFF;
+	peer.clientId = clientId;
 	peer.authState = SSvxPeer::EAuthState::expect_proto_ver;
 	peer.tcpLastRecvTimer.start();
 	peer.tcpHeartbeatTimer.start();
@@ -246,7 +263,8 @@ void CSvxProtocol::TcpAccept(void)
 	m_FdToClientId[fd] = peer.clientId;
 	m_Peers[peer.clientId] = std::move(peer);
 
-	std::cout << "SVXServer: new TCP connection from " << ipstr << " (clientId=" << (clientId & 0xFFFF) << ")" << std::endl;
+	std::cout << "SVXServer: new TCP connection from " << ipstr << " (clientId=" << clientId << ")" << std::endl;
+	return true;
 }
 
 bool CSvxProtocol::TcpSendFrame(SSvxPeer &peer, const std::vector<uint8_t> &msg)
@@ -1241,13 +1259,19 @@ bool CSvxProtocol::Initialize(const char *type, const EProtocol ptype,
 
 	LoadTGMap();
 
-	// Initialize base protocol (opens UDP socket on port)
-	if (!CProtocol::Initialize(type, ptype, port, has_ipv4, has_ipv6))
-		return false;
-
-	// Open TCP listen socket on same port
+	// the TCP listen socket on the same port first: the task, which the base
+	// starts, looks at it from its first round on
+	m_Port = port;
 	if (!TcpListen())
 		return false;
+
+	// Initialize base protocol (opens UDP socket on port, starts the task)
+	if (!CProtocol::Initialize(type, ptype, port, has_ipv4, has_ipv6))
+	{
+		close(m_TcpListenFd);
+		m_TcpListenFd = -1;
+		return false;
+	}
 
 	std::cout << "SVXServer: initialized on port " << m_Port << " with " << m_Passwords.size() << " user(s)" << std::endl;
 	return true;
@@ -1255,6 +1279,9 @@ bool CSvxProtocol::Initialize(const char *type, const EProtocol ptype,
 
 void CSvxProtocol::Close(void)
 {
+	// the task thread first: it walks the peers and polls their sockets
+	StopTask();
+
 	// Disconnect all peers
 	std::vector<uint32_t> peerIds;
 	for (const auto &[id, peer] : m_Peers)
@@ -1276,48 +1303,48 @@ void CSvxProtocol::Close(void)
 
 void CSvxProtocol::Task(void)
 {
-	// 1. Accept new TCP connections
-	TcpAccept();
-
-	// 2. Receive TCP data from all peers
+	// 1. Wait for whatever comes first: TCP data of a node, a new connection, UDP
+	// audio or a packet of the router (the nodes' TCP first). The listener not
+	// while accept fails other than for an empty backlog (out of descriptors):
+	// it would stay readable and keep the wait from waiting
+	m_PollFds.clear();
+	m_PollIds.clear();
+	for (const auto &[id, peer] : m_Peers)
 	{
-		std::vector<struct pollfd> pfds;
-		std::vector<uint32_t> clientIds;
-		for (const auto &[id, peer] : m_Peers)
+		if (peer.tcpFd >= 0)
 		{
-			if (peer.tcpFd >= 0)
-			{
-				pfds.push_back({peer.tcpFd, POLLIN, 0});
-				clientIds.push_back(id);
-			}
-		}
-		if (!pfds.empty())
-		{
-			int ret = poll(pfds.data(), pfds.size(), 0);
-			if (ret > 0)
-			{
-				for (size_t i = 0; i < pfds.size(); i++)
-				{
-					if (pfds[i].revents & (POLLIN | POLLERR | POLLHUP))
-						TcpReceiveFromPeer(clientIds[i]);
-				}
-			}
+			m_PollFds.push_back({peer.tcpFd, POLLIN, 0});
+			m_PollIds.push_back(id);
 		}
 	}
+	if (!m_AcceptStuck)
+		m_PollFds.push_back({m_TcpListenFd, POLLIN, 0});
+	m_PollFds.push_back({m_Socket4.GetSocket(), POLLIN, 0});
+	WaitFor(m_PollFds, WaitTime());
 
-	// 3. Receive all waiting UDP packets (each node sends 50 a second while talking)
+	// 2. Accept new TCP connections, every pass (also a listener left out of the
+	// wait); several a pass, for nodes that all come back at once after a restart
+	for (int i = 0; i < 16 && TcpAccept(); i++) {}
+
+	// 3. Receive TCP data from all peers, looked at again right before their UDP
+	// (also what came after the wait): a talker start comes over TCP before its audio
+	if (!m_PollIds.empty())
+		poll(m_PollFds.data(), m_PollIds.size(), 0);
+	for (size_t i = 0; i < m_PollIds.size(); i++)
+	{
+		if (m_PollFds[i].revents & (POLLIN | POLLERR | POLLHUP))
+			TcpReceiveFromPeer(m_PollIds[i]);
+	}
+
+	// 4. Receive all waiting UDP packets (each node sends 50 a second while talking)
 	{
 		CBuffer buffer;
 		CIp ip;
-		if (Receive4(buffer, ip, 20))
-		{
-			do {
-				OnUdpPacket(buffer, ip);
-			} while (Receive4(buffer, ip, 0));
-		}
+		while (Receive4(buffer, ip, 0))
+			OnUdpPacket(buffer, ip);
 	}
 
-	// 4. Keepalives: send TCP heartbeats, check timeouts
+	// 5. Keepalives: send TCP heartbeats, check timeouts
 	{
 		std::vector<uint32_t> deadPeers;
 		for (auto &[id, peer] : m_Peers)
@@ -1375,7 +1402,7 @@ void CSvxProtocol::Task(void)
 			DisconnectPeer(id);
 	}
 
-	// 5. a talker whose flush got lost ends after a short silence
+	// 6. a talker whose flush got lost ends after a short silence
 	{
 		std::vector<uint32_t> silent;
 		for (auto &[id, peer] : m_Peers)
@@ -1393,20 +1420,20 @@ void CSvxProtocol::Task(void)
 			EndOutStream(mod);
 	}
 
-	// 6. Handle outbound audio queue
+	// 7. Handle outbound audio queue
 	HandleQueue();
 
-	// 7. Check stream timeouts
+	// 8. Check stream timeouts
 	CheckStreamsTimeout();
 
-	// 8. Peer list for the admin socket
+	// 9. Peer list for the admin socket
 	if (m_SnapshotTimer.time() >= 1)
 	{
 		UpdatePeerSnapshot();
 		m_SnapshotTimer.start();
 	}
 
-	// 9. the CClients of connected nodes stay alive, on the module they
+	// 10. the CClients of connected nodes stay alive, on the module they
 	// belong to after TG map changes
 	if (m_AliveTimer.time() >= 5)
 	{
@@ -1416,7 +1443,7 @@ void CSvxProtocol::Task(void)
 		m_AliveTimer.start();
 	}
 
-	// 10. Expire dynamic TGs
+	// 11. Expire dynamic TGs
 	std::set<char> orphans;
 	{
 		auto now = std::chrono::steady_clock::now();

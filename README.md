@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.3** | tcd 0.22.4 | Dashboard v3.1.8
+**urfd 4.40.4** | tcd 0.22.5 | Dashboard v3.1.8
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1115,6 +1115,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.22.5**: the monitor's vocoder table sat in two scroll boxes; with scrollbars always shown (a mouse on macOS) the outer one got a vertical scrollbar that took the width of the last column (its `mute` cut off). The table scrolls sideways in one box now, the legend wraps under it
 - **tcd 0.22.4**: the error for a `Port` out of range names the range tcd takes, 1025 to 49000 (before ">1024 and <49000", though 49000 is accepted); `make install` starts tcd only when `/usr/local/etc/tcd.ini` is there, `make uninstall` removes `tcdmon` as well
 - **tcd 0.22.3**: the stream log (`StreamLog`) counted every frame of a D-Star or DMR stream twice when a codec plugin decoded it ("1304 frames in 13.0 s"); the line now has the frames that came in
 - **tcd 0.22.2**: a codec plugin that cannot open a state for a stream says so once per stream instead of at every frame; when the M17 plugin chosen has no Codec2 1600, the log at start says that its voice+data streams go to `codec2`; the version in the monitor's top bar has a tooltip naming the urfd-ng release it links to; `embed_html.sh` takes the urfd version from `URFD_DIR` when the Makefile has it set (before always `../reflector`)
@@ -1167,6 +1168,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Mixed mode, codec plugins, AGC and gains**: see [tcd/README.md](tcd/README.md)
 
 ### Infrastructure
+- **Protocols wait for packets (4.40.4)**: each protocol thread woke every 20 ms to look for a packet, also with nothing to do (some 50 wake-ups a second each, a few percent of a small CPU for urfd alone); it waits 100 ms now while none of its streams is open, as only timers of seconds are due then, and 20 ms while one is. The router's packets wake it at once as before, G3 now as well (it waited up to 20 ms), and so do the Wires-X replies of YSF, the admin's requests (reconnect, kerchunk, SvxReflector TGs) and the shutdown; the SVXServer and the SvxReflector client wait for their TCP connections in the same wait and read them again right before their UDP, so a talker start over TCP is read at once and still before its audio; the SVXServer takes up to 16 new connections a round; a protocol without a socket waits as well instead of spinning. The MMDVMClient's kerchunk for a TG added by the admin goes out after the reconnect it asks for, on the new login (it could go out on the old one before), also when a dynamic TG expires in the same round. The SVXServer opens its TCP port before its task starts and skips client IDs still in use when the 16 bit counter comes round (a new connection replaced a node then); a flood of connections without login is logged once an hour per address
 - **Quieter log for scanners (4.22.0)**: a rejected connection is logged once per address and kind each hour, the rest summed up in one line
 - **DMR talker alias in UTF-16 (4.10.2)**: our alias is UTF-16 like BrandMeister's, at most 13 characters; Motorola radios (R7) did not show the ISO 8 bit one
 - **MMDVMClient talker change (4.10.2)**: a BrandMeister talker who starts while the module still holds the previous stream (it closes a moment after its last frame) joins as soon as the module is free, instead of being dropped for the whole call

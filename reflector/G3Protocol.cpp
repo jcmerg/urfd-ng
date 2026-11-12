@@ -93,8 +93,8 @@ bool CG3Protocol::Initialize(const char */*type*/, const EProtocol /*type*/, con
 
 void CG3Protocol::Close(void)
 {
-	// the threads below run while keep_running
-	keep_running = false;
+	// the task first, then the threads below, which run while keep_running
+	StopTask();
 
 	if (m_PresenceFuture.valid())
 	{
@@ -155,8 +155,8 @@ void CG3Protocol::PresenceTask(void)
 	CCallsign           Owner;
 	CCallsign           Terminal;
 
-
-	if ( m_PresenceSocket.Receive(Buffer, ReqIp, 20) )
+	// only answers requests: the wait matters for the end of the thread alone
+	if ( m_PresenceSocket.Receive(Buffer, ReqIp, PROTOCOL_IDLE_WAIT) )
 	{
 
 		CIp Ip(ReqIp);
@@ -236,7 +236,8 @@ void CG3Protocol::ConfigTask(void)
 	CCallsign           Call;
 	bool                isRepeaterCall;
 
-	if ( m_ConfigSocket.Receive(&Buffer, &Ip, 20) != -1 )
+	// only answers requests: the wait matters for the end of the thread alone
+	if ( m_ConfigSocket.Receive(&Buffer, &Ip, PROTOCOL_IDLE_WAIT) != -1 )
 	{
 		if (Buffer.size() == 16)
 		{
@@ -349,7 +350,8 @@ void CG3Protocol::IcmpTask(void)
 	CIp Ip;
 	int iIcmpType;
 
-	if ((iIcmpType = m_IcmpRawSocket.IcmpReceive(Buffer, &Ip, 20)) != -1)
+	// the wait matters for the end of the thread alone
+	if ((iIcmpType = m_IcmpRawSocket.IcmpReceive(Buffer, &Ip, PROTOCOL_IDLE_WAIT)) != -1)
 	{
 		if (iIcmpType == ICMP_DEST_UNREACH)
 		{
@@ -383,8 +385,8 @@ void CG3Protocol::Task(void)
 	std::unique_ptr<CDvHeaderPacket>    Header;
 	std::unique_ptr<CDvFramePacket>     Frame;
 
-	// any incoming packet ?
-	if ( m_Socket4.Receive(Buffer, Ip, 20) )
+	// any incoming packet ? (Receive4 wakes for the router's packets as well)
+	if ( Receive4(Buffer, Ip, WaitTime()) )
 	{
 		CIp ClIp;
 		CIp *BaseIp = nullptr;

@@ -178,7 +178,7 @@ void CMMDVMClientProtocol::Task(void)
 	CBuffer Buffer;
 	CIp     Ip;
 
-	if (Receive4(Buffer, Ip, 20))
+	if (Receive4(Buffer, Ip, WaitTime()))
 	{
 		HandleIncoming(Buffer, Ip);
 	}
@@ -205,14 +205,6 @@ void CMMDVMClientProtocol::Task(void)
 		}
 	}
 
-	// Handle pending kerchunk (only when RUNNING — waits for reconnect to complete)
-	if (m_State == EHBState::RUNNING && m_PendingKerchunk.load() != 0)
-	{
-		uint32_t kerchunkTG = m_PendingKerchunk.exchange(0);
-		if (kerchunkTG != 0)
-			SendKerchunk(kerchunkTG);
-	}
-
 	// Purge expired dynamic TGs periodically
 	{
 		auto expired = m_TGMap.PurgeExpired();
@@ -223,6 +215,21 @@ void CMMDVMClientProtocol::Task(void)
 			m_State = EHBState::DISCONNECTED;
 			m_RetryTimer.start();
 		}
+	}
+
+	// Handle pending kerchunk (only when RUNNING and no reconnect is pending —
+	// waits for reconnect to complete; after the expiry above,
+	// whose reconnect would close the login it went out on)
+	// taken first, then the reconnect looked at: the admin requests that before
+	// the kerchunk, so one taken here sees its reconnect pending and goes back
+	if (m_State == EHBState::RUNNING && m_PendingKerchunk.load() != 0)
+	{
+		uint32_t kerchunkTG = m_PendingKerchunk.exchange(0);
+		uint32_t none = 0;
+		if (kerchunkTG != 0 && m_ReconnectRequested)
+			m_PendingKerchunk.compare_exchange_strong(none, kerchunkTG);	// a newer one stays
+		else if (kerchunkTG != 0)
+			SendKerchunk(kerchunkTG);
 	}
 
 	HandleStateMachine();
