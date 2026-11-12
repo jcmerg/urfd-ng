@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.9';
+var DASHBOARD_VERSION = '3.1.10';
 var REPO_URL = 'https://github.com/jcmerg/urfd-ng';
 
 var $ = function (id) { return document.getElementById(id); };
@@ -356,13 +356,12 @@ function dB(v) { return (v > 0 ? '+' : v < 0 ? '\u2212' : '') + Math.abs(v).toFi
 var SHORT_MS = 1500, SHORT_SPEECH_MS = 1000, NO_SPEECH_MS = 3000, MIN_FEC_FRAMES = 50;
 function speechMs(a) { return a.duration_ms * (a.speech_percent || 0) / 100; }
 // what "Hide short calls" leaves out: an ended transmission rated short by tcd's report
-// (audioVerdict), or, on a module without one, one shorter than SHORT_MS by urfd's length
+// (audioVerdict), or, without one, one shorter than SHORT_MS by urfd's length: a module
+// without transcoding, and a kerchunk tcd sends no report for (under 0.1 s of voice
+// frames, while urfd's length counts from the header: that one stayed, 3.1.9)
 function hideable(st) {
     if (st.verdict) return !!st.verdict.hide;
-    // a transcoded module waits for tcd's report, which measures the length its own way;
-    // it sends none for one under 0.1 s
-    var m = S.modules[st.module];
-    return st.duration > 0 && st.duration < (m && m.transcoded ? 100 : SHORT_MS);
+    return st.duration > 0 && st.duration < SHORT_MS;
 }
 // the entries the log has room for
 function logList() { return S.lastHeard.slice(0, options().last_heard_rows || 40); }
