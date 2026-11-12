@@ -333,7 +333,7 @@ void CCodecStream::Thread()
 void CCodecStream::Task(void)
 {
 	// Drain all pending transcoder responses (prevents TCP buffer buildup / deadlock)
-	STCPacket pack;
+	STCPacket pack{};
 	bool receivedAny = false;
 	while (g_TCServer.Receive(m_CSModule, &pack, 0))
 	{

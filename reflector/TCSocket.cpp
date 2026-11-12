@@ -263,7 +263,7 @@ bool CTCSocket::Send(const STCPacket *packet)
 	unsigned count = 0;
 	auto data = (const unsigned char *)packet;
 	do {
-		auto n = send(m_Pfd[pos].fd, data+count, sizeof(STCPacket)-count, 0);
+		auto n = send(m_Pfd[pos].fd, data+count, sizeof(STCPacket)-count, MSG_NOSIGNAL);	// urfd does not ignore SIGPIPE
 		if (n <= 0)
 		{
 			if (0 == n)
@@ -289,19 +289,28 @@ bool CTCSocket::Send(const STCPacket *packet)
 
 bool CTCSocket::receive(int fd, STCPacket *packet)
 {
-	auto n = recv(fd, packet, sizeof(STCPacket), MSG_WAITALL);
-	if (n < 0)
+	// MSG_WAITALL brings less than the packet when a signal came, or when the
+	// reflector's SO_RCVTIMEO ran out with a part of it read (a tcd that froze in
+	// the middle of a packet). After a signal the rest is read; a part after the
+	// timeout is an error and the caller closes: handed on as a packet, its rest
+	// was garbage, and the bytes still to come were read as the next packet's start
+	const auto start = std::chrono::steady_clock::now();
+	size_t count = 0;
+	while (count < sizeof(STCPacket))
 	{
-		return true;
+		auto n = recv(fd, (char *)packet + count, sizeof(STCPacket) - count, MSG_WAITALL);
+		if (n < 0 && EINTR == errno)
+			continue;
+		if (n > 0)
+			count += n;
+		if (n <= 0 || (count < sizeof(STCPacket) && std::chrono::steady_clock::now() - start >= std::chrono::seconds(TC_IO_TIMEOUT)))
+		{
+			// BSD keeps the part and reports the timeout alone
+			if (count || (n < 0 && (EAGAIN == errno || EWOULDBLOCK == errno)))
+				std::cerr << "Transcoder packet on module '" << GetMod(fd) << "' incomplete (" << count << " of " << sizeof(STCPacket) << " bytes, hung?): closing the connection" << std::endl;
+			return true;
+		}
 	}
-
-	if (0 == n)
-	{
-		return true;
-	}
-
-	if (n != sizeof(STCPacket))
-		std::cout << "receive() only read " << n << " bytes of the transcoder packet from module '" << GetMod(fd) << "'" << std::endl;
 	return false;
 }
 
@@ -501,8 +510,9 @@ void CTCServer::TryAccept(int ms)
 	for (unsigned i = 0; i < m_Pending.size(); i++)
 	{
 		auto &p = m_Pending[i];
-		bool done = pfds[i + 1].revents ? advance(p) : false;
-		if (! done && now > p.deadline)
+		// one through its handshake waits for its module's lock only (establish)
+		bool done = p.ready ? establish(p) : (pfds[i + 1].revents ? advance(p) : false);
+		if (! done && ! p.ready && now > p.deadline)
 		{
 			std::cerr << "Transcoder connection from " << p.peer << " dropped: " << (p.module ? "no answer to the password challenge" : "no module byte") << std::endl;
 			close(p.fd);
@@ -588,8 +598,8 @@ bool CTCServer::advance(SPending &p)
 
 		if (m_Password.empty())
 		{
-			establish(p);
-			return true;
+			p.ready = true;
+			return establish(p);
 		}
 
 		uint8_t challenge[TC_AUTH_MAGIC_LEN + TC_AUTH_NONCE_LEN];
@@ -645,14 +655,20 @@ bool CTCServer::advance(SPending &p)
 		close(p.fd);
 		return true;
 	}
-	establish(p);
-	return true;
+	p.ready = true;
+	return establish(p);
 }
 
-void CTCServer::establish(SPending &p)
+// returns false when the module's lock is taken: tried again by the next TryAccept()
+bool CTCServer::establish(SPending &p)
 {
 	const auto pos = m_Modules.find(p.module);
-	auto lock = lockPos(pos);
+	// not waiting for a codec thread that holds the lock (a send or a receive under
+	// way, a stuck one ends after TC_IO_TIMEOUT), as in AnyAreClosed(): this thread
+	// serves the other connections and modules meanwhile
+	std::unique_lock<std::recursive_mutex> lock(*m_Locks[pos], std::try_to_lock);
+	if (!lock.owns_lock())
+		return false;
 
 	if (p.standby)
 	{
@@ -661,7 +677,7 @@ void CTCServer::establish(SPending &p)
 		if (1 != send(p.fd, &answer, 1, MSG_NOSIGNAL) || TC_STANDBY_BUSY == answer)
 		{
 			close(p.fd);
-			return;
+			return true;
 		}
 		std::cout << "Standby transcoder from " << p.peer << " takes over module '" << p.module << "'" << std::endl;
 	}
@@ -676,7 +692,7 @@ void CTCServer::establish(SPending &p)
 		if (RejectLog("Transcoder: second connections", p.peer.GetAddress()))
 			std::cerr << "Transcoder connection for module '" << p.module << "' from " << p.peer << " refused: module '" << p.module << "' has a live transcoder connection (a second tcd for the same modules?)" << std::endl;
 		close(p.fd);
-		return;
+		return true;
 	}
 
 	// blocking again for normal operation
@@ -719,6 +735,7 @@ void CTCServer::establish(SPending &p)
 	m_Pfd[pos].fd = p.fd;
 	m_LastRx[pos] = std::chrono::steady_clock::now();
 	m_Pinged[pos] = 0;
+	return true;
 }
 
 bool CTCClient::Open(const std::string &address, const std::string &modules, uint16_t port)
@@ -917,6 +934,7 @@ bool CTCClient::Connect(char module, bool blocking, int *fd_out)
 		auto lock = lockPos(pos);
 		m_Pfd[pos].fd = fd;
 	}
+	ping(module);
 
 	return false;
 }
@@ -958,6 +976,16 @@ bool CTCClient::authenticate(int fd, char module, bool quiet)
 	return false;
 }
 
+void CTCClient::ping(char module)
+{
+	if (GetFD(module) < 0)	// under the module's lock; Send() checks again
+		return;
+	STCPacket packet{};	// zeroed: never read as a report (TCPacketDef.h)
+	packet.codec_in = ECodecType::ping;
+	packet.module = module;
+	Send(&packet);
+}
+
 void CTCClient::ReConnect() // and sometimes ping
 {
 	static std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();	// not the wall clock: a step back stopped the pings
@@ -978,7 +1006,10 @@ void CTCClient::ReConnect() // and sometimes ping
 		{
 			auto plock = lockPos(pos);
 			if (m_Pfd[pos].fd < 0)
+			{
 				m_Pfd[pos].fd = fd;
+				ping(m_Modules[pos]);
+			}
 			else
 				close(fd);
 		}
@@ -1051,15 +1082,8 @@ void CTCClient::ReConnect() // and sometimes ping
 	{
 		// on every module's connection (tcd 0.22.8): the reflector closes one that
 		// pinged and then went quiet for TC_PING_TIMEOUT, a hung tcd
-		for (size_t i = 0; i < m_Pfd.size(); i++)
-		{
-			if (GetFD(m_Modules[i]) < 0)	// under the module's lock; Send() checks again
-				continue;
-			STCPacket ping{};	// zeroed: never read as a report (TCPacketDef.h)
-			ping.codec_in = ECodecType::ping;
-			ping.module = m_Modules[i];
-			Send(&ping);
-		}
+		for (char m : m_Modules)
+			ping(m);
 		start = now;
 	}
 }

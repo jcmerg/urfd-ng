@@ -2526,6 +2526,8 @@ void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
 			g_Stats.reflector.packets_tx.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
+		// also a module whose connection is closed (Send() says so without a log):
+		// the reconnect may bring it back within the retries
 		std::cerr << "SendToReflector: send failed, attempt " << (attempt + 1) << "/" << max_retries << std::endl;
 		tcClient.ReConnect();
 		std::this_thread::sleep_for(std::chrono::milliseconds(100 * (1 << attempt)));
