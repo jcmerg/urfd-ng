@@ -98,6 +98,7 @@ private:
 		uint8_t nonce[32];
 		uint8_t answer[32];
 		unsigned got;       // bytes of the answer so far
+		bool ready;         // through the handshake, waits for its module's lock
 		std::chrono::steady_clock::time_point deadline;
 	};
 
@@ -110,15 +111,16 @@ private:
 	std::vector<SPending> m_Pending;
 	std::vector<bool> m_Standby;	// per module: the connection is a standby tcd's
 	// per module: when its connection last brought a packet, and whether it brought a
-	// ping yet. A tcd of 0.22.8 or later pings every module's connection every 5 s,
-	// one before only the first: AnyAreClosed() closes a connection that pinged and
+	// ping yet. A tcd of 0.22.8 or later pings every module's connection every 5 s
+	// (0.22.9: and right after connecting, so it is watched from the start), one
+	// before only the first: AnyAreClosed() closes a connection that pinged and
 	// then went quiet (a hung tcd, its kernel still answering the TCP keepalive)
 	std::vector<std::chrono::steady_clock::time_point> m_LastRx;
 	std::vector<char> m_Pinged;	// not vector<bool>: its bits share words, each module is written under its own lock
 	void heard(size_t pos, bool ping) { m_LastRx[pos] = std::chrono::steady_clock::now(); if (ping) m_Pinged[pos] = 1; }
 	void acceptnew();
 	bool advance(SPending &p);
-	void establish(SPending &p);
+	bool establish(SPending &p);
 };
 
 class CTCClient : public CTCSocket
@@ -148,4 +150,5 @@ private:
 	// fd: where the new socket goes instead of the module's entry (the standby worker)
 	bool Connect(char module, bool blocking = false, int *fd_out = nullptr);
 	bool authenticate(int fd, char module, bool quiet = false);
+	void ping(char module);	// on the module's connection, if it has one
 };
