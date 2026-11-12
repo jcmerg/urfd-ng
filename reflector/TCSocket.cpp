@@ -20,6 +20,8 @@
 #include <thread>
 #include <chrono>
 #include <csignal>
+#include <cerrno>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -58,6 +60,9 @@
 #define TC_STANDBY_BUSY   'B'
 #define TC_PENDING_MAX     8	// connections in their handshake at a time
 #define TC_PENDING_TIMEOUT 2	// seconds for the whole handshake
+#define TC_PING_TIMEOUT    20	// seconds without a packet from a tcd that pings (every 5 s)
+#define TC_IO_TIMEOUT      10	// seconds a send to or a receive from a tcd may block (it stopped reading, or
+                          	// froze in the middle of a packet); a network stall shorter than that passes
 
 static void hmac_sha256(const std::string &key, const uint8_t *msg, size_t len, uint8_t *out)
 {
@@ -195,7 +200,12 @@ bool CTCServer::AnyAreClosed()
 	bool any = false;
 	for (unsigned i = 0; i < m_Pfd.size(); i++)
 	{
-		auto lock = lockPos(i);
+		// a module whose codec thread holds its lock (a send or a receive under way, a
+		// stuck one ends after TC_IO_TIMEOUT) is looked at next time: waiting here
+		// held up the handshakes of the connections TryAccept serves
+		std::unique_lock<std::recursive_mutex> lock(*m_Locks[i], std::try_to_lock);
+		if (!lock.owns_lock())
+			continue;
 		if (m_Pfd[i].fd < 0)
 		{
 			any = true;
@@ -215,6 +225,16 @@ bool CTCServer::AnyAreClosed()
 		if (rv > 0 && (pfd.revents & gone))
 		{
 			std::cerr << "Transcoder module '" << m_Modules[i] << "' connection " << ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) ? "lost" : "closed by the transcoder") << " (maintenance probe)" << std::endl;
+			closePos(i);
+			any = true;
+		}
+		// a tcd that pings this connection (0.22.8 and later, every 5 s) and went
+		// quiet: hung, while its kernel still answers the TCP keepalive. Closed, so a
+		// standby tcd can take the module over; the tcd reconnects once it runs again
+		// (a connection with something to read is alive: urfd itself may have stood still)
+		else if (m_Pinged[i] && !(rv > 0 && (pfd.revents & POLLIN)) && std::chrono::steady_clock::now() - m_LastRx[i] > std::chrono::seconds(TC_PING_TIMEOUT))
+		{
+			std::cerr << "Transcoder module '" << m_Modules[i] << "' sent nothing for " << TC_PING_TIMEOUT << " s, its pings stopped (hung?): closing the connection" << std::endl;
 			closePos(i);
 			any = true;
 		}
@@ -238,6 +258,8 @@ bool CTCSocket::Send(const STCPacket *packet)
 		}
 	}
 	auto lock = lockPos(pos);
+	if (m_Pfd[pos].fd < 0)
+		return true;	// closed meanwhile (a ping of tcd's reconnect thread)
 	unsigned count = 0;
 	auto data = (const unsigned char *)packet;
 	do {
@@ -247,6 +269,11 @@ bool CTCSocket::Send(const STCPacket *packet)
 			if (0 == n)
 			{
 				std::cerr << "CTCSocket::Send: socket on module '" << packet->module << "' has been closed!" << std::endl;
+			}
+			else if (errno == EAGAIN || errno == EWOULDBLOCK)
+			{
+				// the reflector's sockets time out (SO_SNDTIMEO): a tcd that stopped reading
+				std::cerr << "Transcoder for module '" << m_Modules[pos] << "' took no packet for " << TC_IO_TIMEOUT << " s (hung?): closing the connection" << std::endl;
 			}
 			else
 			{
@@ -311,6 +338,8 @@ bool CTCServer::Receive(char module, STCPacket *packet, int ms)
 	if (pfds->revents & POLLIN)
 	{
 		rv = receive(pfds->fd, packet);
+		if (!rv)
+			heard(pos, packet->codec_in == ECodecType::ping);
 	}
 
 	// It's possible that even if we read the data, the socket can have an error after the read...
@@ -372,6 +401,7 @@ bool CTCServer::ReceiveNoPoll(char module, STCPacket *packet)
 		closePos(pos);
 		return false;
 	}
+	heard(pos, packet->codec_in == ECodecType::ping);
 	if (packet->codec_in == ECodecType::ping)
 	{
 		KeepReport(*packet);
@@ -394,6 +424,8 @@ bool CTCServer::Open(const std::string &address, const std::string &modules, uin
 		pf.revents = 0;
 	}
 	m_Standby.assign(m_Modules.size(), false);
+	m_LastRx.assign(m_Modules.size(), std::chrono::steady_clock::now());
+	m_Pinged.assign(m_Modules.size(), 0);
 	initLocks();
 
 	// Create persistent listen socket
@@ -674,9 +706,19 @@ void CTCServer::establish(SPending &p)
 	int nodelay = 1;
 	setsockopt(p.fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
 
+	// a tcd that hangs while a stream is on the air stops reading: its buffers fill
+	// and a send would block for good, holding the module's lock; one that froze in
+	// the middle of a packet leaves the receive (MSG_WAITALL) waiting for its rest.
+	// Both give up after TC_IO_TIMEOUT, and the connection is closed
+	struct timeval iotimeout = { TC_IO_TIMEOUT, 0 };
+	setsockopt(p.fd, SOL_SOCKET, SO_SNDTIMEO, &iotimeout, sizeof(iotimeout));
+	setsockopt(p.fd, SOL_SOCKET, SO_RCVTIMEO, &iotimeout, sizeof(iotimeout));
+
 	{ std::ostringstream s; s << "File descriptor " << p.fd << " opened TCP port for module '" << p.module << "' on " << p.peer; std::cout << s.str() << std::endl; }
 
 	m_Pfd[pos].fd = p.fd;
+	m_LastRx[pos] = std::chrono::steady_clock::now();
+	m_Pinged[pos] = 0;
 }
 
 bool CTCClient::Open(const std::string &address, const std::string &modules, uint16_t port)
@@ -918,11 +960,11 @@ bool CTCClient::authenticate(int fd, char module, bool quiet)
 
 void CTCClient::ReConnect() // and sometimes ping
 {
-	static std::chrono::system_clock::time_point start = std::chrono::system_clock::now();
+	static std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();	// not the wall clock: a step back stopped the pings
 	static std::chrono::steady_clock::time_point last_attempt = {};
 	static std::chrono::steady_clock::time_point last_standby = {};
 	static double backoff_secs = 0.0;
-	auto now = std::chrono::system_clock::now();
+	auto now = std::chrono::steady_clock::now();
 	std::chrono::duration<double> secs = now - start;
 
 	// Probe all sockets to detect dead connections before checking FDs
@@ -1007,10 +1049,15 @@ void CTCClient::ReConnect() // and sometimes ping
 
 	if(secs.count() > 5.0)
 	{
-		if (m_Pfd.size() > 0 && m_Pfd[0].fd >= 0)
+		// on every module's connection (tcd 0.22.8): the reflector closes one that
+		// pinged and then went quiet for TC_PING_TIMEOUT, a hung tcd
+		for (size_t i = 0; i < m_Pfd.size(); i++)
 		{
+			if (GetFD(m_Modules[i]) < 0)	// under the module's lock; Send() checks again
+				continue;
 			STCPacket ping{};	// zeroed: never read as a report (TCPacketDef.h)
 			ping.codec_in = ECodecType::ping;
+			ping.module = m_Modules[i];
 			Send(&ping);
 		}
 		start = now;
