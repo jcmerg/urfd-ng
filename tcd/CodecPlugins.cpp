@@ -17,7 +17,12 @@ CCodecPlugins g_Codecs;
 // more than streams can run at once (one per stream and direction, on every
 // module); beyond it the one quiet longest goes first
 #define STATE_TIMEOUT std::chrono::seconds(30)
-#define STATE_MAX     128	// a stream decoded and encoded has two
+#define STATE_MAX     128	// a stream decoded and encoded has two, coded directly one more
+// a state this long without a frame starts afresh at the next: a transmission
+// before whose last frame got lost, or a target on the audio path only after
+// its transmission went the direct path a while. More than urfd's stream
+// timeout (1.6 s), a pause within a transmission keeps its states
+#define STATE_IDLE    std::chrono::seconds(2)
 
 CSoftCodec::~CSoftCodec()
 {
@@ -61,13 +66,14 @@ CSoftCodec::SState *CSoftCodec::State(uint32_t key, uint32_t sequence)
 			if (m_Failed.size() >= STATE_MAX)
 				m_Failed.clear();
 			if (m_Failed.insert(key).second)
-				std::cerr << "Codec plugin " << m_Plugin->name << ": no state for stream " << streamid << " of module " << module << ", its frames stay empty" << std::endl;
+				std::cerr << "Codec plugin " << m_Plugin->name << ": no state for stream " << streamid << " of module " << module
+				          << ((key & 0x40000000u) ? ", it is coded from the audio" : ", its frames stay empty") << std::endl;
 			return nullptr;
 		}
 		m_Failed.erase(key);
-		it = m_States.emplace(key, SState{ state, now, sequence, false, kUnused }).first;
+		it = m_States.emplace(key, SState{ state, now, sequence, false, kUnused, 0, 0 }).first;
 	}
-	if (it->second.running && NewTransmission(it->second.sequence, sequence))
+	if (it->second.running && (NewTransmission(it->second.sequence, sequence) || now - it->second.last_used > STATE_IDLE))
 		it->second.running = false;
 	if (!it->second.running)
 	{
@@ -75,6 +81,7 @@ CSoftCodec::SState *CSoftCodec::State(uint32_t key, uint32_t sequence)
 			m_Plugin->start(it->second.state);
 		it->second.running = true;
 		it->second.use = kUnused;
+		it->second.start = ++m_Starts;
 	}
 	it->second.last_used = now;
 	it->second.sequence = sequence;
@@ -95,10 +102,6 @@ bool CSoftCodec::Encode(uint32_t stream, uint32_t sequence, bool last, const int
 {
 	std::lock_guard<std::mutex> lock(*m_Mutex);
 	SState *s = State(Key(stream, true), sequence);
-	if (s && (s->use == kTranscode || s->use == kAudio) && m_Plugin->start)
-		m_Plugin->start(s->state);	// from transcode to encode mid-transmission: afresh
-	if (s)
-		s->use = kEncode;
 	const bool ok = s && 0 == m_Plugin->encode(s->state, pcm, frame);
 	Stop(s, last);
 	return ok;
@@ -126,23 +129,61 @@ bool CSoftCodec::Transcode(uint32_t stream, uint32_t sequence, bool last, CSoftC
 	std::lock_guard<std::mutex> lock(*m_Mutex);	// the plugin's, shared by both codecs
 	auto it = m_States.find(Key(stream, false));
 	if (it == m_States.end())
-		return false;	// nothing decoded on this stream
-	SState *s = to->State(Key(stream, true), sequence);
-	if (!s || s->use == kEncode || s->use == kAudio)
-		return false;	// the transmission is encoded from the audio: it stays so
-	if (s->use == kUnused && sequence != 0)
+		return false;	// nothing decoded to code from
+	const uint32_t key = DirectKey(stream, m_Codec);
+	auto dt = to->m_States.find(key);
+	if (dt != to->m_States.end() && dt->second.running && dt->second.source == it->second.start)
 	{
-		// it began on the audio path (its first frame may still wait in the
-		// target's queue): it stays there, the order of its frames with it
-		s->use = kEncode;
-		return false;
+		// the transmission it codes: on directly while no frame went the audio path
+		// (a gap in the sequence), else its rest goes the audio path
+		if (dt->second.use == kTranscode && sequence > dt->second.sequence + 1)
+			dt->second.use = kAudio;
+		if (dt->second.use != kTranscode)
+		{
+			to->Stop(&dt->second, last);
+			return false;
+		}
 	}
-	const bool ok = 0 == m_Plugin->transcode(it->second.state, s->state, gain_db, frame);
-	// a failure hands the transmission to the audio path for good: its Encode
-	// starts the state afresh first, and no later frame is transcoded before it
-	s->use = ok ? kTranscode : kAudio;
+	else
+	{
+		// one before, whose last frame was not coded here: done
+		if (dt != to->m_States.end() && dt->second.running)
+			to->Stop(&dt->second, true);
+		// the direct path from the first frame on only: the audio path's encoder
+		// has the frames before, the rest would be coded from two histories
+		if (sequence != 0)
+			return false;
+	}
+	SState *s = to->State(key, sequence);
+	if (!s)
+		return false;
+	if (s->use == kUnused)
+	{
+		// started here: at frame 0 (else after STATE_IDLE, its frames went elsewhere)
+		s->use = sequence == 0 ? kTranscode : kAudio;
+		s->source = it->second.start;
+	}
+	bool ok = false;
+	if (s->use == kTranscode)
+	{
+		ok = 0 == m_Plugin->transcode(it->second.state, s->state, gain_db, frame);
+		if (!ok)
+			s->use = kAudio;
+	}
 	to->Stop(s, last);
 	return ok;
+}
+
+void CSoftCodec::LeaveDirect(uint32_t stream, bool last, CSoftCodec *to)
+{
+	if (!CanTranscode(to))
+		return;
+	std::lock_guard<std::mutex> lock(*m_Mutex);
+	auto dt = to->m_States.find(DirectKey(stream, m_Codec));
+	if (dt == to->m_States.end() || !dt->second.running)
+		return;
+	dt->second.use = kAudio;
+	to->Stop(&dt->second, last);
 }
 
 void CSoftCodec::End(uint32_t stream, bool encode)
@@ -162,7 +203,7 @@ int CSoftCodec::Streams(void)
 	std::unordered_set<uint32_t> active;	// a stream decoded and encoded counts once
 	for (const auto &s : m_States)
 		if (s.second.running && s.second.last_used > cutoff)
-			active.insert(s.first & 0x7fffffffu);
+			active.insert(s.first & 0x00ffffffu);
 	return int(active.size());
 }
 

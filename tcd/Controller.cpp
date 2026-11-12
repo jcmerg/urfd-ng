@@ -453,11 +453,12 @@ static void ModuleDirect(const std::shared_ptr<CTranscoderPacket> &packet, uint8
 		g_Stats.modules[i].direct.store(direct, std::memory_order_relaxed);
 }
 
-// the plugin codec a stream's target goes to, without the side effects of Pick
-// on a device's channel or the stream's counts (tcd's own vocoders count as
+// the plugin codec a stream's target goes to (tcd's own vocoders count as
 // plugins): nullptr for an AMBE device. A stream not pinned yet gets its pin
-// here when its choice is a plugin (Pick would give it the same); a device
-// choice is left to Pick
+// here (Pick, without the stream's counts) when it goes to a plugin: its choice
+// is one, or it is a device but no channel would be taken for it now
+// (FindChannel, the rule of TakeChannel). One a channel would be taken for is
+// left to Pick in ToDStar/ToDmr, which takes it
 CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTranscoderPacket> &packet)
 {
 	const int k = ChoiceOfCodec(codec);
@@ -474,24 +475,35 @@ CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTra
 			return nullptr;
 		if (!list[c])
 		{
-			// a device for new streams: with fixed channels a module beyond them
-			// goes to the first plugin, as Pick sends it (in the pool a free
-			// channel is only known by taking it, so such a stream takes the
-			// audio path for its whole transmission)
+			// a device for new streams: a stream a channel would be taken for now
+			// goes the device path (ToDStar, ToDmr take it); else, by the same rule
+			// as TakeChannel (the devices phased out or lost, its fixed channel
+			// gone, no free one in the pool), it goes to a plugin for its whole
+			// transmission, and so may be coded directly from its first frame on.
+			// Pick pins it below: a device back in the meantime is taken there
+			// instead, and the stream goes the device path whole, not split
 			const bool device = k == kChoiceDStar || k == kChoiceDMR;
-			if (!device || Pool() || std::string::npos != hw_modules[k].find(packet->GetModule()))
+			if (!device || FindChannel(k, packet->GetModule()) >= 0)
 				return nullptr;
 			if (std::none_of(list.begin(), list.end(), [](CSoftCodec *sw) { return sw != nullptr; }))
 				return nullptr;
 		}
 	}
+	// pinned now (or before): a plugin, or nullptr for a device's channel
 	return list[Pick(k, list.size(), packet, nullptr, nullptr, false)];
 }
 
-bool CController::Transcode(uint32_t to, CSoftCodec *from, float source_db, const std::shared_ptr<CTranscoderPacket> &packet, uint8_t *direct)
+bool CController::Transcode(uint32_t to, CSoftCodec *from, bool decoded, float source_db, const std::shared_ptr<CTranscoderPacket> &packet, uint8_t *direct)
 {
-	if (!from || !g_Stats.config.transcode_direct.load(std::memory_order_relaxed) || !from->HasTranscode())
+	if (!from || !from->HasTranscode())
 		return false;
+	// a frame not coded directly leaves a transmission on the direct path to the
+	// audio path for its rest (its target, if direct, is on the decoder's plugin)
+	if (!decoded || !g_Stats.config.transcode_direct.load(std::memory_order_relaxed))
+	{
+		from->LeaveDirect(packet->GetStreamKey(), packet->IsLast(), g_Codecs.Get(to, from->GetName()));
+		return false;
+	}
 	auto *sw = PluginChoice(to, packet);
 	if (!from->CanTranscode(sw))
 		return false;
@@ -1126,7 +1138,7 @@ void CController::ReadReflectorThread()
 				{
 					int total = 0, busy = 0;
 					for (const auto &c : hw_channels[k])
-						if (slots[c.slot]->up && !slots[c.slot]->draining)
+						if (Usable(c))
 						{
 							total++;
 							busy += c.busy ? 1 : 0;
@@ -1515,8 +1527,8 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	// D-Star and P25 from the DMR frame itself, where the plugin can
 	uint8_t direct = 0;
 	const float source_db = agc_db + GainDb(out_num);
-	Transcode(TCD_CODEC_DSTAR, decoded ? sw : nullptr, source_db, packet, &direct);
-	Transcode(TCD_CODEC_P25, decoded ? sw : nullptr, source_db, packet, &direct);
+	Transcode(TCD_CODEC_DSTAR, sw, decoded, source_db, packet, &direct);
+	Transcode(TCD_CODEC_P25, sw, decoded, source_db, packet, &direct);
 	if (packet->IsLast())
 		sw->End(packet->GetStreamKey(), false);
 	if (decoded)	// a failed decode keeps the marks: no flicker
@@ -1610,17 +1622,24 @@ void CController::ProcessSWDStarThread()
 	}
 }
 
+// the choice that decodes a stream whose input codec is `in`, -1 for none (USRP, SVX: audio)
+static int ChoiceOfInput(ECodecType in)
+{
+	switch (in)
+	{
+	case ECodecType::dstar:   return kChoiceDStar;
+	case ECodecType::dmr:     return kChoiceDMR;
+	case ECodecType::p25:     return kChoiceP25;
+	case ECodecType::c2_1600:
+	case ECodecType::c2_3200: return kChoiceM17;
+	default:                  return -1;
+	}
+}
+
 // whether a stream whose input codec is `in` has choice k decode it (else encode)
 static bool StreamDecodes(int k, ECodecType in)
 {
-	switch (k)
-	{
-	case kChoiceDStar: return in == ECodecType::dstar;
-	case kChoiceDMR:   return in == ECodecType::dmr;
-	case kChoiceP25:   return in == ECodecType::p25;
-	case kChoiceM17:   return in == ECodecType::c2_1600 || in == ECodecType::c2_3200;
-	default:           return false;
-	}
+	return k >= 0 && ChoiceOfInput(in) == k;
 }
 
 // StreamLog, from Pick() under pinned_mux: the codec's part of the stream's line,
@@ -1810,8 +1829,25 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 	const uint32_t key = packet->GetStreamKey();
 	std::lock_guard<std::mutex> lock(pinned_mux);
 	const auto now = std::chrono::steady_clock::now();
-	// the first plugin, for a stream no AMBE channel takes; c without one
+	// the plugin that decoded the stream's source (pinned before its targets), nullptr
+	// for a device, tcd's own vocoder or none
+	auto source = [&]() -> const CSoftCodec * {
+		const int ks = ChoiceOfInput(packet->GetCodecIn());
+		if (ks < 0 || ks == k)
+			return nullptr;
+		auto sp = pinned[ks].find(key);
+		if (sp == pinned[ks].end() || sp->second.choice < 0 || sp->second.choice >= int(choices[ks].size()))
+			return nullptr;
+		return choices[ks][sp->second.choice];
+	};
+	// for a stream no AMBE channel takes: the plugin that decoded its source when
+	// that one has the codec (one plugin for the transmission, which can code it
+	// directly), else the first plugin; c without one
 	auto plugin = [&](int c) {
+		if (const CSoftCodec *from = source())
+			for (size_t i = 0; i < list.size(); i++)
+				if (list[i] && list[i]->SamePlugin(from))
+					return int(i);
 		for (size_t i = 0; i < list.size(); i++)
 			if (list[i])
 				return int(i);
@@ -1899,30 +1935,29 @@ void CController::PurgePinned(void)
 	}
 }
 
-int CController::TakeChannel(int k, char module, uint16_t streamid)
+int CController::FindChannel(int k, char module) const
 {
-	auto &list = hw_channels[k];
+	const auto &list = hw_channels[k];
 	const auto now = std::chrono::steady_clock::now();
 	// a device that is lost or phased out takes no new stream
-	auto usable = [&](const SHwChannel &c) { return slots[c.slot]->up && !slots[c.slot]->draining; };
 	int take = -1;
 	if (!Pool())
 	{
 		// fixed: the i-th channel belongs to the i-th module of Modules; a stream of
 		// another module that has it (from the pool before a switch) keeps it
 		const auto i = g_Conf.GetTCMods().find(module);
-		if (i < list.size() && usable(list[i]) && (!list[i].busy || list[i].module == module || now - list[i].last > std::chrono::milliseconds(1500)))
+		if (i < list.size() && Usable(list[i]) && (!list[i].busy || list[i].module == module || now - list[i].last > std::chrono::milliseconds(1500)))
 			take = int(i);
 		// its channel still held by a stream from the pool (the switch was just now): a free one
 		else if (i < list.size())
 			for (size_t j = 0; j < list.size() && take < 0; j++)
-				if (usable(list[j]) && !list[j].busy)
+				if (Usable(list[j]) && !list[j].busy)
 					take = int(j);
 	}
 	else for (size_t i = 0; i < list.size(); i++)
 	{
 		const auto &c = list[i];
-		if (!usable(c))
+		if (!Usable(c))
 			continue;
 		if (c.busy && c.module == module)
 		{
@@ -1932,9 +1967,16 @@ int CController::TakeChannel(int k, char module, uint16_t streamid)
 		if (!c.busy && take < 0)
 			take = int(i);
 	}
+	return take;
+}
+
+int CController::TakeChannel(int k, char module, uint16_t streamid)
+{
+	const int take = FindChannel(k, module);
 	if (take >= 0)
 	{
-		auto &c = list[take];
+		auto &c = hw_channels[k][take];
+		const auto now = std::chrono::steady_clock::now();
 		c.busy = true;
 		c.module = module;
 		c.streamid = streamid;
@@ -2032,7 +2074,7 @@ int CController::UncoveredChoice(int i) const
 		// (with fixed channels its modules would go silent)
 		bool others = false;
 		for (const auto &c : hw_channels[k])
-			others = others || (c.slot != i && slots[c.slot]->up && !slots[c.slot]->draining);
+			others = others || (c.slot != i && Usable(c));
 		if (!Pool() || !others)
 			return k;
 	}
@@ -2337,8 +2379,8 @@ void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	FrameLevels(packet, "imbe");
 	// D-Star and DMR from the IMBE frame itself, where the plugin that decoded it can
 	uint8_t direct = 0;
-	Transcode(TCD_CODEC_DSTAR, decoded ? from : nullptr, agc_db, packet, &direct);
-	Transcode(TCD_CODEC_DMR, decoded ? from : nullptr, agc_db, packet, &direct);
+	Transcode(TCD_CODEC_DSTAR, from, decoded, agc_db, packet, &direct);
+	Transcode(TCD_CODEC_DMR, from, decoded, agc_db, packet, &direct);
 	if (from && packet->IsLast())
 		from->End(packet->GetStreamKey(), false);
 	if (decoded || !from)	// a failed decode keeps the marks: no flicker
@@ -2515,8 +2557,8 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSof
 		if (from)
 		{
 			const float source_db = agc_db + GainDb(dstar_out_num);
-			Transcode(TCD_CODEC_DMR, decoded ? from : nullptr, source_db, packet, &direct);
-			Transcode(TCD_CODEC_P25, decoded ? from : nullptr, source_db, packet, &direct);
+			Transcode(TCD_CODEC_DMR, from, decoded, source_db, packet, &direct);
+			Transcode(TCD_CODEC_P25, from, decoded, source_db, packet, &direct);
 			if (packet->IsLast())
 				from->End(packet->GetStreamKey(), false);
 		}
