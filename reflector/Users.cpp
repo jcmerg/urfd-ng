@@ -170,7 +170,11 @@ void CUsers::StationRenamed(char module, const CCallsign &from, const CCallsign 
 		if (IsHidden(to, module))
 			wait->second.pop_back();	// no entry gets its report
 		else
+		{
+			// its entry is the one Hearing() makes below, heard now, not at the stream's start
 			wait->second.back().talker = to;
+			wait->second.back().started = time(nullptr);
+		}
 	}
 	auto active = m_ActiveStations.find(module);
 	if (active != m_ActiveStations.end() && active->second.IsCallsign(from) && IsHidden(to, module))
