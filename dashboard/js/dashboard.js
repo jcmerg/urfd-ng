@@ -104,6 +104,7 @@ function station(u) {
         protocol: u.protocol || '', via: via, time: u.last_heard_time | 0,
         locator: u.locator || '', lat: u.latitude, lon: u.longitude,
         audio: u.audio || null, verdict: u.audio ? audioVerdict(u.audio) : null,
+        duration: u.duration_ms | 0,	// the stream's length once it ended (urfd 4.40.6), on every module
         key: [u.callsign, u.suffix || '', u.via_node, u.on_module, u.via_peer].join('|')
     };
 }
@@ -191,7 +192,7 @@ var handlers = {
     // the transcoder's report of a transmission, after it: its entry gets the audio
     user_report: function (p) {
         var st = station(p);
-        for (var i = 0; i < S.lastHeard.length; i++) if (S.lastHeard[i].key === st.key) { S.lastHeard[i].audio = st.audio; S.lastHeard[i].verdict = st.verdict; break; }
+        for (var i = 0; i < S.lastHeard.length; i++) if (S.lastHeard[i].key === st.key) { S.lastHeard[i].audio = st.audio; S.lastHeard[i].verdict = st.verdict; S.lastHeard[i].duration = st.duration; break; }
     },
     module_mappings: function (p) {
         Object.keys(p.modules || {}).forEach(function (m) { if (S.modules[m]) S.modules[m].mappings = p.modules[m]; });
@@ -354,18 +355,24 @@ function dB(v) { return (v > 0 ? '+' : v < 0 ? '\u2212' : '') + Math.abs(v).toFi
 // key for 2 s, a longer silent one is a stuck PTT or a dead microphone
 var SHORT_MS = 1500, SHORT_SPEECH_MS = 1000, NO_SPEECH_MS = 3000, MIN_FEC_FRAMES = 50;
 function speechMs(a) { return a.duration_ms * (a.speech_percent || 0) / 100; }
-// what "Hide short calls" leaves out: an ended transmission rated short (a kerchunk, also
-// one with bit errors) or without any speech; one tcd sent no report for stays
-function hideable(st) { return !!(st.verdict && st.verdict.hide); }
-// the last heard entries a visitor sees: as many as the log shows, without the short
-// calls when they are hidden
+// what "Hide short calls" leaves out: an ended transmission rated short by tcd's report
+// (audioVerdict), or, on a module without one, one shorter than SHORT_MS by urfd's length
+function hideable(st) {
+    if (st.verdict) return !!st.verdict.hide;
+    // a transcoded module waits for tcd's report, which measures the length its own way
+    var m = S.modules[st.module];
+    return !(m && m.transcoded) && st.duration > 0 && st.duration < SHORT_MS;
+}
+// the entries the log has room for
+function logList() { return S.lastHeard.slice(0, options().last_heard_rows || 40); }
+// the last heard entries a visitor sees: those of the log, without the short calls when they are hidden
 function visibleHeard() {
-    var list = S.lastHeard.slice(0, options().last_heard_rows || 40);
+    var list = logList();
     return hideShort ? list.filter(function (st) { return !hideable(st); }) : list;
 }
 // short calls hidden where nothing else was heard (all modules for key '')
 function onlyShort(key) {
-    return hideShort && S.lastHeard.slice(0, options().last_heard_rows || 40).some(function (st) { return (!key || st.module === key) && hideable(st); });
+    return hideShort && logList().some(function (st) { return (!key || st.module === key) && hideable(st); });
 }
 
 // the input level for the log and the LCD: none without speech (it would read -100 dB)
@@ -382,7 +389,7 @@ function audioVerdict(a) {
     var lost = rated ? a.fec.uncorrectable / a.fec.frames * 100 : 0;
     var level = 0, w = 'Good', short = false;
     // for "Hide short calls", whatever else is wrong with it
-    var tooShort = a.duration_ms < SHORT_MS || speechMs(a) < SHORT_SPEECH_MS;
+    var tooShort = a.duration_ms < SHORT_MS || speechMs(a) < SHORT_SPEECH_MS;	// "Short", and with no speech too
     if (!a.speech_percent && a.duration_ms >= NO_SPEECH_MS) { level = 1; w = 'No speech'; }	// a carrier without modulation, or all of it muted
     else if (tooShort) { short = true; w = 'Short'; }
     else if (a.clipped_percent >= 5 || a.level_in_db > -8) { level = 2; w = 'Overdriven'; }
@@ -397,7 +404,7 @@ function audioVerdict(a) {
     var sev = Math.max(level, fec, loss);
     // for "Hide short calls": under SHORT_MS whatever else is wrong with it (a kerchunk);
     // a longer one with little or no speech only when the FEC or the network did not mute it
-    var hide = a.duration_ms < SHORT_MS || ((!a.speech_percent || speechMs(a) < SHORT_SPEECH_MS) && Math.max(fec, loss) === 0);
+    var hide = a.duration_ms < SHORT_MS || (tooShort && Math.max(fec, loss) === 0);
     return { w: w, sev: sev, level: level, warn: sev > 0, short: short && sev === 0, hide: hide };
 }
 
@@ -438,7 +445,7 @@ function audioCell(a, v) {
 // ---------------------------------------------------------------------------
 // Last heard: the LCD with who is on the air, the module keypad and the log
 
-var filter = { m: null, cs: '' }, lastCall = null;
+var filter = { m: null, cs: '' }, lastCall = null, lastCallT = 0;
 try { var saved = JSON.parse(sessionStorage.getItem('urf-filter') || 'null'); if (saved) filter = saved; } catch (e) {}
 // the visitor's choice to leave out short transmissions (kerchunks), kept in the browser;
 // only a transmission tcd reported on can be told short (a transcoded module)
@@ -461,7 +468,7 @@ function glob(pat, s) {
 function lcdPanel(key, air, last, hidden) {
     var st = air || last, mod = st ? st.module : key;
     var cls = 'lcd' + (air ? '' : ' idle') + (st ? '' : ' empty');
-    var out = '<div class="' + cls + '" data-lcd="' + h(key) + '" data-call="' + h(st ? mod + st.cs : mod) + '"' + (hidden ? ' hidden' : '') + '><div class="lcd-top">';
+    var out = '<div class="' + cls + '" data-lcd="' + h(key) + '" data-call="' + h(st ? mod + st.cs : mod) + '" data-t="' + (st ? st.time : 0) + '"' + (hidden ? ' hidden' : '') + '><div class="lcd-top">';
     if (air) out += '<span class="ann">TX</span><span>Transmitting</span>';
     else if (last) out += '<span>Last heard ' + formatAgo(last.time) + '</span>';
     else if (onlyShort(key)) out += '<span>Short calls hidden</span>';
@@ -493,7 +500,7 @@ URF.pages.users = {
             + '<div><div class="keys-head"><h2>Modules</h2>' + (f ? '<p class="hint">Tap one to follow it in the display and the log</p>' : '') + '</div><div class="keys" id="keys"></div></div></section>'
             + '<section aria-labelledby="log-title"><div class="tbl-head"><h2 id="log-title">Last heard</h2>'
             + '<div class="filters">' + (f ? '<label for="f-call">Callsign</label><input class="field" id="f-call" type="search" placeholder="DL*, *JC" autocomplete="off" spellcheck="false"><button class="chip" id="f-clear" type="button" hidden>Clear filters</button>' : '')
-            + '<button class="chip" id="f-short" type="button" aria-pressed="false" title="Leave out ended transmissions under ' + SHORT_MS / 1000 + ' s (kerchunks), and longer ones with under ' + SHORT_SPEECH_MS / 1000 + ' s of speech unless bit errors or packet loss muted them. Known on transcoded modules only">Hide short calls</button></div>'
+            + '<button class="chip" id="f-short" type="button" aria-pressed="false" title="Leave out ended transmissions under ' + SHORT_MS / 1000 + ' s (kerchunks), and longer ones with under ' + SHORT_SPEECH_MS / 1000 + ' s of speech unless bit errors or packet loss muted them (on a module without transcoding by the length alone)">Hide short calls</button></div>'
             + '</div><div class="scroll"><table class="t" id="log"><thead><tr><th class="state"><span class="sr">State</span></th><th>Callsign</th><th>Module</th><th>Mode</th><th>Via</th><th class="opt">Position</th><th class="opt">Audio</th><th class="r">Heard</th></tr></thead><tbody id="log-body"></tbody></table></div></section></div>';
         if (!f) filter = { m: null, cs: '' };
         el.addEventListener('click', function (e) {
@@ -540,7 +547,7 @@ URF.pages.users = {
         while (n === 0 || n % cols) { out += '<span class="key blank" aria-hidden="true"></span>'; n++; }
         keys.innerHTML = out;
 
-        var rows = '', live = {}, list = S.lastHeard.slice(0, options().last_heard_rows || 40);
+        var rows = '', live = {}, list = logList();
         list.forEach(function (st) {
             var on = S.onAir[st.module], isLive = !!on && on.cs === st.cs && !live[st.module];
             if (isLive) live[st.module] = true;
@@ -586,7 +593,7 @@ function applyFilter() {
         none.hidden = !(rows.length && !shown);
         var fl = filter.m || filter.cs;
         none.firstChild.textContent = !fl ? 'Only short calls in the log. Turn off "Hide short calls" to see them.'
-            : short ? 'Only short calls match these filters. Turn off "Hide short calls", or clear the filters, to see them.'
+            : short ? 'Only short calls match these filters. Turn off "Hide short calls" to see them.'
             : 'Nobody in the log matches these filters. Clear the filters to see all stations.';
     }
     var clear = $('f-clear'); if (clear) clear.hidden = !(filter.m || filter.cs);
@@ -600,9 +607,10 @@ function applyFilter() {
     });
     if (!shownLcd) { shownLcd = document.querySelector('#lcds .lcd[data-lcd=""]'); if (shownLcd) shownLcd.hidden = false; }
     if (shownLcd) {
-        var key = shownLcd.dataset.lcd + '|' + shownLcd.dataset.call;
-        if (lastCall !== null && key !== lastCall && key.split('|')[0] === lastCall.split('|')[0]) { shownLcd.classList.remove('flick'); void shownLcd.offsetWidth; shownLcd.classList.add('flick'); }
-        lastCall = key;
+        var key = shownLcd.dataset.lcd + '|' + shownLcd.dataset.call, t = +shownLcd.dataset.t || 0;
+        // only a newer call: one hidden as short gives the display back to an older one
+        if (lastCall !== null && key !== lastCall && key.split('|')[0] === lastCall.split('|')[0] && t >= lastCallT) { shownLcd.classList.remove('flick'); void shownLcd.offsetWidth; shownLcd.classList.add('flick'); }
+        lastCall = key; lastCallT = t;
     }
     tick();
 }

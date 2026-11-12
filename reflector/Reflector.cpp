@@ -612,6 +612,8 @@ void CReflector::CloseStream(std::shared_ptr<CPacketStream> stream)
 {
 	if ( stream != nullptr )
 	{
+		// the stream's last packet, before the waits below: the length of the transmission
+		const auto last_packet = std::chrono::steady_clock::now() - std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(stream->GetIdleSeconds()));
 		EndStream(stream);
 
 		// Wait for output queue to fully drain (router distributes to protocols)
@@ -633,7 +635,7 @@ void CReflector::CloseStream(std::shared_ptr<CPacketStream> stream)
 		}
 
 		// also without an owner, or the module stays on air in the dashboards
-		GetUsers()->StationStopped(GetStreamModule(stream), stream->GetLostFrames());
+		GetUsers()->StationStopped(GetStreamModule(stream), stream->GetLostFrames(), last_packet);
 		ReleaseUsers();
 
 		// release clients

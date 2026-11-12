@@ -121,10 +121,11 @@ void CUsers::StationStarted(const CCallsign &my, const CCallsign &rpt1, const CC
 		}
 	}
 	m_ActiveStations[heard.GetOnModule()] = heard;
+	m_StreamStart[heard.GetOnModule()] = std::chrono::steady_clock::now();
 	DispatchStationEvent("station_started", heard);
 }
 
-void CUsers::StationStopped(char module, uint32_t lost_frames)
+void CUsers::StationStopped(char module, uint32_t lost_frames, std::chrono::steady_clock::time_point last_packet)
 {
 	// the stream that runs is the newest one waiting
 	auto wait = m_ReportWait.find(module);
@@ -143,6 +144,27 @@ void CUsers::StationStopped(char module, uint32_t lost_frames)
 	if (it == m_ActiveStations.end())
 		return;
 	DispatchStationEvent("station_stopped", it->second);
+	// the stream's length to its last heard entry (the one Hearing() made at its start,
+	// as ApplyReport finds it), on every module: the dashboard can tell a kerchunk
+	// without tcd's report too
+	auto start = m_StreamStart.find(module);
+	if (start != m_StreamStart.end())
+	{
+		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(last_packet - start->second).count();
+		for (auto &user : m_Users)
+		{
+			if (user.IsCallsign(it->second.GetMy()) && user.GetOnModule() == module)
+			{
+				if (std::abs(double(user.GetLastHeardTime() - it->second.GetLastHeardTime())) <= 2.0)
+				{
+					user.SetDuration(uint32_t(std::max<long long>(ms, 1)));
+					DispatchStationEvent("user_report", user);
+				}
+				break;
+			}
+		}
+		m_StreamStart.erase(start);
+	}
 	m_ActiveStations.erase(it);
 }
 
@@ -163,6 +185,7 @@ void CUsers::StationRenamed(char module, const CCallsign &from, const CCallsign 
 		// the new talker is one HideUnlisted keeps off: the station ends here
 		DispatchStationEvent("station_stopped", active->second);
 		m_ActiveStations.erase(active);
+		m_StreamStart.erase(module);
 	}
 	else if (active != m_ActiveStations.end() && active->second.IsCallsign(from))
 	{

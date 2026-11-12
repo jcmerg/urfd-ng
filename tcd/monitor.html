@@ -106,7 +106,8 @@ section > header { display: flex; flex-wrap: wrap; justify-content: space-betwee
 
 /* module LCDs */
 .mods { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); gap: 1.25rem; }
-.mod { display: grid; grid-template-rows: 1fr auto; gap: 0.5rem; min-width: 0; }
+/* the LCD as high as its content: a signal path of two lines under one card does not stretch its neighbour's */
+.mod { display: grid; grid-template-rows: auto 1fr; align-content: start; gap: 0.5rem; min-width: 0; }
 .bezel { background: var(--bezel); border-radius: 12px; padding: 8px; display: grid; }
 .lcd { border-radius: 5px; background: var(--lcd); color: var(--lcd-ink);
        padding: 0.7rem 1rem 0.8rem; display: grid; grid-template-columns: minmax(0, 1fr) auto;
