@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <deque>
 #include <list>
 #include <map>
@@ -58,7 +59,9 @@ public:
 	// tcd's report of the audio of a stream (STCReport), after it: to the stream's last
 	// heard entry, and a user_report to the WebSocket clients
 	void   Report(char module, uint16_t streamid, const STCReport &report);
-	void   StationStopped(char module, uint32_t lost_frames = 0);	// lost_frames: those the stream had filled in, for Report()
+	// lost_frames: those the stream had filled in, for Report(); last_packet: when its
+	// last packet came (a stream that timed out ends 1.6 s after it), for its length
+	void   StationStopped(char module, uint32_t lost_frames = 0, std::chrono::steady_clock::time_point last_packet = std::chrono::steady_clock::now());
 	// the talker on a module turned out to be someone else: the live station
 	// and its last heard entry take the new callsign
 	void   StationRenamed(char module, const CCallsign &from, const CCallsign &to);
@@ -71,6 +74,7 @@ protected:
 	std::mutex                       m_Mutex;
 	std::list<CUser>                 m_Users;
 	std::map<char, CUser>            m_ActiveStations;	// by module
+	std::map<char, std::chrono::steady_clock::time_point> m_StreamStart;	// of the active stations, for their duration
 	// the streams of a module waiting for tcd's report, oldest first: a report comes
 	// about 0.3 s after its stream, when the next one may have started (a quick
 	// round), and one waits for its stream to stop, which brings the lost frames.
@@ -80,4 +84,5 @@ protected:
 	std::map<char, std::deque<SReportWait>> m_ReportWait;
 	void ExpireReportWait(std::deque<SReportWait> &wait);
 	void ApplyReport(char module, const SReportWait &wait);
+	CUser *StreamEntry(char module, const CCallsign &talker, std::time_t started);
 };

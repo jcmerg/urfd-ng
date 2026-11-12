@@ -61,6 +61,7 @@ public:
 	std::shared_ptr<CClient> GetOwnerClient(void)   { return std::atomic_load(&m_OwnerClient); }
 	const CIp       *GetOwnerIp(void);
 	bool             IsExpired(void) const          { return (m_LastPacketTime.time() > STREAM_TIMEOUT); }
+	double           GetIdleSeconds(void) const     { return m_LastPacketTime.time(); }	// since its last packet
 	// its last packet has been pushed / has been routed to the protocols
 	bool             IsLastPushed(void) const       { return m_bLastPushed; }
 	bool             IsEnded(void) const            { return m_bLastRouted; }

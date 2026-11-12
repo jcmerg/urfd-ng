@@ -36,6 +36,7 @@ public:
 
 	// get
 	const std::string GetCallsign(void) const { return m_My.GetCS(); }
+	const CCallsign &GetMy(void) const         { return m_My; }
 	const std::string GetViaNode(void)  const { return m_Rpt1.GetCS(); }
 	char GetOnModule(void)              const { return m_Rpt2.GetCSModule(); }
 	const std::string GetViaPeer(void)  const { return m_Xlx.GetCS(); }
@@ -52,6 +53,7 @@ public:
 	void SetLocation(const CUser &user) { m_Locator = user.m_Locator; m_Latitude = user.m_Latitude; m_Longitude = user.m_Longitude; }
 	void SetLocation(const std::string &loc, double lat, double lon) { m_Locator = loc; m_Latitude = lat; m_Longitude = lon; }
 	void SetAudio(const nlohmann::json &audio) { m_Audio = audio; }	// tcd's report of the transmission (CUsers::Report)
+	void SetDuration(uint32_t ms) { m_DurationMs = ms; }	// the stream's length, when it ended (CUsers::StationStopped)
 	// 6 character Maidenhead locator of a position
 	static std::string Locator(double lat, double lon);
 	// the operator's name from the DMR ID database, else the NXDN one, empty if unknown
@@ -79,4 +81,5 @@ protected:
 	double      m_Latitude = 0.0;
 	double      m_Longitude = 0.0;
 	nlohmann::json m_Audio;	// null until tcd reported the transmission
+	uint32_t    m_DurationMs = 0;	// 0 while it runs
 };

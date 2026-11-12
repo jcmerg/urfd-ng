@@ -213,6 +213,8 @@ An entry left the last heard list: the talker was renamed during the stream (the
 
 The audio of a transmission on a transcoded module, as tcd measured it: the entry with the key of `user_heard`, now with `audio`. tcd reports about 0.3 s after the stream's last frame (2 s when that got lost); urfd sends `user_report` then, or, when the report came before the stream closed, right before that stream's `station_stopped`. It always follows the `user_heard` of its transmission. The last heard entries of `state_snapshot` carry it as well once it came. A module without transcoding, a transmission shorter than 0.1 s, or a tcd before 0.21.0 gives none.
 
+Since urfd 4.40.6 every entry also gets `duration_ms` at the top level, the stream's length in ms measured by urfd, when its stream ends: a `user_report` with it follows the stream's `station_stopped`, on every module (also without transcoding). An entry whose stream still runs has none. It counts from the stream's opening to its last packet: a stream opened late (late entry) reads shorter than the transmission.
+
 tcd tells urfd only the module and the stream id, so urfd matches a report to the module's streams in order. A report that comes more than 10 s after its stream stopped is dropped, and so is one whose talker has a newer entry on the module by then (a later transmission gets its own report).
 
 - `duration_ms`, `speech_percent`: the length, and the share of its 20 ms frames with speech (input above -50 dBFS)

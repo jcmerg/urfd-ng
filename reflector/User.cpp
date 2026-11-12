@@ -49,6 +49,7 @@ CUser::CUser(const CUser &user)
 	m_LastHeardTime = user.m_LastHeardTime;
 	SetLocation(user);
 	m_Audio = user.m_Audio;
+	m_DurationMs = user.m_DurationMs;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -128,5 +129,7 @@ nlohmann::json CUser::ToJson(void) const
 	}
 	if (!m_Audio.is_null())
 		j["audio"] = m_Audio;
+	if (m_DurationMs)
+		j["duration_ms"] = m_DurationMs;
 	return j;
 }

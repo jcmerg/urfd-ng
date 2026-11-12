@@ -121,10 +121,11 @@ void CUsers::StationStarted(const CCallsign &my, const CCallsign &rpt1, const CC
 		}
 	}
 	m_ActiveStations[heard.GetOnModule()] = heard;
+	m_StreamStart[heard.GetOnModule()] = std::chrono::steady_clock::now();
 	DispatchStationEvent("station_started", heard);
 }
 
-void CUsers::StationStopped(char module, uint32_t lost_frames)
+void CUsers::StationStopped(char module, uint32_t lost_frames, std::chrono::steady_clock::time_point last_packet)
 {
 	// the stream that runs is the newest one waiting
 	auto wait = m_ReportWait.find(module);
@@ -143,6 +144,20 @@ void CUsers::StationStopped(char module, uint32_t lost_frames)
 	if (it == m_ActiveStations.end())
 		return;
 	DispatchStationEvent("station_stopped", it->second);
+	// the stream's length to its last heard entry (the one Hearing() made at its start,
+	// as ApplyReport finds it), on every module: the dashboard can tell a kerchunk
+	// without tcd's report too
+	auto start = m_StreamStart.find(module);
+	if (start != m_StreamStart.end())
+	{
+		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(last_packet - start->second).count();
+		if (auto *user = StreamEntry(module, it->second.GetMy(), it->second.GetLastHeardTime()))
+		{
+			user->SetDuration(uint32_t(std::max<long long>(ms, 1)));
+			DispatchStationEvent("user_report", *user);
+		}
+		m_StreamStart.erase(start);
+	}
 	m_ActiveStations.erase(it);
 }
 
@@ -163,6 +178,7 @@ void CUsers::StationRenamed(char module, const CCallsign &from, const CCallsign 
 		// the new talker is one HideUnlisted keeps off: the station ends here
 		DispatchStationEvent("station_stopped", active->second);
 		m_ActiveStations.erase(active);
+		m_StreamStart.erase(module);
 	}
 	else if (active != m_ActiveStations.end() && active->second.IsCallsign(from))
 	{
@@ -274,20 +290,24 @@ void CUsers::ApplyReport(char module, const SReportWait &wait)
 	// they carry a valid FEC, the decoder counts them among its repeats
 	if (wait.lost_frames)
 		audio["network_lost"] = wait.lost_frames;
-	// the entry Hearing() made at the start of this stream: the talker's newest on
-	// the module, heard when the stream started. One of a later transmission of the
-	// same talker does not take it; it gets its own report
+	if (auto *user = StreamEntry(module, wait.talker, wait.started))
+	{
+		user->SetAudio(audio);
+		DispatchStationEvent("user_report", *user);
+	}
+}
+
+// the entry Hearing() made at the start of a stream: the talker's newest on the
+// module, heard when the stream started. One of a later transmission of the same
+// talker does not take it (it gets its own report and length); nullptr for none
+CUser *CUsers::StreamEntry(char module, const CCallsign &talker, std::time_t started)
+{
 	for (auto &user : m_Users)
 	{
-		if (user.IsCallsign(wait.talker) && user.GetOnModule() == module)
-		{
-			if (std::abs(double(user.GetLastHeardTime() - wait.started)) > 2.0)
-				break;
-			user.SetAudio(audio);
-			DispatchStationEvent("user_report", user);
-			break;
-		}
+		if (user.IsCallsign(talker) && user.GetOnModule() == module)
+			return std::abs(double(user.GetLastHeardTime() - started)) <= 2.0 ? &user : nullptr;
 	}
+	return nullptr;
 }
 
 void CUsers::Location(const CCallsign &my, double lat, double lon)
