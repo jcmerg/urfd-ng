@@ -69,7 +69,7 @@ public:
 	bool AddDynamicTG(uint32_t tg, char module, int ttlSeconds);
 	bool RemoveDynamicTG(uint32_t tg);
 	std::vector<CTGModuleMap::STGInfo> GetTGMappings(void) const;
-	void RequestReconnect(void) { m_ReconnectRequested = true; }
+	void RequestReconnect(void) { m_ReconnectRequested = true; Wake(); }
 	uint32_t ModuleToTG(char module) const;
 	void RefreshActivityByModule(char module);
 	void ReloadStaticTGMap(void);

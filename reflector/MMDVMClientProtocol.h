@@ -95,8 +95,10 @@ public:
 
 	// dynamic TG management (called from admin socket thread)
 	CTGModuleMap &GetTGMap(void) { return m_TGMap; }
-	void RequestReconnect(void) { m_ReconnectRequested = true; }
-	void RequestKerchunk(uint32_t tg) { m_PendingKerchunk = tg; }
+	void RequestReconnect(void) { m_ReconnectRequested = true; Wake(); }
+	// sent while logged in and no reconnect is pending: one requested before
+	// goes first, the kerchunk then on the new login
+	void RequestKerchunk(uint32_t tg) { m_PendingKerchunk = tg; Wake(); }
 	CBrandMeisterApi &GetBmApi() { return m_BmApi; }
 
 protected:

@@ -21,6 +21,7 @@
 #include "WiresXInfo.h"
 #include "WiresXCmdQueue.h"
 #include "WiresXPacketQueue.h"
+#include <functional>
 
 ////////////////////////////////////////////////////////////////////////////////////////
 
@@ -47,6 +48,8 @@ public:
 	void ReleaseCmdQueue(void)                  { m_CmdQueue.Unlock(); }
 	CWiresxPacketQueue *GetPacketQueue(void)    { m_PacketQueue.Lock(); return &m_PacketQueue; }
 	void ReleasePacketQueue(void)               { m_PacketQueue.Unlock(); }
+	// called for each reply packet queued, wakes the protocol's task that sends it
+	void SetWake(std::function<void(void)> wake) { m_Wake = std::move(wake); }
 
 	// get
 
@@ -77,6 +80,7 @@ protected:
 	// queues
 	CWiresxCmdQueue    m_CmdQueue;
 	CWiresxPacketQueue m_PacketQueue;
+	std::function<void(void)> m_Wake;
 
 	// thread
 	std::atomic<bool> keep_running;

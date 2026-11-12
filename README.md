@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.3** | tcd 0.22.5 | Dashboard v3.1.8
+**urfd 4.40.4** | tcd 0.22.5 | Dashboard v3.1.8
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1168,6 +1168,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Mixed mode, codec plugins, AGC and gains**: see [tcd/README.md](tcd/README.md)
 
 ### Infrastructure
+- **Protocols wait for packets (4.40.4)**: each protocol thread woke every 20 ms to look for a packet, also with nothing to do (some 50 wake-ups a second each, a few percent of a small CPU for urfd alone); it waits 100 ms now while none of its streams is open, as only timers of seconds are due then, and 20 ms while one is. The router's packets wake it at once as before, G3 now as well (it waited up to 20 ms), and so do the Wires-X replies of YSF, the admin's requests (reconnect, kerchunk, SvxReflector TGs) and the shutdown; the SVXServer and the SvxReflector client wait for their TCP connections in the same wait and read them again right before their UDP, so a talker start over TCP is read at once and still before its audio; the SVXServer takes up to 16 new connections a round; a protocol without a socket waits as well instead of spinning. The MMDVMClient's kerchunk for a TG added by the admin goes out after the reconnect it asks for, on the new login (it could go out on the old one before), also when a dynamic TG expires in the same round. The SVXServer opens its TCP port before its task starts and skips client IDs still in use when the 16 bit counter comes round (a new connection replaced a node then); a flood of connections without login is logged once an hour per address
 - **Quieter log for scanners (4.22.0)**: a rejected connection is logged once per address and kind each hour, the rest summed up in one line
 - **DMR talker alias in UTF-16 (4.10.2)**: our alias is UTF-16 like BrandMeister's, at most 13 characters; Motorola radios (R7) did not show the ISO 8 bit one
 - **MMDVMClient talker change (4.10.2)**: a BrandMeister talker who starts while the module still holds the previous stream (it closes a moment after its last frame) joins as soon as the module is free, instead of being dropped for the whole call

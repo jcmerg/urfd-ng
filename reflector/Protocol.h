@@ -22,7 +22,9 @@
 #include "PacketStream.h"
 #include "DVHeaderPacket.h"
 #include "DVFramePacket.h"
+#include <poll.h>
 #include <set>
+#include <vector>
 #include <cstring>
 #include <shared_mutex>
 
@@ -73,6 +75,8 @@ public:
 	// initialization
 	virtual bool Initialize(const char *type, const EProtocol ptype, const uint16_t port, const bool has_ipv4, const bool has_ipv6);
 	virtual void Close(void);
+	// ends the task thread: out of its wait at once, then joined
+	void StopTask(void);
 
 	// get
 	const CCallsign &GetReflectorCallsign(void)const { return m_ReflectorCallsign; }
@@ -84,6 +88,8 @@ public:
 
 	// pass-through
 	void Push(std::unique_ptr<CPacket> p);
+	// wakes the task's wait, for work another thread left it (Push does it itself)
+	void Wake(void);
 
 	// protocol blocking (bidirectional, thread-safe for runtime changes)
 	bool IsSourceBlocked(EProtocol src) const { std::shared_lock lk(m_BlockMutex); return m_BlockedSources.count(src) > 0; }
@@ -140,7 +146,12 @@ protected:
 	virtual char DmrDstIdToModule(uint32_t) const;
 	virtual uint32_t ModuleToDmrDestId(char) const;
 
+	// how long the task may wait for a packet, in ms (PROTOCOL_TICK, PROTOCOL_IDLE_WAIT)
+	virtual int WaitTime(void) const;
 	bool Wait(int fd4, int fd6, int time_ms, bool &ready4, bool &ready6);
+	// waits for any of fds (POLLIN and the like, their revents set) or the queue,
+	// at most time_ms; true when one of fds is ready
+	bool WaitFor(std::vector<struct pollfd> &fds, int time_ms);
 	bool Receive6(CBuffer &buf, CIp &Ip, int time_ms);
 	bool Receive4(CBuffer &buf, CIp &Ip, int time_ms);
 	bool ReceiveDS(CBuffer &buf, CIp &Ip, int time_ms);
@@ -183,4 +194,7 @@ protected:
 	uint16_t m_Port;
 	// debug
 	CTimer      m_DebugTimer;
+
+private:
+	int PollWithQueue(struct pollfd *fds, nfds_t n, int time_ms);
 };

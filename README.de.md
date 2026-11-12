@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.40.3** | tcd 0.22.5 | Dashboard v3.1.8
+**urfd 4.40.4** | tcd 0.22.5 | Dashboard v3.1.8
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -1153,6 +1153,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Mischbetrieb, Codec-Plugins, AGC und Verstärkung**: siehe [tcd/README.de.md](tcd/README.de.md)
 
 ### Infrastruktur
+- **Protokolle warten auf Pakete (4.40.4)**: Jeder Protokoll-Thread wachte alle 20 ms auf, um nach einem Paket zu sehen, auch ohne etwas zu tun (je etwa 50 Mal in der Sekunde, ein paar Prozent einer kleinen CPU für urfd allein); er wartet jetzt 100 ms, solange keiner seiner Streams offen ist, da dann nur Timer im Sekundenbereich fällig sind, und 20 ms, solange einer offen ist. Die Pakete des Routers wecken ihn wie bisher sofort, jetzt auch bei G3 (das bis zu 20 ms wartete), ebenso die Wires-X-Antworten von YSF, die Anfragen des Admins (Reconnect, Kerchunk, SvxReflector-TGs) und das Beenden; der SVXServer und der SvxReflector-Client warten in derselben Wartezeit auf ihre TCP-Verbindungen und lesen sie direkt vor ihrem UDP noch einmal, so wird ein Talker-Start über TCP sofort gelesen und weiterhin vor seinem Audio; der SVXServer nimmt bis zu 16 neue Verbindungen je Runde an; ein Protokoll ohne Socket wartet ebenfalls, statt durchzulaufen. Der Kerchunk des MMDVMClient für eine vom Admin hinzugefügte TG geht nach dem Reconnect hinaus, den sie anstößt, auf der neuen Anmeldung (vorher konnte er noch auf der alten hinausgehen), auch wenn in derselben Runde eine dynamische TG abläuft. Der SVXServer öffnet seinen TCP-Port, bevor seine Task startet, und überspringt Client-IDs, die noch vergeben sind, wenn der 16-Bit-Zähler herum ist (eine neue Verbindung ersetzte dann einen Node); eine Flut von Verbindungen ohne Anmeldung wird einmal je Stunde und Adresse geloggt
 - **Ruhigeres Log bei Scannern (4.22.0)**: Eine abgewiesene Verbindung wird pro Adresse und Art einmal in der Stunde geloggt, der Rest in einer Zeile zusammengefasst
 - **DMR-Talker-Alias in UTF-16 (4.10.2)**: Unser Alias ist UTF-16 wie der von BrandMeister, höchstens 13 Zeichen; Motorola-Funkgeräte (R7) zeigten den in ISO 8 Bit nicht an
 - **MMDVMClient-Sprecherwechsel (4.10.2)**: Ein BrandMeister-Sprecher, der anfängt, während das Modul noch den vorigen Stream hält (der schließt kurz nach seinem letzten Frame), steigt ein, sobald das Modul frei ist, statt für den ganzen Ruf verworfen zu werden

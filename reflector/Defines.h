@@ -73,6 +73,13 @@ enum class EProtocol { any, none, dextra, dplus, dcs, g3, xlxpeer, urf, dmrplus,
 inline EProtocol PluginProtocolId(unsigned index) { return EProtocol(int(EProtocol::plugin) + int(index)); }
 inline bool IsPluginProtocol(EProtocol p) { return int(p) >= int(EProtocol::plugin); }
 
+// how long a protocol's task waits for a packet at most: PROTOCOL_TICK while one
+// of its streams is open (the stream timeout), else PROTOCOL_IDLE_WAIT, as only
+// timers of seconds are due then (keepalives, reconnects, timeouts); a packet of
+// the router wakes it at once (CProtocol::Push)
+#define PROTOCOL_TICK                   20                                  // in ms
+#define PROTOCOL_IDLE_WAIT              100                                 // in ms
+
 // DExtra
 #define DEXTRA_KEEPALIVE_PERIOD         3                                   // in seconds
 #define DEXTRA_KEEPALIVE_TIMEOUT        (DEXTRA_KEEPALIVE_PERIOD*10)        // in seconds

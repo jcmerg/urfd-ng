@@ -156,6 +156,7 @@ void CSvxReflectorProtocol::ReloadStaticTGMap(void)
 		std::cout << "SvxReflector: TG mappings reloaded (" << m_TGToModule.size() << " total)" << std::endl;
 	}
 	m_TGsChanged = true;
+	Wake();
 }
 
 // the TG selected by default: the lowest static one, else the lowest dynamic one
@@ -639,41 +640,41 @@ void CSvxReflectorProtocol::Task(void)
 			}
 			else
 			{
-				// nothing to do but wait, don't spin
-				std::this_thread::sleep_for(std::chrono::milliseconds(20));
+				// nothing to do but wait for the next attempt, don't spin (the queue's
+				// wake-up, as at Close(), ends the wait)
+				bool r4, r6;
+				Wait(-1, -1, PROTOCOL_IDLE_WAIT, r4, r6);
 			}
 			break;
 
 		case EState::authenticating:
 		case EState::connected:
 		{
-			// Drain all pending UDP packets; before the login wait on nothing
+			// wait for UDP, TCP or a packet of the router, then drain all pending UDP
+			// packets; before the login only TCP counts, UDP is read and dropped
 			{
+				bool udp, tcp;
+				Wait(m_Socket4.GetSocket(), m_TcpFd, WaitTime(), udp, tcp);
+				// the reflector sends the talker start over TCP before the first
+				// audio over UDP: what arrived over TCP goes first, also when it
+				// came after the wait, or the audio opened a stream of its own
+				// under the connector's callsign
+				if (!TcpReceive())
+					break;
 				CBuffer buffer;
 				CIp ip;
-				if (Receive4(buffer, ip, 20))
+				while (Receive4(buffer, ip, 0))
 				{
-					// the reflector sends the talker start over TCP before the first
-					// audio over UDP: what arrived over TCP goes first, or the audio
-					// opened a stream of its own under the connector's callsign
-					if (!TcpReceive())
-						break;
-					do {
-						// only the reflector's own packets, from its address
-						CIp from(ip);
-						from.SetPort(m_ServerIp.GetPort());
-						if (m_State == EState::connected && from == m_ServerIp)
-						{
-							m_UdpLastReceiveTimer.start();
-							OnUdpPacket(buffer);
-						}
-					} while (Receive4(buffer, ip, 0));
+					// only the reflector's own packets, from its address
+					CIp from(ip);
+					from.SetPort(m_ServerIp.GetPort());
+					if (m_State == EState::connected && from == m_ServerIp)
+					{
+						m_UdpLastReceiveTimer.start();
+						OnUdpPacket(buffer);
+					}
 				}
 			}
-
-			// Receive TCP frames
-			if (!TcpReceive())
-				break;
 
 			// Check TCP timeout
 			if (m_TcpLastReceiveTimer.time() > SVX_TCP_KEEPALIVE_TIMEOUT)
@@ -1306,6 +1307,7 @@ bool CSvxReflectorProtocol::AddDynamicTG(uint32_t tg, char module, int ttlSecond
 
 	// the Task thread monitors it from now on
 	m_TGsChanged = true;
+	Wake();
 	return true;
 }
 
@@ -1344,6 +1346,7 @@ bool CSvxReflectorProtocol::RemoveDynamicTG(uint32_t tg)
 	// client list after the TG lock, the Task thread takes them in this order too
 	RemoveOrphanClients(orphans);
 	m_TGsChanged = true;
+	Wake();
 	return true;
 }
 

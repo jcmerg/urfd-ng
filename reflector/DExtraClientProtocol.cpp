@@ -83,7 +83,7 @@ void CDExtraClientProtocol::Task(void)
 	CBuffer Buffer;
 	CIp     Ip;
 
-	if (Receive4(Buffer, Ip, 20))
+	if (Receive4(Buffer, Ip, WaitTime()))
 		HandleIncoming(Buffer, Ip);
 
 	if (m_ReconnectRequested.exchange(false))

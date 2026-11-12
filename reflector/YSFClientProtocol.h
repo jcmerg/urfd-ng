@@ -58,7 +58,7 @@ public:
 	void Task(void);
 
 	// admin API
-	void RequestReconnect(void) { m_ReconnectRequested = true; }
+	void RequestReconnect(void) { m_ReconnectRequested = true; Wake(); }
 	bool AddMapping(const std::string &host, uint16_t port, char localMod, uint8_t dgid = 0);
 	bool RemoveMapping(char localMod);
 	std::vector<SYsfClientMapping> GetMappings(void) const;

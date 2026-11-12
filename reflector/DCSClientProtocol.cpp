@@ -89,7 +89,7 @@ void CDcsClientProtocol::Task(void)
 	CIp     Ip;
 
 	// receive packets
-	if (Receive4(Buffer, Ip, 20))
+	if (Receive4(Buffer, Ip, WaitTime()))
 	{
 		HandleIncoming(Buffer, Ip);
 	}

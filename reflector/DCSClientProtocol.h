@@ -52,7 +52,7 @@ public:
 	void Task(void);
 
 	// admin API
-	void RequestReconnect(void) { m_ReconnectRequested = true; }
+	void RequestReconnect(void) { m_ReconnectRequested = true; Wake(); }
 	bool AddMapping(const std::string &host, uint16_t port, char remoteMod, char localMod);
 	bool RemoveMapping(char localMod);
 	std::vector<SDcsClientMapping> GetMappings(void) const;

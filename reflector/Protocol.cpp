@@ -22,6 +22,7 @@
 #include "Clients.h"
 #include "ProtocolNames.h"
 #include "MmdvmClientConfig.h"
+#include <algorithm>
 #include <sstream>
 #include <iostream>
 #include <poll.h>
@@ -59,7 +60,12 @@ CProtocol::~CProtocol()
 void CProtocol::Push(std::unique_ptr<CPacket> p)
 {
 	m_Queue.Push(std::move(p));
-	// wake the receive wait, the packet goes out at once
+	// the packet goes out at once
+	Wake();
+}
+
+void CProtocol::Wake(void)
+{
 	if (m_QueueFd >= 0)
 	{
 		const uint64_t one = 1;
@@ -138,13 +144,19 @@ void CProtocol::Thread()
 	}
 }
 
-void CProtocol::Close(void)
+void CProtocol::StopTask(void)
 {
 	keep_running = false;
+	Wake();
 	if ( m_Future.valid() )
 	{
 		m_Future.get();
 	}
+}
+
+void CProtocol::Close(void)
+{
+	StopTask();
 	m_Socket4.Close();
 	m_Socket6.Close();
 }
@@ -300,6 +312,38 @@ uint32_t CProtocol::ModuleToDmrDestId(char m) const
 ////////////////////////////////////////////////////////////////////////////////////////
 // Receivers
 
+// a stream open: its timeout is checked every PROTOCOL_TICK; else only timers
+// of seconds are due
+int CProtocol::WaitTime(void) const
+{
+	return m_Streams.empty() ? PROTOCOL_IDLE_WAIT : PROTOCOL_TICK;
+}
+
+// poll() on fds[0] to fds[n - 1] and the queue's eventfd, which goes into fds[n]
+// (the caller's room for it) and whose wake-up is cleared here
+int CProtocol::PollWithQueue(struct pollfd *fds, nfds_t n, int time_ms)
+{
+	fds[n] = { m_QueueFd, POLLIN, 0 };	// poll leaves out a -1
+	const auto rval = poll(fds, n + 1, time_ms);
+	if (rval < 0 && errno != EINTR)
+		std::cerr << "Receive poll error: " << strerror(errno) << std::endl;
+	if (rval > 0 && (fds[n].revents & POLLIN))
+	{
+		uint64_t count;
+		if (read(m_QueueFd, &count, sizeof(count)) < 0) {}
+	}
+	return rval;
+}
+
+bool CProtocol::WaitFor(std::vector<struct pollfd> &fds, int time_ms)
+{
+	const auto n = fds.size();
+	fds.emplace_back();
+	const auto rval = PollWithQueue(fds.data(), n, time_ms);
+	fds.pop_back();
+	return rval > 0 && std::any_of(fds.begin(), fds.end(), [](const struct pollfd &f) { return f.revents != 0; });
+}
+
 // Waits up to time_ms for a packet on the sockets (fd < 0: none), and returns
 // early, without a packet, when something was pushed into the queue: the Task
 // loops handle the queue after the receive, so a packet of the router does not
@@ -309,25 +353,13 @@ bool CProtocol::Wait(int fd4, int fd6, int time_ms, bool &ready4, bool &ready6)
 	ready4 = ready6 = false;
 	struct pollfd fds[3];
 	nfds_t n = 0;
-	int i4 = -1, i6 = -1, iq = -1;
+	int i4 = -1, i6 = -1;
 	if (fd4 >= 0) { fds[n] = { fd4, POLLIN, 0 }; i4 = n++; }
 	if (fd6 >= 0) { fds[n] = { fd6, POLLIN, 0 }; i6 = n++; }
-	if (0 == n)
-		return false;
-	if (m_QueueFd >= 0) { fds[n] = { m_QueueFd, POLLIN, 0 }; iq = n++; }
 
-	auto rval = poll(fds, n, time_ms);
-	if (rval <= 0)
-	{
-		if (rval < 0 && errno != EINTR)
-			std::cerr << "Receive poll error: " << strerror(errno) << std::endl;
+	// without a socket (none bound) on the queue alone, the task would spin else
+	if (PollWithQueue(fds, n, time_ms) <= 0)
 		return false;
-	}
-	if (iq >= 0 && (fds[iq].revents & POLLIN))
-	{
-		uint64_t count;
-		if (read(m_QueueFd, &count, sizeof(count)) < 0) {}
-	}
 	ready4 = (i4 >= 0 && (fds[i4].revents & POLLIN));
 	ready6 = (i6 >= 0 && (fds[i6].revents & POLLIN));
 	return ready4 || ready6;
