@@ -86,6 +86,16 @@ public:
 		return val;
 	}
 
+	// drops everything queued: taken out under one lock, freed after it
+	void Clear(void)
+	{
+		std::queue<T> old;
+		{
+			std::lock_guard<std::mutex> lock(m);
+			old.swap(q);
+		}
+	}
+
 	bool IsEmpty(void)
 	{
 		std::unique_lock<std::mutex> lock(m);

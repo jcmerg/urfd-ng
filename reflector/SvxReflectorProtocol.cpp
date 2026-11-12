@@ -20,6 +20,7 @@
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <map>
+#include <algorithm>
 
 #include "SvxReflectorProtocol.h"
 #include "SvxReflectorClient.h"
@@ -283,6 +284,14 @@ void CSvxReflectorProtocol::TcpDisconnect(void)
 
 void CSvxReflectorProtocol::Disconnect(void)
 {
+	// urfd audio going out ends first, as at its end: the reflector would keep
+	// the talker until its own timeout else (UDP may work still when TCP failed)
+	if (m_State == EState::connected && m_OutStreamTG.end() != std::find_if(m_OutStreamTG.begin(), m_OutStreamTG.end(), [this](const auto &o) { return o.second == m_SelectedTG; }))
+	{
+		CBuffer flushBuf;
+		BuildUdpHeader(flushBuf, SVX_UDP_MSG_FLUSH_SAMPLES);
+		Send(flushBuf, m_ServerIp);
+	}
 	CloseInStream();
 	m_OutStreamTG.clear();
 	TcpDisconnect();
@@ -818,6 +827,12 @@ void CSvxReflectorProtocol::Task(void)
 		default:
 			break;
 	}
+
+	// not logged in: the router's packets go nowhere, and after the login they
+	// were old audio in one burst (Disconnect() ended the streams going out; a
+	// transmission is heard again from its next header)
+	if (m_State != EState::connected)
+		m_Queue.Clear();
 }
 
 void CSvxReflectorProtocol::HandleKeepalives(void)

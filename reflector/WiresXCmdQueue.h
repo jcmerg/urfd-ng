@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <queue>
 
@@ -39,11 +41,42 @@ public:
 	// pass thru
 	CWiresxCmd front()        { return queue.front(); }
 	void pop()                { queue.pop(); }
-	void push(CWiresxCmd cmd) { queue.push(cmd); }
+	// with the queue locked; wakes the handler's Wait()
+	void push(CWiresxCmd cmd) { queue.push(cmd); m_Cv.notify_all(); }
 	bool empty() const        { return queue.empty(); }
+
+	// the handler's wait, with the queue not locked: until a command is pushed
+	// (push wakes it, called with the queue locked, so it cannot come between the
+	// check here and the wait) or the first one is delay seconds old, at once
+	// after Stop()
+	void Wait(double delay)
+	{
+		std::unique_lock<std::mutex> lock(m_Mutex);
+		if (m_Stop)
+			return;
+		if (queue.empty())
+			m_Cv.wait(lock);
+		else if (const double age = queue.front().GetTime().time(); age < delay)
+			m_Cv.wait_for(lock, std::chrono::duration<double>(delay - age));
+	}
+	// the handler runs (Init): Wait() waits again
+	void Start(void)
+	{
+		std::lock_guard<std::mutex> lock(m_Mutex);
+		m_Stop = false;
+	}
+	// ends the handler's wait for good (Close)
+	void Stop(void)
+	{
+		std::lock_guard<std::mutex> lock(m_Mutex);
+		m_Stop = true;
+		m_Cv.notify_all();
+	}
 
 protected:
 	// status
 	std::mutex  m_Mutex;
+	std::condition_variable m_Cv;
+	bool m_Stop = false;
 	std::queue<CWiresxCmd> queue;
 };

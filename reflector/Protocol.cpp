@@ -48,10 +48,7 @@ CProtocol::~CProtocol()
 	Close();
 
 	// empty queue
-	while ( !m_Queue.IsEmpty() )
-	{
-		m_Queue.Pop();
-	}
+	m_Queue.Clear();
 
 	if (m_QueueFd >= 0)
 		close(m_QueueFd);

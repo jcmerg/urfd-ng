@@ -187,6 +187,7 @@ void CMMDVMClientProtocol::Task(void)
 	if (m_ReconnectRequested.exchange(false))
 	{
 		std::cout << m_Name << ": reconnect requested (TG mapping changed)" << std::endl;
+		EndOutboundCalls();
 		SendClose();
 		m_State = EHBState::DISCONNECTED;
 		m_RetryTimer.start();
@@ -211,6 +212,7 @@ void CMMDVMClientProtocol::Task(void)
 		if (!expired.empty())
 		{
 			std::cout << m_Name << ": " << expired.size() << " dynamic TG(s) expired, reconnecting" << std::endl;
+			EndOutboundCalls();
 			SendClose();
 			m_State = EHBState::DISCONNECTED;
 			m_RetryTimer.start();
@@ -238,6 +240,15 @@ void CMMDVMClientProtocol::Task(void)
 	if (m_State == EHBState::RUNNING)
 	{
 		HandleQueue();
+	}
+	else
+	{
+		// not logged in (logging in, the wait before the next try, no master):
+		// the router's packets go nowhere, and after the login they were old
+		// audio in one burst. The calls going out end here; one still on the air
+		// goes on by late entry (a new header) after the login
+		m_Queue.Clear();
+		m_OutboundCache.clear();
 	}
 }
 
@@ -314,6 +325,7 @@ void CMMDVMClientProtocol::HandleStateMachine(void)
 		if (m_TimeoutTimer.time() > MMDVMCLI_TIMEOUT_PERIOD)
 		{
 			std::cout << m_Name << ": keepalive timeout, reconnecting" << std::endl;
+			EndOutboundCalls();	// DMRD may still get through when the pings did not
 			m_State = EHBState::DISCONNECTED;
 			m_RetryTimer.start();
 		}
@@ -1124,6 +1136,11 @@ void CMMDVMClientProtocol::HandleQueue(void)
 			auto &header = (CDvHeaderPacket &)*packet;
 			char module = header.GetPacketModule();
 
+			// a call still open on the module (its last packet lost) ends first,
+			// also when this one is not sent: the master would hold its slot until
+			// its own timeout, and the new talker's frames would go on in it
+			EndOutboundCall(module, true);
+
 			uint32_t tg = m_TGMap.ModuleToTG(module);
 			if (tg == 0)
 				continue;
@@ -1153,10 +1170,16 @@ void CMMDVMClientProtocol::HandleQueue(void)
 			cache.pktSeqNo = 0;
 			cache.streamId = NextStreamId();
 			cache.srcId = userSrcId;
+			cache.tg = tg;
+			cache.slotFlag = SlotFlag(module);
 			// without tcd the module carries the source's codec: only AMBE+2 (DMR, YSF,
 			// NXDN) may go to the master, and only the first frame tells
 			cache.held = !Transcoded(module);
+			cache.routerStreamId = header.GetStreamId();
 			m_OutboundCache[module] = cache;
+			// a new call: stream ids come round (YSF takes the node's address),
+			// the one ended before must not keep this one from late entry
+			m_EndedStream.erase(module);
 			if (cache.held)
 				continue;
 
@@ -1174,7 +1197,13 @@ void CMMDVMClientProtocol::HandleQueue(void)
 			auto it = m_OutboundCache.find(module);
 			if (it == m_OutboundCache.end())
 			{
-				// Late entry: create cache and send header
+				// Late entry: create cache and send header. Not for the end of a
+				// call (nothing to open, also its end after the silence timeout),
+				// nor for late frames of a call that ended with its last packet
+				if (frame.IsLastPacket())
+					continue;
+				if (auto ended = m_EndedStream.find(module); ended != m_EndedStream.end() && ended->second == frame.GetStreamId())
+					continue;
 				uint32_t tg = m_TGMap.ModuleToTG(module);
 				if (tg == 0)
 					continue;
@@ -1195,8 +1224,8 @@ void CMMDVMClientProtocol::HandleQueue(void)
 					srcId = m_FallbackDmrId;
 				if (srcId == 0)
 				{
-					static std::set<char> warned;
-					if (warned.insert(module).second)
+					// one line per module and connection (each runs in its own thread)
+					if (m_LateEntryWarned.insert(module).second)
 						std::cout << m_Name << ": dropping late-entry frames on module " << module << " - no DMR ID" << std::endl;
 					continue;
 				}
@@ -1207,6 +1236,9 @@ void CMMDVMClientProtocol::HandleQueue(void)
 				cache.pktSeqNo = 0;
 				cache.streamId = NextStreamId();
 				cache.srcId = srcId;
+				cache.tg = tg;
+				cache.slotFlag = SlotFlag(module);
+				cache.routerStreamId = frame.GetStreamId();
 				m_OutboundCache[module] = cache;
 				it = m_OutboundCache.find(module);
 
@@ -1220,7 +1252,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 				buf.Append((uint8_t)(tg >> 8));
 				buf.Append((uint8_t)(tg));
 				buf.Append(m_uiId, 4);
-				buf.Append((uint8_t)(SlotFlag(module) | MMDVMCLI_FLAG_DATA_SYNC | DMR_DT_VOICE_LC_HEADER));
+				buf.Append((uint8_t)(CallSlotFlag(module) | MMDVMCLI_FLAG_DATA_SYNC | DMR_DT_VOICE_LC_HEADER));
 				buf.Append((uint8_t *)&cache.streamId, 4);
 				AppendVoiceLCToBuffer(&buf, srcId, tg);
 				buf.Append((uint8_t)0);
@@ -1229,6 +1261,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 			}
 
 			auto &c = it->second;
+			c.lastFrame.start();
 
 			if (c.held && !c.local)
 			{
@@ -1255,10 +1288,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 
 			if (frame.IsLastPacket())
 			{
-				CBuffer buf;
-				if (EncodeDMRDTerminator(c.streamId, module, buf))
-					SendDMRD(buf, module);
-				m_OutboundCache.erase(it);
+				EndOutboundCall(module, true);	// late frames that overtook nothing open no call
 				continue;
 			}
 
@@ -1278,6 +1308,16 @@ void CMMDVMClientProtocol::HandleQueue(void)
 			}
 		}
 	}
+
+	// a call whose last packet never came (lost) ends after a silence, as the
+	// SvxReflector's talkers do: the master would hold its slot until its own
+	// timeout else (here for OpenBridge too, which has a Task of its own)
+	std::vector<char> silent;
+	for (const auto &[module, c] : m_OutboundCache)
+		if (c.lastFrame.time() > MMDVMCLI_CALL_TIMEOUT)
+			silent.push_back(module);
+	for (char module : silent)
+		EndOutboundCall(module);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -1285,7 +1325,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 
 bool CMMDVMClientProtocol::EncodeDMRDHeader(const CDvHeaderPacket &header, char module, CBuffer &buffer)
 {
-	uint32_t tg = m_TGMap.ModuleToTG(module);
+	const uint32_t tg = CallTG(module);
 	auto it = m_OutboundCache.find(module);
 	if (it == m_OutboundCache.end())
 		return false;
@@ -1302,7 +1342,7 @@ bool CMMDVMClientProtocol::EncodeDMRDHeader(const CDvHeaderPacket &header, char 
 	buffer.Append((uint8_t)(tg >> 8));
 	buffer.Append((uint8_t)(tg));
 	buffer.Append(m_uiId, 4);
-	buffer.Append((uint8_t)(SlotFlag(module) | MMDVMCLI_FLAG_DATA_SYNC | DMR_DT_VOICE_LC_HEADER));
+	buffer.Append((uint8_t)(CallSlotFlag(module) | MMDVMCLI_FLAG_DATA_SYNC | DMR_DT_VOICE_LC_HEADER));
 	buffer.Append((uint8_t *)&streamId, 4);
 	AppendVoiceLCToBuffer(&buffer, srcId, tg);
 	buffer.Append((uint8_t)0);
@@ -1315,7 +1355,7 @@ bool CMMDVMClientProtocol::EncodeDMRDVoiceFrame(
 	const CDvFramePacket &frame0, const CDvFramePacket &frame1, const CDvFramePacket &frame2,
 	uint8_t seqNo, uint32_t streamId, char module, CBuffer &buffer)
 {
-	uint32_t tg = m_TGMap.ModuleToTG(module);
+	const uint32_t tg = CallTG(module);
 	auto cit = m_OutboundCache.find(module);
 	uint32_t srcId = (cit != m_OutboundCache.end()) ? cit->second.srcId : m_uiDmrId;
 
@@ -1330,7 +1370,7 @@ bool CMMDVMClientProtocol::EncodeDMRDVoiceFrame(
 	buffer.Append(m_uiId, 4);
 
 	uint8_t voiceSeq = seqNo % 6;
-	uint8_t flags = SlotFlag(module);
+	uint8_t flags = CallSlotFlag(module);
 	flags |= (voiceSeq == 0) ? MMDVMCLI_FLAG_VOICE_SYNC : voiceSeq;
 	buffer.Append(flags);
 
@@ -1353,10 +1393,45 @@ bool CMMDVMClientProtocol::EncodeDMRDVoiceFrame(
 	return true;
 }
 
+uint32_t CMMDVMClientProtocol::CallTG(char module) const
+{
+	auto it = m_OutboundCache.find(module);
+	return (it != m_OutboundCache.end() && it->second.tg != 0) ? it->second.tg : m_TGMap.ModuleToTG(module);
+}
+
+uint8_t CMMDVMClientProtocol::CallSlotFlag(char module) const
+{
+	auto it = m_OutboundCache.find(module);
+	return (it != m_OutboundCache.end() && it->second.tg != 0) ? it->second.slotFlag : SlotFlag(module);
+}
+
+// the master would hold their slot until its own timeout else, and a call
+// still on the air comes back after the login by late entry with a new stream
+void CMMDVMClientProtocol::EndOutboundCall(char module, bool over)
+{
+	auto it = m_OutboundCache.find(module);
+	if (it == m_OutboundCache.end())
+		return;
+	CBuffer buf;
+	if (m_State == EHBState::RUNNING && !it->second.held && !it->second.local && EncodeDMRDTerminator(it->second.streamId, module, buf))
+		SendDMRD(buf, module);
+	if (over)
+		m_EndedStream[module] = it->second.routerStreamId;
+	m_OutboundCache.erase(it);
+}
+
+void CMMDVMClientProtocol::EndOutboundCalls(void)
+{
+	while (!m_OutboundCache.empty())
+		EndOutboundCall(m_OutboundCache.begin()->first);
+}
+
 bool CMMDVMClientProtocol::EncodeDMRDTerminator(uint32_t streamId, char module, CBuffer &buffer)
 {
-	uint32_t tg = m_TGMap.ModuleToTG(module);
+	// the call's own TG and slot: the map may have changed since it started
 	auto cit = m_OutboundCache.find(module);
+	const uint32_t tg = CallTG(module);
+	const uint8_t slotFlag = CallSlotFlag(module);
 	const uint32_t srcId = (cit != m_OutboundCache.end()) ? TerminatorSrcId(cit->second) : m_uiDmrId;
 
 	buffer.Set((uint8_t *)"DMRD", 4);
@@ -1370,7 +1445,7 @@ bool CMMDVMClientProtocol::EncodeDMRDTerminator(uint32_t streamId, char module, 
 	buffer.Append((uint8_t)(tg >> 8));
 	buffer.Append((uint8_t)(tg));
 	buffer.Append(m_uiId, 4);
-	buffer.Append((uint8_t)(SlotFlag(module) | MMDVMCLI_FLAG_DATA_SYNC | DMR_DT_TERMINATOR_WITH_LC));
+	buffer.Append((uint8_t)(slotFlag | MMDVMCLI_FLAG_DATA_SYNC | DMR_DT_TERMINATOR_WITH_LC));
 	buffer.Append((uint8_t *)&streamId, 4);
 	AppendTerminatorLCToBuffer(&buffer, srcId, tg);
 	buffer.Append((uint8_t)0);

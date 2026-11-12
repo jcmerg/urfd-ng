@@ -36,6 +36,9 @@
 // way in with a delay. Such a stream waits for its first voice frames: when they
 // are (nearly) frames of the call just before, it is dropped
 #define MMDVMCLI_ECHO_WINDOW        3.0 // seconds after the call's last frame
+#define MMDVMCLI_CALL_TIMEOUT       3.0 // seconds without a frame before a call going out ends with its terminator (its last packet lost);
+                                        // above the router's own end of a stream (STREAM_TIMEOUT 1.6 s, then up to 1.2 s for tcd and the router);
+                                        // a stream only delayed goes on by late entry
 #define MMDVMCLI_ECHO_TAIL          150 // frames of the call kept to compare (3 s)
 #define MMDVMCLI_ECHO_VOICE         3   // voice frames that decide
 #define MMDVMCLI_ECHO_BURSTS        6   // or this many bursts (360 ms) at most
@@ -65,6 +68,10 @@ struct SMMDVMClientStreamCache
 	uint32_t        streamId;
 	bool            held = false;    // header waits for the first frame (module not transcoded)
 	bool            local = false;   // not AMBE+2 on a module without transcoding: stays here
+	uint32_t        tg = 0;          // the call's TG and slot, for its terminator when the
+	uint8_t         slotFlag = 0;    // TG map changed meanwhile (a reconnect asked for)
+	CTimer          lastFrame;       // since the call's last frame (MMDVMCLI_CALL_TIMEOUT)
+	uint16_t        routerStreamId = 0;  // the router's stream the call carries
 };
 
 class CMMDVMClientProtocol : public CProtocol
@@ -138,6 +145,16 @@ protected:
 	// DMRD outgoing: Reflector -> Master
 	bool EncodeDMRDHeader(const CDvHeaderPacket &header, char module, CBuffer &buffer);
 	bool EncodeDMRDVoiceFrame(const CDvFramePacket &frame0, const CDvFramePacket &frame1, const CDvFramePacket &frame2, uint8_t seqNo, uint32_t streamId, char module, CBuffer &buffer);
+	// the call going out on module ends with its terminator (if it went to the
+	// master) and leaves the cache; all of them before the link goes down.
+	// over: the router's stream is done, what still comes of it opens no call
+	// (else, after a reconnect or a silence, it goes on by late entry)
+	void EndOutboundCall(char module, bool over = false);
+	void EndOutboundCalls(void);
+	// the TG and slot a call going out on module started with (the map may
+	// change during it), the map's for a module without one
+	uint32_t CallTG(char module) const;
+	uint8_t CallSlotFlag(char module) const;
 	bool EncodeDMRDTerminator(uint32_t streamId, char module, CBuffer &buffer);
 
 	// DMR frame construction helpers (adapted from CDmrmmdvmProtocol)
@@ -247,6 +264,11 @@ protected:
 
 	// Outbound stream cache per module (triplet buffering)
 	std::unordered_map<char, SMMDVMClientStreamCache> m_OutboundCache;
+	std::set<char> m_LateEntryWarned;	// modules whose late entry had no DMR ID, logged once each
+	// the router's stream of the call that ended last on each module with its
+	// last packet (or a new header): late frames of it open no call again, until
+	// the next header opens a call there
+	std::unordered_map<char, uint16_t> m_EndedStream;
 
 	// SHA256
 	CSHA256         m_SHA256;
