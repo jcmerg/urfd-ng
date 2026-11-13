@@ -26,6 +26,7 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <netinet/tcp.h>
+#include <sys/ioctl.h>
 #include <fcntl.h>
 #include <cctype>
 #include <cstring>
@@ -34,6 +35,42 @@
 #include "TCSocket.h"
 #include "RejectLog.h"
 #include "SHA256.h"
+
+// what a poll() says about a connection, the one place that decides it
+enum class EPeer { alive, lost, closed, invalid };
+
+#ifdef POLLRDHUP
+#define TC_HANGUP (POLLHUP | POLLRDHUP)	// Linux: a FIN alone is only readable otherwise
+#else
+#define TC_HANGUP POLLHUP				// macOS, BSD: a FIN sets POLLHUP
+#endif
+
+// invalid: the descriptor is no longer open, it is forgotten, not closed (its
+// number may be another socket's by then); lost: an error (a reset); closed: the
+// peer's FIN or hangup. With keepData, a lost or closed one with bytes still
+// waiting stays alive: its reader takes them (a tcd's last report) and then the
+// EOF or the error, and closes
+static EPeer classify(int fd, short revents, bool keepData)
+{
+	if (revents & POLLNVAL)
+		return EPeer::invalid;
+	if (!(revents & (POLLERR | TC_HANGUP)))
+		return EPeer::alive;
+	int waiting = 0;
+	if (keepData && 0 == ioctl(fd, FIONREAD, &waiting) && waiting > 0)
+		return EPeer::alive;
+	return (revents & POLLERR) ? EPeer::lost : EPeer::closed;
+}
+
+// a connection looked at without reading from it; readable: something to read (data or the EOF)
+static EPeer probePeer(int fd, bool keepData, bool *readable = nullptr)
+{
+	struct pollfd pfd = { fd, (short)(POLLIN | TC_HANGUP), 0 };
+	const int rv = poll(&pfd, 1, 0);
+	if (readable)
+		*readable = rv > 0 && (pfd.revents & POLLIN);
+	return rv > 0 ? classify(fd, pfd.revents, keepData) : EPeer::alive;
+}
 
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
@@ -60,6 +97,7 @@
 #define TC_STANDBY_BUSY   'B'
 #define TC_PENDING_MAX     8	// connections in their handshake at a time
 #define TC_PENDING_TIMEOUT 2	// seconds for the whole handshake
+#define TC_READY_TIMEOUT   (2 * TC_IO_TIMEOUT)	// seconds one through its handshake may wait for its module's lock
 #define TC_PING_TIMEOUT    20	// seconds without a packet from a tcd that pings (every 5 s)
 #define TC_IO_TIMEOUT      10	// seconds a send to or a receive from a tcd may block (it stopped reading, or
                           	// froze in the middle of a packet); a network stall shorter than that passes
@@ -160,12 +198,17 @@ bool CTCSocket::IsModuleConnected(char module)
 	if (m_Pfd[pos].fd < 0)
 		return false;
 
-	// Quick non-blocking poll to detect dead sockets (POLLHUP/POLLERR from keepalive)
-	struct pollfd pfd = { m_Pfd[pos].fd, POLLIN, 0 };
-	int rv = poll(&pfd, 1, 0);
-	if (rv > 0 && (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)))
+	// Quick non-blocking poll to detect dead sockets (the keepalive, a tcd that closed its end)
+	const auto peer = probePeer(m_Pfd[pos].fd, true);
+	if (EPeer::invalid == peer)
 	{
-		std::cerr << "Transcoder module '" << module << "' connection lost" << std::endl;
+		std::cerr << "Transcoder module '" << module << "' connection no longer open, dropping it" << std::endl;
+		m_Pfd[pos].fd = -1;
+		return false;
+	}
+	if (EPeer::alive != peer)
+	{
+		std::cerr << "Transcoder module '" << module << "' connection " << (EPeer::lost == peer ? "lost" : "closed by the transcoder") << std::endl;
 		closePos(pos);
 		return false;
 	}
@@ -213,18 +256,20 @@ bool CTCServer::AnyAreClosed()
 		}
 
 		// Actively probe for dead connections (e.g. half-open after network outage),
-		// and on Linux for a tcd that closed its end (stopped): that is only readable
+		// and for a tcd that closed its end (stopped): that is only readable
 		// otherwise, and a standby tcd would be told busy until something reads it
-#ifdef POLLRDHUP
-		const short gone = POLLERR | POLLHUP | POLLNVAL | POLLRDHUP;
-#else
-		const short gone = POLLERR | POLLHUP | POLLNVAL;
-#endif
-		struct pollfd pfd = { m_Pfd[i].fd, (short)(POLLIN | gone), 0 };
-		int rv = poll(&pfd, 1, 0);
-		if (rv > 0 && (pfd.revents & gone))
+		bool readable = false;
+		const auto peer = probePeer(m_Pfd[i].fd, true, &readable);
+		if (EPeer::invalid == peer)
 		{
-			std::cerr << "Transcoder module '" << m_Modules[i] << "' connection " << ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) ? "lost" : "closed by the transcoder") << " (maintenance probe)" << std::endl;
+			// no longer open: forgotten, not closed (its number may be another socket's by now)
+			std::cerr << "Transcoder module '" << m_Modules[i] << "' connection no longer open (maintenance probe)" << std::endl;
+			m_Pfd[i].fd = -1;
+			any = true;
+		}
+		else if (EPeer::alive != peer)
+		{
+			std::cerr << "Transcoder module '" << m_Modules[i] << "' connection " << (EPeer::lost == peer ? "lost" : "closed by the transcoder") << " (maintenance probe)" << std::endl;
 			closePos(i);
 			any = true;
 		}
@@ -232,7 +277,7 @@ bool CTCServer::AnyAreClosed()
 		// quiet: hung, while its kernel still answers the TCP keepalive. Closed, so a
 		// standby tcd can take the module over; the tcd reconnects once it runs again
 		// (a connection with something to read is alive: urfd itself may have stood still)
-		else if (m_Pinged[i] && !(rv > 0 && (pfd.revents & POLLIN)) && std::chrono::steady_clock::now() - m_LastRx[i] > std::chrono::seconds(TC_PING_TIMEOUT))
+		else if (m_Pinged[i] && !readable && std::chrono::steady_clock::now() - m_LastRx[i] > std::chrono::seconds(TC_PING_TIMEOUT))
 		{
 			std::cerr << "Transcoder module '" << m_Modules[i] << "' sent nothing for " << TC_PING_TIMEOUT << " s, its pings stopped (hung?): closing the connection" << std::endl;
 			closePos(i);
@@ -378,22 +423,21 @@ bool CTCServer::Receive(char module, STCPacket *packet, int ms)
 			heard(pos, packet->codec_in == ECodecType::ping);
 	}
 
-	// It's possible that even if we read the data, the socket can have an error after the read...
-	// So we'll check...
-	if (pfds->revents & POLLERR || pfds->revents & POLLHUP)
-	{
-		if (pfds->revents & POLLERR)
-			std::cerr << "POLLERR received on module '" << module << "', closing socket" << std::endl;
-		if (pfds->revents & POLLHUP)
-			std::cerr << "POLLHUP received on module '" << module << "', closing socket" << std::endl;
-		closePos(pos);
-	}
-	if (pfds->revents & POLLNVAL)
+	// an error or hangup that came with the data: closed once nothing is left to read
+	// (the codec thread comes back for the rest, at once or on its next round after a
+	// ping, a tcd's last report among it)
+	const auto peer = rv ? EPeer::alive : classify(pfds->fd, pfds->revents, true);
+	if (EPeer::invalid == peer)
 	{
 		// the descriptor is no longer open (closed at shutdown): forget it, or the
 		// codec thread polls it again at once, forever
-		std::cerr << "POLLNVAL received on module '" << module << "', dropping the socket" << std::endl;
+		std::cerr << "Transcoder connection on module '" << module << "' no longer open, dropping it" << std::endl;
 		pfds->fd = -1;
+	}
+	else if (EPeer::alive != peer)
+	{
+		std::cerr << "Transcoder connection on module '" << module << "' " << (EPeer::lost == peer ? "failed" : "closed by the transcoder") << ", closing it" << std::endl;
+		closePos(pos);
 	}
 
 	if (rv)
@@ -516,11 +560,13 @@ void CTCServer::TryAccept(int ms)
 	for (unsigned i = 0; i < m_Pending.size(); i++)
 	{
 		auto &p = m_Pending[i];
-		// one through its handshake waits for its module's lock only (establish)
-		bool done = p.ready ? establish(p) : (pfds[i + 1].revents ? advance(p) : false);
-		if (! done && ! p.ready && now > p.deadline)
+		// one through its handshake waits for its module's lock only (establish); its
+		// peer may leave meanwhile: dropped then, not kept in a pending slot until
+		// the lock is free
+		bool done = p.ready ? (establish(p) || droppedGone(p)) : (pfds[i + 1].revents ? advance(p) : false);
+		if (! done && now > p.deadline)
 		{
-			std::cerr << "Transcoder connection from " << p.peer << " dropped: " << (p.module ? "no answer to the password challenge" : "no module byte") << std::endl;
+			std::cerr << "Transcoder connection from " << p.peer << " dropped: " << (p.ready ? "its module stayed busy" : p.module ? "no answer to the password challenge" : "no module byte") << std::endl;
 			close(p.fd);
 			done = true;
 		}
@@ -605,6 +651,7 @@ bool CTCServer::advance(SPending &p)
 		if (m_Password.empty())
 		{
 			p.ready = true;
+			p.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(TC_READY_TIMEOUT);
 			return establish(p);
 		}
 
@@ -662,7 +709,22 @@ bool CTCServer::advance(SPending &p)
 		return true;
 	}
 	p.ready = true;
+	p.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(TC_READY_TIMEOUT);
 	return establish(p);
+}
+
+// true when the peer of a connection in m_Pending has left: the connection is gone then
+bool CTCServer::droppedGone(SPending &p)
+{
+	// a ping waiting in it does not keep it: there is nobody to read it
+	const auto peer = probePeer(p.fd, false);
+	if (EPeer::alive == peer)
+		return false;
+	// a pending fd is m_Pending's alone, nothing else closes it: invalid can't happen
+	if (RejectLog("Transcoder: connections gone before established", p.peer.GetAddress()))
+		std::cerr << "Transcoder connection for module '" << p.module << "' from " << p.peer << " " << (EPeer::lost == peer ? "lost" : "closed") << " before it was established" << std::endl;
+	close(p.fd);
+	return true;
 }
 
 // returns false when the module's lock is taken: tried again by the next TryAccept()
@@ -675,6 +737,10 @@ bool CTCServer::establish(SPending &p)
 	std::unique_lock<std::recursive_mutex> lock(*m_Locks[pos], std::try_to_lock);
 	if (!lock.owns_lock())
 		return false;
+
+	// a tcd that left right after its handshake is not installed as a dead connection
+	if (droppedGone(p))
+		return true;
 
 	if (p.standby)
 	{
@@ -1134,7 +1200,11 @@ void CTCClient::Receive(std::queue<std::unique_ptr<STCPacket>> &queue, int ms)
 			queue.push(std::move(p_tcpack));
 		}
 
-		if (pfd.revents & POLLERR || pfd.revents & POLLHUP)
+		// as on the reflector's side: closed once nothing is left to read
+		const auto peer = classify(pfd.fd, pfd.revents, true);
+		if (EPeer::invalid == peer)
+			m_Pfd[i].fd = -1;
+		else if (EPeer::alive != peer)
 		{
 			const char m = m_Modules[i];
 			if (IsStandby(m))
@@ -1142,10 +1212,6 @@ void CTCClient::Receive(std::queue<std::unique_ptr<STCPacket>> &queue, int ms)
 			else
 				std::cerr << "Connection lost on module " << m << ", reconnecting..." << std::endl;
 			closePos(i);
-		}
-		if (pfd.revents & POLLNVAL)
-		{
-			m_Pfd[i].fd = -1;
 		}
 	}
 }
