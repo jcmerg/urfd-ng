@@ -120,6 +120,7 @@ private:
 	void acceptnew();
 	bool advance(SPending &p);
 	bool establish(SPending &p);
+	bool droppedGone(SPending &p);
 };
 
 class CTCClient : public CTCSocket
