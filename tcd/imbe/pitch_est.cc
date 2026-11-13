@@ -71,10 +71,36 @@ void imbe_vocoder_impl::pitch_est_init(void)
 
 
 
+// The sum of L_shr(L_mult(...), scale_shift) with L_add, but in 64 bits and
+// without a call per product: the same result while no partial sum leaves the
+// 32 bit range, where L_add would saturate. The sum of the magnitudes bounds
+// every partial sum, so when it fits nothing saturated; a sum that does not is
+// done again the saturating way. Both sums vectorize. Most of the encoder's
+// time went here (130 shifts a frame).
 Word32 imbe_vocoder_impl::autocorr(Word16 *sigin, Word16 shift, Word16 scale_shift)
 {
 	Word32 L_sum;
 	Word16 i;
+
+	if(scale_shift >= 0 && scale_shift < 31)
+	{
+		int64_t sum = 0, mag = 0;
+		int sat = 0;	// a product L_mult saturates: -32768 * -32768
+		for(i = 0; i < PITCH_EST_FRAME - shift; i++)
+		{
+			const Word32 p = (Word32)sigin[i] * (Word32)sigin[i + shift];
+			const Word32 t = (p == (Word32)0x40000000L ? MAX_32 : p * 2) >> scale_shift;
+			sat |= p == (Word32)0x40000000L;
+			sum += t;
+			mag += t < 0 ? -(int64_t)t : (int64_t)t;
+		}
+		if(mag <= MAX_32)
+		{
+			if(sat)
+				Overflow = 1;
+			return (Word32)sum;
+		}
+	}
 
 	L_sum = 0;
 	for(i = 0; i < PITCH_EST_FRAME - shift; i++)

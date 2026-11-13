@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.40.8** | tcd 0.22.9 | Dashboard v3.1.10
+**urfd 4.40.8** | tcd 0.22.10 | Dashboard v3.1.10
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -1102,6 +1102,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **M17 wie bei mrefd (4.15.0)**: mrefd-Kopplungen über das Ham-DHT (`M17-XXX AB` ohne Adresse, urfd veröffentlicht seine `[M17] Callsign` als mrefd-Dokument); Packet Mode im Last-Heard, und `PARROT`/`ECHO` schickt ein Paket direkt an den Absender zurück; ein Client spricht unabhängig vom Ziel auf dem Modul, auf dem er verlinkt ist, und bekommt die Streams an @ALL adressiert; die Rufzeichenprüfung von mrefd für CONN, LSTN und die Datenquelle; ein nach dem Verlinken gesperrter Client wird getrennt; ein NACK eines mrefd wird geloggt statt gedumpt, und abgelehnte Stream-Frames erzeugen keinen Dump pro Frame mehr
 
 ### Transcoder (tcd)
+- **tcd 0.22.10**: tcds eigener P25-Vocoder (OP25) wird mit Link-Time-Optimierung und `-O3` gebaut, und seine Pitch-Suche summiert in 64 Bit: Das Codieren braucht ein Drittel der Zeit (Raspberry Pi 4: 1,06 auf 0,37 ms pro Frame), das Decodieren etwa die Hälfte (0,27 auf 0,15 ms), die Frames sind bitgleich. Mit OP25 für P25 fiel ein Pi 4 bei 18 gleichzeitig sprechenden Modulen zurück (sein Thread voll), jetzt hält er mit allen 26 mit (99 % der Frames innerhalb von 15 ms)
 - **tcd 0.22.9**: Pingt jede Verbindung auch gleich nach ihrem Aufbau, damit urfd sie von Anfang an überwacht (vorher: Ein tcd, der in den ersten 5 s einfror, fiel nie auf); ein von einem Signal unterbrochenes Empfangen vom Reflektor liest den Rest des Pakets
 - **tcd 0.22.8**: Pingt den Reflektor alle 5 s auf der Verbindung jedes Moduls (vorher nur auf der ersten), damit urfd 4.40.6 einen hängenden tcd erkennt
 - **tcd 0.22.7**: Die Modulkarten des Monitors sind so hoch wie ihr LCD: Ein zweizeiliger Signalweg unter einer Karte (ein direkter Weg) streckt nicht mehr das LCD der Karte daneben
