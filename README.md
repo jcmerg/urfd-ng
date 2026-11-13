@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.11** | tcd 0.22.12 | Dashboard v3.1.11
+**urfd 4.40.11** | tcd 0.22.12 | Dashboard v3.1.12
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -755,7 +755,7 @@ Since 4.38.0 urfd writes no XML or JSON status file any more (`[Files] XmlPath` 
 
 Module names are configured once in `urfd.ini` and automatically available in the dashboard.
 
-### Dashboard v3.1.11
+### Dashboard v3.1.12
 Since v3.0.0 (urfd 4.38.0) a static page, HTML and plain JavaScript without PHP: it gets the state live over urfd's WebSocket and shows a change the moment it happens, the admin page sends its commands the same way. The pages and the look are those of v2.14; old links (`index.php?show=...`) lead to the same pages. Settings are `[Dashboard]` in `urfd.ini`; `setup.sh update` carries those of the old `config.inc.php` over once.
 
 
@@ -1067,6 +1067,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.6.0**: Dark mode redesign, admin panel, module overview with TG mappings and NXDN RAN, protocol-specific columns hidden when disabled, protocol list, QuadNet Live proxy, reflector list with search/pagination
 - **Dashboard v2.6.1**: Survives an outage of the XLX directory. Explicit timeouts on every outbound request, CallingHome failures logged instead of aborting the page render, reflector and peer lists served from an on-disk cache, admin API no longer serialized behind the PHP session lock
 - **Dashboard v2.7.0**: Locator column for stations that send an M17 GNSS position, also in `/json/stations`
+- **Dashboard v3.1.12**: A transmission on a transcoded module too short for a report from tcd (under 0.1 s of voice, a kerchunk of a few frames) shows "Short" in grey by urfd's length, like a short one with a report; its audio column and the LCD stayed empty
 - **Dashboard v3.1.11**: "Hide short calls" leaves out transmissions under 1 s (as WPSD; before 1.5 s), and longer ones only with under 0.3 s of speech (before 1 s): a "73" or "danke" of 1 s or more was hidden although it was voice. Urfd's length decides before and after tcd's report, so an entry no longer vanishes when the report comes; "No speech" (3 s and more without speech) is no longer hidden; packet loss or bit errors keep a call also when the report has too few frames to rate them. The "Short" level verdict is unchanged
 - **Dashboard v3.1.10**: "Hide short calls" also leaves out a transmission under 1.5 s on a transcoded module that got no report from tcd (a kerchunk of a few voice frames: tcd reports none under 0.1 s, urfd's length counts from the header); its audio column is empty, and it stayed in the list
 - **Dashboard v3.1.9 (urfd 4.40.6)**: "Hide short calls" on Last heard leaves out the ended transmissions under 1.5 s (kerchunks), and longer ones with under 1 s of speech unless bit errors or packet loss muted them, as the dashboard rates tcd's report; without a report from tcd by the length urfd sends (4.40.6; 3.1.10 extended it from modules without transcoding to every module); the stations on the air stay, the choice is kept in the browser
