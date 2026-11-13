@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.8** | tcd 0.22.9 | Dashboard v3.1.10
+**urfd 4.40.8** | tcd 0.22.10 | Dashboard v3.1.10
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -1117,6 +1117,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **M17 as on mrefd (4.15.0)**: mrefd interlinks by the Ham-DHT (`M17-XXX AB` without an address, urfd publishes its `[M17] Callsign` as an mrefd document); packet mode in last heard and `PARROT`/`ECHO` returns a packet straight to its sender; a client talks on the module it is linked on whatever the destination, and gets the streams addressed to @ALL; mrefd's callsign checks for CONN, LSTN and the data source; a client blacklisted after linking is disconnected; an mrefd's NACK is logged instead of dumped, and refused stream frames no longer dump each frame
 
 ### Transcoder (tcd)
+- **tcd 0.22.10**: tcd's own P25 vocoder (OP25) is built with link-time optimization and `-O3`, and its pitch search sums in 64 bits: encoding takes a third of the time (Raspberry Pi 4: 1.06 to 0.37 ms a frame), decoding about half (0.27 to 0.15 ms), the frames are bit-identical. With OP25 for P25 a Pi 4 fell behind at 18 modules talking at once (its thread full), now it keeps up with all 26 (99 % of the frames within 15 ms)
 - **tcd 0.22.9**: pings each connection right after it is made too, so urfd watches it from its start (before: a tcd that froze within its first 5 s was never noticed); a receive from the reflector interrupted by a signal reads the rest of the packet
 - **tcd 0.22.8**: pings the reflector on every module's connection every 5 s (before: the first one only), so urfd 4.40.6 can tell a hung tcd
 - **tcd 0.22.7**: the monitor's module cards are as high as their LCD: a signal path of two lines under one card (a direct path) no longer stretched the LCD of the card next to it

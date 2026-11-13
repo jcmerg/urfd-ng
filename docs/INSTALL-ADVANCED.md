@@ -40,7 +40,7 @@ There are three build scripts, one per way of running things:
 | `reflector/build.sh` | urfd, `inicheck`, `dbutil` | systemd unit `urfd` | `/usr/local/etc/urfd/` |
 | `tcd/build.sh` | tcd, `tcdmon`, the codec plugins | systemd unit `tcd` | `/usr/local/etc/tcd.ini` |
 
-`docker/build.sh` has no switches: it builds what this machine has a configuration for.
+`docker/build.sh` builds what this machine has a configuration for; `docker/build.sh urfd` or `docker/build.sh tcd` builds and restarts only that one (`start` can come with it), the other keeps running.
 
 | In `$URFD_DATA` | `docker/build.sh` builds and starts |
 |---|---|
