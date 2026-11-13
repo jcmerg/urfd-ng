@@ -13,9 +13,20 @@
 # only tcd. Unchanged sources come from the build cache.
 #
 # Usage:
-#   docker/build.sh          # rebuild, restart what runs
-#   docker/build.sh start    # rebuild and start
+#   docker/build.sh               # rebuild, restart what runs
+#   docker/build.sh start         # rebuild and start
+#   docker/build.sh [start] urfd  # only urfd (or only tcd), the other one keeps running
 set -e
+
+START=false
+ONLY=
+for arg in "$@"; do
+    case "$arg" in
+        start) START=true ;;
+        urfd|tcd) ONLY=$arg ;;
+        *) echo "Usage: $0 [start] [urfd|tcd]"; exit 1 ;;
+    esac
+done
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -39,6 +50,10 @@ if [ -f "$TCD_INI" ]; then
     export TCD_MONITOR_PORT="${TCD_MONITOR_PORT:-${port:-8080}}"
 fi
 [ ${#SERVICES[@]} -gt 0 ] || { echo "Neither $DATA/config/urfd.ini nor $TCD_INI exists, nothing to build"; exit 1; }
+if [ -n "$ONLY" ]; then
+    [[ " ${SERVICES[*]} " == *" $ONLY "* ]] || { echo "$ONLY has no configuration in $DATA, nothing to build"; exit 1; }
+    SERVICES=("$ONLY")
+fi
 
 echo "=== Building ${SERVICES[*]} ==="
 docker compose "${FILES[@]}" --profile tcd build "${SERVICES[@]}"
@@ -47,7 +62,7 @@ running=false
 for s in "${SERVICES[@]}"; do
     docker ps -q -f name="^$s\$" | grep -q . && running=true
 done
-if [ "$running" = true ] || [ "$1" = "start" ]; then
+if [ "$running" = true ] || [ "$START" = true ]; then
     echo "=== (Re)starting ${SERVICES[*]} ==="
     docker compose "${FILES[@]}" --profile tcd up -d --force-recreate "${SERVICES[@]}"
 else
