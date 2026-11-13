@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.11';
+var DASHBOARD_VERSION = '3.1.12';
 var REPO_URL = 'https://github.com/jcmerg/urfd-ng';
 
 var $ = function (id) { return document.getElementById(id); };
@@ -429,19 +429,30 @@ function audioDetails(a) {
     return lines.join('\n');
 }
 
+// a transmission on a transcoded module too short for tcd to report on (under 5
+// frames, tcd's StreamReport.h): "Short" by urfd's length, as a report would say
+function shortUnreported(st) {
+    var m = S.modules[st.module];
+    return !st.audio && st.duration > 0 && st.duration < SHORT_MS && !!m && !!m.transcoded;
+}
+function unreportedDetails(st) { return 'Too short to rate the level\n' + (st.duration < 100 ? 'Under 0.1 s' : (st.duration / 1000).toFixed(1) + ' s') + ', too short for a report from the transcoder'; }
+
 // the log's cell: a small meter of the input level, the verdict and the AGC. The meter
 // starts at -50 dBFS, where a frame counts as speech, so a level with speech always
 // shows (a "Too quiet" one below -46 dBFS too), at least a sliver of it
 function meterPos(db) { return Math.max(0, Math.min(100, (db + 50) / 50 * 100)); }
+
+// a short one is not rated: the empty track keeps the column in line, the values are in the tooltip
+function shortCell(title) {
+    return '<span class="lvl short" title="' + h(title) + '"><span class="lvl-bar" aria-hidden="true"></span><span class="lvl-w">Short</span></span>';
+}
 
 function audioCell(a, v) {
     if (!a) return '';
     var fill = a.speech_percent ? Math.max(4, meterPos(a.level_in_db)) : 0, peak = meterPos(a.peak_in_db);
     // two causes: frames the FEC could not repair (bad), frames lost on the way (lost)
     var bad = a.fec ? a.fec.uncorrectable : 0, lost = a.network_lost || 0, muted = a.decoder ? a.decoder.muted : 0;
-    // a short one is not rated: the empty track keeps the column in line, the values are in the tooltip
-    if (v.short)
-        return '<span class="lvl short" title="' + h(audioDetails(a)) + '"><span class="lvl-bar" aria-hidden="true"></span><span class="lvl-w">' + v.w + '</span></span>';
+    if (v.short) return shortCell(audioDetails(a));
     return '<span class="lvl' + SEV[v.sev] + ' lv' + v.level + '" title="' + h(audioDetails(a)) + '">'
         + '<span class="lvl-bar" aria-hidden="true"><i style="width:' + fill.toFixed(0) + '%"></i><b style="left:' + peak.toFixed(0) + '%"></b></span>'
         + '<span class="lvl-w">' + v.w + '</span>'
@@ -491,7 +502,8 @@ function lcdPanel(key, air, last, hidden) {
             + '<div><dt>Via</dt><dd>' + h(st.via) + '</dd></div>'
             + (st.locator ? '<div><dt>Locator</dt><dd>' + h(st.locator) + '</dd></div>' : '')
             + (!air && st.audio ? '<div title="' + h(audioDetails(st.audio)) + '"><dt>Audio</dt><dd>' + st.verdict.w + (audioLevel(st.audio, st.verdict) ? ', ' + audioLevel(st.audio, st.verdict) : '') + '</dd></div>'
-                + (st.audio.agc_db ? '<div><dt>AGC</dt><dd>' + dB(st.audio.agc_db.avg) + '</dd></div>' : '') : '') + '</dl>';
+                + (st.audio.agc_db ? '<div><dt>AGC</dt><dd>' + dB(st.audio.agc_db.avg) + '</dd></div>' : '')
+            : !air && shortUnreported(st) ? '<div title="' + h(unreportedDetails(st)) + '"><dt>Audio</dt><dd>Short</dd></div>' : '') + '</dl>';
     } else {
         out += '<p class="lcd-call">' + (onlyShort(key) ? 'Only short calls' : key ? 'Quiet so far' : 'Waiting for the first call') + '</p>'
             + (key ? '<div class="lcd-ch"><span>Module</span><b>' + h(key) + '</b></div>' : '');
@@ -566,7 +578,8 @@ URF.pages.users = {
                 + '<td class="m"><span class="mod' + (isLive ? ' on' : '') + '">' + h(st.module) + '</span></td>'
                 + '<td class="p">' + h(st.protocol) + '</td><td class="v">' + h(st.via) + '</td>'
                 + '<td class="meta">' + h((st.protocol + (st.via ? ' via ' + st.via : '')).trim())
-                + (st.audio && !isLive ? ' \u00b7 <span class="lvl-m' + (st.verdict.short ? ' short' : SEV[st.verdict.sev]) + '">' + st.verdict.w + (audioLevel(st.audio, st.verdict) ? ', ' + audioLevel(st.audio, st.verdict) : '') + '</span>' : '') + '</td><td class="opt">';
+                + (st.audio && !isLive ? ' \u00b7 <span class="lvl-m' + (st.verdict.short ? ' short' : SEV[st.verdict.sev]) + '">' + st.verdict.w + (audioLevel(st.audio, st.verdict) ? ', ' + audioLevel(st.audio, st.verdict) : '') + '</span>'
+                    : !isLive && shortUnreported(st) ? ' \u00b7 <span class="lvl-m short">Short</span>' : '') + '</td><td class="opt">';
             if (st.locator) {
                 // position sent along with the transmission (M17 GNSS, D-Star DPRS, YSF GPS), rounded to its locator
                 var lat = Number(st.lat), lon = Number(st.lon);
@@ -574,7 +587,7 @@ URF.pages.users = {
             } else {
                 rows += '<a class="muted" href="https://aprs.fi/' + encodeURIComponent(st.cs) + '" target="_blank" rel="noopener">aprs.fi</a>';
             }
-            rows += '</td><td class="opt au">' + (isLive ? '' : audioCell(st.audio, st.verdict)) + '</td><td class="r when" title="' + h(formatDate(st.time)) + '">' + (isLive ? 'on the air' : formatAgo(st.time)) + '</td></tr>';
+            rows += '</td><td class="opt au">' + (isLive ? '' : st.audio ? audioCell(st.audio, st.verdict) : shortUnreported(st) ? shortCell(unreportedDetails(st)) : '') + '</td><td class="r when" title="' + h(formatDate(st.time)) + '">' + (isLive ? 'on the air' : formatAgo(st.time)) + '</td></tr>';
         });
         if (!list.length) rows += '<tr class="empty"><td colspan="8">' + (S.info ? 'Nobody heard since the reflector started. Calls show up here as soon as someone keys up.' : 'Connecting to the reflector') + '</td></tr>';
         rows += '<tr class="empty" id="log-none" hidden><td colspan="8"></td></tr>';
