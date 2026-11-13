@@ -51,6 +51,11 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
+	// a send() to a peer that closed its end returns EPIPE instead of ending urfd,
+	// for every send: MSG_NOSIGNAL covers only the calls that pass it, and where a
+	// system lacks it the fallback in TCSocket.cpp and SvxAudio.cpp makes it 0
+	signal(SIGPIPE, SIG_IGN);
+
 	// Block SIGHUP/SIGTERM/SIGINT before any thread starts, so every thread inherits
 	// the mask and only sigwait in main sees them. Blocked only after the start, the
 	// threads kept SIGHUP's default action, and one arriving while main was not in

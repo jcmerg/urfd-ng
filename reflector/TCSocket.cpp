@@ -263,7 +263,7 @@ bool CTCSocket::Send(const STCPacket *packet)
 	unsigned count = 0;
 	auto data = (const unsigned char *)packet;
 	do {
-		auto n = send(m_Pfd[pos].fd, data+count, sizeof(STCPacket)-count, MSG_NOSIGNAL);	// urfd does not ignore SIGPIPE
+		auto n = send(m_Pfd[pos].fd, data+count, sizeof(STCPacket)-count, MSG_NOSIGNAL);
 		if (n <= 0)
 		{
 			if (0 == n)
@@ -289,25 +289,52 @@ bool CTCSocket::Send(const STCPacket *packet)
 
 bool CTCSocket::receive(int fd, STCPacket *packet)
 {
-	// MSG_WAITALL brings less than the packet when a signal came, or when the
-	// reflector's SO_RCVTIMEO ran out with a part of it read (a tcd that froze in
-	// the middle of a packet). After a signal the rest is read; a part after the
-	// timeout is an error and the caller closes: handed on as a packet, its rest
-	// was garbage, and the bytes still to come were read as the next packet's start
-	const auto start = std::chrono::steady_clock::now();
+	// called once poll() saw POLLIN, under the module's lock (the fd can't be closed
+	// and given to a new connection meanwhile). A packet has TC_IO_TIMEOUT to arrive
+	// whole, counted over all its parts: only a part that is not there yet waits, and
+	// for what is left of it, on both sides (the sockets have no SO_RCVTIMEO). A part
+	// when the time runs out (a peer that froze in the middle of a packet) is an error
+	// and the caller closes: handed on as a packet, its rest was garbage, and the bytes
+	// still to come were read as the next packet's start. Every error is logged here
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(TC_IO_TIMEOUT);
 	size_t count = 0;
 	while (count < sizeof(STCPacket))
 	{
-		auto n = recv(fd, (char *)packet + count, sizeof(STCPacket) - count, MSG_WAITALL);
-		if (n < 0 && EINTR == errno)
-			continue;
+		auto n = recv(fd, (char *)packet + count, sizeof(STCPacket) - count, MSG_DONTWAIT);
 		if (n > 0)
-			count += n;
-		if (n <= 0 || (count < sizeof(STCPacket) && std::chrono::steady_clock::now() - start >= std::chrono::seconds(TC_IO_TIMEOUT)))
 		{
-			// BSD keeps the part and reports the timeout alone
-			if (count || (n < 0 && (EAGAIN == errno || EWOULDBLOCK == errno)))
-				std::cerr << "Transcoder packet on module '" << GetMod(fd) << "' incomplete (" << count << " of " << sizeof(STCPacket) << " bytes, hung?): closing the connection" << std::endl;
+			count += n;
+			continue;
+		}
+		if (0 == n)
+		{
+			if (count)
+				std::cerr << "Transcoder packet on module '" << GetMod(fd) << "' incomplete (" << count << " of " << sizeof(STCPacket) << " bytes, connection closed)" << std::endl;
+			else
+				std::cerr << "Transcoder connection on module '" << GetMod(fd) << "' closed by the other end" << std::endl;
+			return true;
+		}
+		if (EINTR == errno)
+			continue;
+		if (EAGAIN != errno && EWOULDBLOCK != errno)
+		{
+			std::cerr << "Transcoder connection on module '" << GetMod(fd) << "': receive failed (" << strerror(errno) << ")" << std::endl;
+			return true;
+		}
+
+		const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+		struct pollfd pfd = { fd, POLLIN, 0 };
+		const int rv = left > 0 ? poll(&pfd, 1, (int)left) : 0;
+		if (rv < 0 && EINTR == errno)
+			continue;
+		if (rv < 0)
+		{
+			std::cerr << "Transcoder connection on module '" << GetMod(fd) << "': poll failed (" << strerror(errno) << ") with " << count << " of " << sizeof(STCPacket) << " bytes read" << std::endl;
+			return true;
+		}
+		if (0 == rv)
+		{
+			std::cerr << "Transcoder packet on module '" << GetMod(fd) << "' incomplete (" << count << " of " << sizeof(STCPacket) << " bytes after " << TC_IO_TIMEOUT << " s, hung?): closing the connection" << std::endl;
 			return true;
 		}
 	}
@@ -396,29 +423,6 @@ void CTCServer::KeepReport(const STCPacket &packet)
 		m_Reports.push_back({ packet.module, packet.streamid, report });
 }
 
-bool CTCServer::ReceiveNoPoll(char module, STCPacket *packet)
-{
-	const auto pos = m_Modules.find(module);
-	if (pos == std::string::npos)
-		return false;
-	auto lock = lockPos(pos);
-	if (m_Pfd[pos].fd < 0)
-		return false;
-
-	if (receive(m_Pfd[pos].fd, packet))
-	{
-		closePos(pos);
-		return false;
-	}
-	heard(pos, packet->codec_in == ECodecType::ping);
-	if (packet->codec_in == ECodecType::ping)
-	{
-		KeepReport(*packet);
-		return false;
-	}
-	return true;
-}
-
 bool CTCServer::Open(const std::string &address, const std::string &modules, uint16_t port)
 {
 	m_Modules.assign(modules);
@@ -500,8 +504,10 @@ void CTCServer::TryAccept(int ms)
 	// Poll the listen socket and the connections in their handshake
 	std::vector<struct pollfd> pfds(1 + m_Pending.size());
 	pfds[0] = { m_ListenFd, POLLIN, 0 };
+	// one through its handshake (ready) only waits for its module's lock: polled,
+	// its peer closing or sending made poll() return at once, again and again
 	for (unsigned i = 0; i < m_Pending.size(); i++)
-		pfds[i + 1] = { m_Pending[i].fd, POLLIN, 0 };
+		pfds[i + 1] = { m_Pending[i].ready ? -1 : m_Pending[i].fd, POLLIN, 0 };
 	if (poll(pfds.data(), pfds.size(), ms) < 0)
 		return;
 
@@ -723,12 +729,11 @@ bool CTCServer::establish(SPending &p)
 	setsockopt(p.fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
 
 	// a tcd that hangs while a stream is on the air stops reading: its buffers fill
-	// and a send would block for good, holding the module's lock; one that froze in
-	// the middle of a packet leaves the receive (MSG_WAITALL) waiting for its rest.
-	// Both give up after TC_IO_TIMEOUT, and the connection is closed
+	// and a send would block for good, holding the module's lock. It gives up after
+	// TC_IO_TIMEOUT, and the connection is closed (one that froze in the middle of a
+	// packet: receive() keeps its own TC_IO_TIMEOUT)
 	struct timeval iotimeout = { TC_IO_TIMEOUT, 0 };
 	setsockopt(p.fd, SOL_SOCKET, SO_SNDTIMEO, &iotimeout, sizeof(iotimeout));
-	setsockopt(p.fd, SOL_SOCKET, SO_RCVTIMEO, &iotimeout, sizeof(iotimeout));
 
 	{ std::ostringstream s; s << "File descriptor " << p.fd << " opened TCP port for module '" << p.module << "' on " << p.peer; std::cout << s.str() << std::endl; }
 
@@ -1090,10 +1095,14 @@ void CTCClient::ReConnect() // and sometimes ping
 
 void CTCClient::Receive(std::queue<std::unique_ptr<STCPacket>> &queue, int ms)
 {
-	for (auto &pfd : m_Pfd)
+	// polled on a copy: another thread (SendToReflector, the reconnect) may close a
+	// connection and make a new one meanwhile, maybe with the same fd number. Each
+	// one is then read under its module's lock, and only if it is still the one polled
+	std::vector<struct pollfd> pfds(m_Pfd);
+	for (auto &pfd : pfds)
 		pfd.revents = 0;
 
-	auto rv = poll(m_Pfd.data(), m_Pfd.size(), ms);
+	auto rv = poll(pfds.data(), pfds.size(), ms);
 
 	if (rv < 0)
 	{
@@ -1104,9 +1113,11 @@ void CTCClient::Receive(std::queue<std::unique_ptr<STCPacket>> &queue, int ms)
 	if (0 == rv)
 		return;
 
-	for (auto &pfd : m_Pfd)
+	for (size_t i = 0; i < pfds.size(); i++)
 	{
-		if (pfd.fd < 0)
+		const auto &pfd = pfds[i];
+		auto lock = lockPos(i);
+		if (pfd.fd < 0 || pfd.fd != m_Pfd[i].fd)
 			continue;
 
 		if (pfd.revents & POLLIN)
@@ -1115,28 +1126,26 @@ void CTCClient::Receive(std::queue<std::unique_ptr<STCPacket>> &queue, int ms)
 			if (receive(pfd.fd, p_tcpack.get()))
 			{
 				p_tcpack.reset();
-				if (IsStandby(GetMod(pfd.fd)))
-					std::cout << "Module " << GetMod(pfd.fd) << " (standby): given back (its transcoder is back, or the link dropped)" << std::endl;
-				Close(pfd.fd);
+				if (IsStandby(m_Modules[i]))
+					std::cout << "Module " << m_Modules[i] << " (standby): given back (its transcoder is back, or the link dropped)" << std::endl;
+				closePos(i);
+				continue;
 			}
-			else
-			{
-				queue.push(std::move(p_tcpack));
-			}
+			queue.push(std::move(p_tcpack));
 		}
 
-		if (pfd.fd >= 0 && (pfd.revents & POLLERR || pfd.revents & POLLHUP))
+		if (pfd.revents & POLLERR || pfd.revents & POLLHUP)
 		{
-			const char m = GetMod(pfd.fd);
+			const char m = m_Modules[i];
 			if (IsStandby(m))
 				std::cout << "Module " << m << " (standby): given back (its transcoder is back, or the link dropped)" << std::endl;
 			else
 				std::cerr << "Connection lost on module " << m << ", reconnecting..." << std::endl;
-			Close(pfd.fd);
+			closePos(i);
 		}
 		if (pfd.revents & POLLNVAL)
 		{
-			pfd.fd = -1;
+			m_Pfd[i].fd = -1;
 		}
 	}
 }
