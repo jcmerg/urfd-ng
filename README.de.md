@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.40.10** | tcd 0.22.12 | Dashboard v3.1.10
+**urfd 4.40.10** | tcd 0.22.12 | Dashboard v3.1.11
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -740,7 +740,7 @@ Seit 4.38.0 schreibt urfd keine XML- oder JSON-Statusdatei mehr (`[Files] XmlPat
 
 Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Dashboard zur Verfügung.
 
-### Dashboard v3.1.10
+### Dashboard v3.1.11
 Seit v3.0.0 (urfd 4.38.0) eine statische Seite, HTML und einfaches JavaScript ohne PHP: Sie bekommt den Stand live über den WebSocket von urfd und zeigt eine Änderung in dem Moment, in dem sie passiert; die Admin-Seite schickt ihre Befehle auf demselben Weg. Seiten und Aussehen sind die von v2.14; alte Links (`index.php?show=...`) führen auf dieselben Seiten. Die Einstellungen stehen in `[Dashboard]` in `urfd.ini`; `setup.sh update` übernimmt die der alten `config.inc.php` einmal.
 
 
@@ -754,7 +754,7 @@ Seit v3.0.0 (urfd 4.38.0) eine statische Seite, HTML und einfaches JavaScript oh
 In v2.9.0 neu gestaltet als Frontplatte eines Funkgeräts: Ein bernsteinfarbenes LCD zeigt, wer gerade sendet, die Module sind ein Tastenfeld, der Rest sind schlichte Tabellen. Davor: dunkles Design (v2.6.0), robust gegen Ausfälle des Verzeichnisses (v2.6.1), M17-Positionen in der Last-Heard-Liste (v2.7.0), Eintrag ins Verzeichnis an den Reflektor abgegeben (v2.8.0), Sicherheitskorrekturen (v2.8.1, v2.8.2), Korrekturen an Statusdatei und Admin-Socket (v2.8.3). Seit v2.10.0 steht der Vorname neben dem Rufzeichen, aus den ID-Datenbanken, die urfd lädt (ab urfd 4.12.0).
 
 **Seiten:**
-- **Last heard**: Das LCD zeigt die Station, die gerade sendet, mit Modul, Betriebsart, Weg und laufender Sendezeit, sonst gedimmt die zuletzt gehörte. Daneben eine Taste pro Modul: bernsteinfarben, wenn Knoten verbunden sind, mit roter Markierung, solange jemand sendet. Eine Taste schaltet LCD und Log auf ihr Modul; ohne Taste zeigt das LCD die zuletzt begonnene Aussendung und nennt die weiteren Module auf Sendung; der Rufzeichenfilter versteht Platzhalter (`DL*`). Beide Filter überstehen das Neuladen. Auf einem transkodierten Modul zeigt jeder Eintrag, wie der Durchgang klang (Eingangspegel, übersteuert oder nicht, was die AGC änderte, FEC), wie tcd ihn meldete. „Hide short calls“ blendet beendete Durchgänge unter 1,5 s aus (Kerchunks), und längere mit weniger als 1 s Sprache, außer Bitfehler oder Paketverlust haben sie stummgeschaltet (auf einem nicht transkodierten Modul allein nach der Länge); eine Station auf Sendung bleibt immer sichtbar. Die Wahl merkt sich der Browser.
+- **Last heard**: Das LCD zeigt die Station, die gerade sendet, mit Modul, Betriebsart, Weg und laufender Sendezeit, sonst gedimmt die zuletzt gehörte. Daneben eine Taste pro Modul: bernsteinfarben, wenn Knoten verbunden sind, mit roter Markierung, solange jemand sendet. Eine Taste schaltet LCD und Log auf ihr Modul; ohne Taste zeigt das LCD die zuletzt begonnene Aussendung und nennt die weiteren Module auf Sendung; der Rufzeichenfilter versteht Platzhalter (`DL*`). Beide Filter überstehen das Neuladen. Auf einem transkodierten Modul zeigt jeder Eintrag, wie der Durchgang klang (Eingangspegel, übersteuert oder nicht, was die AGC änderte, FEC), wie tcd ihn meldete. „Hide short calls“ blendet beendete Durchgänge unter 1 s aus (Kerchunks), und längere mit weniger als 0,3 s Sprache, außer Bitfehler oder Paketverlust haben sie stummgeschaltet (ohne Bericht von tcd allein nach der Länge); ein „73“ ab 1 s bleibt, ebenso „No speech“ (eine hängende PTT); eine Station auf Sendung bleibt immer sichtbar. Die Wahl merkt sich der Browser.
 - **Modules**: Eine Tabelle mit einer Zeile pro Modul: Name, verbundene Knoten (aufklappbar), DMR+-TG, YSF-DG-ID, NXDN-RAN und -Ziel-ID, Transcoding und Brücken (statisch, und gestrichelt für die zur Laufzeit angelegten). Spalten ausgeschalteter Protokolle werden ausgeblendet. Darunter die Server-Protokolle mit ihren Ports; Client-Protokolle, die nach außen verbinden, fehlen. `?show=modulesd` aus alten Links landet hier.
 - **Links**, **Peers**: Verbundene Knoten und Partner-Reflektoren, mit Verbindungsdauer und der IP, soweit `[Dashboard] LinksIP` / `PeersIP` es erlauben.
 - **Reflector list**: Das XLX-Verzeichnis mit Suche und 25 pro Seite.
@@ -1051,6 +1051,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v3.1.11**: „Hide short calls“ blendet Durchgänge unter 1 s aus (wie WPSD; vorher 1,5 s), längere nur mit weniger als 0,3 s Sprache (vorher 1 s): ein „73“ oder „danke“ ab 1 s wurde ausgeblendet, obwohl es Sprache war. Die Länge von urfd entscheidet vor und nach dem Bericht von tcd, ein Eintrag verschwindet also nicht mehr, wenn der Bericht kommt; „No speech“ (3 s und mehr ohne Sprache) wird nicht mehr ausgeblendet; Paketverlust oder Bitfehler halten einen Ruf auch, wenn der Bericht zu wenige Frames hat, um sie zu bewerten. Die Pegelbewertung „Short“ bleibt
 - **Dashboard v3.1.10**: „Hide short calls“ blendet auch einen Durchgang unter 1,5 s auf einem transkodierten Modul aus, der keinen Bericht von tcd bekam (ein Kerchunk aus wenigen Sprachframes: tcd berichtet unter 0,1 s nicht, die Länge von urfd zählt ab dem Header); seine Audio-Spalte ist leer, und er blieb in der Liste
 - **Dashboard v3.1.9 (urfd 4.40.6)**: „Hide short calls“ auf Last heard blendet beendete Durchgänge unter 1,5 s aus (Kerchunks), und längere mit weniger als 1 s Sprache, außer Bitfehler oder Paketverlust haben sie stummgeschaltet, wie das Dashboard den Bericht von tcd bewertet; ohne Bericht von tcd nach der Länge, die urfd schickt (4.40.6; 3.1.10 hat das von Modulen ohne Transcoding auf jedes Modul erweitert); Stationen auf Sendung bleiben, die Wahl merkt sich der Browser
 - **Dashboard v3.1.8 (urfd 4.40.2)**: Auf der Seite Modules hat die Protokoll-Liste („Protocols“) denselben Abstand nach oben wie die übrigen Teile einer Seite; vorher saß ihre Überschrift direkt unter der Modul-Tabelle

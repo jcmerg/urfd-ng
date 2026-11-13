@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.10';
+var DASHBOARD_VERSION = '3.1.11';
 var REPO_URL = 'https://github.com/jcmerg/urfd-ng';
 
 var $ = function (id) { return document.getElementById(id); };
@@ -354,16 +354,25 @@ function dB(v) { return (v > 0 ? '+' : v < 0 ? '\u2212' : '') + Math.abs(v).toFi
 // without any speech is "No speech" only from 3 s on: a kerchunk may hold the
 // key for 2 s, a longer silent one is a stuck PTT or a dead microphone
 var SHORT_MS = 1500, SHORT_SPEECH_MS = 1000, NO_SPEECH_MS = 3000, MIN_FEC_FRAMES = 50;
+// "Hide short calls": under HIDE_MS (as WPSD), and a longer one with under HIDE_SPEECH_MS
+// of speech (a kerchunk with the key held). A "73" or "danke" of HIDE_MS or more has
+// speech and stays, though "Short" (too short to rate its level)
+var HIDE_MS = 1000, HIDE_SPEECH_MS = 300;
 function speechMs(a) { return a.duration_ms * (a.speech_percent || 0) / 100; }
-// what "Hide short calls" leaves out: an ended transmission rated short by tcd's report
-// (audioVerdict), or, without one, one shorter than SHORT_MS by urfd's length: a module
-// without transcoding, and a kerchunk tcd sends no report for (under 0.1 s of voice
-// frames, while urfd's length counts from the header: that one stayed, 3.1.9).
-// Two lengths, then: with a report tcd's (voice frames, the one audioDetails shows),
-// without one urfd's (header to last packet)
+// what "Hide short calls" leaves out: an ended transmission shorter than HIDE_MS by
+// urfd's length (header to last packet), on every module and before and after tcd's
+// report alike, so an entry does not vanish when the report comes (tcd's length, voice
+// frames only, for an urfd before 4.40.6 that sends none). With tcd's report also a
+// longer one with next to no speech, unless the FEC or the network muted it; never
+// "No speech" (a stuck PTT or a dead microphone is worth seeing). Not the same as the
+// "Short" verdict, which only says the level was not rated
 function hideable(st) {
-    if (st.verdict) return !!st.verdict.hide;
-    return st.duration > 0 && st.duration < SHORT_MS;
+    var a = st.audio;
+    var len = st.duration > 0 ? st.duration : a ? a.duration_ms : 0;
+    if (len > 0 && len < HIDE_MS) return true;
+    if (!a || !st.verdict || st.verdict.w === 'No speech') return false;
+    var muted = a.network_lost > 0 || (a.fec && a.fec.uncorrectable > 0);
+    return speechMs(a) < HIDE_SPEECH_MS && !muted;
 }
 // the entries the log has room for
 function logList() { return S.lastHeard.slice(0, options().last_heard_rows || 40); }
@@ -390,7 +399,6 @@ function audioVerdict(a) {
     var rated = a.fec && a.fec.frames >= MIN_FEC_FRAMES;
     var lost = rated ? a.fec.uncorrectable / a.fec.frames * 100 : 0;
     var level = 0, w = 'Good', short = false;
-    // for "Hide short calls", whatever else is wrong with it
     var tooShort = a.duration_ms < SHORT_MS || speechMs(a) < SHORT_SPEECH_MS;	// "Short", and with no speech too
     if (!a.speech_percent && a.duration_ms >= NO_SPEECH_MS) { level = 1; w = 'No speech'; }	// a carrier without modulation, or all of it muted
     else if (tooShort) { short = true; w = 'Short'; }
@@ -404,10 +412,7 @@ function audioVerdict(a) {
     if (fec > level && fec >= loss) w = 'Bit errors';
     else if (loss > level) w = 'Packet loss';
     var sev = Math.max(level, fec, loss);
-    // for "Hide short calls": under SHORT_MS whatever else is wrong with it (a kerchunk);
-    // a longer one with little or no speech only when the FEC or the network did not mute it
-    var hide = a.duration_ms < SHORT_MS || (tooShort && Math.max(fec, loss) === 0);
-    return { w: w, sev: sev, level: level, warn: sev > 0, short: short && sev === 0, hide: hide };
+    return { w: w, sev: sev, level: level, warn: sev > 0, short: short && sev === 0 };
 }
 
 var SEV = ['', ' warn', ' bad'];
@@ -502,7 +507,7 @@ URF.pages.users = {
             + '<div><div class="keys-head"><h2>Modules</h2>' + (f ? '<p class="hint">Tap one to follow it in the display and the log</p>' : '') + '</div><div class="keys" id="keys"></div></div></section>'
             + '<section aria-labelledby="log-title"><div class="tbl-head"><h2 id="log-title">Last heard</h2>'
             + '<div class="filters">' + (f ? '<label for="f-call">Callsign</label><input class="field" id="f-call" type="search" placeholder="DL*, *JC" autocomplete="off" spellcheck="false"><button class="chip" id="f-clear" type="button" hidden>Clear filters</button>' : '')
-            + '<button class="chip" id="f-short" type="button" aria-pressed="false" title="Leave out ended transmissions under ' + SHORT_MS / 1000 + ' s (kerchunks), and longer ones with under ' + SHORT_SPEECH_MS / 1000 + ' s of speech unless bit errors or packet loss muted them (on a module without transcoding by the length alone)">Hide short calls</button></div>'
+            + '<button class="chip" id="f-short" type="button" aria-pressed="false" title="Leave out ended transmissions under ' + HIDE_MS / 1000 + ' s (kerchunks), and longer ones with under ' + HIDE_SPEECH_MS / 1000 + ' s of speech unless bit errors or packet loss muted them (without a report from tcd by the length alone); never one with no speech at all from 3 s on">Hide short calls</button></div>'
             + '</div><div class="scroll"><table class="t" id="log"><thead><tr><th class="state"><span class="sr">State</span></th><th>Callsign</th><th>Module</th><th>Mode</th><th>Via</th><th class="opt">Position</th><th class="opt">Audio</th><th class="r">Heard</th></tr></thead><tbody id="log-body"></tbody></table></div></section></div>';
         if (!f) filter = { m: null, cs: '' };
         el.addEventListener('click', function (e) {
