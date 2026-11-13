@@ -160,9 +160,11 @@ void CDmrmmdvmProtocol::Task(void)
 		// crack the packet
 		if ( IsValidDvFramePacket(Ip, Buffer, Header, Frames) )
 		{
+			// none while the call waits for its first voice
 			for ( int i = 0; i < 3; i++ )
 			{
-				OnDvFramePacketIn(Frames.at(i), &Ip);
+				if ( Frames.at(i) )
+					OnDvFramePacketIn(Frames.at(i), &Ip);
 			}
 		}
 		else if ( IsValidDvHeaderPacket(Buffer, Header, &Cmd, &CallType, &Slot) )
@@ -177,7 +179,8 @@ void CDmrmmdvmProtocol::Task(void)
 		}
 		else if ( IsValidDvLastFramePacket(Buffer, LastFrame) )
 		{
-			OnDvFramePacketIn(LastFrame, &Ip);
+			if ( ! DropPendingCall(LastFrame->GetStreamId(), Ip, "ended") )
+				OnDvFramePacketIn(LastFrame, &Ip);
 		}
 		else if ( IsValidConnectPacket(Buffer, &Callsign, Ip, &rawDmrId) )
 		{
@@ -338,6 +341,7 @@ void CDmrmmdvmProtocol::Task(void)
 
 	// handle end of streaming timeout
 	CheckStreamsTimeout();
+	CheckPendingCalls();
 
 	// handle queue from reflector
 	HandleQueue();
@@ -367,11 +371,17 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 
 	// find the stream
 	auto stream = GetStream(Header->GetStreamId());
+	auto pending = m_PendingCalls.find(Header->GetStreamId());
 	if ( stream )
 	{
 		// stream already open
 		// skip packet, but tickle the stream
 		stream->Tickle();
+	}
+	else if ( pending != m_PendingCalls.end() && pending->second.ip == Ip )
+	{
+		// header repeated while the call waits for its first voice
+		pending->second.lastPacket.start();
 	}
 	else
 	{
@@ -455,15 +465,17 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 			// and now, re-check module is valid && that it's not a private call
 			if ( !closedTarget && g_Reflector.IsValidModule(rpt2.GetCSModule()) && (CallType == DMR_GROUP_CALL) )
 			{
-				// yes, try to open the stream
-				if ( (stream = g_Reflector.OpenStream(Header, client)) != nullptr )
-				{
-					// keep the handle
-					m_Streams[stream->GetStreamId()] = stream;
-					if (sourceTG != 0)
-						stream->SetSourceTG(sourceTG);
-					lastheard = true;
-				}
+				// yes, the stream opens with the first voice (OpenPendingCall())
+				const uint16_t sid = Header->GetStreamId();
+				SPendingCall &call = m_PendingCalls[sid];
+				call.header = std::move(Header);
+				call.ip = Ip;
+				call.sourceTG = sourceTG;
+				call.my = my;
+				call.rpt1 = rpt1;
+				call.rpt2 = rpt2;
+				call.zeroFrames = 0;
+				call.lastPacket.start();
 			}
 		}
 		else
@@ -480,6 +492,60 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 			g_Reflector.GetUsers()->Hearing(my, rpt1, rpt2, "MMDVM");
 			g_Reflector.ReleaseUsers();
 		}
+	}
+}
+
+// the first voice of a waiting call: its stream opens now
+void CDmrmmdvmProtocol::OpenPendingCall(uint16_t streamId)
+{
+	auto it = m_PendingCalls.find(streamId);
+	if ( it == m_PendingCalls.end() )
+		return;
+	SPendingCall call = std::move(it->second);
+	m_PendingCalls.erase(it);
+
+	bool lastheard = false;
+	std::shared_ptr<CClient>client = g_Reflector.GetClients()->FindClient(call.ip, EProtocol::dmrmmdvm);
+	if ( client )
+	{
+		auto stream = g_Reflector.OpenStream(call.header, client);
+		if ( stream )
+		{
+			// keep the handle
+			m_Streams[stream->GetStreamId()] = stream;
+			if (call.sourceTG != 0)
+				stream->SetSourceTG(call.sourceTG);
+			lastheard = true;
+		}
+	}
+	g_Reflector.ReleaseClients();
+
+	if ( lastheard )
+	{
+		g_Reflector.GetUsers()->Hearing(call.my, call.rpt1, call.rpt2, "MMDVM");
+		g_Reflector.ReleaseUsers();
+	}
+}
+
+// a waiting call that ends or times out without voice: no stream, no last heard
+bool CDmrmmdvmProtocol::DropPendingCall(uint16_t streamId, const CIp &Ip, const char *why)
+{
+	auto it = m_PendingCalls.find(streamId);
+	if ( it == m_PendingCalls.end() || !(it->second.ip == Ip) )
+		return false;
+	std::cout << "MMDVM: call from " << it->second.my << " to TG" << it->second.sourceTG << " " << why << " without voice (" << it->second.zeroFrames << " zero frames), ignored" << std::endl;
+	m_PendingCalls.erase(it);
+	return true;
+}
+
+void CDmrmmdvmProtocol::CheckPendingCalls(void)
+{
+	for ( auto it = m_PendingCalls.begin(); it != m_PendingCalls.end(); )
+	{
+		auto next = std::next(it);
+		if ( it->second.lastPacket.time() > STREAM_TIMEOUT )
+			DropPendingCall(it->first, it->second.ip, "timed out");
+		it = next;
 	}
 }
 
@@ -952,7 +1018,10 @@ bool CDmrmmdvmProtocol::IsValidDvFramePacket(const CIp &Ip, const CBuffer &Buffe
 			uint16_t uiStreamId = DmrdStreamId(Buffer, uiSlot);
 
 			auto stream = GetStream(uiStreamId, &Ip);
-			if ( !stream )
+			auto pending = m_PendingCalls.find(uiStreamId);
+			if ( pending != m_PendingCalls.end() && !(pending->second.ip == Ip) )
+				pending = m_PendingCalls.end();
+			if ( !stream && pending == m_PendingCalls.end() )
 			{
 				// rate-limit: only log once per stream ID
 				static uint16_t lastLateEntryId = 0;
@@ -1030,6 +1099,26 @@ bool CDmrmmdvmProtocol::IsValidDvFramePacket(const CIp &Ip, const CBuffer &Buffe
 			// frame3
 			memcpy(dmrambe, &dmr3ambe[18], 9);
 			frames[2] = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(dmrambe, dmrsync, uiStreamId, uiVoiceSeq, 3, false));
+
+			// a call that waits for its first voice: three frames of zero bytes
+			// are none, anything else opens its stream (the late entry above
+			// may have just made it wait)
+			pending = m_PendingCalls.find(uiStreamId);
+			if ( !stream && pending != m_PendingCalls.end() && pending->second.ip == Ip )
+			{
+				bool zero = true;
+				for ( auto b : dmr3ambe )
+					zero = zero && (b == 0);
+				if ( zero )
+				{
+					pending->second.zeroFrames += 3;
+					pending->second.lastPacket.start();
+					for ( auto &f : frames )
+						f.reset();
+					return true;
+				}
+				OpenPendingCall(uiStreamId);
+			}
 
 			// check
 			if (frames[0] && frames[1] && frames[2])
