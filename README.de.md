@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.40.10** | tcd 0.22.12 | Dashboard v3.1.11
+**urfd 4.40.11** | tcd 0.22.12 | Dashboard v3.1.11
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -968,6 +968,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **Ein DMR-Ruf ohne Sprache an `[MMDVM]` (4.40.11)**: Manche Geräte senden nach einem Wechsel der Sprechgruppe von sich aus einen ganzen Durchgang von etwa 3 s, dessen Sprachframes nur aus Null-Bytes bestehen. urfd zählte ihn als Ruf: Last Heard, „auf Sendung“ im Dashboard und 3 s Nichts an alle anderen Stationen des Moduls. Ein Ruf an `[MMDVM]` öffnet seinen Stream jetzt mit dem ersten Sprachframe, der nicht nur aus Nullen besteht; endet er ohne einen oder läuft er ab, wird er verworfen und geloggt (`call from ... without voice ... ignored`). Der Slot folgt der Sprechgruppe weiter schon beim Header, das Umschalten per Tastendruck geht also wie bisher. Header und Terminator allein erscheinen auch nicht mehr im Last Heard
 - **Start ohne die externe Adresse (4.40.3)**: Antwortete beim Start keiner der `IPCheckUrl`-Dienste (DNS nach einem Boot noch nicht da), beendete sich urfd mit „could not detect IPv4 address“, supervisord gab nach einigen Versuchen auf, und der Reflektor blieb aus, bis er von Hand neu gestartet wurde; jetzt startet er mit einer Warnung und fragt alle 10 s nach, bis ein Dienst antwortet, übernimmt diese erste Antwort sofort und meldet sie an das XLX-Verzeichnis und das DHT (mit `IPCheckInterval = 0` bleibt es ein Fehler)
 - **OpenBridge-Review-Korrekturen (4.40.1)**: Ein DMR-Gespräch, das ohne Header spät auf ein Modul kommt, ging an den Master oder die OpenBridge mit seinem ersten Burst nach dem Header wieder mit der Nummer 0, und FreeDMR verwarf ihn; der Besitzer des Streams eines Moduls wird atomar gelesen und gesetzt, da die Threads anderer Protokolle ihn lesen, während er öffnet und schließt; OpenBridge sucht ein Ziel, das beim Start nicht aufgelöst wurde, alle 10 s erneut (DNS noch nicht da), richtet ihre Schlüssel und BLAKE2b einmal statt je Paket ein und zeichnet keine Frames für eine Echo-Prüfung auf, die sie nie macht; ein ungültiges `SourceServer` oder `PeerId` bleibt mit einer Warnung ungesetzt (es wurde 0, was die Voreinstellung bzw. die Prüfung abschaltete); `[OpenBridge]` in der `urfd.ini` ist ein auskommentierter Block wie `[MMDVM]`, ohne den Abschnitt aus
 - **OpenBridge (4.40.0)**: eine Verbindung von Server zu Server mit einem DMR-Netz (HBlink3, HBlink4, FreeDMR, BrandMeister), jede abgebildete Talkgruppe gleichzeitig, klassisch (HMAC-SHA1) oder FreeDMRs Version 5 (DMRE, BLAKE2b, Keepalives, Source Quench), die von selbst auf FreeDMR wechselt, siehe [OpenBridge](#openbridge-4400)

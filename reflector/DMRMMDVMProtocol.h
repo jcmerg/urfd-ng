@@ -135,6 +135,11 @@ protected:
 	bool IsValidDvFramePacket(const CIp &, const CBuffer &, std::unique_ptr<CDvHeaderPacket> &, std::array<std::unique_ptr<CDvFramePacket>, 3> &);
 	bool IsValidDvLastFramePacket(const CBuffer &, std::unique_ptr<CDvFramePacket> &);
 
+	// calls waiting for their first voice
+	void OpenPendingCall(uint16_t streamId);
+	bool DropPendingCall(uint16_t streamId, const CIp &, const char *why);
+	void CheckPendingCalls(void);
+
 	// packet encoding helpers
 	void EncodeKeepAlivePacket(CBuffer *, std::shared_ptr<CClient>);
 	void EncodeAckPacket(CBuffer *, const CCallsign &);
@@ -194,6 +199,20 @@ protected:
 		size_t operator()(const SCacheKey &k) const { return std::hash<char>()(k.module) ^ (std::hash<uint8_t>()(k.slot) << 8); }
 	};
 	std::unordered_map<SCacheKey, CDmrmmdvmStreamCacheItem, SCacheKeyHash> m_StreamsCache;
+
+	// a group call opens its stream with its first voice that is not all zeros:
+	// some devices key up on their own after a TG change, three seconds of
+	// zero bytes between header and terminator, which is not a call. The slot
+	// follows the TG at the header all the same. Keyed by stream id.
+	struct SPendingCall {
+		std::unique_ptr<CDvHeaderPacket> header;
+		CIp ip;
+		uint32_t sourceTG = 0;
+		CCallsign my, rpt1, rpt2;
+		CTimer lastPacket;
+		uint32_t zeroFrames = 0;
+	};
+	std::unordered_map<uint16_t, SPendingCall> m_PendingCalls;
 
 	// authentication — per-connection random salt
 	struct SPendingAuthEntry {

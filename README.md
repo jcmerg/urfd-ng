@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.40.10** | tcd 0.22.12 | Dashboard v3.1.11
+**urfd 4.40.11** | tcd 0.22.12 | Dashboard v3.1.11
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -983,6 +983,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **A DMR call without voice on `[MMDVM]` (4.40.11)**: some devices key up on their own after a talkgroup change, a full transmission of about 3 s whose voice frames are all zero bytes. urfd counted it as a call: last heard, the dashboard's "on air", and 3 s of nothing to every other station on the module. A call on `[MMDVM]` now opens its stream with its first voice frame that is not all zeros; one that ends or times out without any is dropped and logged (`call from ... without voice ... ignored`). The slot still follows the talkgroup at the header, so switching by keying up works as before. A header and terminator alone no longer show up in last heard either
 - **Start without the external address (4.40.3)**: when none of the `IPCheckUrl` services answered at the start (DNS not up yet after a boot), urfd ended with "could not detect IPv4 address", supervisord gave up after a few tries and the reflector stayed down until restarted by hand; now it starts with a warning and asks every 10 s until a service answers, takes that first answer at once and reports it to the XLX directory and the DHT (with `IPCheckInterval = 0` it is still an error)
 - **OpenBridge review fixes (4.40.1)**: a DMR call that joins a module late (no header) went to the master or the OpenBridge with its first burst numbered 0 again after the header, and FreeDMR dropped it; the owner of a module's stream is read and set atomically, as other protocols' threads read it while it opens and closes; OpenBridge looks up a target that did not resolve at the start every 10 s (DNS not up yet), keeps its keys and its BLAKE2b set up once instead of per packet and records no frames for an echo check it never makes; an invalid `SourceServer` or `PeerId` stays unset with a warning (it became 0, which turned the default or the check off); `[OpenBridge]` in `urfd.ini` is a commented block like `[MMDVM]`, off without the section
 - **OpenBridge (4.40.0)**: a link server to server with a DMR network (HBlink3, HBlink4, FreeDMR, BrandMeister), every mapped talkgroup at the same time, classic (HMAC-SHA1) or FreeDMR's version 5 (DMRE, BLAKE2b, keepalives, source quench), turning FreeDMR by itself, see [OpenBridge](#openbridge-4400)
