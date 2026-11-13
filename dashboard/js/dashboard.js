@@ -358,7 +358,9 @@ function speechMs(a) { return a.duration_ms * (a.speech_percent || 0) / 100; }
 // what "Hide short calls" leaves out: an ended transmission rated short by tcd's report
 // (audioVerdict), or, without one, one shorter than SHORT_MS by urfd's length: a module
 // without transcoding, and a kerchunk tcd sends no report for (under 0.1 s of voice
-// frames, while urfd's length counts from the header: that one stayed, 3.1.9)
+// frames, while urfd's length counts from the header: that one stayed, 3.1.9).
+// Two lengths, then: with a report tcd's (voice frames, the one audioDetails shows),
+// without one urfd's (header to last packet)
 function hideable(st) {
     if (st.verdict) return !!st.verdict.hide;
     return st.duration > 0 && st.duration < SHORT_MS;

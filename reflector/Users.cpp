@@ -193,7 +193,11 @@ void CUsers::StationRenamed(char module, const CCallsign &from, const CCallsign 
 		DispatchStationEvent("station_started", renamed, was);
 	}
 
-	// the newest entry of the old callsign on the module, as Hearing() made it
+	// the newest entry of the old callsign on the module, as Hearing() made it. Made
+	// anew, without tcd's report and urfd's length: a rename only comes while the
+	// stream is on the air (MMDVMClientProtocol), before either is set. Should one
+	// ever come after CloseStream(), carry old's audio and length over, and retime a
+	// stopped wait above too
 	for (auto it = m_Users.begin(); it != m_Users.end(); it++)
 	{
 		if (it->IsCallsign(from) && it->GetOnModule() == module)
