@@ -30,12 +30,16 @@
 
 #include "IP.h"
 #include "TCPacketDef.h"
+#include "WakeFd.h"
+
+// what CTCServer::Receive() got
+enum class ETCReceive { none, ping, packet };
 
 class CTCSocket
 {
 public:
 	CTCSocket() {}
-	virtual ~CTCSocket() { Close(); }
+	virtual ~CTCSocket();
 
 	virtual bool Open(const std::string &address, const std::string &modules, uint16_t port) = 0;
 	void Close(); // close all open sockets
@@ -43,12 +47,21 @@ public:
 	void Close(int fd); // close a specific file descriptor
 
 	// All bool functions, except Server Receive, return true if there was an error
-	bool Send(const STCPacket *packet);
+	// connection: the module's connection it went out on (GetConnectionCount)
+	bool Send(const STCPacket *packet, uint32_t *connection = nullptr);
 
 	int GetFD(char module) const; // can return -1!
 	char GetMod(int fd) const;
 	const std::string &GetModules(void) const { return m_Modules; }
 	bool IsModuleConnected(char module);
+	// a module's wake (CTCServer, made by Open): signalled whenever the module's
+	// connection changed (opened, closed, dropped), and by its codec thread's
+	// pushes, so the thread waits on it and on the connection it saw, and takes a
+	// new one; nullptr for none
+	const CWakeFd *GetWake(char module) const;
+	// counts every change of a module's connection (setPos): a reader sees one it
+	// missed in between, a reconnect included
+	uint32_t GetConnectionCount(char module) const;
 	// shared secret of the transcoder link, empty for none; set it before Open()
 	void SetPassword(const std::string &password) { m_Password = password; }
 
@@ -61,7 +74,13 @@ protected:
 	void initLocks(void);
 	std::unique_lock<std::recursive_mutex> lockPos(size_t pos) const { return std::unique_lock<std::recursive_mutex>(*m_Locks[pos]); }
 	void closePos(size_t pos);
+	void setPos(size_t pos, int fd);
+	void wakePos(size_t pos) const;
 	std::vector<struct pollfd> m_Pfd;
+	// per module (as m_Pfd); made before any thread uses them and freed with this
+	// object, so they need no lock (the codec threads end before: CReflector::Stop)
+	std::vector<std::unique_ptr<CWakeFd>> m_Wake;
+	std::vector<std::atomic<uint32_t>> m_Connections;	// per module, as m_Wake (made by Open)
 	std::vector<std::unique_ptr<std::recursive_mutex>> m_Locks;
 	std::string m_Modules;
 	std::string m_Password;
@@ -73,8 +92,10 @@ public:
 	CTCServer() : CTCSocket(), m_ListenFd(-1) {}
 	~CTCServer() { for (auto &p : m_Pending) close(p.fd); if (m_ListenFd >= 0) close(m_ListenFd); }
 	bool Open(const std::string &address, const std::string &modules, uint16_t port);
-	// Returns true if there is data
-	bool Receive(char module, STCPacket *packet, int ms);
+	// a packet, a ping (a stream report among them, see TakeReports) or nothing;
+	// fd: the module's connection afterwards, -1 for none
+	// connection: the one it read from (GetConnectionCount)
+	ETCReceive Receive(char module, STCPacket *packet, int ms, int *fd = nullptr, uint32_t *connection = nullptr);
 	bool AnyAreClosed();
 	// Non-blocking: poll listen socket for ms and accept any pending connections
 	void TryAccept(int ms = 100);

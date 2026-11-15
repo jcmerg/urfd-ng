@@ -792,10 +792,10 @@ void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t s
 	}
 
 	// Generate unique URFD stream ID
-	static uint16_t s_nextId = 0x100;
-	uint16_t urfStreamId = s_nextId;
-	s_nextId += 0x100;
-	if (s_nextId == 0) s_nextId = 0x100;
+	// shared by every [MMDVMClient] link, each on its own thread: each takes its own
+	// a multiple of 0x100 (MMDVMClientProtocol.h: 1 and 2 mark the echo), 0 skipped
+	static std::atomic<uint16_t> s_nextId { 0x100 };
+	const uint16_t urfStreamId = FreeStreamId([] { return s_nextId.fetch_add(0x100); });
 
 	CCallsign my = DmrIdToCallsign(srcId);
 	if (!retry)

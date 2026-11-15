@@ -79,7 +79,6 @@ protected:
 	bool IsValidDvLastFramePacket(const CIp &, const CBuffer &, std::unique_ptr<CDvFramePacket> &);
 
 	// the open stream of a client (every NXDN client has its own), and a header for a new one
-	std::shared_ptr<CPacketStream> GetStreamByIp(const CIp &, uint16_t &);
 	bool MakeDvHeader(const CIp &, const CBuffer &, std::unique_ptr<CDvHeaderPacket> &);
 
 	// DV packet encoding helpers -- dstid is the destination the receiving client polls

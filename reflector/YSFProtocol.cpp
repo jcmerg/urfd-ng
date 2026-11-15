@@ -255,14 +255,10 @@ void CYsfProtocol::Task(void)
 void CYsfProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, const CIp &Ip, uint8_t dgid)
 {
 	// find the stream
-	auto stream = GetStream(Header->GetStreamId());
-	if ( stream )
-	{
-		// stream already open
-		// skip packet, but tickle the stream
-		stream->Tickle();
-	}
-	else
+	auto stream = GetStream(Header->GetStreamId(), &Ip);
+	// a repeated header of its own stream: nothing to do (it does not keep the
+	// stream alive, the voice does)
+	if ( !stream )
 	{
 		// no stream open yet, open a new one
 		CCallsign my(Header->GetMyCallsign());
@@ -541,7 +537,7 @@ bool CYsfProtocol::IsValidDvHeaderPacket(const CIp &Ip, const CYSFFICH &Fich, co
 	if ( Fich.getFI() == YSF_FI_HEADER )
 	{
 		// get stream id
-		uint32_t uiStreamId = IpToStreamId(Ip);
+		uint32_t uiStreamId = PeerStreamId(Ip);
 
 		// get header data
 		CYSFPayload ysfPayload;
@@ -572,7 +568,7 @@ bool CYsfProtocol::IsValidDvHeaderPacket(const CIp &Ip, const CYSFFICH &Fich, co
 			// and packet
 			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, uiStreamId, Fich.getFN()));
 			// a new transmission: its position (GPS in the data channel) is read again
-			GpsOf(uiStreamId).Reset();
+			m_Gps.Of(uiStreamId).Reset();
 			if ( Fich.getDT() == YSF_DT_VOICE_FR_MODE )
 				header->SetCodecIn(ECodecType::p25);	// VW: IMBE, the codec of P25
 		}
@@ -597,13 +593,14 @@ bool CYsfProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fich, con
 	// is it DV frame ?
 	if ( Fich.getFI() == YSF_FI_COMMUNICATIONS )
 	{
-		// get stream id
-		uint32_t uiStreamId = IpToStreamId(Ip);
-
+		// get stream id: the peer's open stream, else a new one (late entry)
+		uint32_t uiStreamId = PeerStreamId(Ip);
 		auto stream = GetStream(uiStreamId, &Ip);
 		if ( !stream )
 		{
-			std::cerr << "Late entry YSF voice frame, creating YSF header on " << Ip << std::endl;
+			// once per stream id and peer: a talker refused (module busy) tries again and again
+			if (LogOnce(1, Ip, uint16_t(uiStreamId)))
+				std::cerr << "Late entry YSF voice frame, creating YSF header on " << Ip << std::endl;
 			CCallsign csMY;
 			char sz[YSF_CALLSIGN_LENGTH+1];
 			memcpy(sz, &(Buffer.data()[14]), YSF_CALLSIGN_LENGTH);
@@ -624,7 +621,7 @@ bool CYsfProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fich, con
 			rpt2.SetCSModule(' ');
 			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, uiStreamId, Fich.getFN()));
 			// late entry is a new transmission too: its position is read again
-			GpsOf(uiStreamId).Reset();
+			m_Gps.Of(uiStreamId).Reset();
 			if ( Fich.getDT() == YSF_DT_VOICE_FR_MODE )
 				header->SetCodecIn(ECodecType::p25);	// VW: IMBE, the codec of P25
 
@@ -644,9 +641,7 @@ bool CYsfProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fich, con
 				std::array<uint8_t, 20> id;
 				if ( CYsfVW::DecodeData(payload, id.data()) )
 				{
-					if ( m_VwRadioId.size() > 64 )
-						m_VwRadioId.clear();
-					m_VwRadioId[uint16_t(uiStreamId)] = id;
+					m_VwRadioId.Of(uint16_t(uiStreamId)) = id;
 				}
 			}
 			const unsigned *offs;
@@ -703,9 +698,9 @@ bool CYsfProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fich, con
 			double lat, lon;
 			bool got = false;
 			if ( Fich.getDT() == YSF_DT_VD_MODE1 )
-				got = payload.readVDMode1Data(&(Buffer.data()[35]), dt) && GpsOf(uiStreamId).AddVD1(Fich.getFN(), Fich.getFT(), dt, lat, lon);
+				got = payload.readVDMode1Data(&(Buffer.data()[35]), dt) && m_Gps.Of(uiStreamId).AddVD1(Fich.getFN(), Fich.getFT(), dt, lat, lon);
 			else
-				got = payload.readVDMode2Data(&(Buffer.data()[35]), dt) && GpsOf(uiStreamId).AddVD2(Fich.getFN(), Fich.getFT(), dt, lat, lon);
+				got = payload.readVDMode2Data(&(Buffer.data()[35]), dt) && m_Gps.Of(uiStreamId).AddVD2(Fich.getFN(), Fich.getFT(), dt, lat, lon);
 			if ( got )
 			{
 				g_Reflector.GetUsers()->Location(csMY, lat, lon);
@@ -734,7 +729,7 @@ bool CYsfProtocol::IsValidDvLastFramePacket(const CIp &Ip, const CYSFFICH &Fich,
 	if ( Fich.getFI() == YSF_FI_TERMINATOR )
 	{
 		// get stream id
-		uint32_t uiStreamId = IpToStreamId(Ip);
+		uint32_t uiStreamId = PeerStreamId(Ip);
 
 		// get DV frame: the terminator carries no voice, the last packet is silence
 		{
@@ -978,18 +973,17 @@ bool CYsfProtocol::EncodeLastYSFPacket(const CDvHeaderPacket &Header, uint8_t la
 	return true;
 }
 
-CYsfGps &CYsfProtocol::GpsOf(uint32_t streamid)
+void CYsfProtocol::StreamClosed(uint16_t streamid)
 {
-	if ( m_Gps.size() > 64 && m_Gps.find(uint16_t(streamid)) == m_Gps.end() )
-		m_Gps.clear();
-	return m_Gps[uint16_t(streamid)];
+	m_Gps.Erase(streamid);	// the VW radio id stays a while (m_VwRadioId)
+	CProtocol::StreamClosed(streamid);
 }
 
 void CYsfProtocol::VwRadioId(const CDvHeaderPacket &Header, uint8_t *id20) const
 {
-	const auto it = m_VwRadioId.find(Header.GetStreamId());
-	if ( it != m_VwRadioId.end() )
-		memcpy(id20, it->second.data(), 20);
+	const auto *id = m_VwRadioId.Find(Header.GetStreamId());
+	if ( id )
+		memcpy(id20, id->data(), 20);
 	else
 		memset(id20, ' ', 20);
 }
@@ -1319,11 +1313,6 @@ uint8_t CYsfProtocol::ModuleToDGID(char module) const
 	return 0U;
 }
 
-// uiStreamId helpers
-uint32_t CYsfProtocol::IpToStreamId(const CIp &ip) const
-{
-	return ip.GetAddr() ^ (uint32_t)(MAKEDWORD(ip.GetPort(), ip.GetPort()));
-}
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // debug

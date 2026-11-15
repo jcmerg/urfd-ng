@@ -97,14 +97,14 @@ void CP25Protocol::Task(void)
 		{
 			// the sender's open stream; a 0x66 (source id) opens one, so the
 			// records 0x62..0x65 before it can't be forwarded
-			auto sid = GetStreamIdFromIp(Ip);
-			if ( !sid && IsValidDvHeaderPacket(Buffer, Header) )
+			auto sid = OpenStreamIdOf(Ip);
+			if ( !sid && IsValidDvHeaderPacket(Ip, Buffer, Header) )
 			{
 				// callsign muted?
 				if ( g_GateKeeper.MayTransmit(Header->GetMyCallsign(), Ip, EProtocol::p25) )
 				{
 					OnDvHeaderPacketIn(Header, Ip);
-					sid = GetStreamIdFromIp(Ip);
+					sid = OpenStreamIdOf(Ip);
 				}
 			}
 			// nothing after the TDU (a repeated one) goes into the ending stream
@@ -180,8 +180,6 @@ void CP25Protocol::Task(void)
 
 	// handle end of streaming timeout
 	CheckStreamsTimeout();
-	for ( auto it=m_EndedStreams.begin(); it!=m_EndedStreams.end(); )
-		it = m_Streams.count(*it) ? std::next(it) : m_EndedStreams.erase(it);
 
 	// handle queue from reflector
 	HandleQueue();
@@ -243,19 +241,6 @@ void CP25Protocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, 
 			g_Reflector.ReleaseUsers();
 		}
 	}
-}
-
-// the stream the sender at Ip has open, 0 if none: every P25 client has its own,
-// so a blocked or ending talker can't touch another one's stream
-uint16_t CP25Protocol::GetStreamIdFromIp(const CIp &Ip)
-{
-	for ( auto &it : m_Streams )
-	{
-		auto owner = it.second->GetOwnerIp();
-		if ( (owner != nullptr) && (*owner == Ip) )
-			return it.first;
-	}
-	return 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -413,15 +398,12 @@ bool CP25Protocol::IsValidDvPacket(const CBuffer &Buffer, uint16_t sid, std::uni
 	return true;
 }
 
-bool CP25Protocol::IsValidDvHeaderPacket(const CBuffer &Buffer, std::unique_ptr<CDvHeaderPacket> &header)
+bool CP25Protocol::IsValidDvHeaderPacket(const CIp &Ip, const CBuffer &Buffer, std::unique_ptr<CDvHeaderPacket> &header)
 {
 	if ( (Buffer.size() >= 16) && (Buffer.data()[0] == 0x66) )
 	{
-		// a new stream id for every transmission, never 0
-		uint16_t sid;
-		do {
-			sid = static_cast<uint16_t>(::rand());
-		} while ( 0 == sid );
+		// a new stream id for every transmission
+		const uint16_t sid = NewStreamId(Ip);
 
 		uint32_t uiSrcId = ((Buffer.data()[1] << 16) | ((Buffer.data()[2] << 8) & 0xff00) | (Buffer.data()[3] & 0xff));
 		CCallsign csMY = CCallsign("", uiSrcId);

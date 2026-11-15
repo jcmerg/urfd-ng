@@ -62,7 +62,6 @@ bool CPacketStream::OpenPacketStream(const CDvHeaderPacket &DvHeader, std::share
 		m_bLastRouted = false;
 		m_bEcho = echo;
 		m_uiStreamId = DvHeader.GetStreamId();
-		m_bOpen = true;
 		m_uiPacketCntr = 0;
 		m_uiSourceTG = 0;
 		m_iNextWireIdx = -1;
@@ -82,6 +81,8 @@ bool CPacketStream::OpenPacketStream(const CDvHeaderPacket &DvHeader, std::share
 		m_Transcode = !echo && m_CodecStream && g_Reflector.IsTranscoded(m_PSModule);
 		if (m_Transcode)
 			m_CodecStream->ResetStats(m_uiStreamId, m_DvHeader.GetCodecIn());
+		// open once all of it is set: a close reads it (ClosePacketStream)
+		m_bOpen = true;
 		return true;
 	}
 	return false;
@@ -89,16 +90,23 @@ bool CPacketStream::OpenPacketStream(const CDvHeaderPacket &DvHeader, std::share
 
 void CPacketStream::ClosePacketStream(void)
 {
-	// update status
-	m_bOpen = false;
+	// update status. The next stream may open as soon as m_bOpen is false (another
+	// protocol's thread) and sets what is cleared here: cleared before, what is
+	// reported taken before and reported after, so the module is free at once
+	const bool transcode = m_Transcode;
+	CCodecStream::SStats st {};
+	if (transcode)
+		st = m_CodecStream->CloseStats();
+	const uint32_t lost = m_uiLostFrames, muted = m_uiMutedRepeats;
 	m_uiStreamId = 0;
 	std::atomic_store(&m_OwnerClient, std::shared_ptr<CClient>());
-	if (m_Transcode)
-		m_CodecStream->ReportStats();
-	if (m_uiLostFrames)
-		std::cout << "Module " << m_PSModule << ": " << m_uiLostFrames << " lost voice frames filled in" << std::endl;
-	if (m_uiMutedRepeats)
-		std::cout << "Module " << m_PSModule << ": " << m_uiMutedRepeats << " repeated voice frames muted" << std::endl;
+	m_bOpen = false;
+	if (transcode)
+		CCodecStream::PrintStats(st);
+	if (lost)
+		std::cout << "Module " << m_PSModule << ": " << lost << " lost voice frames filled in" << std::endl;
+	if (muted)
+		std::cout << "Module " << m_PSModule << ": " << muted << " repeated voice frames muted" << std::endl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////

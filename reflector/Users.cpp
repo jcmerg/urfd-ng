@@ -247,7 +247,7 @@ void CUsers::Hearing(const CCallsign &my, const CCallsign &rpt1, const CCallsign
 void CUsers::Report(char module, uint16_t streamid, const STCReport &r)
 {
 	// the oldest stream of the module with this id still waiting: tcd reports them
-	// in order, and DMR+ reuses its id for the next transmission
+	// in order (each transmission has its own id, CProtocol::NewStreamId for those whose packets carry none)
 	auto wait = m_ReportWait.find(module);
 	if (wait == m_ReportWait.end())
 		return;

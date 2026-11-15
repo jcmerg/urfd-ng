@@ -955,7 +955,7 @@ bool CSvxProtocol::EnsurePeerInStream(SSvxPeer &peer)
 	if (in.open && (in.rejected || m_Streams.count(in.streamId)))
 		return !in.rejected;
 
-	in.streamId = 0x5D00 | m_StreamCounter++;
+	in.streamId = FreeStreamId([this] { return uint16_t(0x5D00 | m_StreamCounter++); });
 
 	CCallsign my;
 	my.SetCallsign(SvxExtractCallsign(peer.callsign), true);
@@ -1014,8 +1014,7 @@ void CSvxProtocol::ClosePeerInStream(uint32_t clientId)
 		auto sit = m_Streams.find(in.streamId);
 		if (sit != m_Streams.end() && sit->second)
 		{
-			g_Reflector.CloseStream(sit->second);
-			m_Streams.erase(sit);
+			CloseStreamAt(sit);
 		}
 	}
 	else if (peer.rx)

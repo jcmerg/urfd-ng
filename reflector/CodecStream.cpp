@@ -20,7 +20,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <poll.h>
-#include <sys/eventfd.h>
+#include <algorithm>
 
 #include "Global.h"
 #include "DVFramePacket.h"
@@ -36,15 +36,12 @@
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructor
 
-CCodecStream::CCodecStream(CPacketStream *PacketStream, char module) : m_CSModule(module), m_IsOpen(false), m_EventFD(-1),
-	m_uiStreamId(0), m_uiPort(0), m_uiPid(0), m_eCodecIn(ECodecType::none),
+CCodecStream::CCodecStream(CPacketStream *PacketStream, char module) : m_CSModule(module), m_IsOpen(false),
+	m_eCodecIn(ECodecType::none),
 	m_RTMin(-1), m_RTMax(-1), m_RTSum(0), m_RTCount(0),
 	m_uiTotalPackets(0), m_uiMismatchCount(0), m_uiSkipCount(0), m_uiSuperframeCount(0)
 {
 	m_PacketStream = PacketStream;
-	m_EventFD = eventfd(0, EFD_NONBLOCK);
-	if (m_EventFD < 0)
-		std::cerr << "CodecStream[" << module << "]: eventfd creation failed" << std::endl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -52,61 +49,80 @@ CCodecStream::CCodecStream(CPacketStream *PacketStream, char module) : m_CSModul
 
 void CCodecStream::Push(std::unique_ptr<CDvFramePacket> p)
 {
-	m_Queue.Push(std::move(p));
-	if (m_EventFD >= 0)
-	{
-		uint64_t val = 1;
-		// a lost wakeup only delays Task until its 20 ms poll timeout
-		if (write(m_EventFD, &val, sizeof(val)) < 0) {}
-	}
+	// the transmission it is part of: a frame left over when the next one opens is
+	// not sent as that one's. Read without the lock: written by ResetStats on the
+	// thread that pushes the new transmission's frames, before it does
+	const uint32_t generation = m_uiGeneration;
+	m_uiPushedGeneration = generation;
+	m_Queue.Push({ std::move(p), generation });
+	// only a thread that waits needs it (else it sends this one in its round): it
+	// looks at the queue once more after it says so, so either sees the other
+	if (m_Waiting)
+		Wake();
+}
+
+// the module's wake, g_TCServer's (it also wakes the thread when the connection
+// changes); none once Stop() ended the thread, before g_TCServer goes. A lost
+// wakeup only delays Task until its poll timeout
+void CCodecStream::Wake(void)
+{
+	if (const CWakeFd *wake = m_Wake)
+		wake->Signal();
 }
 
 CCodecStream::~CCodecStream()
 {
 	Stop();
-	if (m_EventFD >= 0)
-	{
-		close(m_EventFD);
-		m_EventFD = -1;
-	}
 }
 
 void CCodecStream::Stop(void)
 {
 	// kill the thread
 	keep_running = false;
-	// wake up poll in Task
-	if (m_EventFD >= 0)
+	// wake up poll in Task; once: valid() is false after get(). The wake goes
+	// with it, g_TCServer frees it at exit
+	if (m_Future.valid())
 	{
-		uint64_t val = 1;
-		// a lost wakeup only delays Task until its 20 ms poll timeout
-		if (write(m_EventFD, &val, sizeof(val)) < 0) {}
-	}
-	if ( m_Future.valid() )
-	{
-		m_Future.get();
+		Wake();
+		try
+		{
+			m_Future.get();
+		}
+		catch (const std::exception &e)
+		{
+			// the destructor calls this too, where a throw would end the process
+			std::cerr << "Codec thread of module '" << m_CSModule << "' ended with: " << e.what() << std::endl;
+		}
+		m_Wake = nullptr;
 	}
 }
 
 void CCodecStream::ResetStats(uint16_t streamid, ECodecType type)
 {
-	// Drain stale packets from previous stream
-	while (!m_LocalQueue.IsEmpty())
-		m_LocalQueue.Pop();
+	{
+		// the codec thread reads and changes these as it sends and takes answers
+		std::lock_guard<std::mutex> lock(m_StreamMutex);
+		++m_uiGeneration;
+		// the previous transmission's frames still waiting to go out are dropped
+		// (their generation, Push), its answers still due as they come: by their
+		// stream id, without a mismatch (the protocols give each transmission its
+		// own, CProtocol::NewStreamId)
+		m_PrevStreamIds[m_uiPrevNext] = m_uiStreamId;
+		m_uiPrevNext = (m_uiPrevNext + 1) % m_PrevStreamIds.size();
+		m_uiStreamId = streamid;
+		m_LocalQueue.Clear();
 
-	m_IsOpen = true;
-	keep_running = true;
-	m_uiStreamId = streamid;
-	m_uiPid = 0;
-	m_eCodecIn = type;
-	m_RTMin = -1;
-	m_RTMax = -1;
-	m_RTSum = 0;
-	m_RTCount = 0;
-	m_uiTotalPackets = 0;
-	m_uiMismatchCount = 0;
-	m_uiSkipCount = 0;
-	m_uiSuperframeCount = 0;
+		m_IsOpen = true;
+		m_eCodecIn = type;
+		m_RTMin = -1;
+		m_RTMax = -1;
+		m_RTSum = 0;
+		m_RTCount = 0;
+		m_uiTotalPackets = 0;
+		m_uiMismatchCount = 0;
+		m_uiSkipCount = 0;
+		m_uiSuperframeCount = 0;
+	}
 
 	// Initialize D-Star slow data for transcoded (non-D-Star) streams
 	if (type != ECodecType::dstar && m_PacketStream)
@@ -193,20 +209,59 @@ void CCodecStream::ResetStats(uint16_t streamid, ECodecType type)
 	}
 }
 
-void CCodecStream::ReportStats()
+// the end of the transmission: called before the packet stream is free for the
+// next one (ResetStats), its stats printed after that (PrintStats)
+CCodecStream::SStats CCodecStream::CloseStats(void)
 {
+	std::lock_guard<std::mutex> lock(m_StreamMutex);
 	m_IsOpen = false;
-	// display stats
-	if (m_RTCount > 0)
+	// frames still waiting for an answer (a tcd slower than EndStream waits): it is
+	// not taken any more
+	m_LocalQueue.Clear();
+	return statsLocked();
+}
+
+void CCodecStream::PrintStats(const SStats &st)
+{
+	if (st.rt_count > 0)
 	{
-		double min = 1000.0 * m_RTMin;
-		double max = 1000.0 * m_RTMax;
-		double ave = 1000.0 * m_RTSum / double(m_RTCount);
+		double min = 1000.0 * st.rt_min;
+		double max = 1000.0 * st.rt_max;
+		double ave = 1000.0 * st.rt_avg;
 		auto prec = std::cout.precision();
 		std::cout.precision(1);
-		std::cout << std::fixed << "TC round-trip time(ms): " << min << '/' << ave << '/' << max << ", " << m_RTCount << " total packets" << std::endl;
+		std::cout << std::fixed << "TC round-trip time(ms): " << min << '/' << ave << '/' << max << ", " << st.rt_count << " total packets" << std::endl;
 		std::cout.precision(prec);
 	}
+}
+
+CCodecStream::SStats CCodecStream::GetStats(void) const
+{
+	std::lock_guard<std::mutex> lock(m_StreamMutex);
+	return statsLocked();
+}
+
+CCodecStream::SStats CCodecStream::statsLocked(void) const
+{
+	SStats st;
+	st.codec_in = m_eCodecIn;
+	st.rt_min = m_RTMin;
+	st.rt_max = m_RTMax;
+	st.rt_avg = m_RTCount > 0 ? m_RTSum / m_RTCount : 0.0;
+	st.rt_count = m_RTCount;
+	st.total_packets = m_uiTotalPackets;
+	st.mismatch_count = m_uiMismatchCount;
+	return st;
+}
+
+bool CCodecStream::IsPipelineEmpty(void)
+{
+	// a frame between the queues (sent, or its answer on the way back) is under the
+	// lock. In m_Queue the older transmissions' frames come first: with none of
+	// this one pushed, what is there is theirs, only to be dropped (the codec
+	// thread may be in a send to a tcd that stalls)
+	std::lock_guard<std::mutex> lock(m_StreamMutex);
+	return (m_Queue.IsEmpty() || m_uiPushedGeneration != m_uiGeneration) && m_LocalQueue.IsEmpty();
 }
 
 // a name for the D-Star text, which radios show in ASCII: umlauts and the common
@@ -309,10 +364,14 @@ bool CCodecStream::InitCodecStream()
 	keep_running = true;
 	try
 	{
+		// made by g_TCServer.Open(), before this; dropped by Stop(), before it goes.
+		// Set before the thread (it polls it), cleared again when that fails
+		m_Wake = g_TCServer.GetWake(m_CSModule);
 		m_Future = std::async(std::launch::async, &CCodecStream::Thread, this);
 	}
 	catch(const std::exception& e)
 	{
+		m_Wake = nullptr;
 		std::cerr << "Could not start Codec processing on module '" << m_CSModule << "': " << e.what() << std::endl;
 		return true;
 	}
@@ -330,128 +389,199 @@ void CCodecStream::Thread()
 	}
 }
 
+// an answer of tcd: back into the stream with its frame. Under m_StreamMutex: a
+// protocol thread opening the next stream (ResetStats) empties m_LocalQueue
+void CCodecStream::Answer(const STCPacket &pack, uint32_t connection)
+{
+	// logged after the lock: the threads waiting for it do not wait for the log
+	bool skipped = false, mismatch = false;
+	{
+		std::lock_guard<std::mutex> lock(m_StreamMutex);
+		answerLocked(pack, connection, skipped, mismatch);
+	}
+	if (skipped)
+		std::cerr << "Transcoder lost frames on module " << m_CSModule << ", skipped" << std::endl;
+	if (mismatch)
+		std::cerr << "Transcoder mismatch on module " << m_CSModule << " (stale packet discarded)" << std::endl;
+}
+
+// skipped, mismatch: the first of the stream, to be logged
+void CCodecStream::answerLocked(const STCPacket &pack, uint32_t connection, bool &skipped, bool &mismatch)
+{
+	// an answer to a frame this transmission never sent: a late one of an earlier
+	// one with the same stream id (a source that reuses its id). Not taken as a
+	// sign of frames lost
+	if (m_IsOpen && pack.streamid == m_uiStreamId && pack.sequence >= m_uiTotalPackets)
+		return;
+	// frames sent on a connection before this one's, which went (a reconnect, a
+	// standby tcd taking over): no answer comes for them, and none was lost by tcd
+	while (!m_LocalQueue.IsEmpty() && m_LocalQueue.Front().connection != connection)
+		m_LocalQueue.Pop();
+	if (m_IsOpen && pack.streamid == m_uiStreamId && !m_LocalQueue.IsEmpty())
+	{
+		// frames tcd never answered (lost in an AMBE device that hung) come before
+		// this answer: skip them, else every later answer missed its frame and the
+		// rest of the transmission was dropped
+		while (!m_LocalQueue.IsEmpty() && int32_t(pack.sequence - m_LocalQueue.Front().frame->GetCodecPacket()->sequence) > 0)
+		{
+			m_LocalQueue.Pop();
+			if (m_uiSkipCount++ == 0)
+				skipped = true;
+		}
+		// an answer older than the queue's head was skipped already: drop it, the
+		// head waits for its own answer
+		if (m_LocalQueue.IsEmpty() || int32_t(pack.sequence - m_LocalQueue.Front().frame->GetCodecPacket()->sequence) < 0)
+			return;
+		auto Packet = std::move(m_LocalQueue.Pop().frame);
+
+		if ((pack.streamid == Packet->GetCodecPacket()->streamid) && (pack.sequence == Packet->GetCodecPacket()->sequence))
+		{
+			auto rt = Packet->m_rtTimer.time();
+			if (0 == m_RTCount)
+			{
+				m_RTMin = rt;
+				m_RTMax = rt;
+			}
+			else
+			{
+				if (rt < m_RTMin)
+					m_RTMin = rt;
+				else if (rt > m_RTMax)
+					m_RTMax = rt;
+			}
+			m_RTSum += rt;
+			m_RTCount++;
+
+			Packet->SetCodecData(&pack);
+			// Set D-Star sync and slow data for transcoded streams
+			if (ECodecType::dstar != Packet->GetCodecIn())
+			{
+				std::lock_guard<std::mutex> lock(m_SlowDataMutex);
+				uint8_t frameInSuper = Packet->GetPacketId() % 21;
+				if (frameInSuper == 0)
+				{
+					const uint8_t DStarSync[] = { 0x55, 0x2D, 0x16 };
+					Packet->SetDvData(DStarSync);
+					m_uiSuperframeCount++;
+					// Rotate slow data text every ~5s (12 superframes)
+					if (!m_SlowDataMsg2.empty() && m_uiSuperframeCount % 24 == 12)
+						m_SlowData.SetMessage(m_SlowDataMsg2);
+					else if (!m_SlowDataMsg2.empty() && m_uiSuperframeCount % 24 == 0)
+						m_SlowData.SetMessage(m_SlowDataMsg1);
+				}
+				else if (m_SlowData.IsReady())
+				{
+					Packet->SetDvData(m_SlowData.GetSlowData(frameInSuper, m_uiSuperframeCount));
+				}
+			}
+
+			m_PacketStream->ReturnPacket(std::move(Packet));
+		}
+	}
+	// a late answer of the previous transmission (it ended with answers due): no mismatch
+	else if (m_IsOpen && pack.streamid != m_uiStreamId && std::find(m_PrevStreamIds.begin(), m_PrevStreamIds.end(), pack.streamid) == m_PrevStreamIds.end())
+	{
+		if (m_uiMismatchCount++ == 0)
+			mismatch = true;
+	}
+}
+
+void CCodecStream::DrainQueues(void)
+{
+	std::lock_guard<std::mutex> lock(m_StreamMutex);
+	m_Queue.Clear();
+	m_LocalQueue.Clear();
+}
+
 void CCodecStream::Task(void)
 {
 	// Drain all pending transcoder responses (prevents TCP buffer buildup / deadlock)
 	STCPacket pack{};
 	bool receivedAny = false;
-	while (g_TCServer.Receive(m_CSModule, &pack, 0))
+	int tcfd = -1;	// the connection, as the last receive left it
+	// at most 64 a round (tcd answers one per frame sent): a tcd that floods its
+	// connection with pings does not keep the frames queued here from going out
+	for (int n = 0; n < 64; n++)
 	{
+		uint32_t connection = 0;
+		const auto got = g_TCServer.Receive(m_CSModule, &pack, 0, &tcfd, &connection);
+		if (ETCReceive::none == got)
+			break;
 		receivedAny = true;
-		if (m_IsOpen && pack.streamid == m_uiStreamId && !m_LocalQueue.IsEmpty())
-		{
-			// frames tcd never answered (lost in an AMBE device that hung) come before
-			// this answer: skip them, else every later answer missed its frame and the
-			// rest of the transmission was dropped
-			while (!m_LocalQueue.IsEmpty() && int32_t(pack.sequence - m_LocalQueue.Front()->GetCodecPacket()->sequence) > 0)
-			{
-				m_LocalQueue.Pop();
-				if (m_uiSkipCount++ == 0)
-					std::cerr << "Transcoder lost frames on module " << m_CSModule << ", skipped" << std::endl;
-			}
-			// an answer older than the queue's head was skipped already: drop it, the
-			// head waits for its own answer
-			if (m_LocalQueue.IsEmpty() || int32_t(pack.sequence - m_LocalQueue.Front()->GetCodecPacket()->sequence) < 0)
-				continue;
-			auto Packet = m_LocalQueue.Pop();
-
-			if ((pack.streamid == Packet->GetCodecPacket()->streamid) && (pack.sequence == Packet->GetCodecPacket()->sequence))
-			{
-				auto rt = Packet->m_rtTimer.time();
-				if (0 == m_RTCount)
-				{
-					m_RTMin = rt;
-					m_RTMax = rt;
-				}
-				else
-				{
-					if (rt < m_RTMin)
-						m_RTMin = rt;
-					else if (rt > m_RTMax)
-						m_RTMax = rt;
-				}
-				m_RTSum += rt;
-				m_RTCount++;
-
-				Packet->SetCodecData(&pack);
-				// Set D-Star sync and slow data for transcoded streams
-				if (ECodecType::dstar != Packet->GetCodecIn())
-				{
-					std::lock_guard<std::mutex> lock(m_SlowDataMutex);
-					uint8_t frameInSuper = Packet->GetPacketId() % 21;
-					if (frameInSuper == 0)
-					{
-						const uint8_t DStarSync[] = { 0x55, 0x2D, 0x16 };
-						Packet->SetDvData(DStarSync);
-						m_uiSuperframeCount++;
-						// Rotate slow data text every ~5s (12 superframes)
-						if (!m_SlowDataMsg2.empty() && m_uiSuperframeCount % 24 == 12)
-							m_SlowData.SetMessage(m_SlowDataMsg2);
-						else if (!m_SlowDataMsg2.empty() && m_uiSuperframeCount % 24 == 0)
-							m_SlowData.SetMessage(m_SlowDataMsg1);
-					}
-					else if (m_SlowData.IsReady())
-					{
-						Packet->SetDvData(m_SlowData.GetSlowData(frameInSuper, m_uiSuperframeCount));
-					}
-				}
-
-				m_PacketStream->ReturnPacket(std::move(Packet));
-			}
-		}
-		else if (m_IsOpen && pack.streamid != m_uiStreamId)
-		{
-			if (m_uiMismatchCount++ == 0)
-				std::cerr << "Transcoder mismatch on module " << m_CSModule << " (stale packet discarded)" << std::endl;
-		}
+		if (ETCReceive::ping == got)
+			continue;	// a ping or a report: what follows it is read in this round too
+		Answer(pack, connection);
 	}
 
-	if (!receivedAny && m_Queue.IsEmpty())
+	// the answers still due on a connection that is gone (closed, or replaced: a
+	// reconnect, a standby tcd taking over) never come: the end of the stream
+	// (EndStream) does not wait for them. In the order sent, the oldest first
+	if (!m_LocalQueue.IsEmpty())
 	{
-		// Nothing to receive and nothing to send — wait for eventfd signal; a module
-		// without a transcoder connection has nothing to receive and waits longer
-		// (every module has a codec stream, most of them idle)
-		struct pollfd pfd = { m_EventFD, POLLIN, 0 };
-		poll(&pfd, 1, g_TCServer.GetFD(m_CSModule) < 0 ? 500 : 20);
-		if (pfd.revents & POLLIN)
+		const uint32_t connection = g_TCServer.GetConnectionCount(m_CSModule);
+		std::lock_guard<std::mutex> lock(m_StreamMutex);
+		while (!m_LocalQueue.IsEmpty() && (tcfd < 0 || m_LocalQueue.Front().connection != connection))
+			m_LocalQueue.Pop();
+	}
+
+	if (!receivedAny)
+	{
+		// said before the queue is looked at: a frame pushed after it wakes the poll
+		m_Waiting = true;
+		if (m_Queue.IsEmpty())
 		{
-			uint64_t val;
-			if (read(m_EventFD, &val, sizeof(val)) < 0) {}  // only clears the counter
+			// Nothing to receive and nothing to send — wait for the wake (a frame pushed,
+			// the stop) or for the transcoder's answers, ping or report on its connection
+			// (every module has a codec stream, most of them idle). The connection is the
+			// one the receive saw, outside its lock: one that changed since (opened,
+			// closed, dropped) signals the wake as well, and the next round takes the new
+			// one; the timeout is only a safety net (without a wake, its creation failed,
+			// a pushed frame waits for it: 20 ms)
+			const CWakeFd *wake = m_Wake;
+			const int wakefd = wake ? wake->Fd() : -1;
+			struct pollfd pfd[2] = { { wakefd, POLLIN, 0 }, { tcfd, POLLIN, 0 } };	// poll leaves out a -1
+			poll(pfd, 2, wakefd < 0 ? 20 : 500);
+			if (pfd[0].revents & POLLIN)
+				wake->Clear();
 		}
+		m_Waiting = false;
 	}
 
 	// Send queued packets to transcoder
 	while (!m_Queue.IsEmpty())
 	{
-		auto &Frame = m_Queue.Front();
+		auto &Entry = m_Queue.Front();
+		auto &Frame = Entry.frame;
 
-		if (m_IsOpen)
 		{
+			// the stream's state under m_StreamMutex (ResetStats), but not over the
+			// send: it may wait up to TC_IO_TIMEOUT for a tcd that stopped reading.
+			// A frame of a transmission that ended (the next one opened while it
+			// waited here) or with none open is dropped, not sent as the new one's
+			std::lock_guard<std::mutex> lock(m_StreamMutex);
+			if (!m_IsOpen || Entry.generation != m_uiGeneration)
+			{
+				m_Queue.Pop();
+				continue;
+			}
 			Frame->SetTCParams(m_uiTotalPackets++, m_CSModule);
-
-			int fd = g_TCServer.GetFD(m_CSModule);
-			if (fd < 0)
-			{
-				// Transcoder disconnected — drain queues silently
-				while (!m_Queue.IsEmpty()) m_Queue.Pop();
-				while (!m_LocalQueue.IsEmpty()) m_LocalQueue.Pop();
-				return;
-			}
-
-			Frame->m_rtTimer.start();
-			if (g_TCServer.Send(Frame->GetCodecPacket()))
-			{
-				// Send failed — drain queues
-				while (!m_Queue.IsEmpty()) m_Queue.Pop();
-				while (!m_LocalQueue.IsEmpty()) m_LocalQueue.Pop();
-				return;
-			}
-
-			m_LocalQueue.Push(std::move(m_Queue.Pop()));
 		}
-		else
+
+		Frame->m_rtTimer.start();
+		uint32_t connection = 0;
+		if (g_TCServer.Send(Frame->GetCodecPacket(), &connection))
 		{
-			m_Queue.Pop();
+			// no transcoder connection, or the send failed: drain queues silently
+			DrainQueues();
+			return;
 		}
+
+		// waits for its answer, unless the next transmission opened meanwhile (its
+		// answer has the old stream id then, and is dropped)
+		std::lock_guard<std::mutex> lock(m_StreamMutex);
+		if (Entry.generation == m_uiGeneration)
+			m_LocalQueue.Push({ std::move(m_Queue.Pop().frame), connection });
+		else
+			m_Queue.Pop();
 	}
 }

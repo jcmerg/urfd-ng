@@ -21,11 +21,12 @@
 #include <atomic>
 #include <future>
 #include <mutex>
-#include <sys/eventfd.h>
+#include <array>
 
 #include "DVFramePacket.h"
 #include "SafePacketQueue.h"
 #include "DStarSlowData.h"
+#include "WakeFd.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // class
@@ -40,7 +41,6 @@ public:
 	bool InitCodecStream();
 
 	void ResetStats(uint16_t streamid, ECodecType codectype);
-	void ReportStats();
 
 	// destructor
 	virtual ~CCodecStream();
@@ -49,52 +49,71 @@ public:
 	void Stop(void);
 
 	// get
-	uint16_t GetStreamId(void) const          { return m_uiStreamId; }
 	bool     IsOpen(void) const               { return m_IsOpen; }
-	ECodecType GetCodecIn(void) const         { return m_eCodecIn; }
 	char     GetModule(void) const            { return m_CSModule; }
 
 	// update slow data TG after source TG is known
 	void     UpdateSlowDataTG(uint32_t tg);
 
 	// stats accessors (for admin interface)
-	double   GetRTMin(void) const             { return m_RTMin; }
-	double   GetRTMax(void) const             { return m_RTMax; }
-	double   GetRTAvg(void) const             { return m_RTCount > 0 ? m_RTSum / m_RTCount : 0.0; }
-	unsigned int GetRTCount(void) const       { return m_RTCount; }
-	uint32_t GetTotalPackets(void) const      { return m_uiTotalPackets; }
-	uint32_t GetMismatchCount(void) const     { return m_uiMismatchCount; }
-	uint32_t GetSkipCount(void) const         { return m_uiSkipCount; }
-	bool     IsPipelineEmpty(void)              { return m_Queue.IsEmpty() && m_LocalQueue.IsEmpty(); }
+	// one stream's, taken together under the lock (a stream opening resets them)
+	struct SStats
+	{
+		ECodecType codec_in;
+		double rt_min, rt_max, rt_avg;
+		unsigned int rt_count;
+		uint32_t total_packets, mismatch_count;
+	};
+	SStats   GetStats(void) const;
+	// the transmission ends: its stats, for PrintStats after the stream is free
+	SStats   CloseStats(void);
+	static void PrintStats(const SStats &st);
+	bool     IsPipelineEmpty(void);
 
 	// task
 	void Thread(void);
 	void Task(void);
 
-	// pass-through (signals eventfd to wake up Task)
+	// pass-through (wakes up Task)
 	void Push(std::unique_ptr<CDvFramePacket> p);
 
 protected:
+	// Task's wait ends
+	void Wake(void);
+	// connection: the tcd connection it came on (CTCSocket::GetConnectionCount)
+	void Answer(const STCPacket &pack, uint32_t connection);
+	void answerLocked(const STCPacket &pack, uint32_t connection, bool &skipped, bool &mismatch);
+	SStats statsLocked(void) const;
+	void DrainQueues(void);
+	// the stream's state that a protocol thread resets (ResetStats) while the codec
+	// thread sends and takes answers: m_LocalQueue's order, the stream id, the counters
+	mutable std::mutex m_StreamMutex;
+
 	// identity
 	const char      m_CSModule;
 	// state
 	std::atomic<bool> m_IsOpen;
 	// data
-	uint16_t        m_uiStreamId;
-	uint16_t        m_uiPort;
-	uint8_t         m_uiPid;
 	ECodecType      m_eCodecIn;
 
 	// associated packet stream
 	CPacketStream  *m_PacketStream;
 
 	// queues
-	CSafePacketQueue<std::unique_ptr<CDvFramePacket>> m_LocalQueue, m_Queue;
+	// m_Queue: to be sent, with the transmission it was pushed in (a frame left
+	// over when the next one opens is not sent as that one's); m_LocalQueue: sent,
+	// waiting for its answer
+	struct SQueued { std::unique_ptr<CDvFramePacket> frame; uint32_t generation; };
+	CSafePacketQueue<SQueued> m_Queue;
+	// with the connection it went out on (CTCSocket::GetConnectionCount)
+	struct SSent { std::unique_ptr<CDvFramePacket> frame; uint32_t connection; };
+	CSafePacketQueue<SSent> m_LocalQueue;
 
 	// thread
 	std::atomic<bool> keep_running;
 	std::future<void> m_Future;
-	int m_EventFD;
+	std::atomic<bool> m_Waiting { false };	// Task is about to wait or waits: Push wakes it
+	std::atomic<const CWakeFd *> m_Wake { nullptr };	// g_TCServer's while the thread runs; nullptr for none
 
 	// D-Star slow data for transcoded streams
 	CDStarSlowData m_SlowData;
@@ -117,4 +136,11 @@ protected:
 	uint32_t     m_uiTotalPackets;
 	uint32_t     m_uiMismatchCount;
 	uint32_t     m_uiSkipCount;		// frames of the stream tcd never answered
+	// under m_StreamMutex (ResetStats): the transmission's number, its stream id
+	// and the previous ones', whose late answers are dropped without a mismatch
+	std::atomic<uint32_t> m_uiGeneration { 0 };	// written under the lock, read by Push without it
+	std::atomic<uint32_t> m_uiPushedGeneration { 0 };	// of the last frame pushed
+	uint16_t     m_uiStreamId = 0;
+	std::array<uint16_t, 4> m_PrevStreamIds {};	// a few, for kerchunks in a row
+	size_t       m_uiPrevNext = 0;
 };

@@ -60,6 +60,11 @@ public:
 	// operation
 	bool Start(void);
 	void Stop(void);
+	// a stream with this id open on any module (a loop), or closed lately (its
+	// transcoder answers may still come): no id for a new one (CProtocol::NewStreamId)
+	bool IsStreamIdOpen(uint16_t streamid);
+	bool IsStreamIdRecent(uint16_t streamid);
+	bool IsStreamIdInUse(uint16_t streamid) { return IsStreamIdOpen(streamid) || IsStreamIdRecent(streamid); }
 	void ReloadConfig(const std::string &configPath);
 
 	// clients
@@ -138,7 +143,6 @@ protected:
 	// threads
 	void RouterThread(const char);
 	void MaintenanceThread(void);
-	bool IsStreamOpen(const std::unique_ptr<CDvHeaderPacket> &);
 	char GetStreamModule(std::shared_ptr<CPacketStream>);
 
 	// module_mappings for the WebSocket
@@ -196,4 +200,10 @@ protected:
 	dht::InfoHash refhash;
 	dht::InfoHash m17hash;	// our M17-XXX designator, for mrefd interlinks
 #endif
+
+	// the ids of the streams closed lately, with when (IsStreamIdRecent): for as long
+	// as tcd's report can still come for one (Users, 10 s)
+	std::mutex m_RecentIdsMutex;
+	std::unordered_map<uint16_t, std::chrono::steady_clock::time_point> m_RecentIds;
+	size_t m_RecentIdsPruneAt = 256;
 };

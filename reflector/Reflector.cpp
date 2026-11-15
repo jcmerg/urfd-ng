@@ -135,13 +135,6 @@ bool CReflector::Start(void)
 			return true;
 	}
 
-	// create protocols
-	if (! m_Protocols.Init())
-	{
-		m_Protocols.Close();
-		return true;
-	}
-
 	// echo module
 	if (g_Configure.Contains(g_Keys.echo.module)
 		&& (!g_Configure.Contains(g_Keys.echo.enable) || g_Configure.GetBoolean(g_Keys.echo.enable)))
@@ -150,7 +143,8 @@ bool CReflector::Start(void)
 		std::cout << "Echo module: " << m_EchoModule << std::endl;
 	}
 
-	// start one thread per reflector module
+	// the modules' streams before the protocols, whose threads look them up (an id
+	// open, CProtocol::NewStreamId): m_Stream does not change after this
 	for (auto c : m_Modules)
 	{
 		auto stream = std::make_shared<CPacketStream>(c);
@@ -171,6 +165,18 @@ bool CReflector::Start(void)
 			std::cerr << "Could not make a CPacketStream for module '" << c << "'" << std::endl;
 			return true;
 		}
+	}
+
+	// create protocols
+	if (! m_Protocols.Init())
+	{
+		m_Protocols.Close();
+		return true;
+	}
+
+	// start one thread per reflector module
+	for (auto c : m_Modules)
+	{
 		try
 		{
 			m_RouterFuture[c] = std::async(std::launch::async, &CReflector::RouterThread, this, c);
@@ -496,18 +502,23 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 		return nullptr;
 	}
 
-	// a rejected stream is logged once: DCS repeats the header in every packet,
-	// and the callers retry with them (the clients are locked, one caller at a time)
+	// a rejected stream is logged once: DCS repeats the header in every packet, and
+	// the callers retry with them (the clients are locked, one caller at a time)
 	static uint16_t lastRejectedId = 0;
-	const bool logReject = (DvHeader->GetStreamId() != lastRejectedId);
+	const auto logReject = [&DvHeader]()
+	{
+		if (DvHeader->GetStreamId() == lastRejectedId)
+			return false;
+		lastRejectedId = DvHeader->GetStreamId();
+		return true;
+	};
 
 	// check if no stream with same streamid already open
 	// to prevent loops
-	if ( IsStreamOpen(DvHeader) )
+	if ( IsStreamIdOpen(DvHeader->GetStreamId()) )
 	{
-		if (logReject)
+		if (logReject())
 			std::cerr << "Detected stream loop on module " << DvHeader->GetRpt2Module() << " for client " << client->GetCallsign() << " with sid " << DvHeader->GetStreamId() << std::endl;
-		lastRejectedId = DvHeader->GetStreamId();
 		return nullptr;
 	}
 
@@ -517,9 +528,8 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 		const char target = (DvHeader->GetRpt2Module() == ' ') ? client->GetReflectorModule() : DvHeader->GetRpt2Module();
 		if (!IsModuleOpenTo(target, client->GetProtocol()))
 		{
-			if (logReject)
+			if (logReject())
 				std::cout << "Module " << target << " is closed to " << g_GateKeeper.ProtocolName(client->GetProtocol()) << ", rejecting stream from " << client->GetCallsign() << std::endl;
-			lastRejectedId = DvHeader->GetStreamId();
 			return nullptr;
 		}
 	}
@@ -530,9 +540,8 @@ std::shared_ptr<CPacketStream> CReflector::OpenStream(std::unique_ptr<CDvHeaderP
 	auto tcmods = g_Configure.GetString(g_Keys.tc.modules);
 	if (!g_Configure.GetBoolean(g_Keys.tc.automatic) && tcmods.find(module) != std::string::npos && g_TCServer.GetFD(module) < 0)
 	{
-		if (logReject)
+		if (logReject())
 			std::cout << "Module " << module << " waiting for transcoder, rejecting stream from " << client->GetCallsign() << std::endl;
-		lastRejectedId = DvHeader->GetStreamId();
 		return nullptr;
 	}
 
@@ -608,10 +617,28 @@ void CReflector::EndStream(std::shared_ptr<CPacketStream> stream)
 	}
 }
 
+// how long a closed stream's id is not given to a new one: longer than tcd's report
+// is waited for (Users, 10 s)
+static constexpr auto RECENT_STREAM_ID = std::chrono::seconds(12);
+
 void CReflector::CloseStream(std::shared_ptr<CPacketStream> stream)
 {
 	if ( stream != nullptr )
 	{
+		if (stream->IsOpen())
+		{
+			// its id is not given to a new transmission for a while (CProtocol::NewStreamId);
+			// the old ones go once the table doubled since the last time
+			const auto now = std::chrono::steady_clock::now();
+			std::lock_guard<std::mutex> lock(m_RecentIdsMutex);
+			if (m_RecentIds.size() >= m_RecentIdsPruneAt)
+			{
+				for (auto it = m_RecentIds.begin(); it != m_RecentIds.end(); )
+					it = (now - it->second > RECENT_STREAM_ID) ? m_RecentIds.erase(it) : std::next(it);
+				m_RecentIdsPruneAt = std::max<size_t>(256, 2 * m_RecentIds.size());
+			}
+			m_RecentIds[stream->GetStreamId()] = now;
+		}
 		// the stream's last packet, before the waits below: the length of the transmission
 		const auto last_packet = std::chrono::steady_clock::now() - std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(stream->GetIdleSeconds()));
 		EndStream(stream);
@@ -953,11 +980,18 @@ std::shared_ptr<CPacketStream> CReflector::GetStream(char module)
 	return nullptr;
 }
 
-bool CReflector::IsStreamOpen(const std::unique_ptr<CDvHeaderPacket> &DvHeader)
+bool CReflector::IsStreamIdRecent(uint16_t streamid)
+{
+	std::lock_guard<std::mutex> lock(m_RecentIdsMutex);
+	const auto it = m_RecentIds.find(streamid);
+	return it != m_RecentIds.end() && std::chrono::steady_clock::now() - it->second <= RECENT_STREAM_ID;
+}
+
+bool CReflector::IsStreamIdOpen(uint16_t streamid)
 {
 	for (auto it=m_Stream.begin(); it!=m_Stream.end(); it++)
 	{
-		if ( (it->second->GetStreamId() == DvHeader->GetStreamId()) && (it->second->IsOpen()) )
+		if ( (it->second->GetStreamId() == streamid) && (it->second->IsOpen()) )
 			return true;
 	}
 	return false;
@@ -1189,9 +1223,9 @@ void CReflector::EchoThread(void)
 			auto stream = streamIt->second;
 
 			// generate a new stream ID, another than the recording's
+			// (none open or closed lately: the recording's is one of those)
 			static uint16_t echoStreamId = 0xEC00;
-			if (++echoStreamId == 0 || echoStreamId == header.GetStreamId())
-				echoStreamId = (header.GetStreamId() == 0xEC00) ? 0xEC01 : 0xEC00;
+			for (int n = 0; n < 256 && (++echoStreamId == 0 || IsStreamIdInUse(echoStreamId)); n++) {}
 
 			// create echo header - MY shows "ECHO", UR is the caller; the caller's DMR
 			// and NXDN ids stay, they are the source id of those protocols

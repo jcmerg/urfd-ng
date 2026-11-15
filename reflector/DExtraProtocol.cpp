@@ -324,14 +324,10 @@ void CDextraProtocol::HandleKeepalives(void)
 void CDextraProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, const CIp &Ip)
 {
 	// find the stream
-	auto stream = GetStream(Header->GetStreamId());
-	if ( stream )
-	{
-		// stream already open
-		// skip packet, but tickle the stream
-		stream->Tickle();
-	}
-	else
+	auto stream = GetStream(Header->GetStreamId(), &Ip);
+	// a repeated header of its own stream: nothing to do (it does not keep the
+	// stream alive, the voice does)
+	if ( !stream )
 	{
 		// no stream open yet, open a new one
 		CCallsign my(Header->GetMyCallsign());

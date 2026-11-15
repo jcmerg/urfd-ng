@@ -23,6 +23,7 @@ IP.h
 TCPacketDef.h
 TCSocket.cpp
 TCSocket.h
+WakeFd.h
 Timer.h
 Golay24128.cpp
 Golay24128.h
