@@ -83,7 +83,7 @@ public:
 	bool             HasCodecStream(void) const      { return m_CodecStream != nullptr; }
 	// whether the open stream goes through the transcoder, fixed when it opened
 	bool             IsTranscoding(void) const      { return m_Transcode; }
-	bool             IsCodecPipelineEmpty(void) { return !m_CodecStream || m_CodecStream->IsPipelineEmpty(); }
+	bool             IsCodecPipelineEmpty(void) { return !m_Transcode || !m_CodecStream || m_CodecStream->IsPipelineEmpty(); }	// a stream not transcoded waits for nothing there
 	uint32_t         GetSourceTG(void) const        { return m_uiSourceTG; }
 	void             SetSourceTG(uint32_t tg)       { m_uiSourceTG = tg; if (m_Transcode) m_CodecStream->UpdateSlowDataTG(tg); }
 

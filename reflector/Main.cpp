@@ -95,6 +95,10 @@ int main(int argc, char *argv[])
 	if (g_Reflector.Start())
 	{
 		std::cout << "Error starting reflector" << std::endl;
+		// what did start ends here, while the globals it uses are whole (g_TCServer
+		// goes before g_Reflector, the router futures would block in its destructor)
+		g_Reflector.Stop();
+		CCurlGet::GlobalCleanup();
 		// the streams back to the console before the globals and this thread's line
 		// buffers go, which the destructors would otherwise still write through
 		g_LogBuffer.Uninstall();

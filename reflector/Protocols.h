@@ -46,6 +46,7 @@ public:
 
 
 protected:
+	bool initLocked(void);	// Init under m_Mutex
 	// data
 	std::mutex m_Mutex;
 	std::list<std::unique_ptr<CProtocol>> m_Protocols;

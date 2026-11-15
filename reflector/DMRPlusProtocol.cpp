@@ -187,14 +187,10 @@ void CDmrplusProtocol::Task(void)
 void CDmrplusProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, const CIp &Ip)
 {
 	// find the stream
-	auto stream = GetStream(Header->GetStreamId());
-	if ( stream )
-	{
-		// stream already open
-		// skip packet, but tickle the stream
-		stream->Tickle();
-	}
-	else
+	auto stream = GetStream(Header->GetStreamId(), &Ip);
+	// a repeated header of its own stream: nothing to do (it does not keep the
+	// stream alive, the voice does)
+	if ( !stream )
 	{
 		CCallsign my(Header->GetMyCallsign());
 		CCallsign rpt1(Header->GetRpt1Callsign());
@@ -444,7 +440,7 @@ bool CDmrplusProtocol::IsValidDvHeaderPacket(const CIp &Ip, const CBuffer &Buffe
 			rpt1.SetCSModule(DMRPLUS_MODULE_ID);
 			CCallsign rpt2 = m_ReflectorCallsign;
 			rpt2.SetCSModule(DmrDstIdToModule(uiDstId));
-			uint32_t uiStreamId = IpToStreamId(Ip);
+			uint32_t uiStreamId = PeerStreamId(Ip);
 
 			// and packet
 			Header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(uiSrcId, CCallsign("CQCQCQ"), rpt1, rpt2, uiStreamId, 0, 0));
@@ -492,8 +488,9 @@ bool CDmrplusProtocol::IsValidDvFramePacket(const CIp &Ip, const CBuffer &Buffer
 			memcpy(&dmrsync[1], &dmrframe[14], 5);
 			dmrsync[6] = dmrframe[19] & 0xF0;
 
-			// and create 3 dv frames
-			uint32_t uiStreamId = IpToStreamId(Ip);
+			// and create 3 dv frames (without the header of their transmission, a new
+			// id, they go nowhere)
+			uint32_t uiStreamId = PeerStreamId(Ip);
 			// frame1
 			memcpy(dmrambe, &dmr3ambe[0], 9);
 			frames[0] = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(dmrambe, dmrsync, uiStreamId, uiVoiceSeq, 1, false));
@@ -790,14 +787,4 @@ void CDmrplusProtocol::ReplaceEMBInBuffer(CBuffer *buffer, uint8_t uiDmrPacketId
 		buffer->ReplaceAt(44, (uint8_t)((buffer->at(44) & 0xF0) | ((emb[1U] >> 4) & 0x0F)));
 		buffer->ReplaceAt(45, (uint8_t)((buffer->at(45) & 0x0F) | ((emb[1U] << 4) & 0xF0)));
 	}
-}
-
-////////////////////////////////////////////////////////////////////////////////////////
-// uiStreamId helpers
-
-
-// uiStreamId helpers
-uint32_t CDmrplusProtocol::IpToStreamId(const CIp &ip) const
-{
-	return ip.GetAddr() ^ (uint32_t)(MAKEDWORD(ip.GetPort(), ip.GetPort()));
 }

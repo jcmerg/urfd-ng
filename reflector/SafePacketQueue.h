@@ -60,7 +60,7 @@ public:
 	{
 		std::lock_guard<std::mutex> lock(m);
 		if (q.empty())
-			return nullptr;
+			return T{};	// nullptr for a pointer
 		else
 		{
 			T val = std::move(q.front());
@@ -77,7 +77,7 @@ public:
 		while(q.empty())
 		{
 			if (shutdown)
-				return nullptr;
+				return T{};	// nullptr for a pointer
 			// release lock as long as the wait and reacquire it afterwards.
 			c.wait(lock);
 		}

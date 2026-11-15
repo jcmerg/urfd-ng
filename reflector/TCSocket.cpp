@@ -144,7 +144,41 @@ void CTCSocket::closePos(size_t pos)
 		return;
 	shutdown(m_Pfd[pos].fd, SHUT_RDWR); // may fail if already disconnected, that's OK
 	close(m_Pfd[pos].fd);
-	m_Pfd[pos].fd = -1;
+	setPos(pos, -1);
+}
+
+// the one place a module's connection changes: its codec thread waits on the one
+// it saw outside the lock, the module's wake (CWakeFd) has it look again
+void CTCSocket::setPos(size_t pos, int fd)
+{
+	auto lock = lockPos(pos);
+	m_Pfd[pos].fd = fd;
+	if (pos < m_Connections.size())
+		m_Connections[pos]++;
+	wakePos(pos);
+}
+
+uint32_t CTCSocket::GetConnectionCount(char module) const
+{
+	const auto pos = m_Modules.find(module);
+	return pos < m_Connections.size() ? m_Connections[pos].load() : 0;
+}
+
+const CWakeFd *CTCSocket::GetWake(char module) const
+{
+	const auto pos = m_Modules.find(module);
+	return pos < m_Wake.size() ? m_Wake[pos].get() : nullptr;
+}
+
+void CTCSocket::wakePos(size_t pos) const
+{
+	if (pos < m_Wake.size())
+		m_Wake[pos]->Signal();
+}
+
+CTCSocket::~CTCSocket()
+{
+	Close();
 }
 
 void CTCSocket::Close()
@@ -203,7 +237,7 @@ bool CTCSocket::IsModuleConnected(char module)
 	if (EPeer::invalid == peer)
 	{
 		std::cerr << "Transcoder module '" << module << "' connection no longer open, dropping it" << std::endl;
-		m_Pfd[pos].fd = -1;
+		setPos(pos, -1);	// forgotten, not closed
 		return false;
 	}
 	if (EPeer::alive != peer)
@@ -264,7 +298,7 @@ bool CTCServer::AnyAreClosed()
 		{
 			// no longer open: forgotten, not closed (its number may be another socket's by now)
 			std::cerr << "Transcoder module '" << m_Modules[i] << "' connection no longer open (maintenance probe)" << std::endl;
-			m_Pfd[i].fd = -1;
+			setPos(i, -1);	// forgotten, not closed
 			any = true;
 		}
 		else if (EPeer::alive != peer)
@@ -287,7 +321,7 @@ bool CTCServer::AnyAreClosed()
 	return any;
 }
 
-bool CTCSocket::Send(const STCPacket *packet)
+bool CTCSocket::Send(const STCPacket *packet, uint32_t *connection)
 {
 	auto pos = m_Modules.find(packet->module);
 	if (pos == std::string::npos)
@@ -305,6 +339,8 @@ bool CTCSocket::Send(const STCPacket *packet)
 	auto lock = lockPos(pos);
 	if (m_Pfd[pos].fd < 0)
 		return true;	// closed meanwhile (a ping of tcd's reconnect thread)
+	if (connection && pos < m_Connections.size())
+		*connection = m_Connections[pos];
 	unsigned count = 0;
 	auto data = (const unsigned char *)packet;
 	do {
@@ -386,36 +422,41 @@ bool CTCSocket::receive(int fd, STCPacket *packet)
 	return false;
 }
 
-// returns true if there is data to return
-bool CTCServer::Receive(char module, STCPacket *packet, int ms)
+ETCReceive CTCServer::Receive(char module, STCPacket *packet, int ms, int *fd, uint32_t *connection)
 {
-	bool rv = false;
+	if (fd)
+		*fd = -1;
 	const auto pos = m_Modules.find(module);
 	if (pos == std::string::npos)
 	{
 		std::cerr << "Can't receive on unconfigured module '" << module << "'" << std::endl;
-		return rv;
+		return ETCReceive::none;
 	}
 
 	// held over the poll: the codec threads poll with 0 ms
 	auto lock = lockPos(pos);
 	auto pfds = &m_Pfd[pos];
+	// the one exit once the lock is held: the caller waits on the connection as it is left here
+	if (connection && pos < m_Connections.size())
+		*connection = m_Connections[pos];	// what it reads from (before a close below)
+	auto done = [&](ETCReceive r) { if (fd) *fd = pfds->fd; return r; };
 	if (pfds->fd < 0)
-	{
-		return rv;
-	}
+		return done(ETCReceive::none);
 
 	auto n = poll(pfds, 1, ms);
+	if (n < 0 && EINTR == errno)
+		return done(ETCReceive::none);	// a signal, the connection is fine
 	if (n < 0)
 	{
 		perror("Recieve poll");
 		closePos(pos);
-		return rv;
+		return done(ETCReceive::none);
 	}
 
 	if (0 == n)
-		return rv;	// timeout
+		return done(ETCReceive::none);	// timeout
 
+	bool rv = false;
 	if (pfds->revents & POLLIN)
 	{
 		rv = receive(pfds->fd, packet);
@@ -424,15 +465,15 @@ bool CTCServer::Receive(char module, STCPacket *packet, int ms)
 	}
 
 	// an error or hangup that came with the data: closed once nothing is left to read
-	// (the codec thread comes back for the rest, at once or on its next round after a
-	// ping, a tcd's last report among it)
+	// (the codec thread comes back for the rest in the same round, a tcd's last
+	// report among it)
 	const auto peer = rv ? EPeer::alive : classify(pfds->fd, pfds->revents, true);
 	if (EPeer::invalid == peer)
 	{
 		// the descriptor is no longer open (closed at shutdown): forget it, or the
 		// codec thread polls it again at once, forever
 		std::cerr << "Transcoder connection on module '" << module << "' no longer open, dropping it" << std::endl;
-		pfds->fd = -1;
+		setPos(pos, -1);	// forgotten, not closed
 	}
 	else if (EPeer::alive != peer)
 	{
@@ -444,17 +485,15 @@ bool CTCServer::Receive(char module, STCPacket *packet, int ms)
 		closePos(pos);
 
 	// only an error or hangup, nothing read: there is no packet
-	if (!(pfds->revents & POLLIN))
-		return false;
+	if (rv || !(pfds->revents & POLLIN))
+		return done(ETCReceive::none);
 
-	if(packet->codec_in == ECodecType::ping)
+	if (packet->codec_in == ECodecType::ping)
 	{
-		if (!rv)
-			KeepReport(*packet);
-		return false;
+		KeepReport(*packet);
+		return done(ETCReceive::ping);
 	}
-	else
-		return !rv;
+	return done(ETCReceive::packet);
 }
 
 void CTCServer::KeepReport(const STCPacket &packet)
@@ -469,6 +508,8 @@ void CTCServer::KeepReport(const STCPacket &packet)
 
 bool CTCServer::Open(const std::string &address, const std::string &modules, uint16_t port)
 {
+	// called once (CReflector::Start), before the codec threads, which then hold
+	// the connections and wakes made here
 	m_Modules.assign(modules);
 
 	m_Ip = CIp(address.c_str(), AF_UNSPEC, SOCK_STREAM, port);
@@ -484,6 +525,15 @@ bool CTCServer::Open(const std::string &address, const std::string &modules, uin
 	m_LastRx.assign(m_Modules.size(), std::chrono::steady_clock::now());
 	m_Pinged.assign(m_Modules.size(), 0);
 	initLocks();
+	m_Connections = std::vector<std::atomic<uint32_t>>(m_Modules.size());
+	// the codec threads' wakes, before they start (a frame pushed, a connection's change)
+	m_Wake.clear();
+	for (size_t i = 0; i < m_Modules.size(); i++)
+	{
+		m_Wake.push_back(std::make_unique<CWakeFd>());
+		if (!m_Wake[i]->Open())
+			std::cerr << "Transcoder module '" << m_Modules[i] << "': no wake descriptor (" << strerror(errno) << "), its codec thread looks every 20 ms" << std::endl;
+	}
 
 	// Create persistent listen socket
 	m_ListenFd = socket(m_Ip.GetFamily(), SOCK_STREAM, 0);
@@ -774,8 +824,7 @@ bool CTCServer::establish(SPending &p)
 	if (m_Pfd[pos].fd >= 0)
 	{
 		std::cout << "Transcoder for module '" << p.module << "' is back, the standby one gives it up" << std::endl;
-		shutdown(m_Pfd[pos].fd, SHUT_RDWR);
-		close(m_Pfd[pos].fd);
+		closePos(pos);
 	}
 	m_Standby[pos] = p.standby;
 
@@ -803,9 +852,9 @@ bool CTCServer::establish(SPending &p)
 
 	{ std::ostringstream s; s << "File descriptor " << p.fd << " opened TCP port for module '" << p.module << "' on " << p.peer; std::cout << s.str() << std::endl; }
 
-	m_Pfd[pos].fd = p.fd;
 	m_LastRx[pos] = std::chrono::steady_clock::now();
 	m_Pinged[pos] = 0;
+	setPos(pos, p.fd);
 	return true;
 }
 
@@ -1001,10 +1050,7 @@ bool CTCClient::Connect(char module, bool blocking, int *fd_out)
 		*fd_out = fd;
 		return false;
 	}
-	{
-		auto lock = lockPos(pos);
-		m_Pfd[pos].fd = fd;
-	}
+	setPos(pos, fd);
 	ping(module);
 
 	return false;
@@ -1078,7 +1124,7 @@ void CTCClient::ReConnect() // and sometimes ping
 			auto plock = lockPos(pos);
 			if (m_Pfd[pos].fd < 0)
 			{
-				m_Pfd[pos].fd = fd;
+				setPos(pos, fd);
 				ping(m_Modules[pos]);
 			}
 			else
@@ -1203,7 +1249,7 @@ void CTCClient::Receive(std::queue<std::unique_ptr<STCPacket>> &queue, int ms)
 		// as on the reflector's side: closed once nothing is left to read
 		const auto peer = classify(pfd.fd, pfd.revents, true);
 		if (EPeer::invalid == peer)
-			m_Pfd[i].fd = -1;
+			setPos(i, -1);	// forgotten, not closed
 		else if (EPeer::alive != peer)
 		{
 			const char m = m_Modules[i];

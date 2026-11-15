@@ -178,7 +178,7 @@ void CUSRPProtocol::Task(void)
 		if ( IsValidDvPacket(Buffer, 0, Frame) )
 		{
 			// the voice opens a stream if the TEXT packet didn't
-			auto sid = GetStreamIdFromIp(Ip);
+			auto sid = OpenStreamIdOf(Ip);
 			if ( !sid )
 			{
 				// the talker SET_INFO announced, else the node itself
@@ -207,7 +207,7 @@ void CUSRPProtocol::Task(void)
 			if ( m_HasTalker )
 			{
 				m_Talker = Callsign;
-				if ( !GetStreamIdFromIp(Ip) )
+				if ( !OpenStreamIdOf(Ip) )
 					OpenStream(m_Talker, Ip);
 			}
 		}
@@ -215,7 +215,7 @@ void CUSRPProtocol::Task(void)
 		{
 			// the unkey ends the stream with a silent last frame
 			m_HasTalker = false;
-			auto sid = GetStreamIdFromIp(Ip);
+			auto sid = OpenStreamIdOf(Ip);
 			if ( sid && !m_EndedStreams.count(sid) )
 			{
 				int16_t silence[160] = {};
@@ -238,8 +238,6 @@ void CUSRPProtocol::Task(void)
 
 	// handle end of streaming timeout
 	CheckStreamsTimeout();
-	for ( auto it=m_EndedStreams.begin(); it!=m_EndedStreams.end(); )
-		it = m_Streams.count(*it) ? std::next(it) : m_EndedStreams.erase(it);
 
 	// handle queue from reflector
 	HandleQueue();
@@ -303,18 +301,6 @@ void CUSRPProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header,
 	}
 }
 
-// the stream the sender at Ip has open, 0 if none
-uint16_t CUSRPProtocol::GetStreamIdFromIp(const CIp &Ip)
-{
-	for ( auto &it : m_Streams )
-	{
-		auto owner = it.second->GetOwnerIp();
-		if ( (owner != nullptr) && (*owner == Ip) )
-			return it.first;
-	}
-	return 0;
-}
-
 // opens a stream for the talker my, if the gatekeeper lets it; returns its id or 0
 uint16_t CUSRPProtocol::OpenStream(const CCallsign &my, const CIp &Ip)
 {
@@ -322,11 +308,8 @@ uint16_t CUSRPProtocol::OpenStream(const CCallsign &my, const CIp &Ip)
 	if ( !g_GateKeeper.MayTransmit(my, Ip, EProtocol::usrp) )
 		return 0;
 
-	// a new stream id for every transmission, never 0
-	uint16_t sid;
-	do {
-		sid = static_cast<uint16_t>(::rand());
-	} while ( 0 == sid );
+	// a new stream id for every transmission
+	const uint16_t sid = NewStreamId(Ip);
 
 	CCallsign rpt1 = m_Callsign;
 	CCallsign rpt2 = m_ReflectorCallsign;
@@ -334,7 +317,7 @@ uint16_t CUSRPProtocol::OpenStream(const CCallsign &my, const CIp &Ip)
 	rpt2.SetCSModule(' ');
 	auto header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(my, CCallsign("CQCQCQ"), rpt1, rpt2, sid, true));
 	OnDvHeaderPacketIn(header, Ip);
-	return GetStreamIdFromIp(Ip);
+	return OpenStreamIdOf(Ip);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////

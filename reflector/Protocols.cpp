@@ -57,9 +57,20 @@ CProtocols::~CProtocols()
 // Helper: check if protocol is enabled (defaults to true if key not set)
 #define IS_PROTO_ENABLED(key) (!g_Configure.Contains(key) || g_Configure.GetBoolean(key))
 
+// the lock for all of it, released on every way out: a protocol that fails to
+// start left it locked before, and Close() (CReflector::Start) waited for it for ever
 bool CProtocols::Init(void)
 {
-	m_Mutex.lock();
+	std::lock_guard<std::mutex> lock(m_Mutex);
+	const bool ok = initLocked();
+	for (auto &p : m_Protocols)
+		if (p->GetProtocolType() == EProtocol::mmdvmclient)
+			m_Mmdvm.push_back(static_cast<CMMDVMClientProtocol *>(p.get()));
+	return ok;
+}
+
+bool CProtocols::initLocked(void)
+{
 	{
 		if (IS_PROTO_ENABLED(g_Keys.dextra.enable))
 		{
@@ -232,10 +243,6 @@ bool CProtocols::Init(void)
 		}
 
 	}
-	for (auto &p : m_Protocols)
-		if (p->GetProtocolType() == EProtocol::mmdvmclient)
-			m_Mmdvm.push_back(static_cast<CMMDVMClientProtocol *>(p.get()));
-	m_Mutex.unlock();
 
 	// done
 	return true;

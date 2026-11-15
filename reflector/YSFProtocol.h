@@ -32,6 +32,7 @@
 #include "YSFDefines.h"
 #include "YSFFich.h"
 #include "YSFGps.h"
+#include "PerStream.h"
 #include "WiresXInfo.h"
 #include "WiresXCmdHandler.h"
 
@@ -132,9 +133,6 @@ protected:
 	// server status packet encoding helpers
 	bool EncodeServerStatusPacket(CBuffer *) const;
 
-	// uiStreamId helpers
-	uint32_t IpToStreamId(const CIp &) const;
-
 	// debug
 	bool DebugTestDecodePacket(const CBuffer &);
 	bool DebugDumpHeaderPacket(const CBuffer &);
@@ -148,10 +146,12 @@ protected:
 	// for queue header caches
 	std::unordered_map<char, CYsfStreamCacheItem> m_StreamsCache;
 	// the positions in the data channel, by stream id
-	std::unordered_map<uint16_t, CYsfGps> m_Gps;
-	CYsfGps &GpsOf(uint32_t streamid);
+	CPerStream<CYsfGps> m_Gps { [this](uint16_t id) { return StreamIdLive(id); } };
+	void StreamClosed(uint16_t streamid) override;
 	// VW: the radio id of a stream's first frame, for the VW out (by stream id)
-	std::unordered_map<uint16_t, std::array<uint8_t, 20>> m_VwRadioId;
+	// kept after the stream closed: its VW terminator to the other clients may still
+	// be on its way out (CPerStream keeps those of streams closed lately)
+	CPerStream<std::array<uint8_t, 20>> m_VwRadioId { [this](uint16_t id) { return StreamIdLive(id); } };
 
 	// for wires-x
 	CWiresxCmdHandler   m_WiresxCmdHandler;

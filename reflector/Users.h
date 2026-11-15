@@ -79,7 +79,7 @@ protected:
 	// about 0.3 s after its stream, when the next one may have started (a quick
 	// round), and one waits for its stream to stop, which brings the lost frames.
 	// A stream stopped more than 10 s ago gets none any more (not transcoded, or
-	// too short for tcd to report), so a stream id DMR+ reuses cannot match it
+	// too short for tcd to report)
 	struct SReportWait { uint16_t streamid; CCallsign talker; std::time_t started, stopped; uint32_t lost_frames; nlohmann::json audio; };
 	std::map<char, std::deque<SReportWait>> m_ReportWait;
 	void ExpireReportWait(std::deque<SReportWait> &wait);

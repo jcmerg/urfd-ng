@@ -501,11 +501,12 @@ void CYsfClientProtocol::SendDisconnect(SYsfClientMapping &mapping)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
-// stream ID helper
+// stream helper
 
-uint32_t CYsfClientProtocol::IpToStreamId(const CIp &ip) const
+void CYsfClientProtocol::StreamClosed(uint16_t streamid)
 {
-	return ip.GetAddr() ^ (uint32_t)ip.GetPort();
+	m_Gps.Erase(streamid);
+	CProtocol::StreamClosed(streamid);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -542,7 +543,7 @@ bool CYsfClientProtocol::IsValidDvHeaderPacket(const CIp &Ip, const CYSFFICH &Fi
 {
 	if (Fich.getFI() == YSF_FI_HEADER)
 	{
-		uint32_t uiStreamId = IpToStreamId(Ip);
+		uint32_t uiStreamId = PeerStreamId(Ip);
 
 		CYSFPayload ysfPayload;
 		CCallsign csMY;
@@ -562,7 +563,7 @@ bool CYsfClientProtocol::IsValidDvHeaderPacket(const CIp &Ip, const CYSFFICH &Fi
 
 			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, uiStreamId, Fich.getFN()));
 			// a new transmission: its position (GPS in the data channel) is read again
-			m_Gps[uiStreamId].Reset();
+			m_Gps.Of(uiStreamId).Reset();
 		}
 
 		uint8_t uiAmbe[9];
@@ -582,9 +583,8 @@ bool CYsfClientProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fic
 {
 	if (Fich.getFI() == YSF_FI_COMMUNICATIONS)
 	{
-		uint32_t uiStreamId = IpToStreamId(Ip);
-
-		// late entry: create header if no stream exists
+		// the peer's open stream, else a new one: late entry, create a header
+		uint32_t uiStreamId = PeerStreamId(Ip);
 		auto stream = GetStream(uiStreamId, &Ip);
 		if (!stream)
 		{
@@ -600,7 +600,7 @@ bool CYsfClientProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fic
 			CCallsign rpt2(m_ClientCallsign);
 			rpt2.SetCSModule(' ');
 			header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(csMY, CCallsign("CQCQCQ"), rpt1, rpt2, uiStreamId, Fich.getFN()));
-			m_Gps[uiStreamId].Reset();
+			m_Gps.Of(uiStreamId).Reset();
 		}
 
 		// decode 5 AMBE frames
@@ -621,7 +621,7 @@ bool CYsfClientProtocol::IsValidDvFramePacket(const CIp &Ip, const CYSFFICH &Fic
 			CYSFPayload payload;
 			uint8_t dt[20];
 			double lat, lon;
-			if ( payload.readVDMode2Data((unsigned char *)&(Buffer.data()[35]), dt) && m_Gps[uiStreamId].AddVD2(Fich.getFN(), Fich.getFT(), dt, lat, lon) )
+			if ( payload.readVDMode2Data((unsigned char *)&(Buffer.data()[35]), dt) && m_Gps.Of(uiStreamId).AddVD2(Fich.getFN(), Fich.getFT(), dt, lat, lon) )
 			{
 				g_Reflector.GetUsers()->Location(csMY, lat, lon);
 				g_Reflector.ReleaseUsers();
@@ -648,7 +648,7 @@ bool CYsfClientProtocol::IsValidDvLastFramePacket(const CIp &Ip, const CYSFFICH 
 {
 	if (Fich.getFI() == YSF_FI_TERMINATOR)
 	{
-		uint32_t uiStreamId = IpToStreamId(Ip);
+		uint32_t uiStreamId = PeerStreamId(Ip);
 
 		// the terminator carries no voice: AMBE+2 silence (zero bits would decode as voice)
 		uint8_t uiAmbe[9];

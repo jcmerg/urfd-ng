@@ -27,7 +27,6 @@
 #include <iostream>
 #include <poll.h>
 #include <unistd.h>
-#include <sys/eventfd.h>
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructor
@@ -35,7 +34,8 @@
 
 CProtocol::CProtocol() : keep_running(true)
 {
-	m_QueueFd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+	if (!m_QueueWake.Open())
+		std::cerr << "Protocol: no wake descriptor (" << strerror(errno) << "), its queue waits for the timeout" << std::endl;
 }
 
 
@@ -49,9 +49,6 @@ CProtocol::~CProtocol()
 
 	// empty queue
 	m_Queue.Clear();
-
-	if (m_QueueFd >= 0)
-		close(m_QueueFd);
 }
 
 void CProtocol::Push(std::unique_ptr<CPacket> p)
@@ -63,11 +60,7 @@ void CProtocol::Push(std::unique_ptr<CPacket> p)
 
 void CProtocol::Wake(void)
 {
-	if (m_QueueFd >= 0)
-	{
-		const uint64_t one = 1;
-		if (write(m_QueueFd, &one, sizeof(one)) < 0) {}
-	}
+	m_QueueWake.Signal();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -182,14 +175,12 @@ void CProtocol::OnDvFramePacketIn(std::unique_ptr<CDvFramePacket> &Frame, const 
 	}
 	else
 	{
-		// Rate-limit: only log once per stream ID to avoid flooding
-		static uint16_t lastOrphanId = 0;
-		uint16_t thisId = Frame->GetStreamId();
-		if (thisId != lastOrphanId)
+		// once per stream id and peer
+		const uint16_t thisId = Frame->GetStreamId();
+		if (!Ip || LogOnce(0, *Ip, thisId))
 		{
-			lastOrphanId = thisId;
 			std::cout << std::showbase << std::hex;
-			std::cout << "Orphaned Frame with ID " << ntohs(thisId) << std::noshowbase << std::dec << " on " << *Ip << std::endl;
+			std::cout << "Orphaned Frame with ID " << ntohs(thisId) << std::noshowbase << std::dec << " on " << (Ip ? *Ip : CIp()) << std::endl;
 		}
 		Frame.reset();
 	}
@@ -197,6 +188,79 @@ void CProtocol::OnDvFramePacketIn(std::unique_ptr<CDvFramePacket> &Frame, const 
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // stream handle helpers
+
+// the one way a stream leaves m_Streams: closed, taken out, its id handed on
+// (StreamClosed); returns the next one
+CProtocol::StreamMap::iterator CProtocol::CloseStreamAt(StreamMap::iterator it)
+{
+	g_Reflector.CloseStream(it->second);
+	const uint16_t streamid = it->first;
+	it = m_Streams.erase(it);
+	StreamClosed(streamid);
+	return it;
+}
+
+bool CProtocol::LogOnce(int kind, const CIp &ip, uint16_t id)
+{
+	const uint64_t key = (uint64_t(kind) << 48) | (uint64_t(ip.GetAddr()) << 16) | ip.GetPort();
+	const auto it = m_Logged.find(key);
+	if (it != m_Logged.end() && it->second == id)
+		return false;
+	if (it == m_Logged.end() && m_Logged.size() >= 64)
+		m_Logged.clear();	// peers that went
+	m_Logged[key] = id;
+	return true;
+}
+
+void CProtocol::StreamClosed(uint16_t streamid)
+{
+	m_EndedStreams.erase(streamid);
+	// the next transmission that opens gets another id (NewStreamId)
+	m_StreamIdSeed++;
+}
+
+std::shared_ptr<CPacketStream> CProtocol::OpenStreamOf(const CIp &ip, uint16_t *sid) const
+{
+	for (const auto &it : m_Streams)
+	{
+		const CIp *owner = it.second->GetOwnerIp();
+		if (owner && (*owner == ip))
+		{
+			if (sid)
+				*sid = it.first;
+			return it.second;
+		}
+	}
+	return nullptr;
+}
+
+// an id a protocol may give a new stream: not 0, not in use here, no stream open
+// elsewhere with it (a loop to the reflector) and none closed lately (its late
+// transcoder answers and reports)
+bool CProtocol::StreamIdTaken(uint16_t id) const
+{
+	return 0 == id || m_Streams.count(id) || g_Reflector.IsStreamIdInUse(id);
+}
+
+bool CProtocol::StreamIdLive(uint16_t id) const
+{
+	return m_Streams.count(id) || g_Reflector.IsStreamIdRecent(id);
+}
+
+uint16_t CProtocol::NewStreamId(const CIp &ip)
+{
+	// from the peer's address and port and the seed: a talker refused gets the
+	// same one with every packet until a stream of this protocol closes. Only
+	// the taken ones are in the way, so it ends after a few tries
+	const uint32_t base = (ip.GetAddr() ^ (uint32_t(ip.GetPort()) * 0x10001u)) + uint32_t(m_StreamIdSeed) * 0x9E3779B1u;
+	for (uint32_t k = 0; ; k++)
+	{
+		const uint32_t h = base + k * 0x85EBCA6Bu;
+		const uint16_t id = uint16_t(h ^ (h >> 16));
+		if (!StreamIdTaken(id))
+			return id;
+	}
+}
 
 std::shared_ptr<CPacketStream> CProtocol::GetStream(uint16_t uiStreamId, const CIp *Ip)
 {
@@ -226,10 +290,8 @@ void CProtocol::CheckStreamsTimeout(void)
 			// while the talker is still the master: it doesn't get it back
 			g_Reflector.EndStream(it->second);
 			HandleQueue();
-			// and close it
-			g_Reflector.CloseStream(it->second);
-			// and remove it from the m_Streams map
-			it = m_Streams.erase(it);
+			// and close it, and remove it from the m_Streams map
+			it = CloseStreamAt(it);
 		}
 		else
 		{
@@ -246,14 +308,9 @@ void CProtocol::CloseStreamsOf(const CIp &Ip)
 	{
 		const CIp *owner = it->second->GetOwnerIp();
 		if ( owner && (*owner == Ip) )
-		{
-			g_Reflector.CloseStream(it->second);
-			it = m_Streams.erase(it);
-		}
+			it = CloseStreamAt(it);
 		else
-		{
 			it++;
-		}
 	}
 }
 
@@ -316,19 +373,16 @@ int CProtocol::WaitTime(void) const
 	return m_Streams.empty() ? PROTOCOL_IDLE_WAIT : PROTOCOL_TICK;
 }
 
-// poll() on fds[0] to fds[n - 1] and the queue's eventfd, which goes into fds[n]
+// poll() on fds[0] to fds[n - 1] and the queue's wake (CWakeFd), which goes into fds[n]
 // (the caller's room for it) and whose wake-up is cleared here
 int CProtocol::PollWithQueue(struct pollfd *fds, nfds_t n, int time_ms)
 {
-	fds[n] = { m_QueueFd, POLLIN, 0 };	// poll leaves out a -1
+	fds[n] = { m_QueueWake.Fd(), POLLIN, 0 };	// poll leaves out a -1
 	const auto rval = poll(fds, n + 1, time_ms);
 	if (rval < 0 && errno != EINTR)
 		std::cerr << "Receive poll error: " << strerror(errno) << std::endl;
 	if (rval > 0 && (fds[n].revents & POLLIN))
-	{
-		uint64_t count;
-		if (read(m_QueueFd, &count, sizeof(count)) < 0) {}
-	}
+		m_QueueWake.Clear();
 	return rval;
 }
 

@@ -1154,15 +1154,16 @@ nlohmann::json CAdminSocket::CmdTCStats(void)
 			CCodecStream *cs = stream->GetCodecStream();
 			if (cs)
 			{
-				modInfo["codec_in"] = (int)cs->GetCodecIn();
-				modInfo["total_packets"] = cs->GetTotalPackets();
-				modInfo["mismatch_count"] = cs->GetMismatchCount();
-				modInfo["rt_count"] = cs->GetRTCount();
-				if (cs->GetRTCount() > 0 && cs->GetRTMin() >= 0)
+				const auto st = cs->GetStats();
+				modInfo["codec_in"] = (int)st.codec_in;
+				modInfo["total_packets"] = st.total_packets;
+				modInfo["mismatch_count"] = st.mismatch_count;
+				modInfo["rt_count"] = st.rt_count;
+				if (st.rt_count > 0 && st.rt_min >= 0)
 				{
-					modInfo["rt_min_ms"] = (int)(cs->GetRTMin() * 1000.0);
-					modInfo["rt_avg_ms"] = (int)(cs->GetRTAvg() * 1000.0);
-					modInfo["rt_max_ms"] = (int)(cs->GetRTMax() * 1000.0);
+					modInfo["rt_min_ms"] = (int)(st.rt_min * 1000.0);
+					modInfo["rt_avg_ms"] = (int)(st.rt_avg * 1000.0);
+					modInfo["rt_max_ms"] = (int)(st.rt_max * 1000.0);
 				}
 			}
 		}

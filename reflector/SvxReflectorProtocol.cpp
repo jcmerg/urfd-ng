@@ -858,8 +858,7 @@ void CSvxReflectorProtocol::CloseInStream(void)
 		auto it = m_Streams.find(m_InStream.streamId);
 		if (it != m_Streams.end() && it->second)
 		{
-			g_Reflector.CloseStream(it->second);
-			m_Streams.erase(it);
+			CloseStreamAt(it);
 		}
 	}
 	else
@@ -1048,7 +1047,7 @@ bool CSvxReflectorProtocol::EnsureInStream(void)
 	if (m_InStream.open && (m_InStream.rejected || m_Streams.count(m_InStream.streamId)))
 		return !m_InStream.rejected;
 
-	m_InStream.streamId = 0x5C00 | m_StreamCounter++;
+	m_InStream.streamId = FreeStreamId([this] { return uint16_t(0x5C00 | m_StreamCounter++); });
 
 	// Use talker callsign if available, otherwise reflector callsign
 	std::string userCs = m_InStream.talkerCallsign.empty() ? m_Callsign : m_InStream.talkerCallsign;

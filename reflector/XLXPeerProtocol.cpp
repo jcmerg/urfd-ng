@@ -358,14 +358,10 @@ void CXlxPeerProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Head
 	// todo: do the same for DVFrame and DVLAstFrame packets
 
 	// find the stream
-	auto stream = GetStream(Header->GetStreamId());
-	if ( stream )
-	{
-		// stream already open
-		// skip packet, but tickle the stream
-		stream->Tickle();
-	}
-	else
+	auto stream = GetStream(Header->GetStreamId(), &Ip);
+	// a repeated header of its own stream: nothing to do (it does not keep the
+	// stream alive, the voice does)
+	if ( !stream )
 	{
 		CCallsign my(Header->GetMyCallsign());
 		CCallsign rpt1(Header->GetRpt1Callsign());

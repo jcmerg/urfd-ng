@@ -24,9 +24,15 @@
 #include "DVFramePacket.h"
 #include <poll.h>
 #include <set>
+#include <unordered_set>
+#include <string>
+#include <unordered_map>
+#include <chrono>
 #include <vector>
 #include <cstring>
 #include <shared_mutex>
+
+#include "WakeFd.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 
@@ -118,9 +124,46 @@ protected:
 	virtual void OnDvFramePacketIn(std::unique_ptr<CDvFramePacket> &, const CIp * = nullptr);
 
 	// stream handle helpers
-	std::shared_ptr<CPacketStream> GetStream(uint16_t, const CIp * = nullptr);
+	// the stream with this id owned by Ip (nullptr: none found); there is no
+	// default, a call without an owner found nothing ever
+	std::shared_ptr<CPacketStream> GetStream(uint16_t, const CIp *);
 	void CheckStreamsTimeout(void);
 	void CloseStreamsOf(const CIp &);
+	using StreamMap = std::unordered_map<uint16_t, std::shared_ptr<CPacketStream>>;
+	StreamMap::iterator CloseStreamAt(StreamMap::iterator it);
+	// a stream left m_Streams: what a protocol keeps per stream id goes with it
+	virtual void StreamClosed(uint16_t streamid);
+	// stream ids for peers whose packets carry none (DMR+, YSF, NXDN, P25, USRP),
+	// one per transmission as with the other protocols (the transcoder's answers
+	// and reports, the last heard and loop checks tell them apart): the one of the
+	// peer's open stream, 0 for none; a new one for a transmission that opens,
+	// the same until a stream of this protocol closes (a talker refused again and
+	// again is logged once); and the open one, else a new one
+	uint16_t OpenStreamIdOf(const CIp &ip) const { uint16_t sid = 0; OpenStreamOf(ip, &sid); return sid; }
+	// the stream the peer at ip owns (one at a time: OpenStream makes its client the master)
+	std::shared_ptr<CPacketStream> OpenStreamOf(const CIp &ip, uint16_t *sid = nullptr) const;
+	uint16_t NewStreamId(const CIp &ip);
+	// a protocol that counts its own ids takes the next one not taken (next: the
+	// next candidate); after 256 tries the last one, all of them taken
+	bool StreamIdTaken(uint16_t id) const;
+	// open here, or closed lately (its end may still be on its way out)
+	bool StreamIdLive(uint16_t id) const;
+	template <typename F> uint16_t FreeStreamId(F next) const
+	{
+		uint16_t id = next();
+		for (int n = 0; n < 255 && StreamIdTaken(id); n++)
+			id = next();
+		return id;
+	}
+	uint16_t PeerStreamId(const CIp &ip) { const uint16_t sid = OpenStreamIdOf(ip); return sid ? sid : NewStreamId(ip); }
+	uint16_t m_StreamIdSeed = 0;
+	// once per stream id and peer: whether this id of this peer is new to the log
+	// of kind (an orphan, a late entry), for the protocol's thread alone
+	bool LogOnce(int kind, const CIp &ip, uint16_t id);
+	std::unordered_map<uint64_t, uint16_t> m_Logged;
+	// streams whose last packet was pushed (P25 TDU, USRP unkey): what comes after
+	// it until the stream closes is dropped
+	std::unordered_set<uint16_t> m_EndedStreams;
 
 	// queue helper
 	virtual void HandleQueue(void) = 0;
@@ -170,11 +213,11 @@ protected:
 	CUdpSocket m_Socket6;
 
 	// streams
-	std::unordered_map<uint16_t, std::shared_ptr<CPacketStream>> m_Streams;
+	StreamMap m_Streams;
 
-	// queue, and an eventfd that wakes the receive wait when it got a packet
+	// queue, and what wakes the receive wait when it got a packet
 	CSafePacketQueue<std::unique_ptr<CPacket>> m_Queue;
-	int m_QueueFd = -1;
+	CWakeFd m_QueueWake;
 
 	// thread
 	std::atomic<bool> keep_running;

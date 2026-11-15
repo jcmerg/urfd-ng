@@ -370,13 +370,12 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 	bool lastheard = false;
 
 	// find the stream
-	auto stream = GetStream(Header->GetStreamId());
+	auto stream = GetStream(Header->GetStreamId(), &Ip);	// a repeated header of its own stream
 	auto pending = m_PendingCalls.find(Header->GetStreamId());
 	if ( stream )
 	{
-		// stream already open
-		// skip packet, but tickle the stream
-		stream->Tickle();
+		// stream already open: a repeated header, nothing to do (it does not keep
+		// the stream alive, the voice does)
 	}
 	else if ( pending != m_PendingCalls.end() && pending->second.ip == Ip )
 	{

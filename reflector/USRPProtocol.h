@@ -52,7 +52,6 @@ protected:
 
 	// stream helpers
 	void OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &, const CIp &);
-	uint16_t GetStreamIdFromIp(const CIp &);
 	uint16_t OpenStream(const CCallsign &, const CIp &);
 
 	// packet decoding helpers
@@ -69,8 +68,7 @@ protected:
 
 	// for queue header caches
 	std::unordered_map<char, CUSRPStreamCacheItem> m_StreamsCache;
-	// streams whose unkey was pushed: voice after it until the stream closes is dropped
-	std::unordered_set<uint16_t> m_EndedStreams;
+
 	// the talker a TEXT/SET_INFO packet announced, until the unkey
 	CCallsign m_Talker;
 	bool m_HasTalker = false;

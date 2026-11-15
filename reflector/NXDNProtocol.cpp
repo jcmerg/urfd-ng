@@ -290,14 +290,10 @@ void CNXDNProtocol::Task(void)
 void CNXDNProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, const CIp &Ip)
 {
 	// find the stream
-	auto stream = GetStream(Header->GetStreamId());
-	if ( stream )
-	{
-		// stream already open
-		// skip packet, but tickle the stream
-		stream->Tickle();
-	}
-	else
+	auto stream = GetStream(Header->GetStreamId(), &Ip);
+	// a repeated header of its own stream: nothing to do (it does not keep the
+	// stream alive, the voice does)
+	if ( !stream )
 	{
 		// no stream open yet, open a new one
 		CCallsign my(Header->GetMyCallsign());
@@ -547,20 +543,6 @@ static bool IsNxdnTxRel(const CBuffer &Buffer)
 	return ((Buffer.data()[15] & 0x3FU) == NXDN_MESSAGE_TYPE_TX_REL) || (Buffer.data()[9] & 0x08U);
 }
 
-std::shared_ptr<CPacketStream> CNXDNProtocol::GetStreamByIp(const CIp &Ip, uint16_t &sid)
-{
-	for ( auto &it : m_Streams )
-	{
-		const CIp *owner = it.second->GetOwnerIp();
-		if ( owner && (*owner == Ip) )
-		{
-			sid = it.first;
-			return it.second;
-		}
-	}
-	return nullptr;
-}
-
 bool CNXDNProtocol::MakeDvHeader(const CIp &Ip, const CBuffer &Buffer, std::unique_ptr<CDvHeaderPacket> &header)
 {
 	uint16_t uiSrcId = ((Buffer.data()[5] << 8) & 0xff00) | (Buffer.data()[6] & 0xff);
@@ -590,11 +572,8 @@ bool CNXDNProtocol::MakeDvHeader(const CIp &Ip, const CBuffer &Buffer, std::uniq
 	char mod = DstIdToModule(uiDstId);
 	if (mod == ' ') mod = RANToModule(Buffer.data()[11] & 0x3F);
 	if (mod == ' ') mod = m_AutolinkModule;
-	// a stream id of its own for every client, so parallel talkers do not collide
-	uint16_t sid;
-	do
-		sid = static_cast<uint16_t>(::rand());
-	while ( (0 == sid) || (m_Streams.end() != m_Streams.find(sid)) );
+	// a stream id of its own for every transmission, so parallel talkers do not collide
+	const uint16_t sid = NewStreamId(Ip);
 	CCallsign rpt1(csMY);
 	CCallsign rpt2 = m_ReflectorCallsign;
 	rpt1.SetCSModule(mod);
@@ -608,7 +587,7 @@ bool CNXDNProtocol::IsValidDvHeaderPacket(const CIp &Ip, const CBuffer &Buffer, 
 	if ( IsNxdnDataPacket(Buffer) && IsNxdnFacchPacket(Buffer) && !IsNxdnTxRel(Buffer) && ((Buffer.data()[15] & 0x3FU) == NXDN_MESSAGE_TYPE_VCALL) )
 	{
 		uint16_t sid;
-		auto stream = GetStreamByIp(Ip, sid);
+		auto stream = OpenStreamOf(Ip, &sid);
 		if ( stream )
 		{
 			// a repeated header: the stream is open, keep it alive
@@ -629,7 +608,7 @@ bool CNXDNProtocol::IsValidDvFramePacket(const CIp &Ip, const CBuffer &Buffer, s
 	if ( IsNxdnDataPacket(Buffer) && (((Buffer.data()[10] >> 4) & 0x03U) == NXDN_LICH_USC_SACCH_SS) )
 	{
 		uint16_t sid;
-		auto stream = GetStreamByIp(Ip, sid);
+		auto stream = OpenStreamOf(Ip, &sid);
 		if ( !stream )
 		{
 			// late entry
@@ -641,7 +620,7 @@ bool CNXDNProtocol::IsValidDvFramePacket(const CIp &Ip, const CBuffer &Buffer, s
 				OnDvHeaderPacketIn(header, Ip);
 			}
 			// not allowed or the module is busy: nothing to push the frames to
-			if ( !GetStreamByIp(Ip, sid) )
+			if ( !OpenStreamOf(Ip, &sid) )
 				return false;
 		}
 
@@ -707,7 +686,7 @@ bool CNXDNProtocol::IsValidDvLastFramePacket(const CIp &Ip, const CBuffer &Buffe
 	{
 		// the end of the client's stream goes to the listeners as a last packet
 		uint16_t sid;
-		if ( GetStreamByIp(Ip, sid) )
+		if ( OpenStreamOf(Ip, &sid) )
 			frame = std::unique_ptr<CDvFramePacket>(new CDvFramePacket(AMBE72_SILENCE, sid, 0, true));
 		// recognised in any case, a null frame means no stream to end
 		return true;

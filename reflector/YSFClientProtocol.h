@@ -17,6 +17,7 @@
 #include "YSFPayload.h"
 #include "YSFUtils.h"
 #include "YSFGps.h"
+#include "PerStream.h"
 
 // YSF client protocol constants (aligned with g4klx YSFGateway)
 #define YSFCLI_POLL_PERIOD          5   // seconds between polls
@@ -91,9 +92,6 @@ protected:
 	bool EncodeYSFPacket(const CDvHeaderPacket &, const CDvFramePacket *, uint8_t dgid, CBuffer *) const;
 	bool EncodeLastYSFPacket(const CDvHeaderPacket &, uint8_t dgid, CBuffer *) const;
 
-	// stream ID helper
-	uint32_t IpToStreamId(const CIp &) const;
-
 	// mapping helpers
 	SYsfClientMapping *FindMappingByLocal(char localMod);
 	SYsfClientMapping *FindMappingByIp(const CIp &ip);
@@ -110,8 +108,9 @@ private:
 	// outbound stream cache per local module
 	std::unordered_map<char, SYsfClientStreamCache> m_StreamsCache;
 
-	// the positions in the data channel, by stream id (one per remote reflector)
-	std::unordered_map<uint32_t, CYsfGps> m_Gps;
+	// the positions in the data channel, by stream id (one per transmission)
+	CPerStream<CYsfGps> m_Gps { [this](uint16_t id) { return StreamIdLive(id); } };
+	void StreamClosed(uint16_t streamid) override;
 
 	// reconnect flag
 	std::atomic<bool> m_ReconnectRequested{false};
