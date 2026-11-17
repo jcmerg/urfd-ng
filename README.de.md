@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.40.12** | tcd 0.22.13 | Dashboard v3.1.13
+**urfd 4.40.12** | tcd 0.22.13 | Dashboard v3.1.14
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -740,7 +740,7 @@ Seit 4.38.0 schreibt urfd keine XML- oder JSON-Statusdatei mehr (`[Files] XmlPat
 
 Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Dashboard zur Verfügung.
 
-### Dashboard v3.1.13
+### Dashboard v3.1.14
 Seit v3.0.0 (urfd 4.38.0) eine statische Seite, HTML und einfaches JavaScript ohne PHP: Sie bekommt den Stand live über den WebSocket von urfd und zeigt eine Änderung in dem Moment, in dem sie passiert; die Admin-Seite schickt ihre Befehle auf demselben Weg. Seiten und Aussehen sind die von v2.14; alte Links (`index.php?show=...`) führen auf dieselben Seiten. Die Einstellungen stehen in `[Dashboard]` in `urfd.ini`; `setup.sh update` übernimmt die der alten `config.inc.php` einmal.
 
 
@@ -1052,6 +1052,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v3.1.14**: Die Credential-Datenbank auf der Admin-Seite zeigte „busy, try again“ statt ihres Zustands, manchmal auch das Log: Die Seite fragt alle Abschnitte auf einmal ab, mehr als die 8 Anfragen, die urfd je Verbindung warten lässt. Das Dashboard schickt jetzt höchstens 6 gleichzeitig und reiht die übrigen ein
 - **Dashboard v3.1.13**: „Hide short calls“ heißt jetzt „Hide kerchunks“, mit den Texten dazu („Kerchunks hidden“, „Only kerchunks“). Es blendet aus, was es vorher ausblendete (unter 1 s oder kaum Sprache); ein Ruf von 1 bis 1,5 s mit Sprache ist als „Short“ markiert (zu kurz, um den Pegel zu bewerten) und bleibt, was mit dem alten Namen wie ein Fehler aussah. Die im Browser gemerkte Wahl bleibt erhalten
 - **Dashboard v3.1.12**: Ein Durchgang auf einem transkodierten Modul, der für einen Bericht von tcd zu kurz ist (unter 0,1 s Sprache, ein Kerchunk aus wenigen Frames), zeigt nach der Länge von urfd „Short“ in Grau, wie ein kurzer mit Bericht; seine Audio-Spalte und das LCD blieben leer
 - **Dashboard v3.1.11**: „Hide short calls“ blendet Durchgänge unter 1 s aus (wie WPSD; vorher 1,5 s), längere nur mit weniger als 0,3 s Sprache (vorher 1 s): ein „73“ oder „danke“ ab 1 s wurde ausgeblendet, obwohl es Sprache war. Die Länge von urfd entscheidet vor und nach dem Bericht von tcd, ein Eintrag verschwindet also nicht mehr, wenn der Bericht kommt; „No speech“ (3 s und mehr ohne Sprache) wird nicht mehr ausgeblendet; Paketverlust oder Bitfehler halten einen Ruf auch, wenn der Bericht zu wenige Frames hat, um sie zu bewerten. Die Pegelbewertung „Short“ bleibt
