@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.41.0** | tcd 0.22.13 | Dashboard v3.1.15
+**urfd 4.41.1** | tcd 0.22.13 | Dashboard v3.1.16
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -359,6 +359,8 @@ TG9 = A,TS2                        # Common hotspot default
 {"cmd": "mmdvm_tg_list", "token": "..."}
 {"cmd": "mmdvm_peer_list", "token": "..."}
 ```
+
+`mmdvm_peer_list` gives each hotspot with its `module` (the first one) and, since 4.41.1, `ts1` / `ts2`: every module of that timeslot, the static ones of its options first (left out when the slot has none).
 
 ### D-Star Client Connectors (DCS, DExtra, DPlus)
 Connect to external D-Star reflectors as a client node. Maps remote reflector modules to local reflector modules. All three D-Star linking protocols are supported with their respective wire formats. Mappings can be configured statically in `urfd.ini` or added dynamically at runtime via the Admin interface.
@@ -757,7 +759,7 @@ Since 4.38.0 urfd writes no XML or JSON status file any more (`[Files] XmlPath` 
 
 Module names are configured once in `urfd.ini` and automatically available in the dashboard.
 
-### Dashboard v3.1.15
+### Dashboard v3.1.16
 Since v3.0.0 (urfd 4.38.0) a static page, HTML and plain JavaScript without PHP: it gets the state live over urfd's WebSocket and shows a change the moment it happens, the admin page sends its commands the same way. The pages and the look are those of v2.14; old links (`index.php?show=...`) lead to the same pages. Settings are `[Dashboard]` in `urfd.ini`; `setup.sh update` carries those of the old `config.inc.php` over once.
 
 
@@ -985,6 +987,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **Admin: MMDVM nodes with all their modules (4.41.1)**: the admin's `mmdvm_peer_list` gave one module per hotspot, the first one, so a hotspot with static talkgroups showed only that; it now also has `ts1` / `ts2` with every module of each timeslot
 - **Static talkgroups for hotspots (4.41.0)**: `[MMDVM]` reads the options a hotspot sends after its login (`TS1=26363;TS2=262,2625`, as BrandMeister and FreeDMR take them) and links their modules at once; before, it acknowledged them and kept nothing, so a hotspot heard a module only after keying up on it, and again after every restart of DMRGateway. A timeslot now carries several modules, one call at a time with 5 s hang time after a call, and a key-up on another TG adds a dynamic module next to the static ones instead of replacing the slot's module; see [MMDVM Server](#mmdvm-server). A hotspot that logs in again from another port keeps all of them. The WebSocket's `ts1`/`ts2` name every module of the slot
 - **A DMR call without voice on `[MMDVM]` (4.40.11)**: some devices key up on their own after a talkgroup change, a full transmission of about 3 s whose voice frames are all zero bytes. urfd counted it as a call: last heard, the dashboard's "on air", and 3 s of nothing to every other station on the module. A call on `[MMDVM]` now opens its stream with its first voice frame that is not all zeros; one that ends or times out without any is dropped and logged (`call from ... without voice ... ignored`). The slot still follows the talkgroup at the header, so switching by keying up works as before. A header and terminator alone no longer show up in last heard either
 - **Start without the external address (4.40.3)**: when none of the `IPCheckUrl` services answered at the start (DNS not up yet after a boot), urfd ended with "could not detect IPv4 address", supervisord gave up after a few tries and the reflector stayed down until restarted by hand; now it starts with a warning and asks every 10 s until a service answers, takes that first answer at once and reports it to the XLX directory and the DHT (with `IPCheckInterval = 0` it is still an error)
@@ -1070,6 +1073,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.6.0**: Dark mode redesign, admin panel, module overview with TG mappings and NXDN RAN, protocol-specific columns hidden when disabled, protocol list, QuadNet Live proxy, reflector list with search/pagination
 - **Dashboard v2.6.1**: Survives an outage of the XLX directory. Explicit timeouts on every outbound request, CallingHome failures logged instead of aborting the page render, reflector and peer lists served from an on-disk cache, admin API no longer serialized behind the PHP session lock
 - **Dashboard v2.7.0**: Locator column for stations that send an M17 GNSS position, also in `/json/stations`
+- **Dashboard v3.1.16**: the admin page's MMDVM nodes show every module of each timeslot (e.g. `P F H N TS1, D C R S TS2`), not only the first one
 - **Dashboard v3.1.15**: the Links page shows every module of a DMR hotspot's timeslot (several with static talkgroups, urfd 4.41.0), each as its own tag
 - **Dashboard v3.1.14**: The credential database on the admin page showed "busy, try again" instead of its state, the log at times too: the page asks for all its sections at once, more than the 8 requests urfd lets wait per connection. The dashboard now sends at most 6 at a time and queues the others
 - **Dashboard v3.1.13**: "Hide short calls" is now "Hide kerchunks", with the texts that go with it ("Kerchunks hidden", "Only kerchunks"). It hides what it did before (under 1 s, or next to no speech); a call of 1 to 1.5 s with speech is marked "Short" (too short to rate its level) and stays, which the old name made look like a bug. The choice kept in the browser carries over

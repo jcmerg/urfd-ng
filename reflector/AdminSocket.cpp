@@ -20,6 +20,7 @@
 #include "MMDVMClientProtocol.h"
 #include "OpenBridgeProtocol.h"
 #include "DMRMMDVMProtocol.h"
+#include "DMRMMDVMClient.h"
 #include "SvxReflectorProtocol.h"
 #include "SvxProtocol.h"
 #include "Plugins.h"
@@ -1942,6 +1943,14 @@ nlohmann::json CAdminSocket::CmdMmdvmPeerList(void)
 			peer["callsign"] = (*it)->GetCallsign().GetCS();
 			peer["ip"] = std::string((*it)->GetIp().GetAddress());
 			peer["module"] = std::string(1, (*it)->GetReflectorModule());
+			// every module of each timeslot, the static ones of its options first
+			if (const auto *dmr = dynamic_cast<const CDmrmmdvmClient *>((*it).get()))
+			{
+				if (!dmr->GetSlotModules(1).empty())
+					peer["ts1"] = dmr->GetSlotModules(1);
+				if (!dmr->GetSlotModules(2).empty())
+					peer["ts2"] = dmr->GetSlotModules(2);
+			}
 			peer["connected_since"] = (int64_t)(*it)->GetConnectTime();
 
 			// Look up peer info by IP
