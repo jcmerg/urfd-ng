@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.13';
+var DASHBOARD_VERSION = '3.1.14';
 var REPO_URL = 'https://github.com/jcmerg/urfd-ng';
 
 var $ = function (id) { return document.getElementById(id); };
@@ -232,6 +232,7 @@ function connect() {
         if (msg.event_type === 'reply') {
             var p = pending[msg.id];
             if (p) { delete pending[msg.id]; clearTimeout(p.timer); p.resolve(msg.payload || {}); }
+            sendQueued();
             return;
         }
         var fn = handlers[msg.event_type];
@@ -241,6 +242,7 @@ function connect() {
         S.connected = false;
         Object.keys(pending).forEach(function (id) { clearTimeout(pending[id].timer); pending[id].resolve({ status: 'error', message: 'The connection to the reflector was lost' }); });
         pending = {};
+        queued.splice(0).forEach(function (r) { r.resolve({ status: 'error', message: 'The connection to the reflector was lost' }); });
         URF.onClose.forEach(function (fn) { fn(); });
         schedule();
         setTimeout(connect, retry);
@@ -248,16 +250,27 @@ function connect() {
     };
 }
 
-// a request to urfd, answered with {status, message, ...}
+// a request to urfd, answered with {status, message, ...}. urfd lets 8 of one
+// connection wait and answers "busy" to more; the admin page asks for a dozen
+// sections at once, so at most MAX_INFLIGHT go out and the others queue here
+var MAX_INFLIGHT = 6, queued = [];
 function request(cmd, args) {
     return new Promise(function (resolve) {
         if (!ws || ws.readyState !== 1) { resolve({ status: 'error', message: 'Not connected to the reflector' }); return; }
-        var id = nextId++, msg = Object.assign({}, args || {}, { cmd: cmd, id: id });
-        pending[id] = { resolve: resolve, timer: setTimeout(function () {
-            delete pending[id]; resolve({ status: 'error', message: 'No answer from the reflector yet; it may still carry the command out, look again in a moment' });
-        }, 20000) };
-        ws.send(JSON.stringify(msg));
+        queued.push({ cmd: cmd, args: args, resolve: resolve });
+        sendQueued();
     });
+}
+
+function sendQueued() {
+    while (queued.length && Object.keys(pending).length < MAX_INFLIGHT && ws && ws.readyState === 1) {
+        var r = queued.shift(), id = nextId++, msg = Object.assign({}, r.args || {}, { cmd: r.cmd, id: id });
+        pending[id] = { resolve: r.resolve, timer: setTimeout(function (id, resolve) {
+            delete pending[id]; resolve({ status: 'error', message: 'No answer from the reflector yet; it may still carry the command out, look again in a moment' });
+            sendQueued();
+        }, 20000, id, r.resolve) };
+        ws.send(JSON.stringify(msg));
+    }
 }
 
 // ---------------------------------------------------------------------------
