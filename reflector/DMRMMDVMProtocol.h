@@ -50,6 +50,10 @@ class CDmrmmdvmClient;
 // pending auth timeout
 #define MMDVM_AUTH_TIMEOUT          30
 
+// a slot stays with the module of its last call this long (seconds) before
+// another module's call may take it
+#define MMDVM_SLOT_HANGTIME         5
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // class
 
@@ -127,7 +131,7 @@ protected:
 	bool IsValidAuthenticationPacket(const CBuffer &, CCallsign *, const CIp &, uint32_t *rawDmrId);
 	bool IsValidDisconnectPacket(const CBuffer &, CCallsign *, uint32_t *rawDmrId);
 	bool IsValidConfigPacket(const CBuffer &, CCallsign *, const CIp &);
-	bool IsValidOptionPacket(const CBuffer &, CCallsign *);
+	bool IsValidOptionPacket(const CBuffer &, CCallsign *, uint32_t *rawDmrId);
 	bool IsValidKeepAlivePacket(const CBuffer &, CCallsign *);
 	bool IsValidRssiPacket(const CBuffer &, CCallsign *, int *);
 	bool IsValidDvHeaderPacket(const CBuffer &, std::unique_ptr<CDvHeaderPacket> &, uint8_t *, uint8_t *, uint8_t *slot);
@@ -155,8 +159,7 @@ protected:
 	uint32_t ModuleToDmrDestId(char) const;
 
 	// per-client TG and timeslot lookup for outbound DstId
-	uint32_t GetClientTGForModule(const CDmrmmdvmClient *client, char mod) const;
-	uint8_t GetClientSlotForModule(const CDmrmmdvmClient *client, char mod, uint8_t fallback) const;
+	uint32_t GetClientTGForModule(const CDmrmmdvmClient *client, char mod, uint8_t slot) const;
 	// TG remembered for a slot linked with this TG (XLX private calls 4001-4026 -> TG9)
 	uint32_t SlotTGForLink(uint32_t tg, uint8_t callType) const;
 
@@ -182,6 +185,15 @@ protected:
 
 	// RPTC config parsing
 	bool ParseConfigPacket(const CBuffer &, const CIp &);
+	// RPTO options: static TGs per slot (TS1=26363;TS2=262,2625)
+	void ApplyOptions(CDmrmmdvmClient *, const std::string &options);
+	// the client's slot a packet of this module goes out on now, taking it for the
+	// module; 0: not linked, or the slot carries another call (one call per slot)
+	uint8_t TakeSlotFor(CDmrmmdvmClient *, char mod) const;
+	// a packet of the hotspot's own open call keeps its slot
+	void RefreshOwnCall(const CBuffer &, const CIp &);
+	// the module an unmapped TG on this slot goes to
+	char SlotActiveModule(const CDmrmmdvmClient *, uint8_t slot) const;
 
 protected:
 	// for keep alive
@@ -209,6 +221,7 @@ protected:
 		CIp ip;
 		uint32_t sourceTG = 0;
 		CCallsign my, rpt1, rpt2;
+		uint8_t slot = DMR_SLOT2;
 		CTimer lastPacket;
 		uint32_t zeroFrames = 0;
 	};
