@@ -4,7 +4,7 @@
 
 Basiert auf [urfd](https://github.com/n7tae/urfd) von Thomas Early N7TAE, mit erweiterten Funktionen, dem hybriden Transcoder [tcd](tcd/) und einem Setup-Script, das beides installiert.
 
-**urfd 4.41.0** | tcd 0.22.13 | Dashboard v3.1.15
+**urfd 4.41.1** | tcd 0.22.13 | Dashboard v3.1.16
 
 **Neu hier? Mit dem Setup-Script installieren, siehe [docs/INSTALL.de.md](docs/INSTALL.de.md):**
 
@@ -359,6 +359,8 @@ TG9 = A,TS2                        # Common hotspot default
 {"cmd": "mmdvm_tg_list", "token": "..."}
 {"cmd": "mmdvm_peer_list", "token": "..."}
 ```
+
+`mmdvm_peer_list` liefert jeden Hotspot mit seinem `module` (dem ersten) und seit 4.41.1 `ts1` / `ts2`: jedes Modul dieses Timeslots, die statischen seiner Optionen zuerst (fehlt, wenn der Slot keines hat).
 
 ### D-Star-Client-Anbindungen (DCS, DExtra, DPlus)
 Verbindet sich als Client-Knoten mit fremden D-Star-Reflektoren und ordnet deren Module lokalen Reflektor-Modulen zu. Alle drei D-Star-Linkprotokolle werden mit ihrem jeweiligen Paketformat unterstützt. Zuordnungen lassen sich fest in `urfd.ini` eintragen oder zur Laufzeit über die Admin-Oberfläche hinzufügen.
@@ -742,7 +744,7 @@ Seit 4.38.0 schreibt urfd keine XML- oder JSON-Statusdatei mehr (`[Files] XmlPat
 
 Modulnamen werden einmal in `urfd.ini` eingetragen und stehen automatisch im Dashboard zur Verfügung.
 
-### Dashboard v3.1.15
+### Dashboard v3.1.16
 Seit v3.0.0 (urfd 4.38.0) eine statische Seite, HTML und einfaches JavaScript ohne PHP: Sie bekommt den Stand live über den WebSocket von urfd und zeigt eine Änderung in dem Moment, in dem sie passiert; die Admin-Seite schickt ihre Befehle auf demselben Weg. Seiten und Aussehen sind die von v2.14; alte Links (`index.php?show=...`) führen auf dieselben Seiten. Die Einstellungen stehen in `[Dashboard]` in `urfd.ini`; `setup.sh update` übernimmt die der alten `config.inc.php` einmal.
 
 
@@ -970,6 +972,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 ## Änderungen gegenüber dem Original
 
 ### Protokoll-Anbindungen
+- **Admin: MMDVM-Nodes mit allen Modulen (4.41.1)**: `mmdvm_peer_list` des Admins lieferte ein Modul je Hotspot, das erste, ein Hotspot mit statischen Talkgroups zeigte also nur dieses; es hat jetzt auch `ts1` / `ts2` mit jedem Modul jedes Timeslots
 - **Statische Talkgroups für Hotspots (4.41.0)**: `[MMDVM]` liest die Optionen, die ein Hotspot nach seiner Anmeldung schickt (`TS1=26363;TS2=262,2625`, wie BrandMeister und FreeDMR sie nehmen), und verbindet deren Module sofort; vorher bestätigte es sie und behielt nichts, ein Hotspot hörte ein Modul also erst, nachdem er darauf gesendet hatte, und nach jedem Neustart von DMRGateway erneut. Ein Timeslot trägt jetzt mehrere Module, ein Gespräch zur Zeit mit 5 s Haltezeit nach einem Gespräch, und Senden auf einer anderen TG fügt ein dynamisches Modul neben den statischen hinzu, statt das Modul des Slots zu ersetzen; siehe [MMDVM-Server](#mmdvm-server). Ein Hotspot, der sich von einem anderen Port neu anmeldet, behält sie alle. `ts1`/`ts2` im WebSocket nennen jedes Modul des Slots
 - **Ein DMR-Ruf ohne Sprache an `[MMDVM]` (4.40.11)**: Manche Geräte senden nach einem Wechsel der Sprechgruppe von sich aus einen ganzen Durchgang von etwa 3 s, dessen Sprachframes nur aus Null-Bytes bestehen. urfd zählte ihn als Ruf: Last Heard, „auf Sendung“ im Dashboard und 3 s Nichts an alle anderen Stationen des Moduls. Ein Ruf an `[MMDVM]` öffnet seinen Stream jetzt mit dem ersten Sprachframe, der nicht nur aus Nullen besteht; endet er ohne einen oder läuft er ab, wird er verworfen und geloggt (`call from ... without voice ... ignored`). Der Slot folgt der Sprechgruppe weiter schon beim Header, das Umschalten per Tastendruck geht also wie bisher. Header und Terminator allein erscheinen auch nicht mehr im Last Heard
 - **Start ohne die externe Adresse (4.40.3)**: Antwortete beim Start keiner der `IPCheckUrl`-Dienste (DNS nach einem Boot noch nicht da), beendete sich urfd mit „could not detect IPv4 address“, supervisord gab nach einigen Versuchen auf, und der Reflektor blieb aus, bis er von Hand neu gestartet wurde; jetzt startet er mit einer Warnung und fragt alle 10 s nach, bis ein Dienst antwortet, übernimmt diese erste Antwort sofort und meldet sie an das XLX-Verzeichnis und das DHT (mit `IPCheckInterval = 0` bleibt es ein Fehler)
@@ -1055,6 +1058,7 @@ URF arbeitet als YSF-Master und stellt Wires-X-Räume bereit (einen pro Modul). 
 - **Dashboard v2.6.0**: Neugestaltung im dunklen Design, Admin-Panel, Modulübersicht mit TG-Zuordnungen und NXDN-RAN, Spalten ausgeschalteter Protokolle ausgeblendet, Protokollliste, QuadNet-Live-Proxy, Reflektorliste mit Suche und Seitenaufteilung
 - **Dashboard v2.6.1**: Übersteht einen Ausfall des XLX-Verzeichnisses. Feste Timeouts bei jeder ausgehenden Anfrage, CallingHome-Fehler werden ins Log geschrieben, statt die Seite abzubrechen, Reflektor- und Peer-Listen aus einem Cache auf der Platte, Admin-API nicht mehr hinter der PHP-Session-Sperre aufgereiht
 - **Dashboard v2.7.0**: Locator-Spalte für Stationen, die eine M17-GPS-Position senden, auch in `/json/stations`
+- **Dashboard v3.1.16**: Die MMDVM-Nodes auf der Admin-Seite zeigen jedes Modul jedes Timeslots (z.B. `P F H N TS1, D C R S TS2`), nicht nur das erste
 - **Dashboard v3.1.15**: Die Links-Seite zeigt jedes Modul eines Timeslots eines DMR-Hotspots (mehrere mit statischen Talkgroups, urfd 4.41.0), jedes als eigenes Kästchen
 - **Dashboard v3.1.14**: Die Credential-Datenbank auf der Admin-Seite zeigte „busy, try again“ statt ihres Zustands, manchmal auch das Log: Die Seite fragt alle Abschnitte auf einmal ab, mehr als die 8 Anfragen, die urfd je Verbindung warten lässt. Das Dashboard schickt jetzt höchstens 6 gleichzeitig und reiht die übrigen ein
 - **Dashboard v3.1.13**: „Hide short calls“ heißt jetzt „Hide kerchunks“, mit den Texten dazu („Kerchunks hidden“, „Only kerchunks“). Es blendet aus, was es vorher ausblendete (unter 1 s oder kaum Sprache); ein Ruf von 1 bis 1,5 s mit Sprache ist als „Short“ markiert (zu kurz, um den Pegel zu bewerten) und bleibt, was mit dem alten Namen wie ein Fehler aussah. Die im Browser gemerkte Wahl bleibt erhalten

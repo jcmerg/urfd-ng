@@ -393,6 +393,14 @@ function removeMmdvmUser(dmrid) {
 }
 
 function refreshMmdvmPeerList() {
+    // the modules of each timeslot (several with static talkgroups, urfd 4.41.0)
+    var peerSlots = function (p) {
+        var out = [];
+        if (p.ts1) out.push(p.ts1.split('').join(' ') + ' TS1');
+        if (p.ts2) out.push(p.ts2.split('').join(' ') + ' TS2');
+        if (out.length) return out.join(', ');
+        return p.module && p.module !== ' ' ? p.module : '';
+    };
     adminPost('mmdvm_peer_list', {}, function (resp) {
         var body = tbody('mmdvm-peers-table-body');
         if (resp.status === 'ok' && resp.peers && resp.peers.length > 0) {
@@ -409,7 +417,7 @@ function refreshMmdvmPeerList() {
                     '<td>' + esc(freq) + '</td>' +
                     '<td>' + esc(info.location || '') + '</td>' +
                     '<td>' + esc([info.packageId, info.softwareId].filter(Boolean).join(' / ')) + '</td>' +
-                    '<td>' + esc(p.module && p.module !== ' ' ? p.module : '') + '</td>' +
+                    '<td>' + esc(peerSlots(p)) + '</td>' +
                     '<td>' + esc(since) + '</td>' +
                     '</tr>'
                 );
@@ -825,7 +833,7 @@ var MARKUP = '' +
 '            </section>' +
 '            <section class="admin-sec" id="mmdvm-peers-section" style="display:none;">' +
 '                <header><h2>MMDVM nodes</h2><button class="btn small quiet" onclick="URFAdmin.refreshMmdvmPeerList()">Refresh</button></header>' +
-'                <div class="scroll"><table class="t"><thead><tr><th>Callsign</th><th>DMR ID</th><th>RX / TX in MHz</th><th>Location</th><th>Modem and software</th><th>Module</th><th>Connected since</th></tr></thead>' +
+'                <div class="scroll"><table class="t"><thead><tr><th>Callsign</th><th>DMR ID</th><th>RX / TX in MHz</th><th>Location</th><th>Modem and software</th><th>Modules</th><th>Connected since</th></tr></thead>' +
 '                    <tbody id="mmdvm-peers-table-body"><tr class="empty"><td colspan="7">Loading</td></tr></tbody></table></div>' +
 '            </section>' +
 '            <section class="admin-sec" id="sec-cred">' +
