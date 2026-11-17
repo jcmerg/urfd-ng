@@ -19,6 +19,7 @@
 
 #include <string.h>
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <fstream>
 #include <sstream>
@@ -157,6 +158,7 @@ void CDmrmmdvmProtocol::Task(void)
 #endif
 	{
 		//Buffer.DebugDump(g_Reflector.m_DebugFile);
+		RefreshOwnCall(Buffer, Ip);
 		// crack the packet
 		if ( IsValidDvFramePacket(Ip, Buffer, Header, Frames) )
 		{
@@ -231,33 +233,25 @@ void CDmrmmdvmProtocol::Task(void)
 				{
 					// find and remove stale client with same raw DMR ID but different port (NAT rebind)
 					// preserve slot module links and TGs across reconnect
-					char savedSlot1 = ' ', savedSlot2 = ' ';
-					uint32_t savedTG1 = 0, savedTG2 = 0;
+					std::shared_ptr<CClient> stale;
 					for ( auto it = clients->begin(); it != clients->end(); it++ )
 					{
-						if ( (*it)->GetProtocol() == EProtocol::dmrmmdvm )
+						if ( (*it)->GetProtocol() == EProtocol::dmrmmdvm && static_cast<CDmrmmdvmClient*>((*it).get())->GetRawDmrId() == rawDmrId )
 						{
-							auto *mmdvm = static_cast<CDmrmmdvmClient*>((*it).get());
-							if ( mmdvm->GetRawDmrId() == rawDmrId )
-							{
-								savedSlot1 = mmdvm->GetSlotModule(1);
-								savedSlot2 = mmdvm->GetSlotModule(2);
-								savedTG1 = mmdvm->GetSlotTG(1);
-								savedTG2 = mmdvm->GetSlotTG(2);
-								std::cout << "MMDVM: replacing stale " << (*it)->GetCallsign() << " at " << (*it)->GetIp() << " with " << Ip << std::endl;
-								clients->RemoveClient(*it);
-								break;
-							}
+							stale = *it;
+							break;
 						}
 					}
 
 					std::cout << "MMDVM: login " << Callsign << " at " << Ip << std::endl;
 					auto newClient = std::make_shared<CDmrmmdvmClient>(Callsign, Ip);
 					newClient->SetRawDmrId(rawDmrId);
-					newClient->SetSlotModule(1, savedSlot1);
-					newClient->SetSlotModule(2, savedSlot2);
-					newClient->SetSlotTG(1, savedTG1);
-					newClient->SetSlotTG(2, savedTG2);
+					if ( stale )
+					{
+						std::cout << "MMDVM: replacing stale " << stale->GetCallsign() << " at " << stale->GetIp() << " with " << Ip << std::endl;
+						newClient->CopySlots(*static_cast<CDmrmmdvmClient*>(stale.get()));
+						clients->RemoveClient(stale);
+					}
 					clients->AddClient(newClient);
 				}
 				else
@@ -324,9 +318,16 @@ void CDmrmmdvmProtocol::Task(void)
 
 			// ignore...
 		}
-		else if ( IsValidOptionPacket(Buffer, &Callsign) )
+		else if ( IsValidOptionPacket(Buffer, &Callsign, &rawDmrId) )
 		{
 			std::cout << "MMDVM: options from " << Callsign << " at " << Ip << std::endl;
+
+			// static TGs (TS1=.. / TS2=..) of a logged in hotspot
+			CClients *clients = g_Reflector.GetClients();
+			std::shared_ptr<CClient>client = clients->FindClient(Ip, EProtocol::dmrmmdvm);
+			if ( (client != nullptr) && (static_cast<CDmrmmdvmClient *>(client.get())->GetRawDmrId() == rawDmrId) )
+				ApplyOptions(static_cast<CDmrmmdvmClient *>(client.get()), std::string((const char *)Buffer.data() + 8, Buffer.size() - 8));
+			g_Reflector.ReleaseClients();
 
 			// acknowledge the request
 			EncodeAckPacket(&Buffer, Callsign);
@@ -398,67 +399,66 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 			auto *mmdvm = static_cast<CDmrmmdvmClient*>(client.get());
 			char targetMod = rpt2.GetCSModule();
 			bool closedTarget = false;	// the dialled module is closed to MMDVM
-			char slotMod = mmdvm->GetSlotModule(slot);
+			const auto &cs = client->GetCallsign();
 
-			if ( slotMod == ' ' )
+			if ( cmd == CMD_UNLINK )
 			{
-				// slot not linked yet
-				if ( cmd == CMD_LINK )
+				// TG 4000 drops the slot's dynamic module, the static ones stay
+				const char dyn = mmdvm->GetSlotDynamic(slot);
+				if ( dyn != ' ' )
 				{
-					if ( g_Reflector.MayLinkModule(targetMod, EProtocol::dmrmmdvm) )
-					{
-						std::cout << "MMDVM: " << client->GetCallsign() << " TS" << (int)slot << " linking on module " << targetMod << " (TG" << sourceTG << ")" << std::endl;
-						mmdvm->SetSlotModule(slot, targetMod);
-						mmdvm->SetSlotTG(slot, slotTG);
-					}
-					else
-					{
-						std::cout << "MMDVM: " << rpt1 << " TS" << (int)slot << " link attempt on " << (g_Reflector.IsValidModule(targetMod) ? "a closed" : "a non-existing") << " module" << std::endl;
-					}
+					std::cout << "MMDVM: " << cs << " TS" << (int)slot << " unlinking from module " << dyn << std::endl;
+					mmdvm->ClearSlotDynamic(slot);
 				}
-				else if ( cmd == CMD_NONE && targetMod != ' ' && g_Reflector.MayLinkModule(targetMod, EProtocol::dmrmmdvm) )
-				{
-					// TG mapping resolved to a valid module — auto-link this slot
-					std::cout << "MMDVM: " << client->GetCallsign() << " TS" << (int)slot << " linking on module " << targetMod << " (TG" << sourceTG << ")" << std::endl;
-					mmdvm->SetSlotModule(slot, targetMod);
-					mmdvm->SetSlotTG(slot, slotTG);
-				}
+				targetMod = ' ';
 			}
-			else
+			else if ( targetMod != ' ' && g_Reflector.IsValidModule(targetMod) && !g_Reflector.IsModuleOpenTo(targetMod, EProtocol::dmrmmdvm) )
 			{
-				// slot already linked — switch module if TG maps to a different one;
 				// a module closed to MMDVM ([Modules] Protocols<M>) drops the call, it
 				// does not go out on the slot's module instead
-				if ( targetMod != ' ' && targetMod != slotMod && g_Reflector.IsValidModule(targetMod) && !g_Reflector.IsModuleOpenTo(targetMod, EProtocol::dmrmmdvm) )
+				closedTarget = true;
+				g_Reflector.MayLinkModule(targetMod, EProtocol::dmrmmdvm);	// logs the refusal
+			}
+			else if ( targetMod != ' ' )
+			{
+				const uint8_t onSlot = mmdvm->SlotOfModule(targetMod);
+				if ( onSlot == slot || (onSlot != 0 && mmdvm->GetSlotDynamic(onSlot) != targetMod) )
 				{
-					closedTarget = true;
-					g_Reflector.MayLinkModule(targetMod, EProtocol::dmrmmdvm);	// logs the refusal
+					// linked already (a static module of the other slot stays there,
+					// its calls come back on that slot); a call on another TG of the
+					// module, or on TG9 after an XLX link, is answered on that TG
+					if ( slotTG != 0 && onSlot == slot && slotTG != mmdvm->GetSlotTG(slot, targetMod) )
+						mmdvm->SetSlotTG(slot, targetMod, slotTG);
 				}
-				else if ( targetMod != ' ' && targetMod != slotMod && g_Reflector.MayLinkModule(targetMod, EProtocol::dmrmmdvm) )
+				else if ( g_Reflector.MayLinkModule(targetMod, EProtocol::dmrmmdvm) )
 				{
-					std::cout << "MMDVM: " << client->GetCallsign() << " TS" << (int)slot << " switching to module " << targetMod << " (TG" << sourceTG << ")" << std::endl;
-					mmdvm->SetSlotModule(slot, targetMod);
-					mmdvm->SetSlotTG(slot, slotTG);
-				}
-				else if ( slotTG != 0 && slotTG != mmdvm->GetSlotTG(slot) )
-				{
-					// same module but different TG — update the linked TG
-					mmdvm->SetSlotTG(slot, slotTG);
-				}
-
-				if ( cmd == CMD_UNLINK )
-				{
-					std::cout << "MMDVM: " << client->GetCallsign() << " TS" << (int)slot << " unlinking from module " << slotMod << std::endl;
-					mmdvm->SetSlotModule(slot, ' ');
-					mmdvm->SetSlotTG(slot, 0);
+					// the slot's dynamic module, taken from the other slot if it was there
+					if ( onSlot != 0 )
+						mmdvm->ClearSlotDynamic(onSlot);
+					const char dyn = mmdvm->GetSlotDynamic(slot);
+					std::cout << "MMDVM: " << cs << " TS" << (int)slot << ((dyn == ' ') ? " linking on module " : " switching to module ") << targetMod << " (TG" << sourceTG << ")" << std::endl;
+					mmdvm->SetSlotDynamic(slot, targetMod, slotTG);
 				}
 				else
 				{
-					// replace rpt2 module with this slot's linked module
-					auto m = mmdvm->GetSlotModule(slot);
-					Header->SetRpt2Module(m);
-					rpt2.SetCSModule(m);
+					std::cout << "MMDVM: " << rpt1 << " TS" << (int)slot << " link attempt on a non-existing module" << std::endl;
+					targetMod = ' ';
 				}
+			}
+
+			if ( !closedTarget )
+			{
+				// a TG that maps to no module goes to the module the slot is busy
+				// with, else its dynamic one, else its first static one; it answers
+				// on that TG from now on
+				if ( targetMod == ' ' && cmd != CMD_UNLINK && CallType == DMR_GROUP_CALL )
+				{
+					targetMod = SlotActiveModule(mmdvm, slot);
+					if ( targetMod != ' ' && slotTG != 0 && slotTG != mmdvm->GetSlotTG(slot, targetMod) )
+						mmdvm->SetSlotTG(slot, targetMod, slotTG);
+				}
+				Header->SetRpt2Module(targetMod);
+				rpt2.SetCSModule(targetMod);
 			}
 
 			// and now, re-check module is valid && that it's not a private call
@@ -473,6 +473,7 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 				call.my = my;
 				call.rpt1 = rpt1;
 				call.rpt2 = rpt2;
+				call.slot = slot;
 				call.zeroFrames = 0;
 				call.lastPacket.start();
 			}
@@ -510,6 +511,8 @@ void CDmrmmdvmProtocol::OpenPendingCall(uint16_t streamId)
 		auto stream = g_Reflector.OpenStream(call.header, client);
 		if ( stream )
 		{
+			// the slot carries this call: nothing else goes out on it meanwhile
+			static_cast<CDmrmmdvmClient *>(client.get())->SetSlotOwner(call.slot, call.rpt2.GetCSModule());
 			// keep the handle
 			m_Streams[stream->GetStreamId()] = stream;
 			if (call.sourceTG != 0)
@@ -630,11 +633,10 @@ void CDmrmmdvmProtocol::HandleQueue(void)
 				std::shared_ptr<CClient>client = nullptr;
 				while ( (client = clients->FindNextClient(EProtocol::dmrmmdvm, it)) != nullptr )
 				{
-					if ( (client->GetModuleMastered() != mod) && client->IsLinkedTo(mod) )
+					auto *mmdvm = static_cast<CDmrmmdvmClient*>(client.get());
+					if ( const uint8_t clientSlot = TakeSlotFor(mmdvm, mod) )
 					{
-						auto *mmdvm = static_cast<CDmrmmdvmClient*>(client.get());
-						uint32_t clientTG = GetClientTGForModule(mmdvm, mod);
-						uint8_t clientSlot = GetClientSlotForModule(mmdvm, mod, outSlot);
+						uint32_t clientTG = GetClientTGForModule(mmdvm, mod, clientSlot);
 						buffer.data()[15] = (buffer.data()[15] & 0x7F) | ((clientSlot == DMR_SLOT2) ? 0x80 : 0x00);
 						buffer.data()[8]  = (uint8_t)(clientTG >> 16);
 						buffer.data()[9]  = (uint8_t)(clientTG >> 8);
@@ -663,10 +665,10 @@ void CDmrmmdvmProtocol::HandleQueue(void)
 			std::shared_ptr<CClient>client = nullptr;
 			while ( (client = clients->FindNextClient(EProtocol::dmrmmdvm, it)) != nullptr )
 			{
-				if ( (client->GetModuleMastered() != mod) && client->IsLinkedTo(mod) )
+				auto *mmdvm = static_cast<CDmrmmdvmClient*>(client.get());
+				if ( const uint8_t clientSlot = TakeSlotFor(mmdvm, mod) )
 				{
-					auto *mmdvm = static_cast<CDmrmmdvmClient*>(client.get());
-					uint32_t clientTG = GetClientTGForModule(mmdvm, mod);
+					uint32_t clientTG = GetClientTGForModule(mmdvm, mod, clientSlot);
 
 					// temporarily patch the header's DstId for this client
 					CDvHeaderPacket &hdr = isHeader
@@ -686,7 +688,6 @@ void CDmrmmdvmProtocol::HandleQueue(void)
 					}
 
 					// patch timeslot and rptrId
-					uint8_t clientSlot = GetClientSlotForModule(mmdvm, mod, outSlot);
 					buffer.data()[15] = (buffer.data()[15] & 0x7F) | ((clientSlot == DMR_SLOT2) ? 0x80 : 0x00);
 					uint32_t rptrId = mmdvm->GetRawDmrId();
 					buffer.data()[11] = (uint8_t)(rptrId >> 24);
@@ -881,7 +882,7 @@ bool CDmrmmdvmProtocol::IsValidConfigPacket(const CBuffer &Buffer, CCallsign *ca
 	return valid;
 }
 
-bool CDmrmmdvmProtocol::IsValidOptionPacket(const CBuffer &Buffer, CCallsign *callsign)
+bool CDmrmmdvmProtocol::IsValidOptionPacket(const CBuffer &Buffer, CCallsign *callsign, uint32_t *rawDmrId)
 {
 	uint8_t tag[] = { 'R','P','T','O' };
 
@@ -889,6 +890,7 @@ bool CDmrmmdvmProtocol::IsValidOptionPacket(const CBuffer &Buffer, CCallsign *ca
 	if ( (Buffer.size() >= 8) && (Buffer.Compare(tag, sizeof(tag)) == 0) )
 	{
 		uint32_t uiRptrId = MAKEDWORD(MAKEWORD(Buffer.data()[7],Buffer.data()[6]),MAKEWORD(Buffer.data()[5],Buffer.data()[4]));
+		*rawDmrId = uiRptrId;
 		callsign->SetDmrid(uiRptrId, true);
 
 		valid = callsign->IsValid();
@@ -1430,29 +1432,147 @@ uint32_t CDmrmmdvmProtocol::ModuleToDmrDestId(char m) const
 	return (uint32_t)(m - 'A') + 4001;
 }
 
-uint32_t CDmrmmdvmProtocol::GetClientTGForModule(const CDmrmmdvmClient *client, char mod) const
+uint32_t CDmrmmdvmProtocol::GetClientTGForModule(const CDmrmmdvmClient *client, char mod, uint8_t slot) const
 {
-	for (uint8_t s = 1; s <= 2; s++)
-	{
-		if (client->GetSlotModule(s) == mod)
-		{
-			uint32_t tg = client->GetSlotTG(s);
-			if (tg != 0)
-				return tg;
-		}
-	}
-	return ModuleToDmrDestId(mod);  // fallback to primary TG
+	const uint32_t tg = client->GetSlotTG(slot, mod);
+	return (tg != 0) ? tg : ModuleToDmrDestId(mod);  // fallback to primary TG
 }
 
-uint8_t CDmrmmdvmProtocol::GetClientSlotForModule(const CDmrmmdvmClient *client, char mod, uint8_t fallback) const
+uint8_t CDmrmmdvmProtocol::TakeSlotFor(CDmrmmdvmClient *client, char mod) const
 {
-	// answer on the slot the client linked the module on
-	for (uint8_t s = 1; s <= 2; s++)
+	if ( client->GetModuleMastered() == mod )
+		return 0;
+	const uint8_t slot = client->SlotOfModule(mod);
+	if ( slot == 0 )
+		return 0;
+	// one call per slot: another module's call holds it until it has been
+	// quiet for the hang time, then the next packet takes it
+	const char owner = client->GetSlotOwner(slot);
+	if ( owner != mod && owner != ' ' && client->GetSlotOwnerTime(slot).time() < MMDVM_SLOT_HANGTIME )
+		return 0;
+	client->SetSlotOwner(slot, mod);
+	return slot;
+}
+
+void CDmrmmdvmProtocol::RefreshOwnCall(const CBuffer &Buffer, const CIp &Ip)
+{
+	// a voice packet of the hotspot's own open call keeps its slot (the hang
+	// time counts from its last packet)
+	uint8_t tag[] = { 'D','M','R','D' };
+	if ( Buffer.size() != 55 || Buffer.Compare(tag, sizeof(tag)) != 0 )
+		return;
+	const uint8_t slot = (Buffer.data()[15] & 0x80) ? DMR_SLOT2 : DMR_SLOT1;
+	auto stream = GetStream(DmrdStreamId(Buffer, slot), &Ip);
+	if ( !stream )
+		return;
+	const char mod = stream->GetModule();
+	std::shared_ptr<CClient>client = g_Reflector.GetClients()->FindClient(Ip, EProtocol::dmrmmdvm);
+	if ( client )
 	{
-		if (client->GetSlotModule(s) == mod)
-			return s;
+		auto *mmdvm = static_cast<CDmrmmdvmClient *>(client.get());
+		if ( mmdvm->GetSlotOwner(slot) == mod )
+			mmdvm->SetSlotOwner(slot, mod);
 	}
-	return fallback;
+	g_Reflector.ReleaseClients();
+}
+
+char CDmrmmdvmProtocol::SlotActiveModule(const CDmrmmdvmClient *client, uint8_t slot) const
+{
+	const char owner = client->GetSlotOwner(slot);
+	const auto &mods = client->GetSlotModules(slot);
+	if ( owner != ' ' && client->GetSlotOwnerTime(slot).time() < MMDVM_SLOT_HANGTIME && mods.find(owner) != std::string::npos )
+		return owner;
+	if ( client->GetSlotDynamic(slot) != ' ' )
+		return client->GetSlotDynamic(slot);
+	return mods.empty() ? ' ' : mods[0];
+}
+
+void CDmrmmdvmProtocol::ApplyOptions(CDmrmmdvmClient *client, const std::string &options)
+{
+	// TS1=26363;TS2=262,2625 (also BrandMeister's TS1_1=..;TS1_2=..); other keys
+	// (FreeDMR's DIAL, VOICE, ...) are not ours
+	const auto isSpace = [](unsigned char c) { return std::isspace(c) != 0; };
+	const auto isDigit = [](unsigned char c) { return std::isdigit(c) != 0; };
+	std::vector<std::pair<char, uint32_t>> statics[2];
+	std::string text = options.substr(0, options.find('\0'));
+	std::stringstream items(text);
+	std::string item;
+	while ( std::getline(items, item, ';') )
+	{
+		const auto eq = item.find('=');
+		if ( eq == std::string::npos )
+			continue;
+		std::string key = item.substr(0, eq);
+		key.erase(std::remove_if(key.begin(), key.end(), isSpace), key.end());
+		std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return (char)std::toupper(c); });
+		uint8_t slot = 0;
+		if ( key == "TS1" || key.rfind("TS1_", 0) == 0 )
+			slot = 1;
+		else if ( key == "TS2" || key.rfind("TS2_", 0) == 0 )
+			slot = 2;
+		else
+			continue;
+		std::stringstream tgs(item.substr(eq + 1));
+		std::string word;
+		while ( std::getline(tgs, word, ',') )
+		{
+			word.erase(std::remove_if(word.begin(), word.end(), isSpace), word.end());
+			if ( word.empty() || word.size() > 8 || !std::all_of(word.begin(), word.end(), isDigit) )
+			{
+				if ( !word.empty() )
+					std::cout << "MMDVM: " << client->GetCallsign() << " option TS" << (int)slot << "=" << word << " is no TG, ignored" << std::endl;
+				continue;
+			}
+			const uint32_t tg = (uint32_t)std::stoul(word);
+			if ( tg == 0 )
+				continue;
+			const char m = DmrDstIdToModule(tg);
+			if ( m == ' ' )
+			{
+				std::cout << "MMDVM: " << client->GetCallsign() << " option TS" << (int)slot << " TG" << tg << " maps to no module, ignored" << std::endl;
+				continue;
+			}
+			if ( !g_Reflector.IsValidModule(m) )
+			{
+				std::cout << "MMDVM: " << client->GetCallsign() << " option TS" << (int)slot << " TG" << tg << ": module " << m << " does not exist, ignored" << std::endl;
+				continue;
+			}
+			if ( !g_Reflector.MayLinkModule(m, EProtocol::dmrmmdvm) )
+				continue;	// logs the refusal
+			bool taken = false;
+			for ( const auto &list : statics )
+				for ( const auto &e : list )
+					taken = taken || (e.first == m);
+			if ( taken )
+			{
+				std::cout << "MMDVM: " << client->GetCallsign() << " option TS" << (int)slot << " TG" << tg << ": module " << m << " is static already, ignored" << std::endl;
+				continue;
+			}
+			statics[slot - 1].emplace_back(m, tg);
+		}
+	}
+
+	for ( uint8_t s = 1; s <= 2; s++ )
+	{
+		// unchanged: the same modules on the same TGs (a TG changed by a key-up
+		// on an unmapped TG comes back)
+		std::string mods;
+		bool sameTGs = true;
+		for ( const auto &e : statics[s - 1] )
+		{
+			mods += e.first;
+			sameTGs = sameTGs && (client->GetSlotTG(s, e.first) == e.second);
+		}
+		if ( mods == client->GetSlotStatics(s) && sameTGs )
+			continue;
+		client->SetSlotStatics(s, statics[s - 1]);
+		std::cout << "MMDVM: " << client->GetCallsign() << " TS" << (int)s << " static";
+		if ( statics[s - 1].empty() )
+			std::cout << ": none";
+		for ( const auto &e : statics[s - 1] )
+			std::cout << " " << e.first << " (TG" << e.second << ")";
+		std::cout << std::endl;
+	}
 }
 
 uint32_t CDmrmmdvmProtocol::SlotTGForLink(uint32_t tg, uint8_t callType) const

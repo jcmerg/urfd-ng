@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.14';
+var DASHBOARD_VERSION = '3.1.15';
 var REPO_URL = 'https://github.com/jcmerg/urfd-ng';
 
 var $ = function (id) { return document.getElementById(id); };
@@ -741,11 +741,15 @@ function nodeBand(n, c) {
     return { A: '23cm', B: '70cm', C: '2m', D: 'Dongle', G: 'Gateway' }[c.mod] || '';
 }
 
+// a DMR hotspot: the modules of each timeslot (several with static TGs)
 function nodeModules(n) {
-    var ts1 = n.ts1 || '', ts2 = n.ts2 || '';
-    if (ts1 && ts2 && ts1 !== ts2) return '<span class="mod on">' + h(ts1) + '</span> <span class="muted">TS1</span> <span class="mod on">' + h(ts2) + '</span> <span class="muted">TS2</span>';
-    if (ts1) return '<span class="mod on">' + h(ts1) + '</span> <span class="muted">TS1</span>';
-    if (ts2) return '<span class="mod on">' + h(ts2) + '</span> <span class="muted">TS2</span>';
+    var slot = function (mods, ts) {
+        return mods.split('').map(function (m) { return '<span class="mod on">' + h(m) + '</span>'; }).join(' ') + ' <span class="muted">' + ts + '</span>';
+    };
+    var out = [];
+    if (n.ts1) out.push(slot(n.ts1, 'TS1'));
+    if (n.ts2) out.push(slot(n.ts2, 'TS2'));
+    if (out.length) return out.join(' ');
     return '<span class="mod on">' + h(String(n.reflector_module || '').trim()) + '</span>';
 }
 

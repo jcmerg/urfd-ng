@@ -75,10 +75,11 @@ nlohmann::json NodeJson(const CClient &client)
 	j["modules"] = modules;
 	if (const auto *dmr = dynamic_cast<const CDmrmmdvmClient *>(&client))
 	{
-		if (dmr->GetSlotModule(1) != ' ')
-			j["ts1"] = std::string(1, dmr->GetSlotModule(1));
-		if (dmr->GetSlotModule(2) != ' ')
-			j["ts2"] = std::string(1, dmr->GetSlotModule(2));
+		// every module of the slot, the static ones (the hotspot's options) first
+		if (!dmr->GetSlotModules(1).empty())
+			j["ts1"] = dmr->GetSlotModules(1);
+		if (!dmr->GetSlotModules(2).empty())
+			j["ts2"] = dmr->GetSlotModules(2);
 	}
 	AddIP(j, client.GetIp(), g_Keys.dashboard.linksip);
 	return j;
