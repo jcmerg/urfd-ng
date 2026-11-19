@@ -49,8 +49,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 # downloaded again (ports.ubuntu.com, the arm64 mirror, is often slow)
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
     && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+# NGINX_MIN: refuse to build with an nginx below Ubuntu's fixed version, here
+# nginx2root (CVE-2026-123007/-123633) and CVE-2026-113425/-118899/-123634. The
+# floor is part of this RUN, so raising it rebuilds the layer and fetches the update.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    NGINX_MIN=1.24.0-2ubuntu7.20 \
+    && apt-get update && apt-get install -y --no-install-recommends \
     libcurl3t64-gnutls \
     libopendht3t64 \
     libopus0 \
@@ -64,6 +68,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,t
     ca-certificates \
     procps \
     && apt-get upgrade -y --no-install-recommends \
+    && v="$(dpkg-query -W -f='${Version}' nginx)" \
+    && { dpkg --compare-versions "$v" ge "$NGINX_MIN" \
+        || { echo "nginx $v is below $NGINX_MIN (security fix missing, mirror not synced yet?)" >&2; exit 1; }; } \
     && mkdir -p /var/log/supervisor /var/cache/nginx /usr/local/etc/urfd
 
 # Copy urfd binary and tools
