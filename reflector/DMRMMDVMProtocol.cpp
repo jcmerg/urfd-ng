@@ -29,6 +29,7 @@
 #include "RejectLog.h"
 #include "DMRMMDVMClient.h"
 #include "DMRMMDVMProtocol.h"
+#include "MMDVMClientProtocol.h"
 #include "Notifier.h"
 #include "BPTC19696.h"
 #include "RS129.h"
@@ -345,6 +346,12 @@ void CDmrmmdvmProtocol::Task(void)
 	// handle end of streaming timeout
 	CheckStreamsTimeout();
 	CheckPendingCalls();
+	// the TGs booked for the MMDVMClient links, every second
+	if ( m_LinkTGsTime.time() >= 1.0 )
+	{
+		UpdateLinkTGs();
+		m_LinkTGsTime.start();
+	}
 	// every second, every 100 ms while an expired module waits for the end of a
 	// call going out (the pause before the next one may be short)
 	if ( m_DynamicCheckTime.time() >= (m_DynamicWaiting ? 0.1 : 1.0) )
@@ -1075,12 +1082,16 @@ bool CDmrmmdvmProtocol::IsValidDvHeaderPacket(const CBuffer &Buffer, std::unique
 				*CallType = uiCallType;
 				*slot = uiSlot;
 
+				// the module of the TG (a group call: also the primary TG of a
+				// MMDVMClient link, e.g. a TG booked dynamically on BrandMeister)
+				const char dstModule = (uiCallType == DMR_GROUP_CALL) ? CallTGToModule(uiDstId) : DmrDstIdToModule(uiDstId);
+
 				// link/unlink command ?
 				if ( uiDstId == 4000 )
 				{
 					*cmd = CMD_UNLINK;
 				}
-				else if ( DmrDstIdToModule(uiDstId) != ' ' )
+				else if ( dstModule != ' ' )
 				{
 					*cmd = CMD_LINK;
 				}
@@ -1093,7 +1104,6 @@ bool CDmrmmdvmProtocol::IsValidDvHeaderPacket(const CBuffer &Buffer, std::unique
 				// resolve extended DMR IDs to base for callsign lookup
 				uint32_t mySrcId = (uiSrcId > 9999999) ? uiSrcId / 100 : uiSrcId;
 				uint32_t myRptrId = (uiRptrId > 9999999) ? uiRptrId / 100 : uiRptrId;
-				char dstModule = DmrDstIdToModule(uiDstId);
 				CCallsign csMY = CCallsign("", mySrcId);
 				CCallsign rpt1 = CCallsign("", myRptrId);
 	
@@ -1146,12 +1156,15 @@ bool CDmrmmdvmProtocol::IsValidDvFramePacket(const CIp &Ip, const CBuffer &Buffe
 				}
 				uint8_t cmd;
 
+				// the module of the TG, as for a header (a group call: only those come here)
+				const char dstModule = CallTGToModule(uiDstId);
+
 				// link/unlink command ?
 				if ( uiDstId == 4000 )
 				{
 					cmd = CMD_UNLINK;
 				}
-				else if ( DmrDstIdToModule(uiDstId) != ' ' )
+				else if ( dstModule != ' ' )
 				{
 					cmd = CMD_LINK;
 				}
@@ -1167,7 +1180,7 @@ bool CDmrmmdvmProtocol::IsValidDvFramePacket(const CIp &Ip, const CBuffer &Buffe
 				CCallsign rpt1 = CCallsign("", myRptrId);
 	
 				CCallsign rpt2 = m_ReflectorCallsign;
-				rpt2.SetCSModule(DmrDstIdToModule(uiDstId));
+				rpt2.SetCSModule(dstModule);
 
 				// and packet
 				header = std::unique_ptr<CDvHeaderPacket>(new CDvHeaderPacket(mySrcId, CCallsign("CQCQCQ"), rpt1, rpt2, uiStreamId, 0, 0));
@@ -1534,6 +1547,54 @@ char CDmrmmdvmProtocol::DmrDstIdToModule(uint32_t tg) const
 			return m;
 	}
 	return ' ';
+}
+
+char CDmrmmdvmProtocol::CallTGToModule(uint32_t tg) const
+{
+	const char mod = DmrDstIdToModule(tg);
+	if (mod != ' ')
+		return mod;
+	// a TG the server does not map: a TG booked for a link (UpdateLinkTGs)
+	const auto it = m_LinkTGs.find(tg);
+	return (it == m_LinkTGs.end()) ? ' ' : it->second;
+}
+
+void CDmrmmdvmProtocol::UpdateLinkTGs(void)
+{
+	// the TGs booked on the admin page for an MMDVMClient link (e.g. on
+	// BrandMeister), as their primary TG on a module open to MMDVM: a hotspot
+	// keying up on one links that module. Not a secondary TG (RX only, a call
+	// there would go out to the network on another TG), not the links' TGs from
+	// urfd.ini (TG9 of a link would pull an XLX style hotspot off its module).
+	// Also while the link logs in again (after each booking). Built here, in the
+	// protocol's thread, so a call takes no lock; when another thread holds the
+	// protocols lock (start, admin) the previous list stays until the next try.
+	// A TG two links booked on different modules is left out.
+	std::unordered_map<uint32_t, char> tgs;
+	std::set<uint32_t> ambiguous;
+	auto &protocols = g_Reflector.GetProtocols();
+	if (!protocols.TryLock())
+		return;
+	for (auto *cli : protocols.MmdvmClients())
+	{
+		for (const auto &m : cli->GetTGMap().GetAllMappings())
+		{
+			if (m.is_static || !m.is_primary || m.tg == 4000 || !g_Reflector.IsValidModule(m.module) || !g_Reflector.IsModuleOpenTo(m.module, EProtocol::dmrmmdvm))
+				continue;
+			auto ins = tgs.emplace(m.tg, m.module);
+			if (!ins.second && ins.first->second != m.module)
+				ambiguous.insert(m.tg);
+		}
+	}
+	protocols.Unlock();
+	for (uint32_t tg : ambiguous)
+	{
+		tgs.erase(tg);
+		if (m_LinkTGsAmbiguous.find(tg) == m_LinkTGsAmbiguous.end())
+			std::cout << "MMDVM: TG" << tg << " is booked on different modules by two MMDVMClient links, hotspots keying up on it are not linked by it" << std::endl;
+	}
+	m_LinkTGsAmbiguous.swap(ambiguous);
+	m_LinkTGs.swap(tgs);
 }
 
 uint32_t CDmrmmdvmProtocol::ModuleToDmrDestId(char m) const
