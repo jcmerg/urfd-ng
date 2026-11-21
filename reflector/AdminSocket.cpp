@@ -21,6 +21,7 @@
 #include "OpenBridgeProtocol.h"
 #include "DMRMMDVMProtocol.h"
 #include "DMRMMDVMClient.h"
+#include "Notifier.h"
 #include "SvxReflectorProtocol.h"
 #include "SvxProtocol.h"
 #include "Plugins.h"
@@ -567,7 +568,7 @@ nlohmann::json CAdminSocket::CmdTGAdd(const nlohmann::json &cmd)
 	if (cmd.contains("ts"))
 		timeslot = cmd["ts"];
 
-	int ttl = 900;  // default 15 min
+	int ttl = DYNAMIC_TG_TTL;
 	if (cmd.contains("ttl"))
 		ttl = cmd["ttl"];
 
@@ -1841,7 +1842,7 @@ nlohmann::json CAdminSocket::CmdMmdvmTGAdd(const nlohmann::json &cmd)
 	if (cmd.contains("ts"))
 		timeslot = cmd["ts"];
 
-	int ttl = 900;  // default 15 min
+	int ttl = DYNAMIC_TG_TTL;
 	if (cmd.contains("ttl"))
 		ttl = cmd["ttl"];
 
@@ -1950,6 +1951,7 @@ nlohmann::json CAdminSocket::CmdMmdvmPeerList(void)
 					peer["ts1"] = dmr->GetSlotModules(1);
 				if (!dmr->GetSlotModules(2).empty())
 					peer["ts2"] = dmr->GetSlotModules(2);
+				AddDynamicSlots(peer, *dmr);
 			}
 			peer["connected_since"] = (int64_t)(*it)->GetConnectTime();
 

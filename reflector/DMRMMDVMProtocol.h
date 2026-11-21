@@ -143,6 +143,16 @@ protected:
 	void OpenPendingCall(uint16_t streamId);
 	bool DropPendingCall(uint16_t streamId, const CIp &, const char *why);
 	void CheckPendingCalls(void);
+	// drop the dynamic modules whose timeout ran out ([MMDVM] DynamicTimeout)
+	void CheckDynamicTimeouts(void);
+	// a hotspot's slots changed: client_updated to the WebSocket
+	static void NotifyNodeUpdated(const CClient &);
+	// a call of this hotspot waits for its first voice on the slot and module
+	bool HasPendingCall(const CIp &, uint8_t slot, char module) const;
+public:
+	// [MMDVM] DynamicTimeout, at start and with a config reload
+	static void LoadDynamicTimeout(bool notify = false);
+protected:
 
 	// packet encoding helpers
 	void EncodeKeepAlivePacket(CBuffer *, std::shared_ptr<CClient>);
@@ -198,6 +208,8 @@ protected:
 protected:
 	// for keep alive
 	CTimer         m_LastKeepaliveTime;
+	CTimer         m_DynamicCheckTime;
+	bool           m_DynamicWaiting = false;	// an expired module waits for a call to end
 
 	// for stream id
 	uint16_t              m_uiStreamId;

@@ -591,6 +591,8 @@ bool CConfigure::ReadData(const std::string &path)
 					data["mmdvmBlockProtocols"] = value;
 				else if (0 == key.compare("RequireAuth"))
 					data[g_Keys.mmdvm.requireauth] = IS_TRUE(value[0]);
+				else if (0 == key.compare("DynamicTimeout"))
+					data[g_Keys.mmdvm.dynamictimeout] = getUnsigned(value, "MMDVM DynamicTimeout", 0, 1440, DMRMMDVM_DYNAMIC_TIMEOUT);	// minutes, 0 = never
 				else
 				{
 					// check if it's a user entry (DMR ID or callsign = password)

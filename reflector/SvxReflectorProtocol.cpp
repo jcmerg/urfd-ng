@@ -77,7 +77,7 @@ void CSvxReflectorProtocol::RefreshActivityByModule(char module)
 	auto dynIt = m_DynTGs.find(tg);
 	if (dynIt != m_DynTGs.end())
 	{
-		auto newExpiry = std::chrono::steady_clock::now() + std::chrono::seconds(900);
+		auto newExpiry = std::chrono::steady_clock::now() + std::chrono::seconds(dynIt->second.ttl);
 		if (newExpiry > dynIt->second.expires)
 			dynIt->second.expires = newExpiry;
 	}
@@ -906,7 +906,7 @@ void CSvxReflectorProtocol::OnTalkerStart(const std::vector<uint8_t> &payload)
 		auto dynIt = m_DynTGs.find(tg);
 		if (dynIt != m_DynTGs.end())
 		{
-			auto newExpiry = std::chrono::steady_clock::now() + std::chrono::seconds(900);
+			auto newExpiry = std::chrono::steady_clock::now() + std::chrono::seconds(dynIt->second.ttl);
 			if (newExpiry > dynIt->second.expires)
 				dynIt->second.expires = newExpiry;
 		}
@@ -1278,6 +1278,8 @@ void CSvxReflectorProtocol::EncodeAndSendAudio(const int16_t *pcm)
 
 bool CSvxReflectorProtocol::AddDynamicTG(uint32_t tg, char module, int ttlSeconds)
 {
+	if (ttlSeconds <= 0)
+		ttlSeconds = DYNAMIC_TG_TTL;	// the default, as the admin page sends for an empty field
 	{
 		std::lock_guard<std::mutex> lock(m_TGMutex);
 		auto expiry = std::chrono::steady_clock::now() + std::chrono::seconds(ttlSeconds);
@@ -1293,7 +1295,7 @@ bool CSvxReflectorProtocol::AddDynamicTG(uint32_t tg, char module, int ttlSecond
 				return false;
 			}
 			// Update existing dynamic TTL
-			m_DynTGs[tg].expires = expiry;
+			m_DynTGs[tg] = { expiry, ttlSeconds };
 			std::cout << "SvxReflector: refreshed dynamic TG" << tg << " TTL=" << ttlSeconds << "s" << std::endl;
 			return true;
 		}
@@ -1304,7 +1306,7 @@ bool CSvxReflectorProtocol::AddDynamicTG(uint32_t tg, char module, int ttlSecond
 		{
 			// Module has primary — add as secondary (inbound only)
 			m_TGToModule[tg] = module;
-			m_DynTGs[tg] = { expiry };
+			m_DynTGs[tg] = { expiry, ttlSeconds };
 			std::cout << "SvxReflector: added secondary TG" << tg << " -> Module " << module
 			          << " TTL=" << ttlSeconds << "s (inbound only)" << std::endl;
 		}
@@ -1313,7 +1315,7 @@ bool CSvxReflectorProtocol::AddDynamicTG(uint32_t tg, char module, int ttlSecond
 			// Module is free — add as primary
 			m_TGToModule[tg] = module;
 			m_ModuleToTG[module] = tg;
-			m_DynTGs[tg] = { expiry };
+			m_DynTGs[tg] = { expiry, ttlSeconds };
 			std::cout << "SvxReflector: added dynamic TG" << tg << " -> Module " << module
 			          << " TTL=" << ttlSeconds << "s (primary)" << std::endl;
 		}

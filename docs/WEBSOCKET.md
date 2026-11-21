@@ -142,8 +142,12 @@ Example payload:
 ```
 
 - `callsign`: 8 characters and the module or suffix, as urfd keeps it (`N0CALL  B` is N0CALL-B)
-- `modules`: every module the node is linked to; a DMR hotspot has `ts1` / `ts2` as well, the modules of each timeslot (one letter each, the static ones of its options first, then the one it keyed up on; since 4.41.0 more than one)
+- `modules`: every module the node is linked to; a DMR hotspot has `ts1` / `ts2` as well, the modules of each timeslot (one letter each, the static ones of its options first, then the one it keyed up on; since 4.41.0 more than one); since 4.42.0 also `ts1_dynamic` / `ts2_dynamic`, the slot's dynamic module (the one it keyed up on), with `ts1_expires` / `ts2_expires` (unix time it unlinks without a call of the hotspot on it, `[MMDVM] DynamicTimeout`) and `ts1_left` / `ts2_left` (seconds until then); the times are left out with `DynamicTimeout = 0` and while the hotspot talks on the module (the time starts when its call ends)
 - `ip`: only with `[Dashboard] LinksIP` other than `HideIP` (the default), masked as it says: `ShowLast1ByteOfIP` `*.*.*.123`, `ShowLast2ByteOfIP` `*.*.56.123`, `ShowLast3ByteOfIP` `*.34.56.123`, `ShowFullIP`; for IPv6 the last 1, 2 or 3 groups; the character is `IPMask`
+
+### `client_updated`
+
+Since 4.42.0: a linked node changed, with the payload of `client_added` (callsign and protocol identify it). Sent for a DMR hotspot whose timeslots changed: a dynamic module linked, dropped (TG 4000) or expired, its own call on it started or ended (the expiry moves), or its static modules changed.
 
 ### `client_removed`
 

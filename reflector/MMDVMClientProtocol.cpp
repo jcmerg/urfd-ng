@@ -216,6 +216,22 @@ void CMMDVMClientProtocol::Task(void)
 			SendClose();
 			m_State = EHBState::DISCONNECTED;
 			m_RetryTimer.start();
+			// added via the API as static on BrandMeister: it goes there too (BM
+			// would go on sending it else), after the close, so the HTTP calls hold
+			// up no call; one that fails is left to the sync after the new login,
+			// tried again until it went through
+			if (m_BmApi.IsConfigured())
+			{
+				bool ok = true;
+				for (const auto &e : expired)
+					ok = m_BmApi.RemoveStaticTG(e.first, e.second) && ok;
+				if (!ok)
+				{
+					m_BmSynced = false;
+					m_BmSyncDelay = 60;
+					m_BmNextSync = std::chrono::steady_clock::now();
+				}
+			}
 		}
 	}
 

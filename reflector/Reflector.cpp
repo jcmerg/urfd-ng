@@ -295,6 +295,7 @@ void CReflector::ReloadConfig(const std::string &configPath)
 		}
 		if (auto *obp = m_Protocols.FindByType(EProtocol::openbridge))
 			static_cast<COpenBridgeProtocol *>(obp)->GetTGMap().ReloadStaticFromConfig("obp", "OpenBridge");
+		CDmrmmdvmProtocol::LoadDynamicTimeout(true);	// a hotspot's dynamic module: the new time from its next check
 
 		auto *svxProto = m_Protocols.FindByType(EProtocol::svxreflector);
 		if (svxProto)
@@ -798,6 +799,9 @@ void CReflector::RouterThread(const char ThisModule)
 			m_Protocols.Lock();
 			for (auto *cli : m_Protocols.MmdvmClients())
 				cli->GetTGMap().RefreshActivityByModule(ThisModule);
+			// the admin's dynamic TGs of the MMDVM server as well
+			if (auto *mmdvmProto = m_Protocols.FindByType(EProtocol::dmrmmdvm))
+				static_cast<CDmrmmdvmProtocol *>(mmdvmProto)->GetTGMap().RefreshActivityByModule(ThisModule);
 			m_Protocols.Unlock();
 			auto *svxProto = m_Protocols.FindByType(EProtocol::svxreflector);
 			if (svxProto)

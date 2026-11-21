@@ -394,10 +394,18 @@ function removeMmdvmUser(dmrid) {
 
 function refreshMmdvmPeerList() {
     // the modules of each timeslot (several with static talkgroups, urfd 4.41.0)
+    // the dynamic module with the minutes until it expires (urfd 4.42.0)
     var peerSlots = function (p) {
+        var slot = function (mods, ts, key) {
+            var dyn = p[key + '_dynamic'], left = p[key + '_left'];
+            return mods.split('').map(function (m) {
+                if (m !== dyn || typeof left !== 'number') return m;
+                return m + ' (' + Math.ceil(left / 60) + ' min)';
+            }).join(' ') + ' ' + ts;
+        };
         var out = [];
-        if (p.ts1) out.push(p.ts1.split('').join(' ') + ' TS1');
-        if (p.ts2) out.push(p.ts2.split('').join(' ') + ' TS2');
+        if (p.ts1) out.push(slot(p.ts1, 'TS1', 'ts1'));
+        if (p.ts2) out.push(slot(p.ts2, 'TS2', 'ts2'));
         if (out.length) return out.join(', ');
         return p.module && p.module !== ' ' ? p.module : '';
     };
