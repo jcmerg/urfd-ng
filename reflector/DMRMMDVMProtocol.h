@@ -20,6 +20,7 @@
 
 #include <mutex>
 #include <random>
+#include <set>
 #include <unordered_map>
 
 #include "DMREmbeddedLC.h"
@@ -166,6 +167,10 @@ protected:
 
 	// dmr DstId to Module helper
 	char DmrDstIdToModule(uint32_t) const;
+	// the same for a group call: a TG the server does not map goes to the module
+	// a connected MMDVMClient link booked it on (the admin's dynamic TGs)
+	char CallTGToModule(uint32_t) const;
+	void UpdateLinkTGs(void);
 	uint32_t ModuleToDmrDestId(char) const;
 
 	// per-client TG and timeslot lookup for outbound DstId
@@ -210,6 +215,9 @@ protected:
 	CTimer         m_LastKeepaliveTime;
 	CTimer         m_DynamicCheckTime;
 	bool           m_DynamicWaiting = false;	// an expired module waits for a call to end
+	CTimer         m_LinkTGsTime;
+	std::unordered_map<uint32_t, char> m_LinkTGs;	// TG -> module booked by an MMDVMClient link (UpdateLinkTGs)
+	std::set<uint32_t> m_LinkTGsAmbiguous;	// booked on different modules, logged once
 
 	// for stream id
 	uint16_t              m_uiStreamId;

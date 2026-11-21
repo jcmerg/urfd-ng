@@ -31,6 +31,7 @@ public:
 	bool Init(void);
 	void Close(void);
 	void Lock(void)   { m_Mutex.lock(); }
+	bool TryLock(void) { return m_Mutex.try_lock(); }
 	void Unlock(void) { m_Mutex.unlock(); }
 
 	// pass-through
