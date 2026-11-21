@@ -113,6 +113,8 @@ inline bool IsPluginProtocol(EProtocol p) { return int(p) >= int(EProtocol::plug
 // DMRMmdvm
 #define DMRMMDVM_KEEPALIVE_PERIOD       10                                  // in seconds
 #define DMRMMDVM_KEEPALIVE_TIMEOUT      (DMRMMDVM_KEEPALIVE_PERIOD*10)      // in seconds
+#define DMRMMDVM_DYNAMIC_TIMEOUT        5                                   // in minutes, [MMDVM] DynamicTimeout
+#define DYNAMIC_TG_TTL                  900                                 // in seconds, an admin TG's default timeout
 #define DMRMMDVM_REFLECTOR_SLOT         DMR_SLOT2
 #define DMRMMDVM_REFLECTOR_COLOUR       1
 

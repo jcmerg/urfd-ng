@@ -19,6 +19,7 @@
 #pragma once
 
 #include "Defines.h"
+#include <atomic>
 #include <map>
 #include <string>
 #include <vector>
@@ -57,6 +58,16 @@ public:
 	void SetSlotStatics(uint8_t slot, const std::vector<std::pair<char, uint32_t>> &);
 	void SetSlotDynamic(uint8_t slot, char mod, uint32_t tg);
 	void ClearSlotDynamic(uint8_t slot);
+	// the dynamic module expires after DynamicTimeout without a call of the
+	// hotspot on it ([MMDVM] DynamicTimeout, set by the protocol; 0: never)
+	void TouchSlotDynamic(uint8_t slot)          { if (ValidSlot(slot)) m_Slot[slot-1].dynamicTime.start(); }
+	int GetSlotDynamicLeft(uint8_t slot) const;	// seconds, -1: no dynamic module or no timeout
+	bool IsSlotDynamicExpired(uint8_t slot) const;
+	// whether the hotspot talks on its dynamic module (the time counts from the
+	// end of its call); returns the previous state
+	bool SwapSlotDynamicTalking(uint8_t slot, bool on);
+	bool IsSlotDynamicTalking(uint8_t slot) const { return ValidSlot(slot) && m_Slot[slot-1].dynamicTalking; }
+	static std::atomic<unsigned> s_DynamicTimeout;	// seconds
 	uint8_t SlotOfModule(char mod) const;	// 0: on no slot
 	bool HasReflectorModule(void) const override { return !m_Slot[0].modules.empty() || !m_Slot[1].modules.empty(); }
 	char GetReflectorModule(void) const override;
@@ -80,6 +91,8 @@ protected:
 	{
 		std::string statics;	// from the options, in their order
 		char dynamic = ' ';
+		CTimer dynamicTime;	// since it was linked or the hotspot's last call on it
+		bool dynamicTalking = false;
 		std::string modules;	// statics + dynamic
 		std::map<char, uint32_t> tg;
 		char owner = ' ';

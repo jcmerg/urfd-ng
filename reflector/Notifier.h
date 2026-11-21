@@ -16,11 +16,14 @@
 class CWebsocketLwsNotifier;
 class CClient;
 class CPeer;
+class CDmrmmdvmClient;
 
 // a linked node and a peer as the dashboard gets them, the IP masked as
 // [Dashboard] LinksIP / PeersIP say
 nlohmann::json NodeJson(const CClient &client);
 nlohmann::json PeerJson(const CPeer &peer);
+// a DMR hotspot's dynamic module per timeslot and when it expires
+void AddDynamicSlots(nlohmann::json &j, const CDmrmmdvmClient &dmr);
 
 // one event for the WebSocket clients: {"event_type", "timestamp", "reflector_name", "payload"}
 class CEvent

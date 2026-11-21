@@ -29,6 +29,7 @@
 #include "RejectLog.h"
 #include "DMRMMDVMClient.h"
 #include "DMRMMDVMProtocol.h"
+#include "Notifier.h"
 #include "BPTC19696.h"
 #include "RS129.h"
 #include "Golay2087.h"
@@ -60,6 +61,7 @@ bool CDmrmmdvmProtocol::Initialize(const char *type, const EProtocol ptype, cons
 	m_DefaultId = g_Configure.Contains(g_Keys.mmdvm.fallbackdmrid) ? g_Configure.GetUnsigned(g_Keys.mmdvm.fallbackdmrid) : 0;
 	// RequireAuth defaults to true; only disabled when explicitly set to false
 	m_RequireAuth = !g_Configure.GetData().contains(g_Keys.mmdvm.requireauth) || g_Configure.GetBoolean(g_Keys.mmdvm.requireauth);
+	LoadDynamicTimeout();
 	// base class
 	if (! CProtocol::Initialize(type, ptype, port, has_ipv4, has_ipv6))
 		return false;
@@ -343,6 +345,15 @@ void CDmrmmdvmProtocol::Task(void)
 	// handle end of streaming timeout
 	CheckStreamsTimeout();
 	CheckPendingCalls();
+	// every second, every 100 ms while an expired module waits for the end of a
+	// call going out (the pause before the next one may be short)
+	if ( m_DynamicCheckTime.time() >= (m_DynamicWaiting ? 0.1 : 1.0) )
+	{
+		// the admin's dynamic TGs (their TTL) and the hotspots' dynamic modules
+		m_TGMap.PurgeExpired();
+		CheckDynamicTimeouts();
+		m_DynamicCheckTime.start();
+	}
 
 	// handle queue from reflector
 	HandleQueue();
@@ -399,6 +410,7 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 			auto *mmdvm = static_cast<CDmrmmdvmClient*>(client.get());
 			char targetMod = rpt2.GetCSModule();
 			bool closedTarget = false;	// the dialled module is closed to MMDVM
+			bool slotsChanged = false;	// a dynamic module linked or dropped
 			const auto &cs = client->GetCallsign();
 
 			if ( cmd == CMD_UNLINK )
@@ -409,6 +421,7 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 				{
 					std::cout << "MMDVM: " << cs << " TS" << (int)slot << " unlinking from module " << dyn << std::endl;
 					mmdvm->ClearSlotDynamic(slot);
+					slotsChanged = true;
 				}
 				targetMod = ' ';
 			}
@@ -438,6 +451,7 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 					const char dyn = mmdvm->GetSlotDynamic(slot);
 					std::cout << "MMDVM: " << cs << " TS" << (int)slot << ((dyn == ' ') ? " linking on module " : " switching to module ") << targetMod << " (TG" << sourceTG << ")" << std::endl;
 					mmdvm->SetSlotDynamic(slot, targetMod, slotTG);
+					slotsChanged = true;
 				}
 				else
 				{
@@ -460,6 +474,8 @@ void CDmrmmdvmProtocol::OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Hea
 				Header->SetRpt2Module(targetMod);
 				rpt2.SetCSModule(targetMod);
 			}
+			if ( slotsChanged )
+				NotifyNodeUpdated(*client);
 
 			// and now, re-check module is valid && that it's not a private call
 			if ( !closedTarget && g_Reflector.IsValidModule(rpt2.GetCSModule()) && (CallType == DMR_GROUP_CALL) )
@@ -512,7 +528,17 @@ void CDmrmmdvmProtocol::OpenPendingCall(uint16_t streamId)
 		if ( stream )
 		{
 			// the slot carries this call: nothing else goes out on it meanwhile
-			static_cast<CDmrmmdvmClient *>(client.get())->SetSlotOwner(call.slot, call.rpt2.GetCSModule());
+			auto *mmdvm = static_cast<CDmrmmdvmClient *>(client.get());
+			mmdvm->SetSlotOwner(call.slot, call.rpt2.GetCSModule());
+			// a call of the hotspot on its dynamic module keeps it: the time
+			// counts again from the end of the call (CheckDynamicTimeouts)
+			if ( call.rpt2.GetCSModule() == mmdvm->GetSlotDynamic(call.slot) )
+			{
+				mmdvm->TouchSlotDynamic(call.slot);
+				// the dashboard leaves the time out while it talks
+				if ( !mmdvm->SwapSlotDynamicTalking(call.slot, true) && CDmrmmdvmClient::s_DynamicTimeout != 0 )
+					NotifyNodeUpdated(*client);
+			}
 			// keep the handle
 			m_Streams[stream->GetStreamId()] = stream;
 			if (call.sourceTG != 0)
@@ -742,6 +768,93 @@ void CDmrmmdvmProtocol::HandleKeepalives(void)
 
 	}
 	g_Reflector.ReleaseClients();
+}
+
+void CDmrmmdvmProtocol::CheckDynamicTimeouts(void)
+{
+	m_DynamicWaiting = false;
+	if ( CDmrmmdvmClient::s_DynamicTimeout == 0 )
+		return;
+	CClients *clients = g_Reflector.GetClients();
+	auto it = clients->begin();
+	std::shared_ptr<CClient>client = nullptr;
+	while ( (client = clients->FindNextClient(EProtocol::dmrmmdvm, it)) != nullptr )
+	{
+		auto *mmdvm = static_cast<CDmrmmdvmClient *>(client.get());
+		bool changed = false;
+		for ( uint8_t slot = DMR_SLOT1; slot <= DMR_SLOT2; slot++ )
+		{
+			const char dyn = mmdvm->GetSlotDynamic(slot);
+			if ( dyn == ' ' )
+				continue;
+			// the hotspot talks on it: the time starts when its call ends
+			if ( client->GetModuleMastered() == dyn )
+			{
+				mmdvm->TouchSlotDynamic(slot);
+				mmdvm->SwapSlotDynamicTalking(slot, true);
+				continue;
+			}
+			if ( mmdvm->SwapSlotDynamicTalking(slot, false) )
+				changed = true;	// its call ended: the new expiry to the dashboard
+			if ( !mmdvm->IsSlotDynamicExpired(slot) )
+				continue;
+			// a call from the module going out on the slot right now ends first
+			// (its stream closes, a gap in it does not end it); calls coming in
+			// do not keep the module, a pause between them drops it
+			if ( mmdvm->GetSlotOwner(slot) == dyn )
+			{
+				auto stream = g_Reflector.GetStream(dyn);
+				if ( stream && stream->IsOpen() )
+				{
+					m_DynamicWaiting = true;
+					continue;
+				}
+			}
+			// the hotspot keyed up on it and its call waits for the first voice
+			if ( HasPendingCall(client->GetIp(), slot, dyn) )
+				continue;
+			std::cout << "MMDVM: " << client->GetCallsign() << " TS" << (int)slot << " dynamic module " << dyn << " expired after " << (CDmrmmdvmClient::s_DynamicTimeout / 60) << " min" << std::endl;
+			mmdvm->ClearSlotDynamic(slot);
+			changed = true;
+		}
+		if ( changed )
+			NotifyNodeUpdated(*client);
+	}
+	g_Reflector.ReleaseClients();
+}
+
+void CDmrmmdvmProtocol::LoadDynamicTimeout(bool notify)
+{
+	// a slot's dynamic module goes after this many minutes without a call of the
+	// hotspot on it, as on BrandMeister; 0 keeps it until TG 4000 or another one
+	const unsigned timeout = 60 * (g_Configure.Contains(g_Keys.mmdvm.dynamictimeout) ? g_Configure.GetUnsigned(g_Keys.mmdvm.dynamictimeout) : DMRMMDVM_DYNAMIC_TIMEOUT);
+	const unsigned old = CDmrmmdvmClient::s_DynamicTimeout.exchange(timeout);
+	if ( !notify || old == timeout )
+		return;
+	// a reload with another time: the dashboards get the new expiry of every hotspot
+	CClients *clients = g_Reflector.GetClients();
+	auto it = clients->begin();
+	std::shared_ptr<CClient>client = nullptr;
+	while ( (client = clients->FindNextClient(EProtocol::dmrmmdvm, it)) != nullptr )
+	{
+		const auto *mmdvm = static_cast<const CDmrmmdvmClient *>(client.get());
+		if ( mmdvm->GetSlotDynamic(1) != ' ' || mmdvm->GetSlotDynamic(2) != ' ' )
+			NotifyNodeUpdated(*client);
+	}
+	g_Reflector.ReleaseClients();
+}
+
+bool CDmrmmdvmProtocol::HasPendingCall(const CIp &ip, uint8_t slot, char module) const
+{
+	for ( const auto &p : m_PendingCalls )
+		if ( p.second.ip == ip && p.second.slot == slot && p.second.rpt2.GetCSModule() == module )
+			return true;
+	return false;
+}
+
+void CDmrmmdvmProtocol::NotifyNodeUpdated(const CClient &client)
+{
+	CNotifierManager::Instance().Dispatch("client_updated", [&]() -> nlohmann::json { return NodeJson(client); });
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -1552,6 +1665,7 @@ void CDmrmmdvmProtocol::ApplyOptions(CDmrmmdvmClient *client, const std::string 
 		}
 	}
 
+	bool changed = false;
 	for ( uint8_t s = 1; s <= 2; s++ )
 	{
 		// unchanged: the same modules on the same TGs (a TG changed by a key-up
@@ -1566,6 +1680,7 @@ void CDmrmmdvmProtocol::ApplyOptions(CDmrmmdvmClient *client, const std::string 
 		if ( mods == client->GetSlotStatics(s) && sameTGs )
 			continue;
 		client->SetSlotStatics(s, statics[s - 1]);
+		changed = true;
 		std::cout << "MMDVM: " << client->GetCallsign() << " TS" << (int)s << " static";
 		if ( statics[s - 1].empty() )
 			std::cout << ": none";
@@ -1573,6 +1688,8 @@ void CDmrmmdvmProtocol::ApplyOptions(CDmrmmdvmClient *client, const std::string 
 			std::cout << " " << e.first << " (TG" << e.second << ")";
 		std::cout << std::endl;
 	}
+	if ( changed )
+		NotifyNodeUpdated(*client);
 }
 
 uint32_t CDmrmmdvmProtocol::SlotTGForLink(uint32_t tg, uint8_t callType) const

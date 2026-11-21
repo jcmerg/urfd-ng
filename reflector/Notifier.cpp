@@ -59,6 +59,28 @@ static void AddIP(nlohmann::json &j, const CIp &ip, const std::string &modeKey)
 		j["ip"] = shown;
 }
 
+// the dynamic module of each timeslot and when it expires (unix time, left
+// out without a timeout and while the hotspot talks on it): ts1_dynamic /
+// ts1_expires / ts1_left, ts2_...
+void AddDynamicSlots(nlohmann::json &j, const CDmrmmdvmClient &dmr)
+{
+	for (uint8_t slot = 1; slot <= 2; slot++)
+	{
+		const char dyn = dmr.GetSlotDynamic(slot);
+		if (dyn == ' ')
+			continue;
+		const std::string ts = "ts" + std::to_string(slot);
+		j[ts + "_dynamic"] = std::string(1, dyn);
+		// no time while the hotspot talks on it: it starts when the call ends
+		const int left = dmr.IsSlotDynamicTalking(slot) ? -1 : dmr.GetSlotDynamicLeft(slot);
+		if (left >= 0)
+		{
+			j[ts + "_expires"] = (int64_t)std::time(nullptr) + left;
+			j[ts + "_left"] = left;	// seconds, for a page without the server's clock
+		}
+	}
+}
+
 nlohmann::json NodeJson(const CClient &client)
 {
 	nlohmann::json j = {
@@ -80,6 +102,7 @@ nlohmann::json NodeJson(const CClient &client)
 			j["ts1"] = dmr->GetSlotModules(1);
 		if (!dmr->GetSlotModules(2).empty())
 			j["ts2"] = dmr->GetSlotModules(2);
+		AddDynamicSlots(j, *dmr);
 	}
 	AddIP(j, client.GetIp(), g_Keys.dashboard.linksip);
 	return j;

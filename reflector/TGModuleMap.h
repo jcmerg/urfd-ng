@@ -14,6 +14,7 @@
 #include <mutex>
 #include <chrono>
 #include <vector>
+#include "Defines.h"
 
 struct STGMapEntry
 {
@@ -22,6 +23,7 @@ struct STGMapEntry
 	bool is_static;    // true = from config, false = dynamic (has TTL)
 	bool is_primary;   // true = used for outbound on this module
 	std::chrono::steady_clock::time_point expires;  // only used when !is_static
+	int ttl = DYNAMIC_TG_TTL;	// seconds, activity starts it again (dynamic only)
 };
 
 class CTGModuleMap
@@ -56,8 +58,8 @@ public:
 	void RefreshActivity(uint32_t tg);  // reset TTL on traffic
 	void RefreshActivityByModule(char module);  // reset TTL for all dynamic TGs on module
 
-	// Expire old dynamic entries, returns list of expired TGs
-	std::vector<uint32_t> PurgeExpired(void);
+	// Expire old dynamic entries, returns the expired TGs with their timeslot
+	std::vector<std::pair<uint32_t, uint8_t>> PurgeExpired(void);
 
 	// Generate BM options string (includes all TGs: primary + secondary)
 	std::string GetOptionsString(void) const;

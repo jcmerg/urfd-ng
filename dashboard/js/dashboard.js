@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.1.16';
+var DASHBOARD_VERSION = '3.2.0';
 var REPO_URL = 'https://github.com/jcmerg/urfd-ng';
 
 var $ = function (id) { return document.getElementById(id); };
@@ -157,6 +157,13 @@ var handlers = {
     client_added: function (p) {
         S.links = S.links.filter(function (n) { return nodeKey(n) !== nodeKey(p); });
         S.links.push(p);
+    },
+    // a hotspot's slots changed (dynamic module linked, dropped or expired, urfd 4.42.0)
+    client_updated: function (p) {
+        // in place, the row keeps its position; one not listed (removed meanwhile,
+        // or before the snapshot) is left to client_added and the snapshot
+        var i = S.links.findIndex(function (n) { return nodeKey(n) === nodeKey(p); });
+        if (i >= 0) S.links[i] = p;
     },
     client_removed: function (p) {
         S.links = S.links.filter(function (n) { return nodeKey(n) !== nodeKey(p); });
@@ -341,11 +348,19 @@ function strip(show) {
         : '<div class="strip-in"><span>' + (onlyShort('') ? 'Kerchunks hidden' : 'Nobody heard yet') + '</span></div>';
 }
 
-// running transmit timers, against urfd's clock
+// m:ss of a time span
+function formatMmSs(seconds) {
+    var s = Math.max(0, seconds | 0);
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+// running transmit timers and countdowns, against urfd's clock
 function tick() {
     document.querySelectorAll('[data-since]').forEach(function (el) {
-        var s = Math.max(0, now() - parseInt(el.dataset.since, 10));
-        el.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+        el.textContent = formatMmSs(now() - parseInt(el.dataset.since, 10));
+    });
+    document.querySelectorAll('[data-until]').forEach(function (el) {
+        el.textContent = formatMmSs(parseInt(el.dataset.until, 10) - now());
     });
 }
 
@@ -741,14 +756,20 @@ function nodeBand(n, c) {
     return { A: '23cm', B: '70cm', C: '2m', D: 'Dongle', G: 'Gateway' }[c.mod] || '';
 }
 
-// a DMR hotspot: the modules of each timeslot (several with static TGs)
+// a DMR hotspot: the modules of each timeslot (several with static TGs); the
+// dynamic one with the time until it expires (urfd 4.42.0), as on BrandMeister
 function nodeModules(n) {
-    var slot = function (mods, ts) {
-        return mods.split('').map(function (m) { return '<span class="mod on">' + h(m) + '</span>'; }).join(' ') + ' <span class="muted">' + ts + '</span>';
+    var slot = function (mods, ts, key) {
+        var dyn = n[key + '_dynamic'], until = n[key + '_expires'];
+        return mods.split('').map(function (m) {
+            var box = '<span class="mod on">' + h(m) + '</span>';
+            if (m !== dyn || !until) return box;
+            return box + ' <span class="muted" title="Dynamic, unlinks without a call on it" data-until="' + (until | 0) + '">' + formatMmSs(until - now()) + '</span>';
+        }).join(' ') + ' <span class="muted">' + ts + '</span>';
     };
     var out = [];
-    if (n.ts1) out.push(slot(n.ts1, 'TS1'));
-    if (n.ts2) out.push(slot(n.ts2, 'TS2'));
+    if (n.ts1) out.push(slot(n.ts1, 'TS1', 'ts1'));
+    if (n.ts2) out.push(slot(n.ts2, 'TS2', 'ts2'));
     if (out.length) return out.join(' ');
     return '<span class="mod on">' + h(String(n.reflector_module || '').trim()) + '</span>';
 }

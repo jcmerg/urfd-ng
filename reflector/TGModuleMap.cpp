@@ -208,6 +208,8 @@ bool CTGModuleMap::IsModuleInUse(char module) const
 
 bool CTGModuleMap::AddDynamic(uint32_t tg, char module, uint8_t timeslot, int ttlSeconds)
 {
+	if (ttlSeconds <= 0)
+		ttlSeconds = DYNAMIC_TG_TTL;	// the default, as the admin page sends for an empty field
 	std::lock_guard<std::mutex> lock(m_Mutex);
 	auto expiry = std::chrono::steady_clock::now() + std::chrono::seconds(ttlSeconds);
 
@@ -222,6 +224,7 @@ bool CTGModuleMap::AddDynamic(uint32_t tg, char module, uint8_t timeslot, int tt
 		}
 		// Already dynamic — update TTL
 		tgIt->second.expires = expiry;
+		tgIt->second.ttl = ttlSeconds;
 		std::cout << "Admin: refreshed dynamic TG" << tg << " TTL=" << ttlSeconds << "s" << std::endl;
 		return true;
 	}
@@ -231,7 +234,7 @@ bool CTGModuleMap::AddDynamic(uint32_t tg, char module, uint8_t timeslot, int tt
 	if (modIt != m_ModuleToTG.end())
 	{
 		// Module has a primary — add as secondary (inbound only)
-		m_TGtoEntry[tg] = { module, timeslot, false, false, expiry };
+		m_TGtoEntry[tg] = { module, timeslot, false, false, expiry, ttlSeconds };
 		m_ModuleToAllTGs[module].insert(tg);
 		std::cout << "Admin: added secondary TG" << tg << " -> Module " << module
 		          << " TS" << (int)timeslot << " TTL=" << ttlSeconds << "s (inbound only)" << std::endl;
@@ -239,7 +242,7 @@ bool CTGModuleMap::AddDynamic(uint32_t tg, char module, uint8_t timeslot, int tt
 	}
 
 	// Module is free — add as primary
-	m_TGtoEntry[tg] = { module, timeslot, false, true, expiry };
+	m_TGtoEntry[tg] = { module, timeslot, false, true, expiry, ttlSeconds };
 	m_ModuleToTG[module] = tg;
 	m_ModuleToAllTGs[module].insert(tg);
 	std::cout << "Admin: added dynamic TG" << tg << " -> Module " << module
@@ -288,7 +291,7 @@ void CTGModuleMap::RefreshActivity(uint32_t tg)
 	auto it = m_TGtoEntry.find(tg);
 	if (it != m_TGtoEntry.end() && !it->second.is_static)
 	{
-		auto newExpiry = std::chrono::steady_clock::now() + std::chrono::seconds(900);
+		auto newExpiry = std::chrono::steady_clock::now() + std::chrono::seconds(it->second.ttl);
 		if (newExpiry > it->second.expires)
 			it->second.expires = newExpiry;
 	}
@@ -300,19 +303,22 @@ void CTGModuleMap::RefreshActivityByModule(char module)
 	auto modIt = m_ModuleToAllTGs.find(module);
 	if (modIt == m_ModuleToAllTGs.end())
 		return;
-	auto newExpiry = std::chrono::steady_clock::now() + std::chrono::seconds(900);
+	const auto now = std::chrono::steady_clock::now();
 	for (uint32_t tg : modIt->second)
 	{
 		auto it = m_TGtoEntry.find(tg);
-		if (it != m_TGtoEntry.end() && !it->second.is_static && newExpiry > it->second.expires)
+		if (it == m_TGtoEntry.end() || it->second.is_static)
+			continue;
+		const auto newExpiry = now + std::chrono::seconds(it->second.ttl);
+		if (newExpiry > it->second.expires)
 			it->second.expires = newExpiry;
 	}
 }
 
-std::vector<uint32_t> CTGModuleMap::PurgeExpired(void)
+std::vector<std::pair<uint32_t, uint8_t>> CTGModuleMap::PurgeExpired(void)
 {
 	std::lock_guard<std::mutex> lock(m_Mutex);
-	std::vector<uint32_t> expired;
+	std::vector<std::pair<uint32_t, uint8_t>> expired;
 	auto now = std::chrono::steady_clock::now();
 
 	for (auto it = m_TGtoEntry.begin(); it != m_TGtoEntry.end(); )
@@ -322,6 +328,7 @@ std::vector<uint32_t> CTGModuleMap::PurgeExpired(void)
 			uint32_t tg = it->first;
 			char mod = it->second.module;
 			bool wasPrimary = it->second.is_primary;
+			const uint8_t ts = it->second.timeslot;
 
 			m_ModuleToAllTGs[mod].erase(tg);
 			if (m_ModuleToAllTGs[mod].empty())
@@ -331,7 +338,7 @@ std::vector<uint32_t> CTGModuleMap::PurgeExpired(void)
 				m_ModuleToTG.erase(mod);
 
 			it = m_TGtoEntry.erase(it);
-			expired.push_back(tg);
+			expired.push_back({ tg, ts });
 
 			std::cout << "Admin: dynamic TG" << tg << " expired ("
 			          << (wasPrimary ? "primary" : "secondary")

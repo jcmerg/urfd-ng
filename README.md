@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.41.1** | tcd 0.22.13 | Dashboard v3.1.16
+**urfd 4.42.0** | tcd 0.22.13 | Dashboard v3.2.0
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
@@ -309,6 +309,7 @@ Enable = true
 Port = 62030
 # FallbackDmrId = 0                # DMR ID for talkers without one, to the hotspots, DMR+ and P25 (0 or omit = drop)
 # RequireAuth = false              # Set to false to accept all connections (legacy)
+# DynamicTimeout = 5               # minutes until a slot's dynamic module unlinks without a call of the hotspot on it (0 = never)
 # BlockProtocols = SVXServer,USRP  # Block protocols bidirectionally
 #
 # TG mapping: TG<number> = <Module>[,TS<1|2>]
@@ -340,6 +341,8 @@ TG9 = A,TS2                        # Common hotspot default
 **Dual-slot linking**: Each timeslot links independently. When a hotspot transmits on TS1 with TG 4019 (module S) and on TS2 with TG 4004 (module D), it receives traffic from both modules simultaneously — module S on the timeslot configured for that TG, module D on the other. For this to work, map TGs for different modules to different timeslots. The dashboard shows the linked modules of each timeslot (e.g. "S TS1 D TS2").
 
 **Static talkgroups** (4.41.0): a hotspot names its talkgroups in its options, as for BrandMeister or FreeDMR, and gets them at every login without keying up: `TS1=26363;TS2=262,2625` links the modules of TG 26363 on TS1 and of TG 262 and 2625 on TS2 (`TS1_1=…;TS1_2=…` as BrandMeister writes it works too; other keys such as FreeDMR's `DIAL` are left alone). In MMDVMHost the line is `Options=` in `[DMR Network]`, in DMRGateway `Options=` in the network's section. A TG that maps to no module, a module closed to MMDVM (`[Modules] Protocols<M>`) or a module given twice is left out and logged. A timeslot then carries several modules, one call at a time: the first call takes the slot, a call on another of its modules meanwhile does not go out on it, and after the last packet the slot stays with that module for 5 s, so the answer gets through (the hotspot's own call holds its slot the same way); after that the next call takes it, also in the middle. Keying up on another TG adds that module as the slot's dynamic one (the previous dynamic one goes, the static ones stay), TG 4000 drops the dynamic one; a TG that maps to no module goes to the module the slot is busy with, else the dynamic one, else the first static one. Without options a slot has its one module as before.
+
+**Dynamic module timeout** (4.42.0): as on BrandMeister, a slot's dynamic module unlinks after `DynamicTimeout` minutes (default 5, `0` = never) without a call of the hotspot on it; its own calls on that module start the time again (also one on a TG that maps to no module and goes to it), calls coming in from the module do not. A call from the module going out on the slot at that moment ends first; the module then goes at once, also when an answer would follow (incoming calls do not keep it). While the hotspot talks on it the time stands still and starts when its call ends; the WebSocket leaves the time out meanwhile. The static modules never expire. A dynamic module that is linked, dropped or expires sends `client_updated` on the WebSocket. The WebSocket's links and the admin's `mmdvm_peer_list` give `ts1_dynamic` / `ts2_dynamic` (the module), `ts1_expires` / `ts2_expires` (unix time) and `ts1_left` / `ts2_left` (seconds; both left out with `DynamicTimeout = 0`); the dashboard's links page counts it down next to the module. Before, a dynamic module stayed until TG 4000, another TG or the hotspot's logout.
 
 **Talker alias**: Every call reaches the hotspots with a talker alias, as from BrandMeister: the callsign and the first name from the DMR ID database (e.g. `N0CALL Max`), at most 13 characters in UTF-16 like BrandMeister's, as Motorola radios ignore an ISO 8 bit alias. If the DMR source sends its own alias (BrandMeister, or a radio with one), its text is passed on once it arrived complete, re-encoded in UTF-16 (sources send 7 bit, ISO 8 bit or UTF-8 too), starting over with the header so no blocks of the two get mixed; until then, and for D-Star, YSF, M17 and the other modes, it is ours. It goes in the embedded signalling, one LC in every other superframe; the hotspot shows it and passes it to the radio. MMDVMHost fills the superframes in between with the voice LC (source, TG, its own OVCM setting), so a radio that joins a call late still gets it. The service options in the voice LC (OVCM, emergency, privacy) are always 0: a single source's flags are not passed on to every linked hotspot.
 
@@ -468,7 +471,7 @@ Outgoing frames carry the destination ID each client polled with, encoded per di
 
 ### Dynamic Talkgroup Timer Behavior
 
-Both MMDVM and SVX dynamic TGs have a 15-minute inactivity TTL. The timer is refreshed on any transmission start (DvHeader) on the module, regardless of which protocol originated the traffic. This means cross-protocol activity keeps all timers alive consistently.
+A TG added on the admin page (MMDVMClient, MMDVM server, SvxReflector, SVXServer) expires after its timeout (`ttl`, the admin page's "Timeout in s", default 900 s) without activity. The timer starts again with that timeout on any transmission start (DvHeader) on the module, regardless of which protocol originated the traffic, so cross-protocol activity keeps all timers alive consistently. Since 4.42.0 the timeout given is the one it starts again with (before, any activity set it to 15 minutes), the MMDVM server's TGs expire at all (they stayed until a restart), and an MMDVMClient TG added through the BrandMeister API is removed there again when it expires (before, it stayed static on BM). A hotspot's dynamic module is something else, see `DynamicTimeout` under [MMDVM Server](#mmdvm-server).
 
 **BrandMeister note**: BM maintains its own TG subscription timer independently. When the BM subscription expires, urfd's local mapping will also expire if there is no further activity. Use the **kerchunk** admin command to manually extend the BM-side subscription without needing a radio.
 
@@ -759,7 +762,7 @@ Since 4.38.0 urfd writes no XML or JSON status file any more (`[Files] XmlPath` 
 
 Module names are configured once in `urfd.ini` and automatically available in the dashboard.
 
-### Dashboard v3.1.16
+### Dashboard v3.2.0
 Since v3.0.0 (urfd 4.38.0) a static page, HTML and plain JavaScript without PHP: it gets the state live over urfd's WebSocket and shows a change the moment it happens, the admin page sends its commands the same way. The pages and the look are those of v2.14; old links (`index.php?show=...`) lead to the same pages. Settings are `[Dashboard]` in `urfd.ini`; `setup.sh update` carries those of the old `config.inc.php` over once.
 
 
@@ -987,6 +990,8 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 ## Changes from upstream
 
 ### Protocol Connectors
+- **Dynamic module timeout for hotspots (4.42.0)**: a hotspot's dynamic module (the one it keyed up on) stayed linked until TG 4000, another TG or its logout, so a station that tried a module once kept hearing it. As on BrandMeister it now unlinks after `[MMDVM] DynamicTimeout` minutes (default 5, 0 = never) without a call of the hotspot on it; WebSocket and admin give the module and its expiry (`ts1_dynamic`, `ts1_expires`, `ts1_left`, ...), and the new WebSocket event `client_updated` sends a hotspot whose slots changed, see [MMDVM Server](#mmdvm-server)
+- **Admin TG timeouts (4.42.0)**: activity on a module set the timer of an admin TG to 15 minutes whatever timeout it was added with (MMDVMClient, SvxReflector, SVXServer); it now starts again with its own. The MMDVM server's admin TGs never expired, they do now. An MMDVMClient TG added through the BrandMeister API stayed static on BM after it expired locally, so BM went on sending it; it is removed there now, as when the admin removes it. See [Dynamic Talkgroup Timer Behavior](#dynamic-talkgroup-timer-behavior)
 - **Admin: MMDVM nodes with all their modules (4.41.1)**: the admin's `mmdvm_peer_list` gave one module per hotspot, the first one, so a hotspot with static talkgroups showed only that; it now also has `ts1` / `ts2` with every module of each timeslot
 - **Static talkgroups for hotspots (4.41.0)**: `[MMDVM]` reads the options a hotspot sends after its login (`TS1=26363;TS2=262,2625`, as BrandMeister and FreeDMR take them) and links their modules at once; before, it acknowledged them and kept nothing, so a hotspot heard a module only after keying up on it, and again after every restart of DMRGateway. A timeslot now carries several modules, one call at a time with 5 s hang time after a call, and a key-up on another TG adds a dynamic module next to the static ones instead of replacing the slot's module; see [MMDVM Server](#mmdvm-server). A hotspot that logs in again from another port keeps all of them. The WebSocket's `ts1`/`ts2` name every module of the slot
 - **A DMR call without voice on `[MMDVM]` (4.40.11)**: some devices key up on their own after a talkgroup change, a full transmission of about 3 s whose voice frames are all zero bytes. urfd counted it as a call: last heard, the dashboard's "on air", and 3 s of nothing to every other station on the module. A call on `[MMDVM]` now opens its stream with its first voice frame that is not all zeros; one that ends or times out without any is dropped and logged (`call from ... without voice ... ignored`). The slot still follows the talkgroup at the header, so switching by keying up works as before. A header and terminator alone no longer show up in last heard either
@@ -1073,6 +1078,7 @@ URF acts as a YSF Master providing Wires-X rooms (one per module). YSF users con
 - **Dashboard v2.6.0**: Dark mode redesign, admin panel, module overview with TG mappings and NXDN RAN, protocol-specific columns hidden when disabled, protocol list, QuadNet Live proxy, reflector list with search/pagination
 - **Dashboard v2.6.1**: Survives an outage of the XLX directory. Explicit timeouts on every outbound request, CallingHome failures logged instead of aborting the page render, reflector and peer lists served from an on-disk cache, admin API no longer serialized behind the PHP session lock
 - **Dashboard v2.7.0**: Locator column for stations that send an M17 GNSS position, also in `/json/stations`
+- **Dashboard v3.2.0**: the links page counts down the time until a hotspot's dynamic module unlinks (m:ss next to the module, urfd 4.42.0); the admin page's MMDVM nodes give the minutes left
 - **Dashboard v3.1.16**: the admin page's MMDVM nodes show every module of each timeslot (e.g. `P F H N TS1, D C R S TS2`), not only the first one
 - **Dashboard v3.1.15**: the Links page shows every module of a DMR hotspot's timeslot (several with static talkgroups, urfd 4.41.0), each as its own tag
 - **Dashboard v3.1.14**: The credential database on the admin page showed "busy, try again" instead of its state, the log at times too: the page asks for all its sections at once, more than the 8 requests urfd lets wait per connection. The dashboard now sends at most 6 at a time and queues the others

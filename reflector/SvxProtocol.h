@@ -226,6 +226,7 @@ protected:
 	// Dynamic TG tracking
 	struct SDynTG {
 		std::chrono::steady_clock::time_point expires;
+		int ttl = DYNAMIC_TG_TTL;	// seconds, activity starts it again
 	};
 	std::unordered_map<uint32_t, SDynTG> m_DynTGs;
 

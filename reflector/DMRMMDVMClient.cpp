@@ -22,6 +22,8 @@
 #include "Utils.h"
 
 
+std::atomic<unsigned> CDmrmmdvmClient::s_DynamicTimeout { 60 * DMRMMDVM_DYNAMIC_TIMEOUT };
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructors
 
@@ -87,6 +89,7 @@ void CDmrmmdvmClient::SetSlotStatics(uint8_t slot, const std::vector<std::pair<c
 			if (&d != &s)
 				d.tg.erase(d.dynamic);
 			d.dynamic = ' ';
+			d.dynamicTalking = false;
 			Rebuild(i + 1);
 		}
 	}
@@ -101,7 +104,33 @@ void CDmrmmdvmClient::SetSlotDynamic(uint8_t slot, char mod, uint32_t tg)
 	auto &s = m_Slot[slot-1];
 	s.dynamic = mod;
 	s.tg[mod] = tg;
+	s.dynamicTime.start();
+	s.dynamicTalking = false;
 	Rebuild(slot);
+}
+
+bool CDmrmmdvmClient::IsSlotDynamicExpired(uint8_t slot) const
+{
+	const unsigned timeout = s_DynamicTimeout;
+	return ValidSlot(slot) && m_Slot[slot-1].dynamic != ' ' && timeout != 0 && m_Slot[slot-1].dynamicTime.time() >= timeout;
+}
+
+bool CDmrmmdvmClient::SwapSlotDynamicTalking(uint8_t slot, bool on)
+{
+	if (!ValidSlot(slot))
+		return false;
+	const bool was = m_Slot[slot-1].dynamicTalking;
+	m_Slot[slot-1].dynamicTalking = on;
+	return was;
+}
+
+int CDmrmmdvmClient::GetSlotDynamicLeft(uint8_t slot) const
+{
+	const unsigned timeout = s_DynamicTimeout;
+	if (!ValidSlot(slot) || m_Slot[slot-1].dynamic == ' ' || timeout == 0)
+		return -1;
+	const double left = timeout - m_Slot[slot-1].dynamicTime.time();
+	return (left > 0.0) ? int(left + 0.5) : 0;
 }
 
 void CDmrmmdvmClient::ClearSlotDynamic(uint8_t slot)
@@ -114,6 +143,7 @@ void CDmrmmdvmClient::ClearSlotDynamic(uint8_t slot)
 	if (s.statics.find(s.dynamic) == std::string::npos)
 		s.tg.erase(s.dynamic);
 	s.dynamic = ' ';
+	s.dynamicTalking = false;
 	Rebuild(slot);
 }
 
