@@ -75,6 +75,9 @@ public:
 	void LeaveDirect(uint32_t stream, bool last, CSoftCodec *to);
 	// the streams it codes right now (a frame in the last 2 s)
 	int Streams(void);
+	// closes the states quiet for STATE_TIMEOUT (once a second, the reflector thread):
+	// a module's states are otherwise only made room for when it gets a new stream
+	void Purge(void);
 	// urfd counts the frames of a transmission from 0: frame 0, or a lower count
 	// than the last on the same stream id, is a new transmission (the last frame
 	// of the one before got lost). tcd's own vocoders tell transmissions apart the same way
@@ -146,6 +149,8 @@ public:
 	CSoftCodec *Get(uint32_t codec, const std::string &name = std::string());
 	// every plugin's software codec for a TCD_CODEC_*: tcd's own first, then in the order of the CodecPlugin lines
 	std::vector<CSoftCodec *> All(uint32_t codec);
+	// CSoftCodec::Purge of every codec
+	void Purge(void);
 
 private:
 	// handle: nullptr for tcd's own

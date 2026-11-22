@@ -167,6 +167,8 @@ protected:
 	// FindChannel only looks, TakeChannel takes it
 	int FindChannel(int k, char module) const;
 	int TakeChannel(int k, char module, uint16_t streamid);
+	// frees the stream's channel after its last frame went to the device (takes hw_mux)
+	void ReleaseChannel(int k, const std::shared_ptr<CTranscoderPacket> &packet);
 	// a channel whose device is up and not phased out takes new streams
 	bool Usable(const SHwChannel &c) const { return slots[c.slot]->up && !slots[c.slot]->draining; }
 	bool HasChannel(int k, int hw, char module, uint16_t streamid) const;
@@ -243,7 +245,7 @@ protected:
 	// the stream's choice for `to` is that plugin and it can (CodecPlugin.h api 4);
 	// the AGC's gain and the source's output gain in source_db, the target's gains
 	// added here. Sets the packet's frame of `to` and its bit in direct; false
-	// leaves `to` to the audio path. Called in the decoder's thread for every frame
+	// leaves `to` to the audio path. Called by the module's worker for every frame
 	// (a transmission is coded directly from its first frame on, and after a frame
 	// that was not, its rest goes the audio path: CSoftCodec::Transcode)
 	bool Transcode(uint32_t to, class CSoftCodec *from, bool decoded, float source_db, const std::shared_ptr<CTranscoderPacket> &packet, uint8_t *direct);

@@ -126,8 +126,8 @@ std::string CMonitorServer::BuildStatsJson()
 	bool first = true;
 	for (char mod : g_Stats.module_letters)
 	{
-		int idx = mod - 'A';
-		if (idx < 0 || idx >= CTcdStats::MAX_MODULES) continue;
+		const int idx = ModuleSlot(mod);
+		if (idx == kModuleOther) continue;
 		auto &m = g_Stats.modules[idx];
 
 		if (!first) js << ",";

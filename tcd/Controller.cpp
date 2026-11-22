@@ -1183,6 +1183,11 @@ void CController::ReadReflectorThread()
 						st.reencode_active.store(reencode && sw == dmr_sw, std::memory_order_relaxed);
 					}
 				PurgePinned();
+				// the states of streams quiet for 30 s, on modules where no new stream came
+				g_Codecs.Purge();
+				m_agcDigital.Purge();
+				m_agcAnalog.Purge();
+				m_ambeGain.Purge();
 			}
 		}
 
@@ -1864,7 +1869,7 @@ void CController::StreamLogFlush(SModuleState &ms, uint32_t key, LogLines &lines
 }
 
 // a frame an AMBE device decodes: its FEC as the device sees it, counted for the
-// stream's line and the device (from Pick, with the module's lock and hw_mux)
+// stream's line and the device (from Pick, with the module's lock)
 void CController::DeviceFrameIn(SModuleState &ms, int k, int hw, const std::shared_ptr<CTranscoderPacket> &packet)
 {
 	if (k != kChoiceDStar && k != kChoiceDMR)
@@ -2020,6 +2025,16 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 				*dev = slots[c.slot]->dev;
 				*ch = c.ch;
 			}
+			// the channel is free after the stream's last frame (the device answers
+			// its frames in order, a new stream's come after them). A caller that hands
+			// the frame to the device (dev: ToDStar, ToDmr) frees it once the frame is
+			// queued (ReleaseChannel): freed here, another module's worker could take
+			// the channel and queue its first frame before this last one
+			if (packet->IsLast() && !dev)
+				c.busy = false;
+			// the rest needs no device lock: a channel's slot and the slots' stats are
+			// set at start only
+			hw.unlock();
 			// a frame the device is to decode: its FEC, counted for the stream and the device
 			// (the first frame's part of the stream's line first, so the count has a place)
 			if (StreamDecodes(k, packet->GetCodecIn()))
@@ -2027,10 +2042,6 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 				StreamLogPart(ms, k, packet, pin.choice, pin.hw, fresh || moved);
 				DeviceFrameIn(ms, k, pin.hw, packet);
 			}
-			// the channel is free after the stream's last frame (the device answers
-			// its frames in order, a new stream's come after them)
-			if (packet->IsLast())
-				c.busy = false;
 		}
 		StreamLogPart(ms, k, packet, pin.choice, pin.hw, fresh || moved);
 		if (count)
@@ -2107,6 +2118,14 @@ int CController::FindChannel(int k, char module) const
 			take = int(i);
 	}
 	return take;
+}
+
+void CController::ReleaseChannel(int k, const std::shared_ptr<CTranscoderPacket> &packet)
+{
+	std::lock_guard<std::mutex> lock(hw_mux);
+	for (auto &c : hw_channels[k])
+		if (c.busy && c.module == packet->GetModule() && c.streamid == packet->GetStreamId())
+			c.busy = false;
 }
 
 int CController::TakeChannel(int k, char module, uint16_t streamid)
@@ -2436,11 +2455,16 @@ void CController::ToDStar(std::shared_ptr<CTranscoderPacket> packet)
 	std::shared_ptr<CDVDevice> dev;
 	uint8_t ch = 0;
 	if (SwCodec(TCD_CODEC_DSTAR, packet, &dev, &ch))
+	{
 		StageSWDStar(packet);
-	else if (dev)
+		return;
+	}
+	if (dev)
 		dev->AddPacketToChannel(packet, ch);
 	else
 		NoChannel("D-Star", packet->GetModule());
+	if (packet->IsLast())
+		ReleaseChannel(kChoiceDStar, packet);	// after the frame is queued, see Pick
 }
 
 void CController::ToDmr(std::shared_ptr<CTranscoderPacket> packet)
@@ -2448,11 +2472,16 @@ void CController::ToDmr(std::shared_ptr<CTranscoderPacket> packet)
 	std::shared_ptr<CDVDevice> dev;
 	uint8_t ch = 0;
 	if (SwCodec(TCD_CODEC_DMR, packet, &dev, &ch))
+	{
 		StageSWAMBE2(packet);
-	else if (dev)
+		return;
+	}
+	if (dev)
 		dev->AddPacketToChannel(packet, ch);
 	else
 		NoChannel("DMR", packet->GetModule());
+	if (packet->IsLast())
+		ReleaseChannel(kChoiceDMR, packet);	// after the frame is queued, see Pick
 }
 
 // IMBE silence, as MMDVMHost and P25Gateway (and urfd's P25Protocol) fill a lost frame with

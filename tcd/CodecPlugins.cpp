@@ -210,6 +210,32 @@ void CSoftCodec::End(uint32_t stream, bool encode)
 		Stop(&it->second, true);
 }
 
+void CSoftCodec::Purge(void)
+{
+	const auto now = std::chrono::steady_clock::now();
+	for (int i = 0; i < SPluginLocks::kShards; i++)
+	{
+		CLock lock(*m_Locks, i);
+		auto &states = m_Shards[i].states;
+		for (auto it = states.begin(); it != states.end(); )
+		{
+			if (now - it->second.last_used > STATE_TIMEOUT)
+			{
+				m_Plugin->close(it->second.state);
+				it = states.erase(it);
+			}
+			else
+				++it;
+		}
+	}
+}
+
+void CCodecPlugins::Purge(void)
+{
+	for (auto *c : m_Codecs)
+		c->Purge();
+}
+
 int CSoftCodec::Streams(void)
 {
 	// the transmissions not ended with a frame in the last 2 s: a state stays 30 s

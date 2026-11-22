@@ -409,6 +409,19 @@ public:
 	}
 
 private:
+	// the streams not heard for 30 s, of every module (once a second, the reflector
+	// thread; a module's are otherwise dropped only when it gets a new stream)
+public:
+	void Purge(void)
+	{
+		const auto now = std::chrono::steady_clock::now();
+		for (auto &shard : m_shards)
+		{
+			std::lock_guard<std::mutex> lock(shard.mutex);
+			DropEndedStreams(shard.streams, now);
+		}
+	}
+private:
 	// streams not heard for 30 s have ended
 	static void DropEndedStreams(std::unordered_map<uint32_t, AGCState> &streams, std::chrono::steady_clock::time_point now)
 	{
