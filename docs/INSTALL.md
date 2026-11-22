@@ -101,7 +101,7 @@ Forward these ports from your router to the machine, or open them in the firewal
 Once everything works from outside, the reflector can be listed in hotspot software:
 
 1. Edit `/opt/urfd/config/urfd.ini`, section `[CallingHome]`: set `Enable = true`, the `Country` name (e.g. `Germany`) and a `Comment`. The `DashboardUrl` from `[Names]` is sent along.
-2. Moving a reflector that the directory lists already (an XLX dashboard or an older urfd registered it)? Then put its old hash in the section as `Hash = ...`, see the [README](../README.md#moving-a-reflector-that-is-listed-already). Otherwise leave `Hash` blank: the reflector makes one at its first start and saves it there.
+2. Moving a reflector that the directory lists already (an XLX dashboard or an older urfd registered it)? Then put its old hash in the section as `Hash = ...`, see the [configuration guide](CONFIGURATION.md#moving-a-reflector-that-is-listed-already). Otherwise leave `Hash` blank: the reflector makes one at its first start and saves it there.
 3. Restart: `docker restart urfd`.
 
 The reflector then reports to the directory every 5 minutes; `docker logs urfd | grep CallingHome` shows whether it got through. If you answered yes to this question during setup, it is already on.

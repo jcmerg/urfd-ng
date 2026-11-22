@@ -101,7 +101,7 @@ Leite diese Ports in deinem Router auf den Rechner weiter, oder gib sie in der F
 Wenn alles von außen funktioniert, kann der Reflektor in der Hotspot-Software erscheinen:
 
 1. In `/opt/urfd/config/urfd.ini`, Abschnitt `[CallingHome]`: `Enable = true` setzen, dazu den Namen des Landes bei `Country` (z.B. `Germany`) und einen `Comment`. Die `DashboardUrl` aus `[Names]` wird mitgeschickt.
-2. Ziehst du einen Reflektor um, der schon im Verzeichnis steht (eingetragen von einem XLX-Dashboard oder einem älteren urfd)? Dann trage seinen alten Hash im Abschnitt als `Hash = ...` ein, siehe [README](../README.de.md#einen-schon-eingetragenen-reflektor-umziehen). Sonst `Hash` leer lassen: Der Reflektor erzeugt beim ersten Start einen und speichert ihn dort.
+2. Ziehst du einen Reflektor um, der schon im Verzeichnis steht (eingetragen von einem XLX-Dashboard oder einem älteren urfd)? Dann trage seinen alten Hash im Abschnitt als `Hash = ...` ein, siehe [Konfigurationsanleitung](CONFIGURATION.de.md#einen-schon-eingetragenen-reflektor-umziehen). Sonst `Hash` leer lassen: Der Reflektor erzeugt beim ersten Start einen und speichert ihn dort.
 3. Neu starten: `docker restart urfd`.
 
 Der Reflektor meldet sich dann alle 5 Minuten beim Verzeichnis; `docker logs urfd | grep CallingHome` zeigt, ob es geklappt hat. Hast du die Frage beim Setup mit yes beantwortet, ist das schon eingeschaltet.

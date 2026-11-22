@@ -32,7 +32,7 @@ The image is built from this checkout; configuration and state live outside it, 
 | `$URFD_DATA/config/` | `/usr/local/etc/urfd` | `urfd.ini` (with the dashboard's `[Dashboard]`), interlink, black/whitelist, downloaded ID databases |
 | `$URFD_DATA/tcd/` | `/usr/local/etc/tcd` (tcd service) | `tcd.ini`, only with `--profile tcd` |
 
-`urfd.ini` must exist. See the main [README](../README.md) and the commented templates in [config/](../config/) for details.
+`urfd.ini` must exist. See [docs/CONFIGURATION.md](../docs/CONFIGURATION.md) and the commented templates in [config/](../config/) for details.
 
 ### Dashboard
 

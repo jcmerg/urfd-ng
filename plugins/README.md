@@ -1,7 +1,7 @@
 # Plugins
 
-Protocols that urfd loads from shared objects at start, see **Plugins** in the
-[README](../README.md#plugins) and [reflector/Plugin.h](../reflector/Plugin.h).
+Protocols that urfd loads from shared objects at start, see **Plugins** in
+[docs/CONFIGURATION.md](../docs/CONFIGURATION.md#plugins) and [reflector/Plugin.h](../reflector/Plugin.h).
 
 A plugin's source goes into a directory of its own here, `plugins/<name>/`,
 with a `Makefile` that builds the shared object against the urfd sources given
