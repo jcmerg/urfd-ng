@@ -132,11 +132,11 @@ The hash identifies the reflector in the directory, and the directory ties `XLXn
 
 A reflector that was registered before, by an XLX dashboard or another urfd, has to keep its hash; the directory would not accept a new one for the same name. Set it before the first start with `Enable = true`.
 
-1. Check whether your name is in the directory (here `XLX363`, the number of your `URFnnn`):
+1. Check whether your name is in the directory (here `XLX999`, the number of your `URFnnn`):
    ```bash
-   curl -s 'http://xlxapi.rlx.lu/api.php?do=GetReflectorList' | grep -A6 '<name>XLX363</name>'
+   curl -s 'http://xlxapi.rlx.lu/api.php?do=GetReflectorList' | grep -A6 '<name>XLX999</name>'
    # without curl:
-   wget -qO- 'http://xlxapi.rlx.lu/api.php?do=GetReflectorList' | grep -A6 '<name>XLX363</name>'
+   wget -qO- 'http://xlxapi.rlx.lu/api.php?do=GetReflectorList' | grep -A6 '<name>XLX999</name>'
    ```
    Not listed: nothing to do, the reflector makes its hash itself. If the listed reflector isn't yours, choose another number.
 2. Listed and yours: copy the hash from the old server. The file is `$CallingHome['HashFile']` in the old dashboard's `config.inc.php`:
@@ -450,7 +450,7 @@ Map2 = 198.51.100.30,42000,F,15          # YSF reflector -> local module F, DG-I
 # BlockProtocols = MMDVMClient            # optional
 ```
 
-**Map format**: `host,port,local_module[,dgid]`; DG-ID 0 = none. When set, it goes into the FICH header of every outgoing voice packet. Outgoing packets carry the reflector callsign (e.g. `URF363`) in the radio field, shown as "Radio" on YSF dashboards.
+**Map format**: `host,port,local_module[,dgid]`; DG-ID 0 = none. When set, it goes into the FICH header of every outgoing voice packet. Outgoing packets carry the reflector callsign (e.g. `URF999`) in the radio field, shown as "Radio" on YSF dashboards.
 
 ```json
 {"cmd": "ysf_map_add", "token": "...", "host": "203.0.113.20", "port": 42099, "local_module": "A", "dgid": 0}
@@ -466,7 +466,7 @@ Port = 17000
 # Callsign = M17-XXX        # required for mrefd interlinks, see below
 ```
 
-- **Module selection**: a client picks its module when it links: the `CONN` (or `LSTN`) packet carries the module letter. To change modules, link again with the other letter, e.g. `URF363 B` as the reflector in Pi-Star/WPSD, the module selector in DroidStar or mvoice, or `URF363 B` as the destination on an M17 radio. A new link replaces the old one of the same callsign and IP. As on mrefd, a transmission goes to the module the client is linked on, whatever its destination (`URF363 B`, `M17-XXX B` or @ALL); streams to the clients are addressed to @ALL.
+- **Module selection**: a client picks its module when it links: the `CONN` (or `LSTN`) packet carries the module letter. To change modules, link again with the other letter, e.g. `URF999 B` as the reflector in Pi-Star/WPSD, the module selector in DroidStar or mvoice, or `URF999 B` as the destination on an M17 radio. A new link replaces the old one of the same callsign and IP. As on mrefd, a transmission goes to the module the client is linked on, whatever its destination (`URF999 B`, `M17-XXX B` or @ALL); streams to the clients are addressed to @ALL.
 - **Echo**: `PARROT` or `ECHO` as destination reaches the [echo module](#echo-module) from any linked module; a packet mode packet to them comes straight back to its sender.
 - **Listen-only**: `LSTN` clients are registered on their module, which lets monitoring services such as dvref.com check the reflector. Their voice and data are dropped.
 - **Voice and data**: voice frames in both the legacy and the V#3 TYPE layout are taken, encrypted streams dropped. Packet mode (`M17P`, e.g. SMS) is checked against both CRCs and forwarded unchanged to the other M17 clients on the module; the sender shows in last heard.
@@ -653,11 +653,11 @@ The protocol field is only for DCS entries. With OpenDHT, URF peers can also be 
 [XLXPeer]
 Enable = true               # required for XLX peers and DCS peers with XLX protocol
 Port = 10002
-# Callsign = XLX363         # optional: callsign for XLX peering
+# Callsign = XLX999         # optional: callsign for XLX peering
 
 [DCS]
 Port = 30051
-# Callsign = DCS363         # optional: callsign for native DCS peering
+# Callsign = DCS999         # optional: callsign for native DCS peering
 
 [M17]
 # Callsign = M17-XXX        # required for mrefd peers; unique, it is published in the Ham-DHT

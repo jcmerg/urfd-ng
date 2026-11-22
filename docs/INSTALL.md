@@ -15,7 +15,7 @@ This guide sets up a URF reflector, with its web dashboard and optionally the tc
 - **For the transcoder**, one of:
   - **DVSI AMBE USB sticks** (DV3000/ThumbDV or DV3003), plugged into the machine that runs tcd. One device: 1 transcoded module, DMR/YSF then needs a codec plugin. DV3000 + DV3003: 2 modules. Two DV3000: 1 module. Two DV3003: up to 3 modules.
   - **A codec plugin**, a software vocoder for D-Star and DMR/YSF: no sticks needed, as many modules as the CPU manages, also next to sticks for the modules they don't cover. None is part of this repository, because software AMBE and AMBE2+ may touch patents: using one is your decision (see [Codec plugins](../tcd/README.md#codec-plugins)). The setup script offers to fetch [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin); read its patent notice first. M17 and P25 need neither: tcd brings Codec2 and an IMBE vocoder of its own.
-- **A reflector callsign**: `URF` plus three letters or digits, e.g. `URF363`. Check that it is not taken in the [reflector list](https://xlxapi.rlx.lu/api/exportreflectors).
+- **A reflector callsign**: `URF` plus three letters or digits, e.g. `URF999`. Check that it is not taken in the [reflector list](https://xlxapi.rlx.lu/api/exportreflectors).
 
 ## Which setup?
 

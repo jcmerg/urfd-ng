@@ -15,7 +15,7 @@ Diese Anleitung richtet mit dem Setup-Script einen URF-Reflektor mit Web-Dashboa
 - **Für den Transcoder** eines davon:
   - **DVSI-AMBE-USB-Sticks** (DV3000/ThumbDV oder DV3003), eingesteckt in den Rechner, auf dem tcd läuft. Ein Gerät: 1 transcodiertes Modul, DMR/YSF braucht dann ein Codec-Plugin. DV3000 + DV3003: 2 Module. Zwei DV3000: 1 Modul. Zwei DV3003: bis zu 3 Module.
   - **Ein Codec-Plugin**, ein Software-Vocoder für D-Star und DMR/YSF: keine Sticks nötig, so viele Module, wie die CPU schafft, auch neben Sticks für die Module, die sie nicht abdecken. Keines ist Teil dieses Repositorys, weil AMBE und AMBE2+ in Software Patente berühren können: Ob du eines nutzt, entscheidest du (siehe [Codec-Plugins](../tcd/README.de.md#codec-plugins)). Das Setup-Script bietet an, [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin) zu holen; lies vorher dessen Patenthinweis. M17 und P25 brauchen keines von beiden: tcd bringt Codec2 und einen eigenen IMBE-Vocoder mit.
-- **Ein Reflektor-Rufzeichen**: `URF` plus drei Buchstaben oder Ziffern, z.B. `URF363`. Prüfe in der [Reflektorliste](https://xlxapi.rlx.lu/api/exportreflectors), dass es noch frei ist.
+- **Ein Reflektor-Rufzeichen**: `URF` plus drei Buchstaben oder Ziffern, z.B. `URF999`. Prüfe in der [Reflektorliste](https://xlxapi.rlx.lu/api/exportreflectors), dass es noch frei ist.
 
 ## Welcher Aufbau?
 
