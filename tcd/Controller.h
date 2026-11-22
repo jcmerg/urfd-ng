@@ -76,7 +76,7 @@ protected:
 	// (an AMBE device reads it while it has it). Workers in tcd.ini, auto: one
 	// per CPU core, at most one per module
 	enum class EStage : uint8_t { in, codec2, imbe, usrp, swdmr, swdstar, dstar_answer, dmr_answer };
-	struct SJob { EStage stage; std::shared_ptr<CTranscoderPacket> packet; SDeviceAnswer answer; std::chrono::steady_clock::time_point queued; };
+	struct SJob { EStage stage; std::shared_ptr<CTranscoderPacket> packet; std::unique_ptr<SDeviceAnswer> answer; std::chrono::steady_clock::time_point queued; };	// answer: the device answer stages only
 	class CWorkerQueue
 	{
 	public:

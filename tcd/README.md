@@ -213,7 +213,7 @@ Frame formats: D-Star as the 9 data bytes of a DV frame, DMR/YSF as the 72 bits 
 
 ### Module workers
 
-Each module belongs to one of tcd's workers (`Workers` in tcd.ini, `auto`: one per CPU core). The worker does everything for its module's frames: decoding, AGC, encoding to the other codecs in software, the AMBE devices' answers and sending the frames back to urfd. Workers run at the same time, so the modules share the CPU cores and a module that takes long does not hold up the modules of other workers. The modules are dealt out in turn in the order of `Modules` and `StandbyModules`; the log names the split at start (`4 module workers: AE BF CG DH`).
+Each module belongs to one of tcd's workers (`Workers` in tcd.ini, `auto`: one per CPU core). The worker does everything for its module's frames, one codec after the other: decoding, AGC, encoding to the other codecs in software, the AMBE devices' answers and sending the frames back to urfd. Workers run at the same time, so the modules share the CPU cores and a module that takes long does not hold up the modules of other workers. The modules are dealt out in turn in the order of `Modules` and `StandbyModules`; the log names the split at start (`4 module workers: AE BF CG DH`).
 
 The AMBE devices keep their own threads for the serial line; a worker hands them a frame and goes on with other frames meanwhile. tcd's own vocoders (OP25, Codec2) run in parallel; a codec plugin does when it sets `TCD_PLUGIN_CONCURRENT` (API 5), otherwise one worker at a time uses it and the log says so at start. Measured on a Raspberry Pi 5: 26 modules transcoding at the same time in all protocols take less than half of one core ([measurements](docs/MEASUREMENTS.md#cpu-load-and-latency)).
 

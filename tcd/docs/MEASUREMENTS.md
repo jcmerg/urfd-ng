@@ -85,6 +85,7 @@ The IMBE decoder puts extra energy below 120 Hz into its audio, which threw Code
 
   | Load | before: one thread per codec | module workers |
   |---|---|---|
+  | one stream alone, each input codec in turn | median 0.2-0.7 ms, at most 5.7 ms | median 0.2-0.7 ms, at most 1.2 ms |
   | 26 modules, all six input codecs mixed | 43 % of a core, 99 % within 0.8 ms, at most 4.8 ms | 36 %, 0.8 ms, at most 3.7 ms |
   | the same, all 26 frames at the same instant | 38 %, 99 % within 8.0 ms, at most 9.9 ms | 37 %, 3.6 ms, at most 6.5 ms |
   | 26 modules of USRP (heaviest: every codec encoded) | 60 %, 0.6 ms, at most 7.0 ms | 50 %, 0.5 ms, at most 3.3 ms |
