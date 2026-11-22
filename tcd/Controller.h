@@ -91,10 +91,14 @@ protected:
 		std::atomic<int64_t> job_start_ns{0};
 		std::atomic<uint32_t> wait_us{0};
 		std::atomic<int64_t> told_full{0};	// SteadyMs of the last "jobs behind"
+		std::atomic<int64_t> told_late{0};	// SteadyMs of the last "frames older than"
 		uint64_t last_busy_ns = 0;	// the reflector thread's
 	};
-	static constexpr std::size_t WORKER_QUEUE_MAX = 2000;	// about 6 s of 7 busy modules
-	bool m17_first_dropped[kModuleSlots] = {};	// ToWorker's (the reflector thread): the first half of an M17 payload was dropped
+	static constexpr std::size_t WORKER_QUEUE_MAX = 2000;	// a bound for the memory; TooLate keeps the wait short
+	static constexpr auto WORKER_JOB_MAX_AGE = std::chrono::milliseconds(400);
+	bool in_first_dropped[kModuleSlots] = {};	// ToWorker's (the reflector thread): a pair's first packet was dropped
+	bool late_first_dropped[kModuleSlots] = {};	// TooLate's (each module's worker): the same for a late one
+	bool TooLate(const SJob &job, std::chrono::steady_clock::time_point now);
 	std::vector<std::unique_ptr<SWorker>> workers;
 	int worker_of[kModuleSlots] = {};	// by ModuleSlot
 	void StartWorkers(void);

@@ -94,8 +94,9 @@ public:
 			it->second.mutes++;
 	}
 
-	// the reports that are due go to send: 300 ms after the last frame of a stream
-	// (its audio is through by then), 2 s after anything of one whose last frame got lost
+	// the reports that are due go to send: 600 ms after the last frame of a stream
+	// (its audio is through by then, a module worker drops frames older than 400 ms),
+	// 2 s after anything of one whose last frame got lost
 	void Flush(const std::function<void(const STCPacket &)> &send)
 	{
 		std::vector<STCPacket> due;
@@ -106,7 +107,7 @@ public:
 			for (auto it = m_streams.begin(); it != m_streams.end();)
 			{
 				const auto quiet = now - it->second.seen;
-				if ((it->second.last && quiet >= std::chrono::milliseconds(300)) || quiet >= std::chrono::seconds(2))
+				if ((it->second.last && quiet >= std::chrono::milliseconds(600)) || quiet >= std::chrono::seconds(2))
 				{
 					Report(it->first, it->second, due);
 					it = m_streams.erase(it);

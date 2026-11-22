@@ -1326,6 +1326,13 @@ void CController::WorkerThread(int i)
 		const uint32_t waited = uint32_t(std::min<int64_t>(UINT32_MAX, std::chrono::duration_cast<std::chrono::microseconds>(start - job.queued).count()));
 		for (uint32_t prev = w.wait_us.load(std::memory_order_relaxed); waited > prev && !w.wait_us.compare_exchange_weak(prev, waited, std::memory_order_relaxed); )
 			;
+		if (TooLate(job, start))
+		{
+			job.packet.reset();
+			job.answer.reset();
+			w.job_start_ns.store(0, std::memory_order_release);
+			continue;
+		}
 		try
 		{
 			RunJob(job);
@@ -1343,6 +1350,38 @@ void CController::WorkerThread(int i)
 		w.job_start_ns.store(0, std::memory_order_release);
 		w.busy_ns.fetch_add(uint64_t(std::max<int64_t>(0, end_ns - start_ns)), std::memory_order_release);
 	}
+}
+
+// a packet from the reflector that waited longer than WORKER_JOB_MAX_AGE for its
+// worker is dropped: that late it is of no use to urfd, and the worker catches up
+// (its channels and reports stay in time). Not a device's answer (that frame is
+// done) nor a stream's last frame (states, channel and line end with it); after a
+// dropped first packet its second goes too (M17 pairs). In the module's worker
+bool CController::TooLate(const SJob &job, std::chrono::steady_clock::time_point now)
+{
+	if (job.answer.has_value())
+		return false;
+	const auto &packet = job.packet;
+	const int slot = ModuleSlot(packet->GetModule());
+	bool drop;
+	if (packet->IsLast())
+		drop = false;
+	else if (packet->IsSecond() && late_first_dropped[slot])
+		drop = true;
+	else
+		drop = now - job.queued > WORKER_JOB_MAX_AGE;
+	if (!packet->IsSecond())
+		late_first_dropped[slot] = drop;
+	else
+		late_first_dropped[slot] = false;
+	if (drop)
+	{
+		auto &w = *workers[worker_of[slot]];
+		if (OncePerSecond(w.told_late))
+			std::cerr << "Worker " << worker_of[slot] << " (modules " << g_Stats.workers[worker_of[slot]].modules << ") is behind: frames older than "
+			          << std::chrono::duration_cast<std::chrono::milliseconds>(WORKER_JOB_MAX_AGE).count() << " ms dropped" << std::endl;
+	}
+	return drop;
 }
 
 void CController::WorkerStatsTick(void)
@@ -1392,19 +1431,20 @@ void CController::ToWorker(std::shared_ptr<CTranscoderPacket> packet, const SDev
 	auto &wk = *workers[w];
 	// a stream's last frame too: its states, its channel and its line end with it
 	const bool always = job.answer.has_value() || job.packet->IsLast();
-	// an M17 payload comes in two packets, the second coded with the first's half
-	// (audio_store, data_store): after a first one is dropped, its second goes too
-	const bool m17 = !job.answer.has_value() && (ECodecType::c2_1600 == job.packet->GetCodecIn() || ECodecType::c2_3200 == job.packet->GetCodecIn());
+	// packets come in pairs for M17 (a payload in two, the second coded with the
+	// first's half: audio_store, data_store, whatever the source): after a first
+	// one is dropped, its second goes too
+	const bool in = !job.answer.has_value();
 	const int slot = ModuleSlot(job.packet->GetModule());
-	if (m17 && job.packet->IsSecond() && m17_first_dropped[slot] && !always)
+	if (in && job.packet->IsSecond() && in_first_dropped[slot] && !always)
 	{
-		m17_first_dropped[slot] = false;
+		in_first_dropped[slot] = false;
 		return;
 	}
-	const bool first = m17 && !job.packet->IsSecond();
+	const bool first = in && !job.packet->IsSecond();
 	const bool taken = wk.queue.push(std::move(job), always ? SIZE_MAX : WORKER_QUEUE_MAX) != 0;
 	if (first)
-		m17_first_dropped[slot] = !taken;
+		in_first_dropped[slot] = !taken;
 	if (!taken && keep_running)
 	{
 		if (OncePerSecond(wk.told_full))
@@ -1698,24 +1738,10 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 
 void CController::StageSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 {
-	switch (packet->GetCodecIn())
-	{
-		case ECodecType::c2_1600:
-		case ECodecType::c2_3200:
-		case ECodecType::dstar:
-		case ECodecType::p25:
-		case ECodecType::usrp:
-		case ECodecType::svx:
-			AudiotoSWAMBE2(packet);
-			break;
-
-		case ECodecType::dmr:
-			SWAMBE2toAudio(packet);
-			break;
-
-		default:	// none, ping: StageIn routes neither
-			break;
-	}
+	if (ECodecType::dmr == packet->GetCodecIn())
+		SWAMBE2toAudio(packet);
+	else
+		AudiotoSWAMBE2(packet);
 }
 
 // D-Star from a codec plugin, when no device does it
@@ -2064,18 +2090,19 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 			// the channel and queue its first frame before this last one
 			if (packet->IsLast() && !dev)
 				c.busy = false;
-			// the rest needs no device lock: a channel's slot and the slots' stats are
-			// set at start only
+			// the stream's part of its line under the devices' lock: ChannelName reads
+			// the slot's node, which the device watch sets when it opens the device again
+			// (once per stream, else a lookup)
+			StreamLogPart(ms, k, packet, pin.choice, pin.hw, fresh || moved);
+			// the FEC check needs no device lock: a channel's slot and the slots' stats
+			// are set at start only
 			hw.unlock();
 			// a frame the device is to decode: its FEC, counted for the stream and the device
-			// (the first frame's part of the stream's line first, so the count has a place)
 			if (StreamDecodes(k, packet->GetCodecIn()))
-			{
-				StreamLogPart(ms, k, packet, pin.choice, pin.hw, fresh || moved);
 				DeviceFrameIn(ms, k, pin.hw, packet);
-			}
 		}
-		StreamLogPart(ms, k, packet, pin.choice, pin.hw, fresh || moved);
+		else
+			StreamLogPart(ms, k, packet, pin.choice, pin.hw, fresh || moved);
 		if (count)
 			StreamLogCount(ms, k, packet, lines);
 		choice = pin.choice;
@@ -2183,6 +2210,8 @@ bool CController::HasChannel(int k, int hw, char module, uint16_t streamid) cons
 	return slots[c.slot]->up && c.busy && c.module == module && c.streamid == streamid;
 }
 
+// with hw_mux, or before the workers run: the slot's node changes when the device
+// watch opens the device again
 std::string CController::ChannelName(int k, size_t c) const
 {
 	const auto &h = hw_channels[k][c];
@@ -2378,9 +2407,8 @@ void CController::PhaseOut(int i)
 }
 
 // its streams are done when its channels are free and quiet for a second and the
-// device has answered every frame (a stream's last frame frees its channel once it
-// is in the device's input queue, which GetBufferDepth does not count: the second
-// of quiet covers it); with hw_mux
+// device has every frame sent and answered (its input queue and its buffer are
+// empty); with hw_mux
 bool CController::SlotBusyLocked(int i)
 {
 	auto &s = *slots[i];
@@ -2389,7 +2417,7 @@ bool CController::SlotBusyLocked(int i)
 	for (const auto &list : hw_channels)
 		for (const auto &c : list)
 			busy = busy || (c.slot == i && (c.busy || now - c.last < std::chrono::seconds(1)));
-	return busy || (s.dev && s.up && s.dev->GetBufferDepth() > 0);
+	return busy || (s.dev && s.up && (s.dev->GetBufferDepth() > 0 || s.dev->QueuedPackets() > 0));
 }
 
 bool CController::SlotBusy(int i)

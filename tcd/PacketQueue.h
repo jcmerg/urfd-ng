@@ -60,6 +60,12 @@ public:
 		return true;
 	}
 
+	std::size_t Size()
+	{
+		std::lock_guard<std::mutex> lock(mx);
+		return q.size();
+	}
+
 	void Shutdown()
 	{
 		{

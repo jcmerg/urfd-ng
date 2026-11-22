@@ -65,6 +65,8 @@ public:
 	std::string GetProductID() { return productid; }
 	Edvtype GetType() const { return devtype; }
 	unsigned int GetBufferDepth() const { return buffer_depth.load(std::memory_order_relaxed); }
+	// the frames handed to it and not sent yet
+	std::size_t QueuedPackets() { return input_queue.Size(); }
 	// output gain per encoding: a DV3003 in mixed mode encodes D-Star and DMR
 	void SetOutputGains(int32_t dstar_num, int32_t dmr_num) { m_outputGainDStar.store(dstar_num, std::memory_order_relaxed); m_outputGainDmr.store(dmr_num, std::memory_order_relaxed); }
 	void SetStatsIndex(int idx) { m_statsIndex = idx; }
