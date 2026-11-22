@@ -40,6 +40,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <mutex>
+#include <atomic>
 #include <chrono>
 
 #include "ModuleIndex.h"
@@ -147,8 +148,10 @@ public:
 	               float gateFloorDb = 0.0f)
 	{
 		std::lock_guard<std::mutex> lock(m_paramMutex);
+		m_paramVersion.fetch_add(1, std::memory_order_release);	// the modules copy them at their next frame
 		m_params.gateFloor = powf(10.0f, std::min(gateFloorDb, 0.0f) / 20.0f);
 		m_params.enabled = enable;
+		m_enabled.store(enable, std::memory_order_relaxed);
 		m_params.targetDb = targetDbfs + ENVELOPE_OFFSET;
 		m_params.maxGainUpDb = maxGainUpDb;
 		m_params.maxGainDownDb = maxGainDownDb;
@@ -365,16 +368,20 @@ public:
 	{
 		gate_out = false;
 		gain_db_out = 0.0f;
-		SParams p;
-		{
-			std::lock_guard<std::mutex> lock(m_paramMutex);
-			p = m_params;
-		}
-		if (!p.enabled) return;
-
-		// the streams of a module, under its lock: the modules' workers run in parallel
+		// the streams of a module, under its lock: the modules' workers run in parallel;
+		// the module's copy of the settings, fetched again when Configure changed them
 		auto &shard = m_shards[ModuleSlotOfKey(streamKey)];
 		std::lock_guard<std::mutex> lock(shard.mutex);
+		const uint32_t version = m_paramVersion.load(std::memory_order_acquire);
+		if (shard.version != version)
+		{
+			std::lock_guard<std::mutex> plock(m_paramMutex);
+			shard.params = m_params;
+			shard.version = m_paramVersion.load(std::memory_order_relaxed);
+		}
+		const SParams &p = shard.params;
+		if (!p.enabled) return;
+
 		const auto now = std::chrono::steady_clock::now();
 		auto it = shard.streams.find(streamKey);
 		if (it == shard.streams.end())
@@ -389,8 +396,7 @@ public:
 
 	bool IsEnabled() const
 	{
-		std::lock_guard<std::mutex> lock(m_paramMutex);
-		return m_params.enabled;
+		return m_enabled.load(std::memory_order_relaxed);
 	}
 
 private:
@@ -408,8 +414,11 @@ private:
 
 	const agc::Filters m_filters;
 	SParams m_params;
-	mutable std::mutex m_paramMutex;	// m_params: Configure (once a second) and each frame's copy
-	// the streams by CTranscoderPacket::GetStreamKey, per module (ModuleSlotOfKey)
-	struct SShard { std::mutex mutex; std::unordered_map<uint32_t, AGCState> streams; };
+	mutable std::mutex m_paramMutex;	// m_params: Configure (once a second) and the modules' copies
+	std::atomic<uint32_t> m_paramVersion{1};	// counts Configure's calls
+	std::atomic<bool> m_enabled{false};	// m_params.enabled, for IsEnabled without the lock
+	// the streams by CTranscoderPacket::GetStreamKey, per module (ModuleSlotOfKey),
+	// with the module's copy of the settings (version: m_paramVersion when copied)
+	struct SShard { std::mutex mutex; std::unordered_map<uint32_t, AGCState> streams; SParams params; uint32_t version = 0; };
 	SShard m_shards[kModuleSlots];
 };

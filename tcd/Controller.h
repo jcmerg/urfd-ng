@@ -26,9 +26,7 @@
 #include <future>
 #include <mutex>
 #include <list>
-#include <deque>
 #include <thread>
-#include <condition_variable>
 #include <utility>
 
 #include "DV3000.h"
@@ -57,7 +55,7 @@ public:
 	// an AMBE device's answer to a packet (DVSIDevice: its reader, or a lost
 	// answer's silence): the packet's module worker puts it into the packet and
 	// routes it on (RouteDstPacket, RouteDmrPacket)
-	void DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, Encoding ch_enc, std::unique_ptr<SDeviceAnswer> answer);
+	void DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, std::unique_ptr<SDeviceAnswer> answer);
 	void ReconfigureAGC();  // re-read AGC params from g_Stats.config
 	void Dump(const std::shared_ptr<CTranscoderPacket> packet, const std::string &title) const;
 
@@ -78,8 +76,8 @@ protected:
 	// per CPU core, at most one per module
 	// what comes to a worker from another thread: a packet from the reflector, or
 	// an AMBE device's answer to one; the rest of a packet's work the worker calls itself
-	enum class EStage : uint8_t { in, dstar_answer, dmr_answer };
-	struct SJob { EStage stage; std::shared_ptr<CTranscoderPacket> packet; std::unique_ptr<SDeviceAnswer> answer; std::chrono::steady_clock::time_point queued; };	// answer: the device answer stages only
+	enum class EStage : uint8_t { in, answer };
+	struct SJob { EStage stage; std::shared_ptr<CTranscoderPacket> packet; std::unique_ptr<SDeviceAnswer> answer; std::chrono::steady_clock::time_point queued; };	// answer: of the answer stage only
 	// busy_ns: the time it worked in jobs done, job_start_ns: the start of the
 	// one it is in (0: none), so a long one counts in the seconds it takes;
 	// wait_us: the longest a job waited since the last look (WorkerStatsTick, in

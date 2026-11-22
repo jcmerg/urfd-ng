@@ -39,7 +39,7 @@ public:
 		db = db < -40 ? -40 : db > 0 ? 0 : db;
 		if (db == m_suppressDb.exchange(db))
 			return;
-		for (int i = 0; i < 26; i++)
+		for (int i = 0; i < kModuleOther; i++)
 		{
 			std::lock_guard<std::mutex> lock(m_mutex[i]);
 			if (m_states[i])
@@ -51,7 +51,7 @@ public:
 	void Process(int16_t *samples, char module)
 	{
 		const int i = ModuleSlot(module);
-		if (i >= 26)
+		if (i == kModuleOther)
 			return;	// no module
 		// the module's lock: the modules' workers run in parallel
 		std::lock_guard<std::mutex> lock(m_mutex[i]);
@@ -73,7 +73,7 @@ public:
 	}
 
 private:
-	SpeexPreprocessState *m_states[26] = {};
+	SpeexPreprocessState *m_states[kModuleOther] = {};
 	std::atomic<int> m_suppressDb{0};
-	std::mutex m_mutex[26];	// by module
+	std::mutex m_mutex[kModuleOther];	// by module (ModuleSlot)
 };

@@ -30,14 +30,15 @@
 #include <condition_variable>
 
 #include "PacketQueue.h"
+#include "TranscoderPacket.h"
 #include "DVSIPacket.h"
 #include "DeviceIO.h"
 #include "G711.h"
 
 // a device's answer to a packet, put into the packet by its module's worker
-// (CController::DeviceAnswer): audio, decoded speech in pcm, else the frame in
-// ambe of the channel's codec
-struct SDeviceAnswer { bool audio; uint8_t ambe[9]; int16_t pcm[160]; };
+// (CController::DeviceAnswer): enc, the channel's codec; audio, decoded speech
+// in pcm, else the frame of enc in ambe
+struct SDeviceAnswer { Encoding enc; bool audio; uint8_t ambe[9]; int16_t pcm[160]; };
 
 class CDVDevice
 {
@@ -56,7 +57,6 @@ public:
 	bool ConfigureChannel(uint8_t pkt_ch, Encoding enc, int8_t in_gain, int8_t out_gain);
 	void Start();
 	void CloseDevice();
-	void AddPacket(const std::shared_ptr<CTranscoderPacket> packet);
 	// a packet for a channel the controller chose (a DV3000 has only channel 0)
 	void AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> packet, uint8_t channel);
 	// called once from the reader thread when the device is lost (unplugged, or it
@@ -73,7 +73,6 @@ public:
 
 	// Virtual hooks for mixed-mode support
 	virtual Encoding GetChannelEncoding(uint8_t /*channel*/) const { return type; }
-	virtual uint8_t MapPacketToChannel(const std::shared_ptr<CTranscoderPacket> &packet) const;
 
 protected:
 	const Encoding type;
@@ -92,7 +91,11 @@ protected:
 	int64_t m_logWindow = 0;
 	int m_logged = 0, m_suppressed = 0;
 	bool LogLost(void);
-	CPacketQueue input_queue;
+	// a packet for a channel, as the module's worker handed it over: one packet can
+	// come twice, for a D-Star and a DMR channel of one device (mixed mode, pool);
+	// decode: the channel decodes its AMBE frame, else it encodes its audio
+	struct SFeed { std::shared_ptr<CTranscoderPacket> packet; uint8_t channel; bool decode; };
+	CBlockingQueue<SFeed> input_queue;
 	std::future<void> feedFuture, readFuture;
 	std::string description, productid;
 	std::atomic<int32_t> m_outputGainDStar{256}, m_outputGainDmr{256};
@@ -105,11 +108,6 @@ protected:
 	size_t SpeechOut(const int16_t *audio, void *samples) const;
 	bool probing = false;	// Probe: fewer messages
 	std::function<void()> m_onLost;
-	// the channel AddPacketToChannel chose for a packet, until FeedDevice takes it
-	mutable std::unordered_map<CTranscoderPacket *, uint8_t> target_channel;
-	mutable std::mutex target_mutex;
-	// the channel of a packet from AddPacketToChannel (and forgets it), 0xFF without one
-	uint8_t TargetChannel(const std::shared_ptr<CTranscoderPacket> &packet) const;
 	void Lost(void);
 
 	// the packets a vocoder channel works on, oldest first: a device answers them in

@@ -616,7 +616,8 @@ void CController::Stop()
 {
 	keep_running = false;
 
-	// the workers wait in their queues: wake them up, then wait for all
+	// the reflector thread and the device watch end first (no new packets), then
+	// the workers are woken in their queues and joined (StopWorkers)
 	for (auto *f : { &reflectorFuture, &watchFuture })
 		if (f->valid())
 			f->get();
@@ -1352,9 +1353,9 @@ void CController::ToWorker(EStage stage, std::shared_ptr<CTranscoderPacket> pack
 	workers[w]->queue.push(SJob{ stage, std::move(packet), std::move(answer), std::chrono::steady_clock::now() });
 }
 
-void CController::DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, Encoding ch_enc, std::unique_ptr<SDeviceAnswer> answer)
+void CController::DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, std::unique_ptr<SDeviceAnswer> answer)
 {
-	ToWorker(Encoding::dstar == ch_enc ? EStage::dstar_answer : EStage::dmr_answer, std::move(packet), std::move(answer));
+	ToWorker(EStage::answer, std::move(packet), std::move(answer));
 }
 
 void CController::RunJob(SJob &job)
@@ -1365,21 +1366,23 @@ void CController::RunJob(SJob &job)
 	case EStage::in:
 		StageIn(packet);
 		break;
-	case EStage::dstar_answer:
-	case EStage::dmr_answer:
+	case EStage::answer:
+	{
 		if (!job.answer)
 			break;
+		const bool dstar = Encoding::dstar == job.answer->enc;
 		if (job.answer->audio)
 			packet->SetAudioSamples(job.answer->pcm, false);
-		else if (EStage::dstar_answer == job.stage)
+		else if (dstar)
 			packet->SetDStarData(job.answer->ambe);
 		else
 			packet->SetDMRData(job.answer->ambe);
-		if (EStage::dstar_answer == job.stage)
+		if (dstar)
 			RouteDstPacket(packet);
 		else
 			RouteDmrPacket(packet);
 		break;
+	}
 	}
 }
 
@@ -2615,25 +2618,22 @@ void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
 
 void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
 {
-	constexpr int max_retries = 5;
-	for (int attempt = 0; attempt < max_retries; ++attempt)
-	{
-		if (!tcClient.Send(packet->GetTCPacket()))
-		{
-			packet->Sent();
-			g_Stats.PacketOut(packet->GetModule());
-			g_Stats.reflector.packets_tx.fetch_add(1, std::memory_order_relaxed);
-			return;
-		}
-		// also a module whose connection is closed (Send() says so without a log):
-		// the reflector thread's reconnect (every 100 ms at most) may bring it back
-		// within the retries; a worker does not reconnect itself, ReConnect is the
-		// reflector thread's alone
-		std::cerr << "SendToReflector: send failed, attempt " << (attempt + 1) << "/" << max_retries << std::endl;
-		std::this_thread::sleep_for(std::chrono::milliseconds(100 * (1 << attempt)));
-	}
-	std::cerr << "SendToReflector: dropping packet after " << max_retries << " retries" << std::endl;
 	packet->Sent();
+	if (!tcClient.Send(packet->GetTCPacket()))
+	{
+		g_Stats.PacketOut(packet->GetModule());
+		g_Stats.reflector.packets_tx.fetch_add(1, std::memory_order_relaxed);
+		return;
+	}
+	// the module's connection is closed (Send() logs why, or says nothing when it
+	// was closed before): the frame is dropped at once. Waiting for the reflector
+	// thread's reconnect here held up every module of this worker, and a frame
+	// that late is of no use to urfd. Said once a second at most
+	static std::atomic<int64_t> told{0};
+	const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	int64_t last = told.load(std::memory_order_relaxed);
+	if (now - last >= 1000 && told.compare_exchange_strong(last, now))
+		std::cerr << "SendToReflector: no connection for module " << packet->GetModule() << ", frame dropped (the reflector thread reconnects)" << std::endl;
 }
 
 void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSoftCodec *from, bool decoded)

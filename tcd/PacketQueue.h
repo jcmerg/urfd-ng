@@ -23,8 +23,6 @@
 #include <condition_variable>
 #include <memory>
 
-#include "TranscoderPacket.h"
-
 // a blocking queue between threads: pop waits for an item; after Shutdown pop
 // gives up at once, and what is left or pushed after is dropped
 template <typename T>
@@ -61,23 +59,6 @@ public:
 		return true;
 	}
 
-	// without waiting: false when it is empty
-	bool try_pop(T &item)
-	{
-		std::lock_guard<std::mutex> lock(mx);
-		if (q.empty())
-			return false;
-		item = std::move(q.front());
-		q.pop_front();
-		return true;
-	}
-
-	bool IsEmpty()
-	{
-		std::lock_guard<std::mutex> lock(mx);
-		return q.empty();
-	}
-
 	void Shutdown()
 	{
 		{
@@ -92,24 +73,4 @@ private:
 	std::condition_variable cv;
 	std::deque<T> q;
 	bool stop = false;
-};
-
-// for holding CTranscoder packets while the vocoders are working their magic
-class CPacketQueue : public CBlockingQueue<std::shared_ptr<CTranscoderPacket>>
-{
-public:
-	// nullptr when shut down
-	std::shared_ptr<CTranscoderPacket> pop()
-	{
-		std::shared_ptr<CTranscoderPacket> packet;
-		CBlockingQueue::pop(packet);
-		return packet;
-	}
-	// without waiting: nullptr when it is empty
-	std::shared_ptr<CTranscoderPacket> try_pop()
-	{
-		std::shared_ptr<CTranscoderPacket> packet;
-		CBlockingQueue::try_pop(packet);
-		return packet;
-	}
 };
