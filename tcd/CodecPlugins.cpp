@@ -249,7 +249,12 @@ void CSoftCodec::Purge(void)
 
 void CCodecPlugins::Purge(void)
 {
-	for (auto *c : m_Codecs)
+	std::vector<CSoftCodec *> codecs;
+	{
+		std::lock_guard<std::mutex> lock(m_CodecsMutex);
+		codecs = m_Codecs;	// a CSoftCodec lives as long as tcd
+	}
+	for (auto *c : codecs)
 		c->Purge();
 }
 
@@ -472,14 +477,21 @@ bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vecto
 
 std::vector<CSoftCodec *> CCodecPlugins::All(uint32_t codec)
 {
+	std::lock_guard<std::mutex> lock(m_CodecsMutex);
 	std::vector<CSoftCodec *> all;
 	for (auto &l : m_Loaded)
 		if (l.ready && (l.plugin->codecs & codec))
-			all.push_back(Get(codec, l.plugin->name));
+			all.push_back(GetLocked(codec, l.plugin->name));
 	return all;
 }
 
 CSoftCodec *CCodecPlugins::Get(uint32_t codec, const std::string &name)
+{
+	std::lock_guard<std::mutex> lock(m_CodecsMutex);
+	return GetLocked(codec, name);
+}
+
+CSoftCodec *CCodecPlugins::GetLocked(uint32_t codec, const std::string &name)
 {
 	for (auto &l : m_Loaded)
 	{

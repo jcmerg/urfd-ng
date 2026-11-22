@@ -96,7 +96,8 @@ protected:
 	// a packet for a channel, as the module's worker handed it over: one packet can
 	// come twice, for a D-Star and a DMR channel of one device (mixed mode, pool);
 	// decode: the channel decodes its AMBE frame, else it encodes its audio
-	struct SFeed { std::shared_ptr<CTranscoderPacket> packet; uint8_t channel; bool decode; };
+	struct SFeed { std::shared_ptr<CTranscoderPacket> packet; uint8_t channel; bool decode; int64_t queued_ms; };
+	std::atomic<int64_t> m_toldStale{0};	// SteadyMs of the last "too late for the device" line
 	CBlockingQueue<SFeed> input_queue;
 	std::atomic<int64_t> m_toldQueue{0};	// SteadyMs of the last "packets wait" line
 	std::future<void> feedFuture, readFuture;

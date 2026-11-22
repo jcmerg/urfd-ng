@@ -158,6 +158,8 @@ private:
 	struct SLoaded { std::string path; void *handle; const tcd_codec_plugin *plugin; bool ready; std::shared_ptr<SPluginLocks> locks; };
 	std::vector<SLoaded> m_Loaded;
 	std::vector<CSoftCodec *> m_Codecs;	// made by Get, one per plugin and codec
+	std::mutex m_CodecsMutex;	// m_Codecs: Get (a worker may make one late) and Purge (the reflector thread)
+	CSoftCodec *GetLocked(uint32_t codec, const std::string &name);
 };
 
 extern CCodecPlugins g_Codecs;

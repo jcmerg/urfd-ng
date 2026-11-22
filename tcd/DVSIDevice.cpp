@@ -68,7 +68,7 @@ void CDVDevice::AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> pack
 	// what the channel does, decided here in the packet's worker: it decodes the
 	// frame of its codec when the packet has one, else it encodes the audio
 	const bool decode = (Encoding::dstar == GetChannelEncoding(channel)) ? packet->DStarIsSet() : packet->DMRIsSet();
-	const auto size = input_queue.push(SFeed{ packet, channel, decode });
+	const auto size = input_queue.push(SFeed{ packet, channel, decode, SteadyMs() });
 	if (size > 200 && OncePerSecond(m_toldQueue))
 		std::cerr << description << ": " << size << " packets wait to go to the device" << std::endl;
 }
@@ -615,6 +615,21 @@ void CDVDevice::FeedDevice()
 		if (!input_queue.pop(feed))	// blocks until there is something to pop, unless shutting down
 			break;
 		const auto &packet = feed.packet;
+		// a device slower than the frames come (but not silent) would queue them
+		// without end: a frame that waited a second goes back with silence, like a
+		// lost answer, without the device
+		if (SteadyMs() - feed.queued_ms > 1000)
+		{
+			if (OncePerSecond(m_toldStale))
+				std::cerr << description << ": frames waited more than a second to go to the device, silence instead" << std::endl;
+			SDeviceAnswer answer{};
+			const Encoding ch_enc = GetChannelEncoding(feed.channel);
+			answer.audio = feed.decode;
+			if (!feed.decode)
+				memcpy(answer.ambe, Encoding::dstar == ch_enc ? DSTAR_SILENCE : DMR_SILENCE, sizeof(answer.ambe));
+			Deliver(packet, ch_enc, answer);
+			continue;
+		}
 		{
 			{	// wait until there is room in chip FIFO
 				const unsigned int max_depth = (Edvtype::dv3003 == devtype) ? 5 : 2;

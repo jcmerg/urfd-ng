@@ -1289,6 +1289,32 @@ static int UsableCores(void)
 		const auto slash = path.find_last_of('/');
 		path = slash == 0 || slash == std::string::npos ? std::string("/") : path.substr(0, slash);
 	}
+	// cgroup v1: the cpu controller's cfs quota and period, of tcd's cgroup (a
+	// container sees its own at the mount's top)
+	{
+		std::string v1;
+		std::ifstream cg("/proc/self/cgroup");
+		std::string line;
+		while (std::getline(cg, line))
+		{
+			const auto a = line.find(':'), b = line.find(':', a + 1);
+			if (a == std::string::npos || b == std::string::npos)
+				continue;
+			const std::string ctrl = "," + line.substr(a + 1, b - a - 1) + ",";
+			if (ctrl.find(",cpu,") != std::string::npos)
+				v1 = line.substr(b + 1);
+		}
+		for (const std::string &dir : { "/sys/fs/cgroup/cpu" + (v1 == "/" ? std::string() : v1), std::string("/sys/fs/cgroup/cpu"), std::string("/sys/fs/cgroup/cpu,cpuacct") })
+		{
+			std::ifstream fq(dir + "/cpu.cfs_quota_us"), fp(dir + "/cpu.cfs_period_us");
+			long q = 0, p = 0;
+			if (fq >> q && fp >> p && q > 0 && p > 0)
+			{
+				cores = std::min<long>(cores, (q + p - 1) / p);
+				break;
+			}
+		}
+	}
 #endif
 	return std::max(1, cores);
 }
@@ -1442,8 +1468,9 @@ void CController::ToWorker(std::shared_ptr<CTranscoderPacket> packet, const SDev
 	// modules; more are dropped, said once a second at most. A device's answer is
 	// always taken: the device's FIFO bounds them, and the frame is done there
 	auto &wk = *workers[w];
-	// a stream's last frame too: its states, its channel and its line end with it
-	const bool always = job.answer.has_value() || job.packet->IsLast();
+	// a stream's last frame too (its states, its channel and its line end with it),
+	// and its first (the direct path starts there only)
+	const bool always = job.answer.has_value() || job.packet->IsLast() || 0 == job.packet->GetSequence();
 	const bool taken = wk.queue.push(std::move(job), always ? SIZE_MAX : WORKER_QUEUE_MAX) != 0;
 	if (!taken && keep_running)
 	{
@@ -2109,7 +2136,12 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 				DeviceFrameIn(ms, k, pin.hw, packet);
 		}
 		else
+		{
+			// no device channel (a plugin, or none free): no device lock for the line
+			if (hw.owns_lock())
+				hw.unlock();
 			StreamLogPart(ms, k, packet, pin.choice, pin.hw, fresh || moved);
+		}
 		if (count)
 			StreamLogCount(ms, k, packet, lines);
 		choice = pin.choice;
