@@ -793,7 +793,8 @@ int main(int argc, char *argv[])
 		}
 
 		// the module workers: their modules, how busy each was and the longest wait
-		// of a frame in its queue in the last second (red from 70 % or 20 ms)
+		// of a frame in its queue in the last second (red from 70 % or 20 ms); waiting
+		// for a codec plugin without parallel calls counts as work
 		{
 			const auto items = json_arr_items(json_arr(last_json, "workers"));
 			if (!items.empty() && row < rows - 1)

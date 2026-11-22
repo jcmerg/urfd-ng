@@ -69,7 +69,7 @@ void CDVDevice::AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> pack
 	// frame of its codec when the packet has one, else it encodes the audio
 	const bool decode = (Encoding::dstar == GetChannelEncoding(channel)) ? packet->DStarIsSet() : packet->DMRIsSet();
 	const auto size = input_queue.push(SFeed{ packet, channel, decode });
-	if (size > 200)
+	if (size > 200 && OncePerSecond(m_toldQueue))
 		std::cerr << description << ": " << size << " packets wait to go to the device" << std::endl;
 }
 

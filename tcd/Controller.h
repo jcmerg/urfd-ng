@@ -280,9 +280,6 @@ protected:
 	// the reflector's packets in, and the stages of the workers
 	void ReadReflectorThread();
 	void StageIn(std::shared_ptr<CTranscoderPacket> packet);
-	void StageC2(std::shared_ptr<CTranscoderPacket> packet);
-	void StageIMBE(std::shared_ptr<CTranscoderPacket> packet);
-	void StageUSRP(std::shared_ptr<CTranscoderPacket> packet);
 	void StageSWAMBE2(std::shared_ptr<CTranscoderPacket> packet);
 	void StageSWDStar(std::shared_ptr<CTranscoderPacket> packet);
 	void Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet);

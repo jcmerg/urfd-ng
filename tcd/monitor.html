@@ -304,7 +304,7 @@ table.measure tr.grp { display: none; }
     <section aria-labelledby="h-wrk" id="workers-box" hidden>
       <header><h2 id="h-wrk">Workers</h2></header>
       <dl class="kv line" id="workers"></dl>
-      <p class="legend">Each module is coded by one worker, the workers run at the same time. Per worker: its modules, the share of a CPU core it worked in the last second, and the longest a frame waited for it then (red from 70 % or 20 ms: more Workers in tcd.ini spread the modules wider).</p>
+      <p class="legend">Each module is coded by one worker, the workers run at the same time. Per worker: its modules, the share of a CPU core it worked in the last second, and the longest a frame waited for it then (red from 70 % or 20 ms: more Workers in tcd.ini spread the modules wider, unless a codec plugin without parallel calls holds them up, as the log says at start; its waiting counts as work here).</p>
     </section>
 
     <section aria-labelledby="h-dev">

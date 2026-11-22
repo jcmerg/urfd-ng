@@ -96,6 +96,7 @@ protected:
 	// decode: the channel decodes its AMBE frame, else it encodes its audio
 	struct SFeed { std::shared_ptr<CTranscoderPacket> packet; uint8_t channel; bool decode; };
 	CBlockingQueue<SFeed> input_queue;
+	std::atomic<int64_t> m_toldQueue{0};	// SteadyMs of the last "packets wait" line
 	std::future<void> feedFuture, readFuture;
 	std::string description, productid;
 	std::atomic<int32_t> m_outputGainDStar{256}, m_outputGainDmr{256};

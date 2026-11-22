@@ -419,10 +419,7 @@ static void Stat(int stats, char module, std::atomic<uint32_t> SwVocoderStats::*
 	auto &st = g_Stats.sw[stats];
 	(st.*counter).fetch_add(1, std::memory_order_relaxed);
 	st.active_module.store(module, std::memory_order_relaxed);
-	st.last_active_ms.store(
-		(uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count(),
-		std::memory_order_relaxed);
+	st.last_active_ms.store((uint64_t)SteadyMs(), std::memory_order_relaxed);
 }
 
 // counts a call of a codec plugin for the monitor
@@ -1121,8 +1118,7 @@ void CController::ReadReflectorThread()
 
 			// Sync DVSI device stats (buf_depth, active channels)
 			{
-				auto now_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-					std::chrono::steady_clock::now().time_since_epoch()).count();
+				const auto now_ms = (uint64_t)SteadyMs();
 				for (int di = 0; di < g_Stats.num_devices; di++)
 				{
 					auto &ds = g_Stats.devices[di];
@@ -1160,8 +1156,7 @@ void CController::ReadReflectorThread()
 
 			// Sync the stats of the codec plugins
 			{
-				auto now_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-					std::chrono::steady_clock::now().time_since_epoch()).count();
+				const auto now_ms = (uint64_t)SteadyMs();
 				const bool reencode = dmr_sw && HwAny(kChoiceDMR) &&
 					(g_Stats.config.dmr_gain_mode.load(std::memory_order_relaxed) == 2) &&
 					(m_agcDigital.IsEnabled() || outgain_dmr_num != 256 || dmr_reencode_num != 256);
@@ -1368,12 +1363,11 @@ void CController::ToWorker(std::shared_ptr<CTranscoderPacket> packet, const SDev
 	// modules; more are dropped, said once a second at most. A device's answer is
 	// always taken: the device's FIFO bounds them, and the frame is done there
 	auto &wk = *workers[w];
-	const bool from_device = job.answer.has_value();
-	if (wk.queue.push(std::move(job), from_device ? SIZE_MAX : WORKER_QUEUE_MAX) == 0 && keep_running)
+	// a stream's last frame too: its states, its channel and its line end with it
+	const bool always = job.answer.has_value() || job.packet->IsLast();
+	if (wk.queue.push(std::move(job), always ? SIZE_MAX : WORKER_QUEUE_MAX) == 0 && keep_running)
 	{
-		const int64_t now = SteadyMs();
-		int64_t last = wk.told_full.load(std::memory_order_relaxed);
-		if (now - last >= 1000 && wk.told_full.compare_exchange_strong(last, now))
+		if (OncePerSecond(wk.told_full))
 			std::cerr << "Worker " << w << " (modules " << g_Stats.workers[w].modules << ") is " << WORKER_QUEUE_MAX << " jobs behind: frames dropped" << std::endl;
 	}
 }
@@ -1415,15 +1409,17 @@ void CController::StageIn(std::shared_ptr<CTranscoderPacket> packet)
 		ToDmr(packet);
 		break;
 	case ECodecType::p25:
-		StageIMBE(packet);
+		IMBEtoAudio(packet);
 		break;
 	case ECodecType::usrp:
+		USRPtoAudio(packet);
+		break;
 	case ECodecType::svx:
-		StageUSRP(packet);
+		SvxToAudio(packet);
 		break;
 	case ECodecType::c2_1600:
 	case ECodecType::c2_3200:
-		StageC2(packet);
+		Codec2toAudio(packet);
 		break;
 	default:
 		Dump(packet, "ERROR: Received a reflector packet with unknown Codec:");
@@ -1580,50 +1576,12 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	g_Stats.UpdateLevelsOut(packet->GetModule(), packet->GetAudioSamples(), 160);
 	FrameLevels(packet, "codec2");
 	// D-Star and DMR first: an AMBE device gets its frame before the software
-	// encodes here (a codec plugin codes them right away, in this worker; the
-	// packet goes to the reflector when its last codec is set, SendIfDone below)
+	// encodes here (a codec plugin codes them right away, in this worker); the
+	// packet goes to the reflector when its last codec is set
 	ToDStar(packet);
 	ToDmr(packet);
-	{
-		int16_t imbe_buf[160];
-		memcpy(imbe_buf, packet->GetAudioSamples(), sizeof(imbe_buf));
-		ApplyGain(imbe_buf, 160, outgain_imbe_num);
-		EncodeIMBE(packet, imbe_buf, imbe);
-	}
-	packet->SetP25Data(imbe);
-
-	{
-		int16_t usrp_buf[160];
-		memcpy(usrp_buf, packet->GetAudioSamples(), sizeof(usrp_buf));
-		ApplyGain(usrp_buf, 160, outgain_usrp_num);
-		packet->SetUSRPData(usrp_buf);
-	}
-	SendIfDone(packet);
-}
-
-void CController::StageC2(std::shared_ptr<CTranscoderPacket> packet)
-{
-	switch (packet->GetCodecIn())
-	{
-		case ECodecType::c2_1600:
-		case ECodecType::c2_3200:
-			// this is an original M17 packet, so decode it to audio
-			// Codec2toAudio will send it on for AMBE processing
-			Codec2toAudio(packet);
-			break;
-
-		case ECodecType::dstar:
-		case ECodecType::dmr:
-		case ECodecType::p25:
-		case ECodecType::usrp:
-		case ECodecType::svx:
-			// codec_in was AMBE, so we need to calculate the the M17 data
-			AudiotoCodec2(packet);
-			break;
-
-		default:	// none, ping: StageIn routes neither
-			break;
-	}
+	AudiotoIMBE(packet);
+	AudiotoUSRP(packet);
 }
 
 void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
@@ -1696,9 +1654,9 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	if (decoded)	// a failed decode keeps the marks: no flicker
 		ModuleDirect(packet, direct);
 	ToDStar(packet);
-	StageC2(packet);
-	StageIMBE(packet);
-	StageUSRP(packet);
+	AudiotoCodec2(packet);
+	AudiotoIMBE(packet);
+	AudiotoUSRP(packet);
 }
 
 void CController::StageSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
@@ -2565,30 +2523,8 @@ void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	// the AMBE codecs first: a device gets its frame before the software encodes
 	ToDStar(packet);
 	ToDmr(packet);
-	StageC2(packet);
-	StageUSRP(packet);
-}
-
-void CController::StageIMBE(std::shared_ptr<CTranscoderPacket> packet)
-{
-	switch (packet->GetCodecIn())
-	{
-		case ECodecType::c2_1600:
-		case ECodecType::c2_3200:
-		case ECodecType::dstar:
-		case ECodecType::dmr:
-		case ECodecType::usrp:
-		case ECodecType::svx:
-			AudiotoIMBE(packet);
-			break;
-
-		case ECodecType::p25:
-			IMBEtoAudio(packet);
-			break;
-
-		default:	// none, ping: StageIn routes neither
-			break;
-	}
+	AudiotoCodec2(packet);
+	AudiotoUSRP(packet);
 }
 
 void CController::AudiotoUSRP(std::shared_ptr<CTranscoderPacket> packet)
@@ -2620,33 +2556,8 @@ void CController::USRPtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	// the AMBE codecs first: a device gets its frame before the software encodes
 	ToDStar(packet);
 	ToDmr(packet);
-	StageC2(packet);
-	StageIMBE(packet);
-}
-
-void CController::StageUSRP(std::shared_ptr<CTranscoderPacket> packet)
-{
-	switch (packet->GetCodecIn())
-	{
-		case ECodecType::c2_1600:
-		case ECodecType::c2_3200:
-		case ECodecType::dstar:
-		case ECodecType::dmr:
-		case ECodecType::p25:
-			AudiotoUSRP(packet);
-			break;
-
-		case ECodecType::usrp:
-			USRPtoAudio(packet);
-			break;
-
-		case ECodecType::svx:
-			SvxToAudio(packet);
-			break;
-
-		default:	// none, ping: StageIn routes neither
-			break;
-	}
+	AudiotoCodec2(packet);
+	AudiotoIMBE(packet);
 }
 
 void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
@@ -2668,8 +2579,8 @@ void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
 	// the AMBE codecs first: a device gets its frame before the software encodes
 	ToDStar(packet);
 	ToDmr(packet);
-	StageC2(packet);
-	StageIMBE(packet);
+	AudiotoCodec2(packet);
+	AudiotoIMBE(packet);
 }
 
 void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
@@ -2686,10 +2597,7 @@ void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
 	// thread's reconnect here held up every module of this worker, and a frame
 	// that late is of no use to urfd. Said once a second at most per module
 	static std::atomic<int64_t> told[kModuleSlots] = {};
-	auto &t = told[ModuleSlot(packet->GetModule())];
-	const int64_t now = SteadyMs();
-	int64_t last = t.load(std::memory_order_relaxed);
-	if (now - last >= 1000 && t.compare_exchange_strong(last, now))
+	if (OncePerSecond(told[ModuleSlot(packet->GetModule())]))
 		std::cerr << "SendToReflector: no connection for module " << packet->GetModule() << ", frame dropped (the reflector thread reconnects)" << std::endl;
 }
 
@@ -2726,9 +2634,9 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSof
 		// Output gains applied in encode functions and DVSI FeedDevice
 		// DMR first: a device gets its frame before the software encodes
 		ToDmr(packet);
-		StageC2(packet);
-		StageIMBE(packet);
-		StageUSRP(packet);
+		AudiotoCodec2(packet);
+		AudiotoIMBE(packet);
+		AudiotoUSRP(packet);
 	}
 	else
 	{
@@ -2792,9 +2700,9 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 		}
 		// D-Star first: a device gets its frame before the software encodes
 		ToDStar(packet);
-		StageC2(packet);
-		StageIMBE(packet);
-		StageUSRP(packet);
+		AudiotoCodec2(packet);
+		AudiotoIMBE(packet);
+		AudiotoUSRP(packet);
 	}
 	else
 	{
