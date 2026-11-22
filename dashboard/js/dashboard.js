@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var DASHBOARD_VERSION = '3.2.0';
+var DASHBOARD_VERSION = '3.2.1';
 var REPO_URL = 'https://github.com/jcmerg/urfd-ng';
 
 var $ = function (id) { return document.getElementById(id); };
