@@ -96,9 +96,11 @@ protected:
 	};
 	static constexpr std::size_t WORKER_QUEUE_MAX = 2000;	// a bound for the memory; TooLate keeps the wait short
 	static constexpr auto WORKER_JOB_MAX_AGE = std::chrono::milliseconds(400);
-	bool in_first_dropped[kModuleSlots] = {};	// ToWorker's (the reflector thread): a pair's first packet was dropped
-	bool late_first_dropped[kModuleSlots] = {};	// TooLate's (each module's worker): the same for a late one
 	bool TooLate(const SJob &job, std::chrono::steady_clock::time_point now);
+	// the module worker's last packet from the reflector, per module (PairCheck)
+	struct SPairLast { bool valid; uint16_t streamid; uint32_t sequence; };
+	SPairLast pair_last[kModuleSlots] = {};
+	void PairCheck(const std::shared_ptr<CTranscoderPacket> &packet);
 	std::vector<std::unique_ptr<SWorker>> workers;
 	int worker_of[kModuleSlots] = {};	// by ModuleSlot
 	void StartWorkers(void);

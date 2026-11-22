@@ -215,15 +215,24 @@ void CSoftCodec::Purge(void)
 	const auto now = std::chrono::steady_clock::now();
 	for (int i = 0; i < SPluginLocks::kShards; i++)
 	{
-		// a look under the module's lock first: the plugin's (when it is not
-		// concurrent) only when a state is to be closed
+		// a look under the module's lock first, skipped while a worker codes on the
+		// module (a plugin call that hangs must not hold up the reflector thread);
+		// the plugin's lock (when it is not concurrent) only when a state is to be closed
 		{
-			std::lock_guard<std::mutex> look(m_Locks->module[i]);
+			std::unique_lock<std::mutex> look(m_Locks->module[i], std::try_to_lock);
+			if (!look.owns_lock())
+				continue;
 			const auto &states = m_Shards[i].states;
 			if (std::none_of(states.begin(), states.end(), [&](const std::pair<const uint32_t, SState> &s) { return now - s.second.last_used > STATE_TIMEOUT; }))
 				continue;
 		}
-		CLock lock(*m_Locks, i);
+		// the plugin's lock only if free as well: the next second tries again
+		std::unique_lock<std::mutex> plugin(m_Locks->plugin, std::defer_lock);
+		if (!m_Locks->concurrent && !plugin.try_lock())
+			continue;
+		std::unique_lock<std::mutex> module(m_Locks->module[i], std::try_to_lock);
+		if (!module.owns_lock())
+			continue;
 		auto &states = m_Shards[i].states;
 		for (auto it = states.begin(); it != states.end(); )
 		{
@@ -252,8 +261,12 @@ int CSoftCodec::Streams(void)
 	std::unordered_set<uint32_t> active;	// a stream decoded and encoded counts once
 	for (int i = 0; i < SPluginLocks::kShards; i++)
 	{
-		// no plugin call: the module's lock is enough
-		std::lock_guard<std::mutex> lock(m_Locks->module[i]);
+		// no plugin call: the module's lock is enough; a module a worker codes on
+		// right now is left out of this count (a plugin call that hangs must not
+		// hold up the reflector thread)
+		std::unique_lock<std::mutex> lock(m_Locks->module[i], std::try_to_lock);
+		if (!lock.owns_lock())
+			continue;
 		for (const auto &s : m_Shards[i].states)
 			if (s.second.running && s.second.last_used > cutoff)
 				active.insert(s.first & 0x00ffffffu);

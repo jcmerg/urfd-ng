@@ -54,6 +54,10 @@ extern CTcdStats g_Stats;
 
 extern CConfigure g_Conf;
 
+// Codec2 3200 silence: the second half of a payload not encoded yet, and what
+// a plugin that fails to encode gives instead
+static const uint8_t C2_3200_SILENCE[8] = { 0x01U, 0x00U, 0x09U, 0x43U, 0x9CU, 0xE4U, 0x21U, 0x08U };
+
 // the thread's name in top -H and the like
 static void SetThreadName(const char *name)
 {
@@ -1322,7 +1326,6 @@ void CController::WorkerThread(int i)
 	{
 		const auto start = std::chrono::steady_clock::now();
 		const int64_t start_ns = std::max<int64_t>(1, SteadyNs(start));
-		w.job_start_ns.store(start_ns, std::memory_order_release);
 		const uint32_t waited = uint32_t(std::min<int64_t>(UINT32_MAX, std::chrono::duration_cast<std::chrono::microseconds>(start - job.queued).count()));
 		for (uint32_t prev = w.wait_us.load(std::memory_order_relaxed); waited > prev && !w.wait_us.compare_exchange_weak(prev, waited, std::memory_order_relaxed); )
 			;
@@ -1330,9 +1333,9 @@ void CController::WorkerThread(int i)
 		{
 			job.packet.reset();
 			job.answer.reset();
-			w.job_start_ns.store(0, std::memory_order_release);
 			continue;
 		}
+		w.job_start_ns.store(start_ns, std::memory_order_release);
 		try
 		{
 			RunJob(job);
@@ -1355,25 +1358,15 @@ void CController::WorkerThread(int i)
 // a packet from the reflector that waited longer than WORKER_JOB_MAX_AGE for its
 // worker is dropped: that late it is of no use to urfd, and the worker catches up
 // (its channels and reports stay in time). Not a device's answer (that frame is
-// done) nor a stream's last frame (states, channel and line end with it); after a
-// dropped first packet its second goes too (M17 pairs). In the module's worker
+// done) nor a stream's last frame (states, channel and line end with it). A
+// second packet whose first is missing is coded against silence (PairCheck).
+// In the module's worker
 bool CController::TooLate(const SJob &job, std::chrono::steady_clock::time_point now)
 {
-	if (job.answer.has_value())
+	if (job.answer.has_value() || job.packet->IsLast())
 		return false;
-	const auto &packet = job.packet;
-	const int slot = ModuleSlot(packet->GetModule());
-	bool drop;
-	if (packet->IsLast())
-		drop = false;
-	else if (packet->IsSecond() && late_first_dropped[slot])
-		drop = true;
-	else
-		drop = now - job.queued > WORKER_JOB_MAX_AGE;
-	if (!packet->IsSecond())
-		late_first_dropped[slot] = drop;
-	else
-		late_first_dropped[slot] = false;
+	const int slot = ModuleSlot(job.packet->GetModule());
+	const bool drop = now - job.queued > WORKER_JOB_MAX_AGE;
 	if (drop)
 	{
 		auto &w = *workers[worker_of[slot]];
@@ -1431,20 +1424,7 @@ void CController::ToWorker(std::shared_ptr<CTranscoderPacket> packet, const SDev
 	auto &wk = *workers[w];
 	// a stream's last frame too: its states, its channel and its line end with it
 	const bool always = job.answer.has_value() || job.packet->IsLast();
-	// packets come in pairs for M17 (a payload in two, the second coded with the
-	// first's half: audio_store, data_store, whatever the source): after a first
-	// one is dropped, its second goes too
-	const bool in = !job.answer.has_value();
-	const int slot = ModuleSlot(job.packet->GetModule());
-	if (in && job.packet->IsSecond() && in_first_dropped[slot] && !always)
-	{
-		in_first_dropped[slot] = false;
-		return;
-	}
-	const bool first = in && !job.packet->IsSecond();
 	const bool taken = wk.queue.push(std::move(job), always ? SIZE_MAX : WORKER_QUEUE_MAX) != 0;
-	if (first)
-		in_first_dropped[slot] = !taken;
 	if (!taken && keep_running)
 	{
 		if (OncePerSecond(wk.told_full))
@@ -1462,6 +1442,7 @@ void CController::RunJob(SJob &job)
 	const auto &packet = job.packet;
 	if (!job.answer.has_value())
 	{
+		PairCheck(packet);
 		StageIn(packet);	// from the reflector
 		return;
 	}
@@ -1476,6 +1457,22 @@ void CController::RunJob(SJob &job)
 		RouteDstPacket(packet);
 	else
 		RouteDmrPacket(packet);
+}
+
+// M17 codes a payload in two packets, the second with the first's half
+// (audio_store: the decoded 1600 audio, data_store: the coded 3200 half); a second
+// whose first did not come here (dropped as too late, or lost before urfd) is coded
+// against silence, not against a half of an older payload. In the module's worker
+void CController::PairCheck(const std::shared_ptr<CTranscoderPacket> &packet)
+{
+	const int slot = ModuleSlot(packet->GetModule());
+	auto &last = pair_last[slot];
+	if (packet->IsSecond() && !(last.valid && last.streamid == packet->GetStreamId() && last.sequence + 1 == packet->GetSequence()))
+	{
+		memset(audio_store[slot], 0, sizeof(audio_store[slot]));
+		memcpy(data_store[slot], C2_3200_SILENCE, sizeof(data_store[slot]));
+	}
+	last = SPairLast{ true, packet->GetStreamId(), packet->GetSequence() };
 }
 
 void CController::StageIn(std::shared_ptr<CTranscoderPacket> packet)
@@ -1546,9 +1543,6 @@ void CController::HighPass(char module, uint16_t streamid, int16_t *samples)
 // This is only called when codec_in was not M17. Obviously, the incoming
 // packet was already decoded to audio.
 // This might complete the packet. If so, send it back to the reflector
-// Codec2 3200 silence: the second half of a payload not encoded yet, and what
-// a plugin that fails to encode gives instead
-static const uint8_t C2_3200_SILENCE[8] = { 0x01U, 0x00U, 0x09U, 0x43U, 0x9CU, 0xE4U, 0x21U, 0x08U };
 
 void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 {
@@ -2083,13 +2077,11 @@ int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoder
 				*dev = slots[c.slot]->dev;
 				*ch = c.ch;
 			}
-			// the channel is free after the stream's last frame (the device answers
-			// its frames in order, a new stream's come after them). A caller that hands
-			// the frame to the device (dev: ToDStar, ToDmr) frees it once the frame is
-			// queued (ReleaseChannel): freed here, another module's worker could take
-			// the channel and queue its first frame before this last one
-			if (packet->IsLast() && !dev)
-				c.busy = false;
+			// the channel is free after the stream's last frame, once that frame is
+			// queued to the device (ReleaseChannel in ToDStar, ToDmr): freed here,
+			// another module's worker could take it and queue its first frame before
+			// this last one (the device answers its frames in order). A last frame
+			// that does not reach the device frees it after 1.5 s (PurgePinned)
 			// the stream's part of its line under the devices' lock: ChannelName reads
 			// the slot's node, which the device watch sets when it opens the device again
 			// (once per stream, else a lookup)
