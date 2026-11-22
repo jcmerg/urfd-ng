@@ -15,7 +15,7 @@ Diese Anleitung richtet mit dem Setup-Script einen URF-Reflektor mit Web-Dashboa
 - **Für den Transcoder** eines davon:
   - **DVSI-AMBE-USB-Sticks** (DV3000/ThumbDV oder DV3003), eingesteckt in den Rechner, auf dem tcd läuft. Ein Gerät: 1 transcodiertes Modul, DMR/YSF braucht dann ein Codec-Plugin. DV3000 + DV3003: 2 Module. Zwei DV3000: 1 Modul. Zwei DV3003: bis zu 3 Module.
   - **Ein Codec-Plugin**, ein Software-Vocoder für D-Star und DMR/YSF: keine Sticks nötig, so viele Module, wie die CPU schafft, auch neben Sticks für die Module, die sie nicht abdecken. Keines ist Teil dieses Repositorys, weil AMBE und AMBE2+ in Software Patente berühren können: Ob du eines nutzt, entscheidest du (siehe [Codec-Plugins](../tcd/README.de.md#codec-plugins)). Das Setup-Script bietet an, [tcd-mbelib-neo-plugin](https://github.com/jcmerg/tcd-mbelib-neo-plugin) zu holen; lies vorher dessen Patenthinweis. M17 und P25 brauchen keines von beiden: tcd bringt Codec2 und einen eigenen IMBE-Vocoder mit.
-- **Ein Reflektor-Rufzeichen**: `URF` plus drei Buchstaben oder Ziffern, z.B. `URF363`. Prüfe in der [Reflektorliste](https://xlxapi.rlx.lu/api/exportreflectors), dass es noch frei ist.
+- **Ein Reflektor-Rufzeichen**: `URF` plus drei Buchstaben oder Ziffern, z.B. `URF999`. Prüfe in der [Reflektorliste](https://xlxapi.rlx.lu/api/exportreflectors), dass es noch frei ist.
 
 ## Welcher Aufbau?
 
@@ -101,7 +101,7 @@ Leite diese Ports in deinem Router auf den Rechner weiter, oder gib sie in der F
 Wenn alles von außen funktioniert, kann der Reflektor in der Hotspot-Software erscheinen:
 
 1. In `/opt/urfd/config/urfd.ini`, Abschnitt `[CallingHome]`: `Enable = true` setzen, dazu den Namen des Landes bei `Country` (z.B. `Germany`) und einen `Comment`. Die `DashboardUrl` aus `[Names]` wird mitgeschickt.
-2. Ziehst du einen Reflektor um, der schon im Verzeichnis steht (eingetragen von einem XLX-Dashboard oder einem älteren urfd)? Dann trage seinen alten Hash im Abschnitt als `Hash = ...` ein, siehe [README](../README.de.md#einen-schon-eingetragenen-reflektor-umziehen). Sonst `Hash` leer lassen: Der Reflektor erzeugt beim ersten Start einen und speichert ihn dort.
+2. Ziehst du einen Reflektor um, der schon im Verzeichnis steht (eingetragen von einem XLX-Dashboard oder einem älteren urfd)? Dann trage seinen alten Hash im Abschnitt als `Hash = ...` ein, siehe [Konfigurationsanleitung](CONFIGURATION.de.md#einen-schon-eingetragenen-reflektor-umziehen). Sonst `Hash` leer lassen: Der Reflektor erzeugt beim ersten Start einen und speichert ihn dort.
 3. Neu starten: `docker restart urfd`.
 
 Der Reflektor meldet sich dann alle 5 Minuten beim Verzeichnis; `docker logs urfd | grep CallingHome` zeigt, ob es geklappt hat. Hast du die Frage beim Setup mit yes beantwortet, ist das schon eingeschaltet.

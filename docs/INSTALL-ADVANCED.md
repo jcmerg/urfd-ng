@@ -88,7 +88,7 @@ sudo docker logs -f urfd
 
 Another data directory: `sudo URFD_DATA=/srv/urfd docker/build.sh start`, the same for `docker compose`. The container uses the host network, so the ports in `urfd.ini` are the ports on the host; the dashboard listens on 8363.
 
-Reload after changing mappings or lists (what a reload covers: [README](../README.md#sighup-configuration-reload)):
+Reload after changing mappings or lists (what a reload covers: [configuration guide](CONFIGURATION.md#sighup-configuration-reload)):
 
 ```bash
 sudo docker exec urfd pkill -HUP -x urfd   # not docker kill -s HUP: that reaches supervisord

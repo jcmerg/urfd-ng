@@ -88,7 +88,7 @@ sudo docker logs -f urfd
 
 Anderes Datenverzeichnis: `sudo URFD_DATA=/srv/urfd docker/build.sh start`, ebenso für `docker compose`. Der Container nutzt das Netz des Hosts, die Ports in `urfd.ini` sind also die Ports des Hosts; das Dashboard lauscht auf 8363.
 
-Neu laden nach geänderten Zuordnungen oder Listen (was ein Neuladen umfasst: [README](../README.de.md#konfiguration-per-sighup-neu-laden)):
+Neu laden nach geänderten Zuordnungen oder Listen (was ein Neuladen umfasst: [Konfigurationsanleitung](CONFIGURATION.de.md#konfiguration-per-sighup-neu-laden)):
 
 ```bash
 sudo docker exec urfd pkill -HUP -x urfd   # nicht docker kill -s HUP: das erreicht supervisord
