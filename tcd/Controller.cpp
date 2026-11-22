@@ -513,6 +513,19 @@ CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTra
 	return list[Pick(k, list.size(), packet, nullptr, nullptr, false)];
 }
 
+// the codec `to` of from's plugin, nullptr without one: from the choice lists, set
+// at start (no lock, unlike g_Codecs.Get)
+CSoftCodec *CController::SiblingOf(const CSoftCodec *from, uint32_t to) const
+{
+	const int k = ChoiceOfCodec(to);
+	if (k < 0)
+		return nullptr;
+	for (auto *sw : choices[k])
+		if (sw && sw->SamePlugin(from) && sw->GetCodec() == to)
+			return sw;
+	return nullptr;
+}
+
 bool CController::Transcode(uint32_t to, CSoftCodec *from, bool decoded, float source_db, const std::shared_ptr<CTranscoderPacket> &packet, uint8_t *direct)
 {
 	if (!from || !from->HasTranscode())
@@ -521,7 +534,7 @@ bool CController::Transcode(uint32_t to, CSoftCodec *from, bool decoded, float s
 	// audio path for its rest (its target, if direct, is on the decoder's plugin)
 	if (!decoded || !g_Stats.config.transcode_direct.load(std::memory_order_relaxed))
 	{
-		from->LeaveDirect(packet->GetStreamKey(), packet->IsLast(), g_Codecs.Get(to, from->GetName()));
+		from->LeaveDirect(packet->GetStreamKey(), packet->IsLast(), SiblingOf(from, to));
 		return false;
 	}
 	auto *sw = PluginChoice(to, packet);
@@ -1398,23 +1411,52 @@ void CController::WorkerThread(int i)
 	}
 }
 
+// what is never dropped, by the queue's bound or as too late: a device's answer
+// (that frame is done), a stream's last frame (its states, channel and line end
+// with it) and its first (the direct path, Transcode, starts there only)
+bool CController::MustKeep(const SJob &job)
+{
+	return job.answer.has_value() || job.packet->IsLast() || 0 == job.packet->GetSequence();
+}
+
+// a dropped frame: its stream goes on, so its report waits and its AMBE channels
+// stay its own (PurgePinned frees a channel quiet for 1.5 s)
+void CController::DroppedFrame(const std::shared_ptr<CTranscoderPacket> &packet)
+{
+	g_Reports.Touch(packet->GetModule(), packet->GetStreamId());
+	auto &ms = StateOf(packet->GetStreamKey());
+	std::lock_guard<std::mutex> lock(ms.mx);
+	const auto now = std::chrono::steady_clock::now();
+	for (int k : { kChoiceDStar, kChoiceDMR })
+	{
+		auto it = ms.pinned[k].find(packet->GetStreamKey());
+		if (it == ms.pinned[k].end())
+			continue;
+		it->second.last = now;
+		if (it->second.hw >= 0)
+		{
+			std::lock_guard<std::mutex> hw(hw_mux);
+			auto &c = hw_channels[k][it->second.hw];
+			if (c.busy && c.module == packet->GetModule() && c.streamid == packet->GetStreamId())
+				c.last = now;
+		}
+	}
+}
+
 // a packet from the reflector that waited longer than WORKER_JOB_MAX_AGE for its
 // worker is dropped: that late it is of no use to urfd, and the worker catches up
-// (its channels and reports stay in time). Not a device's answer (that frame is
-// done) nor a stream's last frame (states, channel and line end with it). A
-// second packet whose first is missing is coded against silence (SStoreTag).
+// (its channels and reports stay in time). Not what MustKeep keeps. A second
+// packet whose first is missing is coded against silence (SStoreTag).
 // In the module's worker
 bool CController::TooLate(const SJob &job, std::chrono::steady_clock::time_point now)
 {
-	// nor a transmission's first frame: the direct path (Transcode) starts there only
-	if (job.answer.has_value() || job.packet->IsLast() || 0 == job.packet->GetSequence())
+	if (MustKeep(job))
 		return false;
 	const int slot = ModuleSlot(job.packet->GetModule());
 	const bool drop = now - job.queued > WORKER_JOB_MAX_AGE;
 	if (drop)
 	{
-		// the stream is still going: its report waits for its last frame
-		g_Reports.Touch(job.packet->GetModule(), job.packet->GetStreamId());
+		DroppedFrame(job.packet);
 		auto &w = *workers[worker_of[slot]];
 		if (OncePerSecond(w.told_late))
 			std::cerr << "Worker " << worker_of[slot] << " (modules " << g_Stats.workers[worker_of[slot]].modules << ") is behind: frames older than "
@@ -1468,10 +1510,11 @@ void CController::ToWorker(std::shared_ptr<CTranscoderPacket> packet, const SDev
 	// modules; more are dropped, said once a second at most. A device's answer is
 	// always taken: the device's FIFO bounds them, and the frame is done there
 	auto &wk = *workers[w];
-	// a stream's last frame too (its states, its channel and its line end with it),
-	// and its first (the direct path starts there only)
-	const bool always = job.answer.has_value() || job.packet->IsLast() || 0 == job.packet->GetSequence();
+	const bool always = MustKeep(job);
+	std::shared_ptr<CTranscoderPacket> dropped = always ? nullptr : job.packet;
 	const bool taken = wk.queue.push(std::move(job), always ? SIZE_MAX : WORKER_QUEUE_MAX) != 0;
+	if (!taken && dropped)
+		DroppedFrame(dropped);
 	if (!taken && keep_running)
 	{
 		if (OncePerSecond(wk.told_full))

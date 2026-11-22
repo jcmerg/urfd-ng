@@ -174,9 +174,9 @@ private:
 		std::chrono::steady_clock::time_point lastUsed{};
 	};
 
+public:
 	// the streams not heard for 30 s, of every module (once a second, the reflector
 	// thread; a module's are otherwise dropped only when it gets a new stream)
-public:
 	void Purge(void)
 	{
 		const auto now = std::chrono::steady_clock::now();

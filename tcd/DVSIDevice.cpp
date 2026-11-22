@@ -622,12 +622,8 @@ void CDVDevice::FeedDevice()
 		{
 			if (OncePerSecond(m_toldStale))
 				std::cerr << description << ": frames waited more than a second to go to the device, silence instead" << std::endl;
-			SDeviceAnswer answer{};
-			const Encoding ch_enc = GetChannelEncoding(feed.channel);
-			answer.audio = feed.decode;
-			if (!feed.decode)
-				memcpy(answer.ambe, Encoding::dstar == ch_enc ? DSTAR_SILENCE : DMR_SILENCE, sizeof(answer.ambe));
-			Deliver(packet, ch_enc, answer);
+			SDeviceAnswer answer = SilenceAnswer(feed.channel, feed.decode);
+			Deliver(packet, answer.enc, answer);
 			continue;
 		}
 		{
@@ -808,6 +804,18 @@ std::shared_ptr<CTranscoderPacket> CDVDevice::PopWaiting(uint8_t channel, bool *
 	return packet;
 }
 
+// the answer for a frame the device did not answer: silent audio for one it was to
+// decode, else the channel's codec's silence frame
+SDeviceAnswer CDVDevice::SilenceAnswer(uint8_t channel, bool decode) const
+{
+	SDeviceAnswer answer{};
+	answer.enc = GetChannelEncoding(channel);
+	answer.audio = decode;
+	if (!decode)
+		memcpy(answer.ambe, Encoding::dstar == answer.enc ? DSTAR_SILENCE : DMR_SILENCE, sizeof(answer.ambe));
+	return answer;
+}
+
 void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer)
 {
 	answer.enc = ch_enc;
@@ -832,12 +840,8 @@ void CDVDevice::LostAnswer(uint8_t channel, const char *why)
 		unsigned(channel), packet->GetModule(), unsigned(packet->GetStreamId()), unsigned(packet->GetSequence()), why);
 	if (LogLost())
 		std::cerr << description << line << std::endl;
-	const Encoding ch_enc = GetChannelEncoding(channel);
-	SDeviceAnswer answer{};
-	answer.audio = decode;
-	if (!decode)
-		memcpy(answer.ambe, Encoding::dstar == ch_enc ? DSTAR_SILENCE : DMR_SILENCE, sizeof(answer.ambe));
-	Deliver(packet, ch_enc, answer);
+	SDeviceAnswer answer = SilenceAnswer(channel, decode);
+	Deliver(packet, answer.enc, answer);
 }
 
 bool CDVDevice::LogLost(void)
