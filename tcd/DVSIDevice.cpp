@@ -38,6 +38,7 @@
 #include "Configure.h"
 #include "TcdStats.h"
 #include "Controller.h"
+#include "SteadyClock.h"
 
 // a device that leaves a packet unanswered for this long is taken as lost, like an
 // unplugged one: a codec plugin takes its streams (or tcd stops, without one). An
@@ -54,10 +55,6 @@
 static const uint8_t DSTAR_SILENCE[9] { 0x9EU, 0x8DU, 0x32U, 0x88U, 0x26U, 0x1AU, 0x3FU, 0x61U, 0xE8U };
 static const uint8_t DMR_SILENCE[9]   { 0xB9U, 0xE8U, 0x81U, 0x52U, 0x61U, 0x73U, 0x00U, 0x2AU, 0x6BU };
 
-static int64_t SteadyMs()
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-}
 
 extern CConfigure g_Conf;
 extern CController g_Cont;
@@ -630,14 +627,9 @@ void CDVDevice::FeedDevice()
 			{
 				const uint8_t index = feed.channel;
 				// save the packet in the vocoder's queue while the vocoder does its magic
-				if (index == 0xFF)
-				{
-					std::cerr << "Module '" << packet->GetModule() << "' is not configured on " << description << std::endl;
-				}
-				else
 				{
 					Encoding ch_enc = GetChannelEncoding(index);
-					const bool needs_audio = feed.decode;	// named for its answer: audio
+					const bool needs_audio = feed.decode;	// decodes the frame: its answer is audio
 					PushWaiting(index, packet, needs_audio);
 
 					// Track channel activity in stats
@@ -803,10 +795,10 @@ std::shared_ptr<CTranscoderPacket> CDVDevice::PopWaiting(uint8_t channel, bool *
 	return packet;
 }
 
-void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, std::unique_ptr<SDeviceAnswer> answer)
+void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer)
 {
-	answer->enc = ch_enc;
-	g_Cont.DeviceAnswer(packet, std::move(answer));
+	answer.enc = ch_enc;
+	g_Cont.DeviceAnswer(packet, answer);
 }
 
 void CDVDevice::LostAnswer(uint8_t channel, const char *why)
@@ -828,11 +820,11 @@ void CDVDevice::LostAnswer(uint8_t channel, const char *why)
 	if (LogLost())
 		std::cerr << description << line << std::endl;
 	const Encoding ch_enc = GetChannelEncoding(channel);
-	auto answer = std::make_unique<SDeviceAnswer>();
-	answer->audio = decode;
+	SDeviceAnswer answer{};
+	answer.audio = decode;
 	if (!decode)
-		memcpy(answer->ambe, Encoding::dstar == ch_enc ? DSTAR_SILENCE : DMR_SILENCE, sizeof(answer->ambe));
-	Deliver(packet, ch_enc, std::move(answer));
+		memcpy(answer.ambe, Encoding::dstar == ch_enc ? DSTAR_SILENCE : DMR_SILENCE, sizeof(answer.ambe));
+	Deliver(packet, ch_enc, answer);
 }
 
 bool CDVDevice::LogLost(void)

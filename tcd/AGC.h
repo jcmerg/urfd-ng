@@ -140,6 +140,11 @@ class CAGC
 		float releaseAlpha = 0.04f;
 		float noiseGateDb = -55.0f;
 		float gateFloor = 1.0f;          // gain limit with the gate closed (0 dB)
+		bool operator==(const SParams &o) const
+		{
+			return enabled == o.enabled && targetDb == o.targetDb && maxGainUpDb == o.maxGainUpDb && maxGainDownDb == o.maxGainDownDb &&
+			       attackAlpha == o.attackAlpha && releaseAlpha == o.releaseAlpha && noiseGateDb == o.noiseGateDb && gateFloor == o.gateFloor;
+		}
 	};
 
 public:
@@ -147,17 +152,21 @@ public:
 	               float maxGainUpDb, float maxGainDownDb, float noiseGateDbfs = -55.0f,
 	               float gateFloorDb = 0.0f)
 	{
+		SParams p;
+		p.gateFloor = powf(10.0f, std::min(gateFloorDb, 0.0f) / 20.0f);
+		p.enabled = enable;
+		p.targetDb = targetDbfs + ENVELOPE_OFFSET;
+		p.maxGainUpDb = maxGainUpDb;
+		p.maxGainDownDb = maxGainDownDb;
+		p.attackAlpha  = (attackMs  > 0.0f) ? 1.0f - expf(-20.0f / attackMs)  : 1.0f;
+		p.releaseAlpha = (releaseMs > 0.0f) ? 1.0f - expf(-20.0f / releaseMs) : 1.0f;
+		p.noiseGateDb = noiseGateDbfs;
 		std::lock_guard<std::mutex> lock(m_paramMutex);
-		m_paramVersion.fetch_add(1, std::memory_order_release);	// the modules copy them at their next frame
-		m_params.gateFloor = powf(10.0f, std::min(gateFloorDb, 0.0f) / 20.0f);
-		m_params.enabled = enable;
+		if (p == m_params)
+			return;	// the monitor's once-a-second Configure, nothing changed
+		m_params = p;
 		m_enabled.store(enable, std::memory_order_relaxed);
-		m_params.targetDb = targetDbfs + ENVELOPE_OFFSET;
-		m_params.maxGainUpDb = maxGainUpDb;
-		m_params.maxGainDownDb = maxGainDownDb;
-		m_params.attackAlpha  = (attackMs  > 0.0f) ? 1.0f - expf(-20.0f / attackMs)  : 1.0f;
-		m_params.releaseAlpha = (releaseMs > 0.0f) ? 1.0f - expf(-20.0f / releaseMs) : 1.0f;
-		m_params.noiseGateDb = noiseGateDbfs;
+		m_paramVersion.fetch_add(1, std::memory_order_release);	// the modules copy them at their next frame
 	}
 
 	void Configure(bool enable, float targetDbfs, float attackMs, float releaseMs, float maxGainDb)

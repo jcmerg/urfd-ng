@@ -42,6 +42,7 @@
 #include "AmbeGain.h"
 #include "AmbeFrameCheck.h"
 #include "StreamReport.h"
+#include "SteadyClock.h"
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
@@ -68,8 +69,8 @@ static void SetThreadName(const char *name)
 // (StatsLog) and the stream's report
 static void FrameLevels(const std::shared_ptr<CTranscoderPacket> &packet, const char *codec)
 {
-	const int i = packet->GetModule() - 'A';
-	if (i < 0 || i >= CTcdStats::MAX_MODULES)
+	const int i = ModuleSlot(packet->GetModule());
+	if (i == kModuleOther)
 		return;
 	const auto &ms = g_Stats.modules[i];
 	g_StatsLog.LogFrame(packet->GetModule(), packet->GetStreamId(), codec,
@@ -461,8 +462,8 @@ static float GainDb(int32_t num)
 // the monitor: which codecs the module's stream is coded into directly
 static void ModuleDirect(const std::shared_ptr<CTranscoderPacket> &packet, uint8_t direct)
 {
-	const int i = packet->GetModule() - 'A';
-	if (i >= 0 && i < CTcdStats::MAX_MODULES)
+	const int i = ModuleSlot(packet->GetModule());
+	if (i != kModuleOther)
 		g_Stats.modules[i].direct.store(direct, std::memory_order_relaxed);
 }
 
@@ -1096,8 +1097,8 @@ void CController::ReadReflectorThread()
 			// Age idle timers and reset stale modules
 			for (char mod : g_Conf.GetTCMods())
 			{
-				int idx = mod - 'A';
-				if (idx < 0 || idx >= CTcdStats::MAX_MODULES) continue;
+				const int idx = ModuleSlot(mod);
+				if (idx == kModuleOther) continue;
 				auto &ms = g_Stats.modules[idx];
 				float idle = ms.last_activity.load(std::memory_order_relaxed);
 				if (idle < 1.0e6f)  // whole seconds stay exact in a float far beyond this
@@ -1289,11 +1290,6 @@ void CController::StopWorkers(void)
 			w->thread.join();
 }
 
-static int64_t SteadyNs(std::chrono::steady_clock::time_point t)
-{
-	return std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch()).count();
-}
-
 void CController::WorkerThread(int i)
 {
 	char name[16];
@@ -1309,7 +1305,15 @@ void CController::WorkerThread(int i)
 		const uint32_t waited = uint32_t(std::min<int64_t>(UINT32_MAX, std::chrono::duration_cast<std::chrono::microseconds>(start - job.queued).count()));
 		for (uint32_t prev = w.wait_us.load(std::memory_order_relaxed); waited > prev && !w.wait_us.compare_exchange_weak(prev, waited, std::memory_order_relaxed); )
 			;
-		RunJob(job);
+		try
+		{
+			RunJob(job);
+		}
+		catch (const std::exception &e)
+		{
+			// one frame lost, not tcd: the other modules of the worker go on
+			std::cerr << "Worker " << i << ": a frame of module " << job.packet->GetModule() << " failed: " << e.what() << std::endl;
+		}
 		job.packet.reset();
 		job.answer.reset();
 		const int64_t end_ns = SteadyNs(std::chrono::steady_clock::now());
@@ -1349,17 +1353,30 @@ void CController::WorkerStatsTick(void)
 	}
 }
 
-void CController::ToWorker(EStage stage, std::shared_ptr<CTranscoderPacket> packet, std::unique_ptr<SDeviceAnswer> answer)
+void CController::ToWorker(EStage stage, std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer *answer)
 {
 	if (workers.empty())
 		return;	// not started
 	const int w = worker_of[ModuleSlot(packet->GetModule())];
-	workers[w]->queue.push(SJob{ stage, std::move(packet), std::move(answer), std::chrono::steady_clock::now() });
+	SJob job{ stage, std::move(packet), std::nullopt, std::chrono::steady_clock::now() };
+	if (answer)
+		job.answer = *answer;
+	// a worker that cannot keep up (a send that blocks, a plugin that hangs) gets
+	// at most WORKER_QUEUE_MAX jobs, some seconds of its modules; more are
+	// dropped, said once a second at most
+	auto &wk = *workers[w];
+	if (wk.queue.push(std::move(job), WORKER_QUEUE_MAX) == 0)
+	{
+		const int64_t now = SteadyMs();
+		int64_t last = wk.told_full.load(std::memory_order_relaxed);
+		if (now - last >= 1000 && wk.told_full.compare_exchange_strong(last, now))
+			std::cerr << "Worker " << w << " (modules " << g_Stats.workers[w].modules << ") is " << WORKER_QUEUE_MAX << " jobs behind: frames dropped" << std::endl;
+	}
 }
 
-void CController::DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, std::unique_ptr<SDeviceAnswer> answer)
+void CController::DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer &answer)
 {
-	ToWorker(EStage::answer, std::move(packet), std::move(answer));
+	ToWorker(EStage::answer, std::move(packet), &answer);
 }
 
 void CController::RunJob(SJob &job)
@@ -1372,7 +1389,7 @@ void CController::RunJob(SJob &job)
 		break;
 	case EStage::answer:
 	{
-		if (!job.answer)
+		if (!job.answer.has_value())
 			break;
 		const bool dstar = Encoding::dstar == job.answer->enc;
 		if (job.answer->audio)
@@ -1848,8 +1865,13 @@ void CController::StreamLogCount(SModuleState &ms, int k, const std::shared_ptr<
 
 void CController::PrintLines(const LogLines &lines)
 {
+	if (lines.empty())
+		return;
+	// in one write, so the lines of several workers do not mix
+	std::string out;
 	for (const auto &l : lines)
-		std::cout << l << std::endl;
+		out += l + '\n';
+	std::cout << out << std::flush;
 }
 
 // the stream's line, with the module's lock: into lines, printed after it
@@ -2665,11 +2687,12 @@ void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
 	// the module's connection is closed (Send() logs why, or says nothing when it
 	// was closed before): the frame is dropped at once. Waiting for the reflector
 	// thread's reconnect here held up every module of this worker, and a frame
-	// that late is of no use to urfd. Said once a second at most
-	static std::atomic<int64_t> told{0};
-	const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-	int64_t last = told.load(std::memory_order_relaxed);
-	if (now - last >= 1000 && told.compare_exchange_strong(last, now))
+	// that late is of no use to urfd. Said once a second at most per module
+	static std::atomic<int64_t> told[kModuleSlots] = {};
+	auto &t = told[ModuleSlot(packet->GetModule())];
+	const int64_t now = SteadyMs();
+	int64_t last = t.load(std::memory_order_relaxed);
+	if (now - last >= 1000 && t.compare_exchange_strong(last, now))
 		std::cerr << "SendToReflector: no connection for module " << packet->GetModule() << ", frame dropped (the reflector thread reconnects)" << std::endl;
 }
 

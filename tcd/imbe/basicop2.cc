@@ -56,7 +56,7 @@ Word16 saturate (Word32 L_var1);
  |   Constants and Globals                                                   |
  |___________________________________________________________________________|
 */
-thread_local Flag Overflow = 0;	// written by the operators, never read: per thread, so states run in parallel
+thread_local Flag Overflow = 0;	// per thread, so states run in parallel: read only by L_add_c, L_sub_c and L_sat, which OP25 does not use
 thread_local Flag Carry = 0;
 
 /*___________________________________________________________________________

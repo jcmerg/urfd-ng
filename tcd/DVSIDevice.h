@@ -134,7 +134,7 @@ protected:
 	void Resync(void);
 	// a packet with this device's output set, on to the controller
 	// the answer to the packet goes to its module's worker, which puts it into the packet
-	void Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, std::unique_ptr<SDeviceAnswer> answer);
+	void Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer);
 
 	// reading the answers while running: bytes read ahead first, then the device
 	std::deque<uint8_t> rx;

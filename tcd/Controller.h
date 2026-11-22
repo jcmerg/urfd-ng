@@ -26,6 +26,7 @@
 #include <future>
 #include <mutex>
 #include <list>
+#include <optional>
 #include <thread>
 #include <utility>
 
@@ -55,7 +56,7 @@ public:
 	// an AMBE device's answer to a packet (DVSIDevice: its reader, or a lost
 	// answer's silence): the packet's module worker puts it into the packet and
 	// routes it on (RouteDstPacket, RouteDmrPacket)
-	void DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, std::unique_ptr<SDeviceAnswer> answer);
+	void DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer &answer);
 	void ReconfigureAGC();  // re-read AGC params from g_Stats.config
 	void Dump(const std::shared_ptr<CTranscoderPacket> packet, const std::string &title) const;
 
@@ -77,7 +78,7 @@ protected:
 	// what comes to a worker from another thread: a packet from the reflector, or
 	// an AMBE device's answer to one; the rest of a packet's work the worker calls itself
 	enum class EStage : uint8_t { in, answer };
-	struct SJob { EStage stage; std::shared_ptr<CTranscoderPacket> packet; std::unique_ptr<SDeviceAnswer> answer; std::chrono::steady_clock::time_point queued; };	// answer: of the answer stage only
+	struct SJob { EStage stage; std::shared_ptr<CTranscoderPacket> packet; std::optional<SDeviceAnswer> answer; std::chrono::steady_clock::time_point queued; };	// answer: of the answer stage only
 	// busy_ns: the time it worked in jobs done, job_start_ns: the start of the
 	// one it is in (0: none), so a long one counts in the seconds it takes;
 	// wait_us: the longest a job waited since the last look (WorkerStatsTick, in
@@ -89,8 +90,10 @@ protected:
 		std::atomic<uint64_t> busy_ns{0};
 		std::atomic<int64_t> job_start_ns{0};
 		std::atomic<uint32_t> wait_us{0};
+		std::atomic<int64_t> told_full{0};	// SteadyMs of the last "jobs behind"
 		uint64_t last_busy_ns = 0;	// the reflector thread's
 	};
+	static constexpr std::size_t WORKER_QUEUE_MAX = 2000;	// about 6 s of 7 busy modules
 	std::vector<std::unique_ptr<SWorker>> workers;
 	int worker_of[kModuleSlots] = {};	// by ModuleSlot
 	void StartWorkers(void);
@@ -99,7 +102,7 @@ protected:
 	void WorkerStatsTick(void);	// once a second: g_Stats.workers
 	std::chrono::steady_clock::time_point worker_tick;
 	// a job to the worker of the packet's module (from the reflector thread or a device's reader)
-	void ToWorker(EStage stage, std::shared_ptr<CTranscoderPacket> packet, std::unique_ptr<SDeviceAnswer> answer = nullptr);
+	void ToWorker(EStage stage, std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer *answer = nullptr);
 	void RunJob(SJob &job);
 	// the packet to the reflector once every codec is set (only its worker sets them)
 	void SendIfDone(const std::shared_ptr<CTranscoderPacket> &packet);

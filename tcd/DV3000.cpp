@@ -118,26 +118,26 @@ void CDV3000::ProcessPacket(const SDV_Packet &p)
 		return;
 	}
 	{
-		auto answer = std::make_unique<SDeviceAnswer>();
+		SDeviceAnswer answer{};
 		if (PKT_CHANNEL == p.header.packet_type)
 		{
 			if (11!=ntohs(p.header.payload_length) || PKT_CHAND!=p.field_id || 72!=p.payload.ambe3k.num_bits)
 				dump("Improper ambe packet:", &p, packet_size(p));
-			answer->audio = false;
-			memcpy(answer->ambe, p.payload.ambe3k.data, sizeof(answer->ambe));
+			answer.audio = false;
+			memcpy(answer.ambe, p.payload.ambe3k.data, sizeof(answer.ambe));
 		}
 		else if (PKT_SPEECH == p.header.packet_type)
 		{
 			if (((COMPAND_LINEAR == compand) ? 322 : 162)!=ntohs(p.header.payload_length) || PKT_SPEECHD!=p.field_id || 160!=p.payload.audio3k.num_samples)
 				dump("Improper audio packet:", &p, packet_size(p));
-			answer->audio = true;
-			SpeechIn(p.payload.audio3k.samples, answer->pcm);
+			answer.audio = true;
+			SpeechIn(p.payload.audio3k.samples, answer.pcm);
 		}
 		else
 		{
 			dump("ReadDevice() ERROR: Read an unexpected device packet:", &p, packet_size(p));
 			return;
 		}
-		Deliver(packet, type, std::move(answer));	// a DMR or a DStar device
+		Deliver(packet, type, answer);	// a DMR or a DStar device
 	}
 }

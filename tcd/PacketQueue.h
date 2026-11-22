@@ -22,6 +22,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <memory>
+#include <cstdint>
 
 // a blocking queue between threads: pop waits for an item; after Shutdown pop
 // gives up at once, and what is left or pushed after is dropped
@@ -29,13 +30,13 @@ template <typename T>
 class CBlockingQueue
 {
 public:
-	// the queue's size after it, 0 when it is shut down (dropped)
-	std::size_t push(T item)
+	// the queue's size after it, 0 when it is shut down or holds max items already (dropped)
+	std::size_t push(T item, std::size_t max = SIZE_MAX)
 	{
 		std::size_t size;
 		{
 			std::lock_guard<std::mutex> lock(mx);
-			if (stop)
+			if (stop || q.size() >= max)
 				return 0;
 			q.push_back(std::move(item));
 			size = q.size();
