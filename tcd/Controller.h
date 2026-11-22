@@ -142,6 +142,7 @@ protected:
 		std::chrono::steady_clock::time_point last;
 	};
 	std::vector<SHwChannel> hw_channels[kNumChoices];
+	std::mutex hw_mux;
 	// DeviceChannels for the streams that start from now on (the monitor switches it)
 	static bool Pool(void) { return g_Stats.config.device_pool.load(std::memory_order_relaxed) != 0; }
 	std::future<void> watchFuture;
@@ -157,9 +158,9 @@ protected:
 	void PhaseOut(int slot);
 	// its channels in use, or quiet for less than a second, or frames still on the device
 	bool SlotBusy(int slot);
-	bool SlotBusyLocked(int slot);	// with pinned_mux
+	bool SlotBusyLocked(int slot);	// with hw_mux
 	int UncoveredChoice(int slot) const;
-	// the channel of codec k for a stream, -1 for none (under pinned_mux):
+	// the channel of codec k for a stream, -1 for none (under hw_mux):
 	// FindChannel only looks, TakeChannel takes it
 	int FindChannel(int k, char module) const;
 	int TakeChannel(int k, char module, uint16_t streamid);
@@ -188,14 +189,27 @@ protected:
 	// is done, or when the stream has been quiet for 5 s (its last frame lost)
 	struct SStreamPart { int k; std::string by; bool device, decode, done; uint32_t frames, fec, unc, bad; };
 	struct SStreamLog { char module; std::chrono::steady_clock::time_point first, last; std::vector<SStreamPart> parts; };
-	std::unordered_map<uint32_t, SStreamLog> stream_log;	// by GetStreamKey, under pinned_mux
-	SStreamPart *StreamLogPart(int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw, bool note);
-	void StreamLogCount(int k, const std::shared_ptr<CTranscoderPacket> &packet);
-	void StreamLogFlush(uint32_t key);
-	void DeviceFrameIn(int k, int hw, const std::shared_ptr<CTranscoderPacket> &packet);
+	// a module's streams: their pins (by GetStreamKey) and their lines, under the
+	// module's lock, so the workers of different modules do not wait for each other
+	struct SModuleState
+	{
+		std::mutex mx;
+		std::unordered_map<uint32_t, SPinned> pinned[kNumChoices];
+		std::unordered_map<uint32_t, SStreamLog> stream_log;
+	};
+	SModuleState module_state[kModuleSlots];	// by ModuleSlotOfKey
+	SModuleState &StateOf(uint32_t key) { return module_state[ModuleSlotOfKey(key)]; }
+	// stream lines made under a lock, printed once it is released (no output under a lock)
+	using LogLines = std::vector<std::string>;
+	static void PrintLines(const LogLines &lines);
+	// with the module's lock (ms of the packet's stream)
+	SStreamPart *StreamLogPart(SModuleState &ms, int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw, bool note);
+	void StreamLogCount(SModuleState &ms, int k, const std::shared_ptr<CTranscoderPacket> &packet, LogLines &lines);
+	void StreamLogFlush(SModuleState &ms, uint32_t key, LogLines &lines);
+	void DeviceFrameIn(SModuleState &ms, int k, int hw, const std::shared_ptr<CTranscoderPacket> &packet);
 	void DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket> &packet);
-	std::mutex pinned_mux;
-	std::unordered_map<uint32_t, SPinned> pinned[kNumChoices];	// by GetStreamKey
+	// the AMBE devices: slots (their dev, up, ...) and hw_channels (busy, last, the
+	// stream on it); taken after a module's lock, never before it
 	// the modules the devices do D-Star and DMR for; the other modules go to a
 	// plugin (empty for P25 and M17, which have no device)
 	std::string hw_modules[kNumChoices];

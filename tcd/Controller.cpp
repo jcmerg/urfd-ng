@@ -479,9 +479,10 @@ CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTra
 		return nullptr;
 	const auto &list = choices[k];
 	{
-		std::lock_guard<std::mutex> lock(pinned_mux);
-		auto it = pinned[k].find(packet->GetStreamKey());
-		if (it != pinned[k].end())
+		auto &ms = StateOf(packet->GetStreamKey());
+		std::lock_guard<std::mutex> lock(ms.mx);
+		auto it = ms.pinned[k].find(packet->GetStreamKey());
+		if (it != ms.pinned[k].end())
 			return (it->second.choice >= 0 && it->second.choice < int(list.size())) ? list[it->second.choice] : nullptr;
 		int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
 		if (c < 0 || c >= int(list.size()))
@@ -496,7 +497,10 @@ CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTra
 			// Pick pins it below: a device back in the meantime is taken there
 			// instead, and the stream goes the device path whole, not split
 			const bool device = k == kChoiceDStar || k == kChoiceDMR;
-			if (!device || FindChannel(k, packet->GetModule()) >= 0)
+			if (!device)
+				return nullptr;
+			std::lock_guard<std::mutex> hw(hw_mux);
+			if (FindChannel(k, packet->GetModule()) >= 0)
 				return nullptr;
 			if (std::none_of(list.begin(), list.end(), [](CSoftCodec *sw) { return sw != nullptr; }))
 				return nullptr;
@@ -606,7 +610,7 @@ void CController::ReconfigureAGC()
 	outgain_usrp_num = calcNumerator(g_Stats.config.outgain_usrp.load());
 	outgain_imbe_num = calcNumerator(g_Stats.config.outgain_imbe.load());
 	outgain_m17_num = calcNumerator(g_Stats.config.outgain_m17.load());
-	std::lock_guard<std::mutex> lock(pinned_mux);
+	std::lock_guard<std::mutex> lock(hw_mux);
 	for (auto &s : slots)
 		if (s->dev)
 			s->dev->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
@@ -628,7 +632,7 @@ void CController::Stop()
 	for (auto &s : slots)
 		if (s->dev && !s->closed)
 			s->dev->CloseDevice();
-	std::lock_guard<std::mutex> lock(pinned_mux);
+	std::lock_guard<std::mutex> lock(hw_mux);
 	for (auto &s : slots)
 		s->dev.reset();
 }
@@ -1129,7 +1133,7 @@ void CController::ReadReflectorThread()
 							ds.ch_module[ch].store(' ', std::memory_order_relaxed);
 					}
 				}
-				std::lock_guard<std::mutex> lock(pinned_mux);
+				std::lock_guard<std::mutex> lock(hw_mux);
 				for (auto &s : slots)
 					if (s->dev && s->stats >= 0)
 						g_Stats.devices[s->stats].buf_depth.store(s->up ? s->dev->GetBufferDepth() : 0, std::memory_order_relaxed);
@@ -1767,21 +1771,21 @@ static bool StreamDecodes(int k, ECodecType in)
 	return k >= 0 && ChoiceOfInput(in) == k;
 }
 
-// StreamLog, from Pick() under pinned_mux: the codec's part of the stream's line,
-// added at the stream's first frame with the vocoder it got; `note` when the
+// StreamLog, from Pick() with the module's lock: the codec's part of the stream's
+// line, added at the stream's first frame with the vocoder it got; `note` when the
 // vocoder was (re)chosen, so a change mid-stream is noted
-CController::SStreamPart *CController::StreamLogPart(int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw, bool note)
+CController::SStreamPart *CController::StreamLogPart(SModuleState &ms, int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw, bool note)
 {
 	if (!g_Conf.GetStreamLog())
 		return nullptr;
-	auto &log = stream_log[packet->GetStreamKey()];
+	auto &log = ms.stream_log[packet->GetStreamKey()];
 	if (log.parts.empty())
 	{
 		// a stream's last frame comes by again after its line went out (the DMR
 		// re-encode picks it a second time): no line of one frame for it
 		if (packet->IsLast())
 		{
-			stream_log.erase(packet->GetStreamKey());
+			ms.stream_log.erase(packet->GetStreamKey());
 			return nullptr;
 		}
 		log.module = packet->GetModule();
@@ -1822,12 +1826,12 @@ CController::SStreamPart *CController::StreamLogPart(int k, const std::shared_pt
 
 // every packet counts; the last one completes the part, unless a device still has
 // to answer it (DeviceFrameOut); the line goes out when every part is done
-void CController::StreamLogCount(int k, const std::shared_ptr<CTranscoderPacket> &packet)
+void CController::StreamLogCount(SModuleState &ms, int k, const std::shared_ptr<CTranscoderPacket> &packet, LogLines &lines)
 {
 	if (!g_Conf.GetStreamLog())
 		return;
-	auto it = stream_log.find(packet->GetStreamKey());
-	if (it == stream_log.end())
+	auto it = ms.stream_log.find(packet->GetStreamKey());
+	if (it == ms.stream_log.end())
 		return;
 	auto &log = it->second;
 	log.last = std::chrono::steady_clock::now();
@@ -1839,14 +1843,20 @@ void CController::StreamLogCount(int k, const std::shared_ptr<CTranscoderPacket>
 				p.done = true;
 		}
 	if (std::all_of(log.parts.begin(), log.parts.end(), [](const SStreamPart &p) { return p.done; }))
-		StreamLogFlush(packet->GetStreamKey());
+		StreamLogFlush(ms, packet->GetStreamKey(), lines);
 }
 
-// the stream's line, under pinned_mux
-void CController::StreamLogFlush(uint32_t key)
+void CController::PrintLines(const LogLines &lines)
 {
-	auto it = stream_log.find(key);
-	if (it == stream_log.end())
+	for (const auto &l : lines)
+		std::cout << l << std::endl;
+}
+
+// the stream's line, with the module's lock: into lines, printed after it
+void CController::StreamLogFlush(SModuleState &ms, uint32_t key, LogLines &lines)
+{
+	auto it = ms.stream_log.find(key);
+	if (it == ms.stream_log.end())
 		return;
 	const auto &log = it->second;
 	uint32_t frames = 0;
@@ -1872,13 +1882,13 @@ void CController::StreamLogFlush(uint32_t key)
 		if (!p.done)
 			line << " (no last frame)";
 	}
-	std::cout << line.str() << std::endl;
-	stream_log.erase(it);
+	lines.push_back(line.str());
+	ms.stream_log.erase(it);
 }
 
 // a frame an AMBE device decodes: its FEC as the device sees it, counted for the
-// stream's line and the device (from Pick, under pinned_mux)
-void CController::DeviceFrameIn(int k, int hw, const std::shared_ptr<CTranscoderPacket> &packet)
+// stream's line and the device (from Pick, with the module's lock and hw_mux)
+void CController::DeviceFrameIn(SModuleState &ms, int k, int hw, const std::shared_ptr<CTranscoderPacket> &packet)
 {
 	if (k != kChoiceDStar && k != kChoiceDMR)
 		return;
@@ -1893,8 +1903,8 @@ void CController::DeviceFrameIn(int k, int hw, const std::shared_ptr<CTranscoder
 		if (r.uncorrectable)
 			d.uncorrectable.fetch_add(1, std::memory_order_relaxed);
 	}
-	auto it = stream_log.find(packet->GetStreamKey());
-	if (it == stream_log.end())
+	auto it = ms.stream_log.find(packet->GetStreamKey());
+	if (it == ms.stream_log.end())
 		return;
 	for (auto &p : it->second.parts)
 		if (p.k == k)
@@ -1913,34 +1923,40 @@ void CController::DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket>
 {
 	if (k != kChoiceDStar && k != kChoiceDMR)
 		return;
-	std::lock_guard<std::mutex> lock(pinned_mux);
-	auto pin = pinned[k].find(packet->GetStreamKey());
-	if (pin == pinned[k].end() || pin->second.hw < 0 || choices[k][pin->second.choice])
-		return;	// not on an AMBE device
-	const SAmbeFec r = (k == kChoiceDStar) ? AmbeFrameCheck::DStar(packet->GetDStarData()) : AmbeFrameCheck::Dmr(packet->GetDMRData());
-	const int st = slots[hw_channels[k][pin->second.hw].slot]->stats;
-	if (st >= 0)
+	LogLines lines;
 	{
-		auto &d = g_Stats.devices[st];
-		d.encodes.fetch_add(1, std::memory_order_relaxed);
-		if (r.errors || r.uncorrectable)
-			d.bad_out.fetch_add(1, std::memory_order_relaxed);
-	}
-	auto it = stream_log.find(packet->GetStreamKey());
-	if (it == stream_log.end())
-		return;
-	auto &log = it->second;
-	log.last = std::chrono::steady_clock::now();
-	for (auto &p : log.parts)
-		if (p.k == k)
+		auto &ms = StateOf(packet->GetStreamKey());
+		std::lock_guard<std::mutex> lock(ms.mx);
+		auto pin = ms.pinned[k].find(packet->GetStreamKey());
+		if (pin == ms.pinned[k].end() || pin->second.hw < 0 || choices[k][pin->second.choice])
+			return;	// not on an AMBE device
+		// hw_channels' slot and the slots' stats are set at start only: no hw_mux
+		const SAmbeFec r = (k == kChoiceDStar) ? AmbeFrameCheck::DStar(packet->GetDStarData()) : AmbeFrameCheck::Dmr(packet->GetDMRData());
+		const int st = slots[hw_channels[k][pin->second.hw].slot]->stats;
+		if (st >= 0)
 		{
+			auto &d = g_Stats.devices[st];
+			d.encodes.fetch_add(1, std::memory_order_relaxed);
 			if (r.errors || r.uncorrectable)
-				p.bad++;
-			if (packet->IsLast())
-				p.done = true;
+				d.bad_out.fetch_add(1, std::memory_order_relaxed);
 		}
-	if (std::all_of(log.parts.begin(), log.parts.end(), [](const SStreamPart &p) { return p.done; }))
-		StreamLogFlush(packet->GetStreamKey());
+		auto it = ms.stream_log.find(packet->GetStreamKey());
+		if (it == ms.stream_log.end())
+			return;
+		auto &log = it->second;
+		log.last = std::chrono::steady_clock::now();
+		for (auto &p : log.parts)
+			if (p.k == k)
+			{
+				if (r.errors || r.uncorrectable)
+					p.bad++;
+				if (packet->IsLast())
+					p.done = true;
+			}
+		if (std::all_of(log.parts.begin(), log.parts.end(), [](const SStreamPart &p) { return p.done; }))
+			StreamLogFlush(ms, packet->GetStreamKey(), lines);
+	}
+	PrintLines(lines);
 }
 
 // the choice of a stream, made at its first packet: the one for new streams, but a
@@ -1948,116 +1964,137 @@ void CController::DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket>
 int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev, uint8_t *ch, bool count)
 {
 	const auto &list = choices[k];	// M17 1600's list runs alongside, of the same size
-	auto &pins = pinned[k];
 	const uint16_t streamid = packet->GetStreamId();
 	const char module = packet->GetModule();
 	const uint32_t key = packet->GetStreamKey();
-	std::lock_guard<std::mutex> lock(pinned_mux);
-	const auto now = std::chrono::steady_clock::now();
-	// the plugin that decoded the stream's source (pinned before its targets), nullptr
-	// for a device, tcd's own vocoder or none
-	auto source = [&]() -> const CSoftCodec * {
-		const int ks = ChoiceOfInput(packet->GetCodecIn());
-		if (ks < 0 || ks == k)
-			return nullptr;
-		auto sp = pinned[ks].find(key);
-		if (sp == pinned[ks].end() || sp->second.choice < 0 || sp->second.choice >= int(choices[ks].size()))
-			return nullptr;
-		return choices[ks][sp->second.choice];
-	};
-	// for a stream no AMBE channel takes: the plugin that decoded its source when
-	// that one has the codec (one plugin for the transmission, which can code it
-	// directly), else the first plugin; c without one
-	auto plugin = [&](int c) {
-		if (const CSoftCodec *from = source())
+	auto &ms = StateOf(key);
+	auto &pins = ms.pinned[k];
+	LogLines lines;	// printed once the locks are released
+	int choice;
+	{
+		std::lock_guard<std::mutex> lock(ms.mx);
+		// the devices' lock, after the module's: only where a device comes in
+		std::unique_lock<std::mutex> hw(hw_mux, std::defer_lock);
+		auto with_hw = [&]() { if (!hw.owns_lock()) hw.lock(); };
+		const auto now = std::chrono::steady_clock::now();
+		// the plugin that decoded the stream's source (pinned before its targets), nullptr
+		// for a device, tcd's own vocoder or none
+		auto source = [&]() -> const CSoftCodec * {
+			const int ks = ChoiceOfInput(packet->GetCodecIn());
+			if (ks < 0 || ks == k)
+				return nullptr;
+			auto sp = ms.pinned[ks].find(key);
+			if (sp == ms.pinned[ks].end() || sp->second.choice < 0 || sp->second.choice >= int(choices[ks].size()))
+				return nullptr;
+			return choices[ks][sp->second.choice];
+		};
+		// for a stream no AMBE channel takes: the plugin that decoded its source when
+		// that one has the codec (one plugin for the transmission, which can code it
+		// directly), else the first plugin; c without one
+		auto plugin = [&](int c) {
+			if (const CSoftCodec *from = source())
+				for (size_t i = 0; i < list.size(); i++)
+					if (list[i] && list[i]->SamePlugin(from))
+						return int(i);
 			for (size_t i = 0; i < list.size(); i++)
-				if (list[i] && list[i]->SamePlugin(from))
+				if (list[i])
 					return int(i);
-		for (size_t i = 0; i < list.size(); i++)
-			if (list[i])
-				return int(i);
-		return c;
-	};
-	// a codec in software does every module; the devices only the streams they
-	// have a channel for (D-Star and DMR, whose list is the one asked for)
-	auto device = [&](int c) { return !list[c]; };
-	auto it = pins.find(key);
-	bool fresh = false, moved = false;
-	if (it == pins.end())
-	{
-		fresh = true;
-		int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
-		if (c < 0 || c >= int(list_size))
-			c = 0;
-		int hw = -1;
-		if (device(c))
+			return c;
+		};
+		// a codec in software does every module; the devices only the streams they
+		// have a channel for (D-Star and DMR, whose list is the one asked for)
+		auto device = [&](int c) { return !list[c]; };
+		auto it = pins.find(key);
+		bool fresh = false, moved = false;
+		if (it == pins.end())
 		{
-			hw = TakeChannel(k, module, streamid);
-			if (hw < 0)
-				c = plugin(c);
+			fresh = true;
+			int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
+			if (c < 0 || c >= int(list_size))
+				c = 0;
+			int hw = -1;
+			if (device(c))
+			{
+				with_hw();
+				hw = TakeChannel(k, module, streamid);
+				if (hw < 0)
+					c = plugin(c);
+			}
+			it = pins.emplace(key, SPinned{ c, hw, now }).first;
 		}
-		it = pins.emplace(key, SPinned{ c, hw, now }).first;
-	}
-	else if (device(it->second.choice) && !HasChannel(k, it->second.hw, module, streamid))
-	{
-		// its channel is gone: the device was lost, or the channel went to another
-		// stream after a pause; another channel, else a plugin for the rest of the stream
-		it->second.hw = TakeChannel(k, module, streamid);
-		if (it->second.hw < 0)
-			it->second.choice = plugin(it->second.choice);
-		moved = true;
-	}
-	auto &pin = it->second;
-	pin.last = now;
-	if (device(pin.choice) && pin.hw >= 0)
-	{
-		auto &c = hw_channels[k][pin.hw];
-		c.last = now;
-		if (dev)
+		else if (device(it->second.choice) && (with_hw(), !HasChannel(k, it->second.hw, module, streamid)))
 		{
-			*dev = slots[c.slot]->dev;
-			*ch = c.ch;
+			// its channel is gone: the device was lost, or the channel went to another
+			// stream after a pause; another channel, else a plugin for the rest of the stream
+			it->second.hw = TakeChannel(k, module, streamid);
+			if (it->second.hw < 0)
+				it->second.choice = plugin(it->second.choice);
+			moved = true;
 		}
-		// a frame the device is to decode: its FEC, counted for the stream and the device
-		// (the first frame's part of the stream's line first, so the count has a place)
-		if (StreamDecodes(k, packet->GetCodecIn()))
+		auto &pin = it->second;
+		pin.last = now;
+		if (device(pin.choice) && pin.hw >= 0)
 		{
-			StreamLogPart(k, packet, pin.choice, pin.hw, fresh || moved);
-			DeviceFrameIn(k, pin.hw, packet);
+			with_hw();
+			auto &c = hw_channels[k][pin.hw];
+			c.last = now;
+			if (dev)
+			{
+				*dev = slots[c.slot]->dev;
+				*ch = c.ch;
+			}
+			// a frame the device is to decode: its FEC, counted for the stream and the device
+			// (the first frame's part of the stream's line first, so the count has a place)
+			if (StreamDecodes(k, packet->GetCodecIn()))
+			{
+				StreamLogPart(ms, k, packet, pin.choice, pin.hw, fresh || moved);
+				DeviceFrameIn(ms, k, pin.hw, packet);
+			}
+			// the channel is free after the stream's last frame (the device answers
+			// its frames in order, a new stream's come after them)
+			if (packet->IsLast())
+				c.busy = false;
 		}
-		// the channel is free after the stream's last frame (the device answers
-		// its frames in order, a new stream's come after them)
-		if (packet->IsLast())
-			c.busy = false;
+		StreamLogPart(ms, k, packet, pin.choice, pin.hw, fresh || moved);
+		if (count)
+			StreamLogCount(ms, k, packet, lines);
+		choice = pin.choice;
 	}
-	StreamLogPart(k, packet, pin.choice, pin.hw, fresh || moved);
-	if (count)
-		StreamLogCount(k, packet);
-	return pin.choice;
+	PrintLines(lines);
+	return choice;
 }
 
 // streams quiet for 30 s are forgotten; a channel quiet for 1.5 s is free again
 // (a stream whose last frame was lost)
 void CController::PurgePinned(void)
 {
-	std::lock_guard<std::mutex> lock(pinned_mux);
 	const auto now = std::chrono::steady_clock::now();
 	const auto cutoff = now - std::chrono::seconds(30);
-	for (auto &p : pinned)
-		for (auto it = p.begin(); it != p.end(); )
-			it = it->second.last < cutoff ? p.erase(it) : std::next(it);
-	for (auto &list : hw_channels)
-		for (auto &c : list)
-			if (c.busy && now - c.last > std::chrono::milliseconds(1500))
-				c.busy = false;
-	// a stream's line whose last frame did not come: out after 5 s of quiet
-	for (auto it = stream_log.begin(); it != stream_log.end(); )
+	LogLines lines;
+	for (auto &ms : module_state)
 	{
-		const uint32_t id = it->first;
-		++it;
-		if (now - stream_log[id].last > std::chrono::seconds(5))
-			StreamLogFlush(id);
+		std::lock_guard<std::mutex> lock(ms.mx);
+		for (auto &p : ms.pinned)
+			for (auto it = p.begin(); it != p.end(); )
+				it = it->second.last < cutoff ? p.erase(it) : std::next(it);
+		// a stream's line whose last frame did not come: out after 5 s of quiet
+		for (auto it = ms.stream_log.begin(); it != ms.stream_log.end(); )
+		{
+			const uint32_t id = it->first;
+			const bool quiet = now - it->second.last > std::chrono::seconds(5);
+			++it;
+			if (quiet)
+				StreamLogFlush(ms, id, lines);
+		}
 	}
+	{
+		std::lock_guard<std::mutex> lock(hw_mux);
+		for (auto &list : hw_channels)
+			for (auto &c : list)
+				if (c.busy && now - c.last > std::chrono::milliseconds(1500))
+					c.busy = false;
+	}
+	PrintLines(lines);
 }
 
 int CController::FindChannel(int k, char module) const
@@ -2215,7 +2252,7 @@ void CController::DeviceLost(int i, const CDVDevice *dev)
 		return;
 	auto &s = *slots[i];
 	{
-		std::lock_guard<std::mutex> lock(pinned_mux);
+		std::lock_guard<std::mutex> lock(hw_mux);
 		if (s.dev.get() != dev || !s.up)
 			return;	// an older device of the slot, or already out
 	}
@@ -2227,7 +2264,7 @@ void CController::DeviceLost(int i, const CDVDevice *dev)
 		return;
 	}
 	{
-		std::lock_guard<std::mutex> lock(pinned_mux);
+		std::lock_guard<std::mutex> lock(hw_mux);
 		s.next_try = std::chrono::steady_clock::now() + std::chrono::seconds(2);
 		s.up = false;
 		for (auto &list : hw_channels)
@@ -2268,7 +2305,7 @@ void CController::PhaseOut(int i)
 				std::cout << s.desc << " changes to DeviceCompand = " << CompandName(g_Stats.config.device_compand.load()) << ": no new streams, the ones on it run to their end" << std::endl;
 		}
 		{
-			std::lock_guard<std::mutex> lock(pinned_mux);
+			std::lock_guard<std::mutex> lock(hw_mux);
 			if (!SlotBusyLocked(i))
 			{
 				s.up = false;
@@ -2297,7 +2334,7 @@ void CController::PhaseOut(int i)
 	{
 		const bool was_out = s.out;
 		{
-			std::lock_guard<std::mutex> lock(pinned_mux);
+			std::lock_guard<std::mutex> lock(hw_mux);
 			s.draining = false;
 			s.out = false;
 			s.next_try = std::chrono::steady_clock::time_point::min();	// at this pass of the watch
@@ -2310,7 +2347,7 @@ void CController::PhaseOut(int i)
 
 // its streams are done when its channels are free and quiet for a second and the
 // device has answered every frame (the last one is freed at its Pick, before the
-// device has it); with pinned_mux
+// device has it); with hw_mux
 bool CController::SlotBusyLocked(int i)
 {
 	auto &s = *slots[i];
@@ -2324,7 +2361,7 @@ bool CController::SlotBusyLocked(int i)
 
 bool CController::SlotBusy(int i)
 {
-	std::lock_guard<std::mutex> lock(pinned_mux);
+	std::lock_guard<std::mutex> lock(hw_mux);
 	return SlotBusyLocked(i);
 }
 
@@ -2394,7 +2431,7 @@ void CController::DeviceWatchThread()
 			}
 			// in the slot before its reader runs: a reader that fails at once finds it there
 			{
-				std::lock_guard<std::mutex> lock(pinned_mux);
+				std::lock_guard<std::mutex> lock(hw_mux);
 				s.dev = dev;
 				s.node = node;
 				s.closed = false;
