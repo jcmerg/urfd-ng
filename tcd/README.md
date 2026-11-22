@@ -200,7 +200,7 @@ No codec plugin is part of this repository: software implementations of AMBE and
 
 ### Writing a plugin
 
-The interface is plain C, [`CodecPlugin.h`](CodecPlugin.h): `open`/`close` a state per stream, `encode`/`decode` 160 samples of 8 kHz PCM to and from a frame, `start`/`stop` at the first and after the last frame of a transmission; optionally `decode_info` (how a frame came out: corrected bit errors, repeat, mute, tone, silence), `frame_format` and `transcode` for the direct path. tcd calls a plugin from one thread at a time and closes the state of a stream that has been quiet for 30 s. A plugin is built against this header only and loads into newer tcd versions as long as its API version is within `TCD_CODEC_API_MIN` to `TCD_CODEC_API`.
+The interface is plain C, [`CodecPlugin.h`](CodecPlugin.h): `open`/`close` a state per stream, `encode`/`decode` 160 samples of 8 kHz PCM to and from a frame, `start`/`stop` at the first and after the last frame of a transmission; optionally `decode_info` (how a frame came out: corrected bit errors, repeat, mute, tone, silence), `frame_format` and `transcode` for the direct path. tcd closes the state of a stream that has been quiet for 30 s. It calls a plugin from one thread at a time, unless the plugin sets `TCD_PLUGIN_CONCURRENT` (API 5): then the [module workers](#module-workers) call it at the same time on the states of different streams, never on one state at once. A plugin is built against this header only and loads into newer tcd versions as long as its API version is within `TCD_CODEC_API_MIN` to `TCD_CODEC_API`.
 
 Frame formats: D-Star as the 9 data bytes of a DV frame, DMR/YSF as the 72 bits of an AMBE2+ frame in air order, MSB first (the formats of the DVSI devices); P25 as the 88 IMBE parameter bits u0..u7 in 11 bytes, MSB first; M17 as the 64 Codec2 bits of 20 ms (3200) or 40 ms (1600, 320 samples). tcd encodes M17 as 3200 only.
 
@@ -210,6 +210,12 @@ Frame formats: D-Star as the 9 data bytes of a DV frame, DMR/YSF as the 72 bits 
 - `decode`: decodes a frames file
 - `dvsitest <device> enc|dec dstar|dmr in out`: the same on a DV3003 (`DVSI_TYPE=3000` for a DV3000), to compare a plugin with the hardware; `dvsitest <device> info` prints the chip's product ID and version; `dvsitest <device> batch <jobs>` runs a job list on the three channels of a DV3003. Stop tcd first, or phase the device out in the monitor.
 - `ambecheck`: checks the FEC of a file of AMBE frames
+
+### Module workers
+
+Each module belongs to one of tcd's workers (`Workers` in tcd.ini, `auto`: one per CPU core). The worker does everything for its module's frames: decoding, AGC, encoding to the other codecs in software, the AMBE devices' answers and sending the frames back to urfd. Workers run at the same time, so the modules share the CPU cores and a module that takes long does not hold up the modules of other workers. The modules are dealt out in turn in the order of `Modules` and `StandbyModules`; the log names the split at start (`4 module workers: AE BF CG DH`).
+
+The AMBE devices keep their own threads for the serial line; a worker hands them a frame and goes on with other frames meanwhile. tcd's own vocoders (OP25, Codec2) run in parallel; a codec plugin does when it sets `TCD_PLUGIN_CONCURRENT` (API 5), otherwise one worker at a time uses it and the log says so at start. Measured on a Raspberry Pi 5: 26 modules transcoding at the same time in all protocols take less than half of one core ([measurements](docs/MEASUREMENTS.md#cpu-load-and-latency)).
 
 ## tcd in Docker
 
@@ -282,6 +288,7 @@ A device that cannot be opened or does not answer is left out with a warning, an
 | `CodecPlugin` | `op25`, `codec2` | codec plugin to load, one line each: the path of a shared object, or `op25` / `codec2` for tcd's own (see [Codec plugins](#codec-plugins)) |
 | `CodecDStar` / `CodecDMR` / `CodecP25` / `CodecM17` | — | the vocoder new streams get: `dvsi`, `op25`, `codec2` or a plugin's name; written by Save |
 | `Transcode` | `direct` | `direct`: D-Star, DMR/YSF and P25 coded into each other from the vocoder parameters where a plugin can; `audio`: every codec from the decoded audio (see [Codec plugins](#codec-plugins)) |
+| `Workers` | `auto` | the threads that code the modules, each module on one of them; `auto`: one per CPU core, at most one per module; or 1 to 26 (see [Module workers](#module-workers)) |
 | `DeviceChannels` | — (default `fixed`) | `fixed`: the AMBE channels belong to the first modules; `pool`: a stream takes any free channel (see [Channel pool](#channel-pool-devicechannels--pool)) |
 | `DeviceCompand` | — (default `linear`) | audio to and from the AMBE devices: `linear` (16 bits), `ulaw` or `alaw` (8-bit G.711, see [Lost answers](#lost-answers-devicecompand)); written by Save |
 
@@ -490,6 +497,7 @@ What tcd does beyond [n7tae/tcd](https://github.com/n7tae/tcd); the details of e
 
 - **Devices**: serial access through the kernel's `ftdi_sio` driver instead of libftd2xx (POSIX backend by Jason Kendall), device type from the chip, exact device selection, macOS support, mixed mode (DV3000 + DV3003, or a lone DV3003), three devices and more, channel pool, lost devices handed to the codec plugins and reopened, recovery from lost serial answers, `DeviceCompand`
 - **Vocoders**: codec plugins with a plain C interface, switchable at run time, direct transcoding between the MBE codecs; OP25 and Codec2 as built-in plugins; no MD380 firmware in tcd
+- **Threads**: module workers that code the modules in parallel, instead of one thread per codec for all modules
 - **Audio**: a speech-driven AGC with separate profiles for digital and analog sources, noise suppression for FM sources, output gains per codec, the AGC's gain in the AMBE2+ bitstream for DMR → DMR/YSF, a 300 Hz high-pass for P25 → M17
 - **Monitoring**: web dashboard in the urfd dashboard's look and `tcdmon`, a report of each transmission to urfd, stream log with FEC check, stats CSV with `agc-analyze`
 - **Operation**: built from the urfd repository with `build.sh` or in Docker, standby modules for a second tcd, a password for the reflector connection, host names as `ServerAddress`, reconnect with backoff, pings and timeouts on the reflector connection, `TCP_NODELAY`, monitor on loopback by default with an optional password, web server on libwebsockets (GPL compatible)

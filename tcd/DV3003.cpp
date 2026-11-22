@@ -138,23 +138,21 @@ void CDV3003::ProcessPacket(const SDV_Packet &p)
 	}
 	{
 		Encoding ch_enc = GetChannelEncoding(channel);
+		SDeviceAnswer answer{};
 
 		if (PKT_CHANNEL == p.header.packet_type)
 		{
 			if (12!=ntohs(p.header.payload_length) || PKT_CHAND!=p.payload.ambe.chand || 72!=p.payload.ambe.num_bits)
 				dump("Improper ambe packet:", &p, packet_size(p));
-			if (Encoding::dstar == ch_enc)
-				packet->SetDStarData(p.payload.ambe.data);
-			else
-				packet->SetDMRData(p.payload.ambe.data);
+			answer.audio = false;
+			memcpy(answer.ambe, p.payload.ambe.data, sizeof(answer.ambe));
 		}
 		else if (PKT_SPEECH == p.header.packet_type)
 		{
 			if (((COMPAND_LINEAR == compand) ? 323 : 163)!=ntohs(p.header.payload_length) || PKT_SPEECHD!=p.payload.audio.speechd || 160!=p.payload.audio.num_samples)
 				dump("Improper audio packet:", &p, packet_size(p));
-			int16_t pcm[160];
-			SpeechIn(p.payload.audio.samples, pcm);
-			packet->SetAudioSamples(pcm, false);
+			answer.audio = true;
+			SpeechIn(p.payload.audio.samples, answer.pcm);
 		}
 		else
 		{
@@ -163,6 +161,6 @@ void CDV3003::ProcessPacket(const SDV_Packet &p)
 		}
 
 		// Route based on per-channel encoding, not device type
-		Deliver(packet, ch_enc);
+		Deliver(packet, ch_enc, answer);
 	}
 }

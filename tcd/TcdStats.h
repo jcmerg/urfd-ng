@@ -93,6 +93,16 @@ struct SwVocoderStats
 	std::atomic<uint64_t> last_active_ms{0}; // timestamp of last operation
 };
 
+// a module worker (Controller.h), for the monitor: its modules, the share of a
+// CPU core it worked in the last second, and the longest a job (a packet from
+// the reflector, an AMBE device's answer) waited in its queue then
+struct WorkerStats
+{
+	std::string modules;	// set once at start
+	std::atomic<float> busy_pct{0.0f};
+	std::atomic<float> wait_ms{0.0f};
+};
+
 struct ReflectorStats
 {
 	std::atomic<bool> connected{false};
@@ -122,6 +132,9 @@ public:
 	// in service, and of them in use by a stream
 	std::atomic<int> hw_total[kNumChoices] {}, hw_busy[kNumChoices] {};
 	int            num_devices{0};
+	static constexpr int MAX_WORKERS = 26;
+	WorkerStats    workers[MAX_WORKERS];
+	std::atomic<int> num_workers{0};	// set once the workers run
 	ReflectorStats reflector;
 
 	// Configuration (readable by monitor, writable by REST)

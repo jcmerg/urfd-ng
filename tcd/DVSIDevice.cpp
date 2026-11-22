@@ -834,18 +834,9 @@ std::shared_ptr<CTranscoderPacket> CDVDevice::PopWaiting(uint8_t channel, bool *
 	return packet;
 }
 
-void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc)
+void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, const SDeviceAnswer &answer)
 {
-	if (Encoding::dstar == ch_enc)
-	{
-		std::lock_guard<std::mutex> lock(g_Cont.dstar_mux);
-		g_Cont.RouteDstPacket(packet);
-	}
-	else
-	{
-		std::lock_guard<std::mutex> lock(g_Cont.dmrst_mux);
-		g_Cont.RouteDmrPacket(packet);
-	}
+	g_Cont.DeviceAnswer(packet, ch_enc, answer);
 }
 
 void CDVDevice::LostAnswer(uint8_t channel, const char *why)
@@ -867,16 +858,11 @@ void CDVDevice::LostAnswer(uint8_t channel, const char *why)
 	if (LogLost())
 		std::cerr << description << line << std::endl;
 	const Encoding ch_enc = GetChannelEncoding(channel);
-	if (decode)
-	{
-		const int16_t silence[160] = {};
-		packet->SetAudioSamples(silence, false);
-	}
-	else if (Encoding::dstar == ch_enc)
-		packet->SetDStarData(DSTAR_SILENCE);
-	else
-		packet->SetDMRData(DMR_SILENCE);
-	Deliver(packet, ch_enc);
+	SDeviceAnswer answer{};
+	answer.audio = decode;
+	if (!decode)
+		memcpy(answer.ambe, Encoding::dstar == ch_enc ? DSTAR_SILENCE : DMR_SILENCE, sizeof(answer.ambe));
+	Deliver(packet, ch_enc, answer);
 }
 
 bool CDVDevice::LogLost(void)

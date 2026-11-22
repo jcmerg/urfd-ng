@@ -25,8 +25,8 @@
  | $Id $
  |___________________________________________________________________________|
 */
-extern Flag Overflow;
-extern Flag Carry;
+extern thread_local Flag Overflow;
+extern thread_local Flag Carry;
 
 #define MAX_32 (Word32)0x7fffffffL
 #define MIN_32 (Word32)0x80000000L

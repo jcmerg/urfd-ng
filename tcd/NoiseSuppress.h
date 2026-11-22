@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <cmath>
+#include <atomic>
 #include <mutex>
 #include <speex/speex_preprocess.h>
 
@@ -34,13 +35,14 @@ public:
 	{
 		int db = (int)lroundf(suppressDb);
 		db = db < -40 ? -40 : db > 0 ? 0 : db;
-		std::lock_guard<std::mutex> lock(m_mutex);
-		if (db == m_suppressDb)
+		if (db == m_suppressDb.exchange(db))
 			return;
-		m_suppressDb = db;
-		for (auto &st : m_states)
-			if (st)
-				speex_preprocess_ctl(st, SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &m_suppressDb);
+		for (int i = 0; i < 26; i++)
+		{
+			std::lock_guard<std::mutex> lock(m_mutex[i]);
+			if (m_states[i])
+				speex_preprocess_ctl(m_states[i], SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &db);
+		}
 	}
 
 	// one 20 ms frame (160 samples at 8 kHz) of the module, in place
@@ -49,8 +51,10 @@ public:
 		int i = module - 'A';
 		if (i < 0 || i >= 26)
 			return;
-		std::lock_guard<std::mutex> lock(m_mutex);
-		if (m_suppressDb == 0)
+		// the module's lock: the modules' workers run in parallel
+		std::lock_guard<std::mutex> lock(m_mutex[i]);
+		int db = m_suppressDb.load();
+		if (db == 0)
 			return;
 		if (!m_states[i])
 		{
@@ -61,13 +65,13 @@ public:
 			// the AGC's job (setting VAD at all makes speexdsp print a warning)
 			int on = 1;
 			speex_preprocess_ctl(m_states[i], SPEEX_PREPROCESS_SET_DENOISE, &on);
-			speex_preprocess_ctl(m_states[i], SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &m_suppressDb);
+			speex_preprocess_ctl(m_states[i], SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &db);
 		}
 		speex_preprocess_run(m_states[i], samples);
 	}
 
 private:
 	SpeexPreprocessState *m_states[26] = {};
-	int m_suppressDb = 0;
-	std::mutex m_mutex;
+	std::atomic<int> m_suppressDb{0};
+	std::mutex m_mutex[26];	// by module
 };

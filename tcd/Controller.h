@@ -26,6 +26,9 @@
 #include <future>
 #include <mutex>
 #include <list>
+#include <deque>
+#include <thread>
+#include <condition_variable>
 #include <utility>
 
 #include "DV3000.h"
@@ -41,8 +44,6 @@
 class CController
 {
 public:
-	std::mutex dstar_mux, dmrst_mux;
-
 	CController();
 	bool Start();
 	void Stop();
@@ -51,14 +52,60 @@ public:
 	// decoded: from's decode succeeded (a failed one gets no transcode, only its End)
 	void RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, class CSoftCodec *from = nullptr, bool decoded = true);
 	void RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet);
+	// an AMBE device's answer to a packet (DVSIDevice: its reader, or a lost
+	// answer's silence): the packet's module worker puts it into the packet and
+	// routes it on (RouteDstPacket, RouteDmrPacket)
+	void DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, Encoding ch_enc, const SDeviceAnswer &answer);
 	void ReconfigureAGC();  // re-read AGC params from g_Stats.config
 	void Dump(const std::shared_ptr<CTranscoderPacket> packet, const std::string &title) const;
 
 protected:
 	std::atomic<bool> keep_running;
-	std::future<void> reflectorFuture, c2Future, imbeFuture, usrpFuture;
-	std::unordered_map<char, int16_t[160]> audio_store;
-	std::unordered_map<char, uint8_t[8]> data_store;
+	std::future<void> reflectorFuture;
+	// per module (ModuleIndex): M17 1600 audio of the payload's second half, and the
+	// first half of an M17 3200 payload being coded
+	int16_t audio_store[27][160] = {};
+	uint8_t data_store[27][8] = {};
+	static int ModuleIndex(char module) { return (module >= 'A' && module <= 'Z') ? module - 'A' : 26; }
+
+	// The modules' workers: every module belongs to one of them (worker_of), which
+	// does all the work on its packets: decoding, AGC, coding to the other codecs
+	// in software, sending them back, and the AMBE devices' answers. The modules
+	// of different workers are coded in parallel, those of one worker one after
+	// the other; a packet's frames are only ever touched by its module's worker
+	// (an AMBE device reads it while it has it). Workers in tcd.ini, auto: one
+	// per CPU core, at most one per module
+	enum class EStage : uint8_t { in, codec2, imbe, usrp, swdmr, swdstar, dstar_answer, dmr_answer };
+	struct SJob { EStage stage; std::shared_ptr<CTranscoderPacket> packet; SDeviceAnswer answer; std::chrono::steady_clock::time_point queued; };
+	class CWorkerQueue
+	{
+	public:
+		void push(SJob &&job);
+		bool pop(SJob &job);	// false when shut down
+		void Shutdown();
+	private:
+		std::mutex mx;
+		std::condition_variable cv;
+		std::deque<SJob> q;
+		bool stop = false;
+	};
+	// busy_ns: the time it worked, wait_us: the longest a job waited since the
+	// monitor's last look (WorkerStatsTick, in the reflector thread, takes both)
+	struct SWorker { CWorkerQueue queue; std::thread thread; std::atomic<uint64_t> busy_ns{0}; std::atomic<uint32_t> wait_us{0}; uint64_t last_busy_ns = 0; };
+	std::vector<std::unique_ptr<SWorker>> workers;
+	int worker_of[27] = {};	// by ModuleIndex
+	// the worker of the calling thread, -1 for none (reflector, devices, monitor)
+	static thread_local int t_worker;
+	void StartWorkers(void);
+	void WorkerStatsTick(void);	// every second: g_Stats.workers
+	std::chrono::steady_clock::time_point worker_tick;
+	void WorkerThread(int i);
+	// the stage of a packet: right here when the caller is the packet's module
+	// worker, else queued for it
+	void Dispatch(EStage stage, std::shared_ptr<CTranscoderPacket> packet);
+	void RunStage(EStage stage, const std::shared_ptr<CTranscoderPacket> &packet, const SDeviceAnswer *answer);
+	// the packet to the reflector once every codec is set (only its worker sets them)
+	void SendIfDone(const std::shared_ptr<CTranscoderPacket> &packet);
 	CTCClient tcClient;
 	// an AMBE device in use: how to open it again, its channels' codecs, and
 	// whether it answers. A lost device is left to the codec plugins and opened
@@ -126,11 +173,6 @@ protected:
 	// a name for channel c of codec k in the log: DV3003 ch1
 	std::string ChannelName(int k, size_t c) const;
 
-	CPacketQueue codec2_queue;
-
-	CPacketQueue imbe_queue;
-	CPacketQueue usrp_queue;
-	std::mutex send_mux;
 	// per vocoder choice (CodecChoice.h), what may do it: nullptr = the AMBE
 	// devices, else a codec of tcd's own vocoders (OP25, Codec2) or of a codec
 	// plugin (CodecPlugins.h), as g_Stats.codec_options names them; a stream keeps
@@ -206,7 +248,7 @@ protected:
 	std::atomic<int32_t> outgain_dstar_num{256}, outgain_dmr_num{256}, outgain_usrp_num{256}, outgain_imbe_num{256}, outgain_m17_num{256};
 	// P25 to M17: a 300 Hz high-pass in front of the Codec2 encoder, per module
 	struct SHighPass { float z[2][2]; uint16_t streamid; };
-	std::unordered_map<char, SHighPass> c2_highpass;
+	SHighPass c2_highpass[27] = {};	// by ModuleIndex
 	void HighPass(char module, uint16_t streamid, int16_t *samples);
 	CAGC m_agcDigital;  // D-Star, DMR/YSF/NXDN, M17, P25
 	CAGC m_agcAnalog;   // SVX and USRP: FM audio, gate above its noise floor
@@ -221,12 +263,14 @@ protected:
 	bool DiscoverFtdiDevices(std::list<std::pair<std::string, std::string>> &found);
 	bool IsAmbeDevice(const std::string &desc);
 	bool InitVocoders();
-	// processing threads
+	// the reflector's packets in, and the stages of the workers
 	void ReadReflectorThread();
-	void ProcessC2Thread();
-
-	void ProcessIMBEThread();
-	void ProcessUSRPThread();
+	void StageIn(std::shared_ptr<CTranscoderPacket> packet);
+	void StageC2(std::shared_ptr<CTranscoderPacket> packet);
+	void StageIMBE(std::shared_ptr<CTranscoderPacket> packet);
+	void StageUSRP(std::shared_ptr<CTranscoderPacket> packet);
+	void StageSWAMBE2(std::shared_ptr<CTranscoderPacket> packet);
+	void StageSWDStar(std::shared_ptr<CTranscoderPacket> packet);
 	void Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet);
 	void AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet);
 	void IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet);
@@ -235,12 +279,8 @@ protected:
 	void AudiotoUSRP(std::shared_ptr<CTranscoderPacket> packet);
 	void SvxToAudio(std::shared_ptr<CTranscoderPacket> packet);
 	void SendToReflector(std::shared_ptr<CTranscoderPacket> packet);
-	std::future<void> swambe2Future, swdstarFuture;
-	CPacketQueue swambe2_queue, swdstar_queue;
-	void ProcessSWAMBE2Thread();
 	void SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet);
 	void AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet);
-	void ProcessSWDStarThread();
 	void SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet);
 	void AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet);
 	// a packet to the D-Star or the DMR codec: a DVSI device or a codec plugin

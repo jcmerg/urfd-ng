@@ -792,6 +792,28 @@ int main(int argc, char *argv[])
 			row++;
 		}
 
+		// the module workers: their modules, how busy each was and the longest wait
+		// of a frame in its queue in the last second (red from 70 % or 20 ms)
+		{
+			const auto items = json_arr_items(json_arr(last_json, "workers"));
+			if (!items.empty() && row < rows - 1)
+			{
+				attron(COLOR_PAIR(7) | A_BOLD);
+				mvprintw(row, 0, "Workers");
+				attroff(COLOR_PAIR(7) | A_BOLD);
+				for (const auto &wj : items)
+				{
+					const double busy = json_num(wj, "busy"), wait = json_num(wj, "wait_ms");
+					const bool hot = busy >= 70.0 || wait >= 20.0;
+					printw("  %s ", json_str(wj, "modules").c_str());
+					attron(hot ? (COLOR_PAIR(3) | A_BOLD) : COLOR_PAIR(5));
+					printw("%.0f%% %.1fms", busy, wait);
+					attroff(COLOR_PAIR(3) | COLOR_PAIR(5) | A_BOLD);
+				}
+				row++;
+			}
+		}
+
 		// who codes AMBE (and P25, M17) for new streams, when it is not the default
 		{
 			auto codecs = json_obj(last_json, "codecs");

@@ -41,6 +41,7 @@
 #define OUTGAIN_M17    "OutputGainM17"
 #define DMRGAINMODE    "DmrGainMode"
 #define TRANSCODE      "Transcode"
+#define WORKERS        "Workers"
 #define AMBEGAIN_DB    "AmbeGainDb"
 #define MODULES        "Modules"
 #define STANDBYMODULES "StandbyModules"
@@ -192,6 +193,11 @@ bool CConfigure::ReadData(const std::string &path)
 			if (value == "direct")     transcode_direct = true;
 			else if (value == "audio") transcode_direct = false;
 			else { std::cerr << "Warning: unknown " << TRANSCODE << " '" << value << "', using 'direct'" << std::endl; transcode_direct = true; }
+		}
+		else if (0 == key.compare(WORKERS))
+		{
+			// a bad value keeps 0: auto
+			workers = value == "auto" ? 0 : int(getUnsigned(key, value, 1, 26, 0));
 		}
 		else if (0 == key.compare(DMRGAINMODE))
 		{
@@ -370,6 +376,7 @@ bool CConfigure::ReadData(const std::string &path)
 		if (dmr_gain_mode == EDmrGainMode::reencode) std::cout << " (DMR -> DMR/YSF: AGC and re-encode by a codec plugin)";
 		std::cout << std::endl;
 	}
+	std::cout << WORKERS << " = " << (workers ? std::to_string(workers) : std::string("auto")) << std::endl;
 	std::cout << TRANSCODE << " = " << (transcode_direct ? "direct (a codec plugin codes D-Star, DMR/YSF and P25 from each other's frames where it can)" : "audio (every codec is encoded from the decoded audio)") << std::endl;
 	if (agc_enabled)
 	{

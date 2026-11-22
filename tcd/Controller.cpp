@@ -29,6 +29,7 @@
 #include <sstream>
 #include <fstream>
 #include <thread>
+#include <pthread.h>
 #include <queue>
 #include <vector>
 #include "TranscoderPacket.h"
@@ -53,6 +54,18 @@ extern CConfigure g_Conf;
 
 // a frame's levels, after the AGC (UpdateLevelsIn/Out, UpdateAGC): to the CSV log
 // (StatsLog) and the stream's report
+// the thread's name in top -H and the like
+static void SetThreadName(const char *name)
+{
+#if defined(__linux__)
+	pthread_setname_np(pthread_self(), name);
+#elif defined(__APPLE__)
+	pthread_setname_np(name);
+#else
+	(void)name;
+#endif
+}
+
 static void FrameLevels(const std::shared_ptr<CTranscoderPacket> &packet, const char *codec)
 {
 	const int i = packet->GetModule() - 'A';
@@ -552,16 +565,8 @@ bool CController::Start()
 		keep_running = false;
 		return true;
 	}
+	StartWorkers();
 	reflectorFuture = std::async(std::launch::async, &CController::ReadReflectorThread, this);
-	c2Future        = std::async(std::launch::async, &CController::ProcessC2Thread,     this);
-	imbeFuture      = std::async(std::launch::async, &CController::ProcessIMBEThread,   this);
-	usrpFuture      = std::async(std::launch::async, &CController::ProcessUSRPThread,   this);
-	// the threads of the codec plugins, when there is one for the codec
-	const auto &dmr_choices = choices[kChoiceDMR], &dstar_choices = choices[kChoiceDStar];
-	if (std::count(dmr_choices.begin(), dmr_choices.end(), nullptr) < (long)dmr_choices.size())
-		swambe2Future = std::async(std::launch::async, &CController::ProcessSWAMBE2Thread, this);
-	if (std::count(dstar_choices.begin(), dstar_choices.end(), nullptr) < (long)dstar_choices.size())
-		swdstarFuture = std::async(std::launch::async, &CController::ProcessSWDStarThread, this);
 	return false;
 }
 
@@ -609,15 +614,16 @@ void CController::Stop()
 {
 	keep_running = false;
 
-	// the worker threads wait in their queues: wake them up, then wait for all
-	codec2_queue.Shutdown();
-	imbe_queue.Shutdown();
-	usrp_queue.Shutdown();
-	swambe2_queue.Shutdown();
-	swdstar_queue.Shutdown();
-	for (auto *f : { &reflectorFuture, &c2Future, &imbeFuture, &usrpFuture, &swambe2Future, &swdstarFuture, &watchFuture })
+	// the workers wait in their queues: wake them up, then wait for all; a device's
+	// answer that comes after is dropped by the queue it would go to
+	for (auto &w : workers)
+		w->queue.Shutdown();
+	for (auto *f : { &reflectorFuture, &watchFuture })
 		if (f->valid())
 			f->get();
+	for (auto &w : workers)
+		if (w->thread.joinable())
+			w->thread.join();
 
 	tcClient.Close();
 	// all closed before any is dropped: a reader still running routes to the others
@@ -705,7 +711,6 @@ bool CController::InitVocoders()
 			std::cerr << "Transcoded modules[" << i << "] is not an uppercase letter!" << std::endl;
 			return true;
 		}
-		c2_highpass[c] = SHighPass{ {{0.0f, 0.0f}, {0.0f, 0.0f}}, 0 };
 	}
 
 	// the vocoder each choice names in tcd.ini, empty for the default: the
@@ -1072,11 +1077,13 @@ bool CController::InitVocoders()
 // based on packet's codec_in.
 void CController::ReadReflectorThread()
 {
+	SetThreadName("tcd-reflector");
 	uint32_t reconf_counter = 0;
 	while (keep_running)
 	{
 		// preemptively check the connection(s)...
 		tcClient.ReConnect();
+		WorkerStatsTick();
 
 		// Every ~1s: re-read config + age idle modules
 		if (++reconf_counter >= 10)
@@ -1232,31 +1239,200 @@ void CController::ReadReflectorThread()
 			// Idle reset is handled by 2s timeout in reconf loop
 			// (not here, because the packet still flows through the pipeline
 			// and Route functions would overwrite the reset values)
-			switch (packet->GetCodecIn())
-			{
-			case ECodecType::dstar:
-				ToDStar(packet);
-				break;
-			case ECodecType::dmr:
-				ToDmr(packet);
-				break;
-			case ECodecType::p25:
-				imbe_queue.push(packet);
-				break;
-			case ECodecType::usrp:
-			case ECodecType::svx:
-				usrp_queue.push(packet);
-				break;
-			case ECodecType::c2_1600:
-			case ECodecType::c2_3200:
-				codec2_queue.push(packet);
-				break;
-			default:
-				Dump(packet, "ERROR: Received a reflector packet with unknown Codec:");
-				break;
-			}
+			// on to the module's worker
+			Dispatch(EStage::in, packet);
 		}
 	}
+}
+
+thread_local int CController::t_worker = -1;
+
+void CController::CWorkerQueue::push(SJob &&job)
+{
+	{
+		std::lock_guard<std::mutex> lock(mx);
+		if (stop)
+			return;
+		q.push_back(std::move(job));
+	}
+	cv.notify_one();
+}
+
+bool CController::CWorkerQueue::pop(SJob &job)
+{
+	std::unique_lock<std::mutex> lock(mx);
+	cv.wait(lock, [this] { return stop || !q.empty(); });
+	if (stop)
+	{
+		q.clear();
+		return false;
+	}
+	job = std::move(q.front());
+	q.pop_front();
+	return true;
+}
+
+void CController::CWorkerQueue::Shutdown()
+{
+	{
+		std::lock_guard<std::mutex> lock(mx);
+		stop = true;
+	}
+	cv.notify_all();
+}
+
+void CController::StartWorkers(void)
+{
+	const std::string mods(g_Conf.GetTCMods());
+	int n = g_Conf.GetWorkers();
+	if (n <= 0)
+	{
+		const unsigned cores = std::thread::hardware_concurrency();
+		n = cores ? int(cores) : 1;
+	}
+	n = std::max(1, std::min(n, int(mods.size())));
+	// the modules in turn, in the order of Modules and StandbyModules
+	std::vector<std::string> of(n);
+	for (size_t i = 0; i < mods.size(); i++)
+	{
+		worker_of[ModuleIndex(mods[i])] = int(i % size_t(n));
+		of[i % size_t(n)] += mods[i];
+	}
+	for (int i = 0; i < n; i++)
+		workers.push_back(std::make_unique<SWorker>());
+	for (int i = 0; i < n && i < CTcdStats::MAX_WORKERS; i++)
+		g_Stats.workers[i].modules = of[i];
+	worker_tick = std::chrono::steady_clock::now();
+	g_Stats.num_workers.store(std::min(n, CTcdStats::MAX_WORKERS));
+	for (int i = 0; i < n; i++)
+		workers[i]->thread = std::thread(&CController::WorkerThread, this, i);
+	std::cout << n << (n == 1 ? " module worker:" : " module workers:");
+	for (const auto &m : of)
+		std::cout << " " << m;
+	std::cout << std::endl;
+}
+
+void CController::WorkerThread(int i)
+{
+	t_worker = i;
+	char name[16];
+	snprintf(name, sizeof(name), "tcd-worker%d", i);
+	SetThreadName(name);
+	auto &w = *workers[i];
+	SJob job;
+	while (w.queue.pop(job))
+	{
+		const auto start = std::chrono::steady_clock::now();
+		const uint32_t waited = uint32_t(std::min<int64_t>(UINT32_MAX, std::chrono::duration_cast<std::chrono::microseconds>(start - job.queued).count()));
+		for (uint32_t prev = w.wait_us.load(std::memory_order_relaxed); waited > prev && !w.wait_us.compare_exchange_weak(prev, waited, std::memory_order_relaxed); )
+			;
+		RunStage(job.stage, job.packet, &job.answer);
+		job.packet.reset();
+		w.busy_ns.fetch_add(uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count()), std::memory_order_relaxed);
+	}
+}
+
+void CController::WorkerStatsTick(void)
+{
+	// once a second: the reflector loop runs more often while packets come
+	const auto now = std::chrono::steady_clock::now();
+	const double elapsed = std::chrono::duration<double>(now - worker_tick).count();
+	if (elapsed < 1.0)
+		return;
+	worker_tick = now;
+	for (size_t i = 0; i < workers.size() && i < size_t(CTcdStats::MAX_WORKERS); i++)
+	{
+		auto &w = *workers[i];
+		const uint64_t busy = w.busy_ns.load(std::memory_order_relaxed);
+		const double pct = double(busy - w.last_busy_ns) / 1e9 / elapsed * 100.0;
+		w.last_busy_ns = busy;
+		g_Stats.workers[i].busy_pct.store(float(std::min(100.0, pct)), std::memory_order_relaxed);
+		g_Stats.workers[i].wait_ms.store(float(w.wait_us.exchange(0, std::memory_order_relaxed)) / 1000.0f, std::memory_order_relaxed);
+	}
+}
+
+void CController::Dispatch(EStage stage, std::shared_ptr<CTranscoderPacket> packet)
+{
+	if (workers.empty())
+		return;	// not started
+	const int w = worker_of[ModuleIndex(packet->GetModule())];
+	if (t_worker == w)
+		RunStage(stage, packet, nullptr);
+	else
+		workers[w]->queue.push(SJob{ stage, std::move(packet), {}, std::chrono::steady_clock::now() });
+}
+
+void CController::DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, Encoding ch_enc, const SDeviceAnswer &answer)
+{
+	if (workers.empty())
+		return;
+	const EStage stage = Encoding::dstar == ch_enc ? EStage::dstar_answer : EStage::dmr_answer;
+	const int w = worker_of[ModuleIndex(packet->GetModule())];
+	if (t_worker == w)
+		RunStage(stage, packet, &answer);
+	else
+		workers[w]->queue.push(SJob{ stage, std::move(packet), answer, std::chrono::steady_clock::now() });
+}
+
+void CController::RunStage(EStage stage, const std::shared_ptr<CTranscoderPacket> &packet, const SDeviceAnswer *answer)
+{
+	switch (stage)
+	{
+	case EStage::in:      StageIn(packet);      break;
+	case EStage::codec2:  StageC2(packet);      break;
+	case EStage::imbe:    StageIMBE(packet);    break;
+	case EStage::usrp:    StageUSRP(packet);    break;
+	case EStage::swdmr:   StageSWAMBE2(packet); break;
+	case EStage::swdstar: StageSWDStar(packet); break;
+	case EStage::dstar_answer:
+	case EStage::dmr_answer:
+		if (!answer)
+			break;
+		if (answer->audio)
+			packet->SetAudioSamples(answer->pcm, false);
+		else if (EStage::dstar_answer == stage)
+			packet->SetDStarData(answer->ambe);
+		else
+			packet->SetDMRData(answer->ambe);
+		if (EStage::dstar_answer == stage)
+			RouteDstPacket(packet);
+		else
+			RouteDmrPacket(packet);
+		break;
+	}
+}
+
+void CController::StageIn(std::shared_ptr<CTranscoderPacket> packet)
+{
+	switch (packet->GetCodecIn())
+	{
+	case ECodecType::dstar:
+		ToDStar(packet);
+		break;
+	case ECodecType::dmr:
+		ToDmr(packet);
+		break;
+	case ECodecType::p25:
+		StageIMBE(packet);
+		break;
+	case ECodecType::usrp:
+	case ECodecType::svx:
+		StageUSRP(packet);
+		break;
+	case ECodecType::c2_1600:
+	case ECodecType::c2_3200:
+		StageC2(packet);
+		break;
+	default:
+		Dump(packet, "ERROR: Received a reflector packet with unknown Codec:");
+		break;
+	}
+}
+
+void CController::SendIfDone(const std::shared_ptr<CTranscoderPacket> &packet)
+{
+	if (packet->AllCodecsAreSet() && packet->HasNotBeenSent())
+		SendToReflector(packet);
 }
 
 // 4th order Butterworth high-pass, 300 Hz at 8 kHz, two biquads (direct form II
@@ -1270,7 +1446,7 @@ void CController::HighPass(char module, uint16_t streamid, int16_t *samples)
 		{ 0.734407998f, -1.468815996f, 0.734407998f, -1.5997196711f, 0.6451760153f },
 		{ 1.0f, -2.0f, 1.0f, -1.7852530573f, 0.8359813686f }
 	};
-	auto &hp = c2_highpass[module];
+	auto &hp = c2_highpass[ModuleIndex(module)];
 	if (hp.streamid != streamid)
 	{
 		hp = SHighPass{ {{0.0f, 0.0f}, {0.0f, 0.0f}}, streamid };
@@ -1308,21 +1484,19 @@ void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 	memcpy(m17data + 8, C2_3200_SILENCE, sizeof(C2_3200_SILENCE));
 	if (packet->IsSecond())
 	{
-		memcpy(m17data, data_store[packet->GetModule()], 8);
+		memcpy(m17data, data_store[ModuleIndex(packet->GetModule())], 8);
 		EncodeM17(packet, gained, m17data+8);
 		packet->SetM17Data(m17data);
 	}
 	else
 	{
 		EncodeM17(packet, gained, m17data);
-		memcpy(data_store[packet->GetModule()], m17data, 8);
+		memcpy(data_store[ModuleIndex(packet->GetModule())], m17data, 8);
 		packet->SetM17Data(m17data);
 	}
 
 	// we might be all done...
-	send_mux.lock();
-	if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-	send_mux.unlock();
+	SendIfDone(packet);
 }
 
 void CController::EncodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *bits)
@@ -1358,7 +1532,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 				if (auto *sw = SwCodec(TCD_CODEC_M17_1600, packet))
 					sw->End(packet->GetStreamKey(), false);
 			int16_t tmp[160];
-			memcpy(tmp, audio_store[packet->GetModule()], sizeof(tmp));
+			memcpy(tmp, audio_store[ModuleIndex(packet->GetModule())], sizeof(tmp));
 			g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 			float agc_db; bool agc_gate;
 			m_agcDigital.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
@@ -1388,7 +1562,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 			g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 			packet->SetAudioSamples(tmp, false);
 			// the second half goes through the AGC with the second packet
-			memcpy(audio_store[packet->GetModule()], &(tmp[160]), 320);
+			memcpy(audio_store[ModuleIndex(packet->GetModule())], &(tmp[160]), 320);
 		}
 		else /* codec_in is ECodecType::c2_3200 */
 		{
@@ -1428,35 +1602,28 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	ToDmr(packet);
 }
 
-void CController::ProcessC2Thread()
+void CController::StageC2(std::shared_ptr<CTranscoderPacket> packet)
 {
-	while (keep_running)
+	switch (packet->GetCodecIn())
 	{
-		auto packet = codec2_queue.pop();
-		if (!packet)
-			break;	// the queue was shut down: tcd stops
+		case ECodecType::c2_1600:
+		case ECodecType::c2_3200:
+			// this is an original M17 packet, so decode it to audio
+			// Codec2toAudio will send it on for AMBE processing
+			Codec2toAudio(packet);
+			break;
 
-		switch (packet->GetCodecIn())
-		{
-			case ECodecType::c2_1600:
-			case ECodecType::c2_3200:
-				// this is an original M17 packet, so decode it to audio
-				// Codec2toAudio will send it on for AMBE processing
-				Codec2toAudio(packet);
-				break;
+		case ECodecType::dstar:
+		case ECodecType::dmr:
+		case ECodecType::p25:
+		case ECodecType::usrp:
+		case ECodecType::svx:
+			// codec_in was AMBE, so we need to calculate the the M17 data
+			AudiotoCodec2(packet);
+			break;
 
-			case ECodecType::dstar:
-			case ECodecType::dmr:
-			case ECodecType::p25:
-			case ECodecType::usrp:
-			case ECodecType::svx:
-				// codec_in was AMBE, so we need to calculate the the M17 data
-				AudiotoCodec2(packet);
-				break;
-
-			default:	// none, ping: ReadReflectorThread queues neither
-				break;
-		}
+		default:	// none, ping: ReadReflectorThread queues neither
+			break;
 	}
 }
 
@@ -1464,9 +1631,7 @@ void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 {
 	if (packet->DMRIsSet())	// coded from the source's frame already (Transcode)
 	{
-		send_mux.lock();
-		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-		send_mux.unlock();
+		SendIfDone(packet);
 		return;
 	}
 	uint8_t ambe2[9] = {};
@@ -1486,9 +1651,7 @@ void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 	packet->SetDMRData(ambe2);
 
 	// we might be all done...
-	send_mux.lock();
-	if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-	send_mux.unlock();
+	SendIfDone(packet);
 }
 
 void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
@@ -1534,37 +1697,30 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	if (decoded)	// a failed decode keeps the marks: no flicker
 		ModuleDirect(packet, direct);
 	ToDStar(packet);
-	codec2_queue.push(packet);
-	imbe_queue.push(packet);
-	usrp_queue.push(packet);
+	Dispatch(EStage::codec2, packet);
+	Dispatch(EStage::imbe, packet);
+	Dispatch(EStage::usrp, packet);
 }
 
-void CController::ProcessSWAMBE2Thread()
+void CController::StageSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 {
-	while (keep_running)
+	switch (packet->GetCodecIn())
 	{
-		auto packet = swambe2_queue.pop();
-		if (!packet)
-			break;	// the queue was shut down: tcd stops
+		case ECodecType::c2_1600:
+		case ECodecType::c2_3200:
+		case ECodecType::dstar:
+		case ECodecType::p25:
+		case ECodecType::usrp:
+		case ECodecType::svx:
+			AudiotoSWAMBE2(packet);
+			break;
 
-		switch (packet->GetCodecIn())
-		{
-			case ECodecType::c2_1600:
-			case ECodecType::c2_3200:
-			case ECodecType::dstar:
-			case ECodecType::p25:
-			case ECodecType::usrp:
-			case ECodecType::svx:
-				AudiotoSWAMBE2(packet);
-				break;
+		case ECodecType::dmr:
+			SWAMBE2toAudio(packet);
+			break;
 
-			case ECodecType::dmr:
-				SWAMBE2toAudio(packet);
-				break;
-
-			default:	// none, ping: ReadReflectorThread queues neither
-				break;
-		}
+		default:	// none, ping: ReadReflectorThread queues neither
+			break;
 	}
 }
 
@@ -1574,9 +1730,7 @@ void CController::AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 {
 	if (packet->DStarIsSet())	// coded from the source's frame already (Transcode)
 	{
-		dstar_mux.lock();
 		RouteDstPacket(packet);
-		dstar_mux.unlock();
 		return;
 	}
 	// OutputGainDStar and DStarGainIn, as a device applies them before its encoder
@@ -1589,9 +1743,7 @@ void CController::AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 	sw->Encode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), pcm, frame);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 	packet->SetDStarData(frame);
-	dstar_mux.lock();
 	RouteDstPacket(packet);
-	dstar_mux.unlock();
 }
 
 void CController::SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet)
@@ -1603,23 +1755,15 @@ void CController::SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet)
 	SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
 	ApplyGain(pcm, 160, dstar_out_num);
 	packet->SetAudioSamples(pcm, false);
-	dstar_mux.lock();
 	RouteDstPacket(packet, sw, decoded);
-	dstar_mux.unlock();
 }
 
-void CController::ProcessSWDStarThread()
+void CController::StageSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 {
-	while (keep_running)
-	{
-		auto packet = swdstar_queue.pop();
-		if (!packet)
-			break;	// the queue was shut down: tcd stops
-		if (ECodecType::dstar == packet->GetCodecIn())
-			SWDStarToAudio(packet);
-		else
-			AudioToSWDStar(packet);
-	}
+	if (ECodecType::dstar == packet->GetCodecIn())
+		SWDStarToAudio(packet);
+	else
+		AudioToSWDStar(packet);
 }
 
 // the choice that decodes a stream whose input codec is `in`, -1 for none (USRP, SVX: audio)
@@ -2297,7 +2441,7 @@ void CController::ToDStar(std::shared_ptr<CTranscoderPacket> packet)
 	std::shared_ptr<CDVDevice> dev;
 	uint8_t ch = 0;
 	if (SwCodec(TCD_CODEC_DSTAR, packet, &dev, &ch))
-		swdstar_queue.push(packet);
+		Dispatch(EStage::swdstar, packet);
 	else if (dev)
 		dev->AddPacketToChannel(packet, ch);
 	else
@@ -2309,7 +2453,7 @@ void CController::ToDmr(std::shared_ptr<CTranscoderPacket> packet)
 	std::shared_ptr<CDVDevice> dev;
 	uint8_t ch = 0;
 	if (SwCodec(TCD_CODEC_DMR, packet, &dev, &ch))
-		swambe2_queue.push(packet);
+		Dispatch(EStage::swdmr, packet);
 	else if (dev)
 		dev->AddPacketToChannel(packet, ch);
 	else
@@ -2345,9 +2489,7 @@ void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
 	if (packet->P25IsSet())	// coded from the source's frame already (Transcode)
 	{
 		SwCodec(TCD_CODEC_P25, packet);	// its StreamLog count, as EncodeIMBE's lookup would make it
-		send_mux.lock();
-		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-		send_mux.unlock();
+		SendIfDone(packet);
 		return;
 	}
 	uint8_t imbe[11];
@@ -2357,9 +2499,7 @@ void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
 	EncodeIMBE(packet, gained, imbe);
 	packet->SetP25Data(imbe);
 	// we might be all done...
-	send_mux.lock();
-	if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-	send_mux.unlock();
+	SendIfDone(packet);
 }
 
 void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
@@ -2386,39 +2526,32 @@ void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	if (decoded || !from)	// a failed decode keeps the marks: no flicker
 		ModuleDirect(packet, direct);
 	ToDStar(packet);
-	codec2_queue.push(packet);
+	Dispatch(EStage::codec2, packet);
 
 	ToDmr(packet);
 
-	usrp_queue.push(packet);
+	Dispatch(EStage::usrp, packet);
 }
 
-void CController::ProcessIMBEThread()
+void CController::StageIMBE(std::shared_ptr<CTranscoderPacket> packet)
 {
-	while (keep_running)
+	switch (packet->GetCodecIn())
 	{
-		auto packet = imbe_queue.pop();
-		if (!packet)
-			break;	// the queue was shut down: tcd stops
+		case ECodecType::c2_1600:
+		case ECodecType::c2_3200:
+		case ECodecType::dstar:
+		case ECodecType::dmr:
+		case ECodecType::usrp:
+		case ECodecType::svx:
+			AudiotoIMBE(packet);
+			break;
 
-		switch (packet->GetCodecIn())
-		{
-			case ECodecType::c2_1600:
-			case ECodecType::c2_3200:
-			case ECodecType::dstar:
-			case ECodecType::dmr:
-			case ECodecType::usrp:
-			case ECodecType::svx:
-				AudiotoIMBE(packet);
-				break;
+		case ECodecType::p25:
+			IMBEtoAudio(packet);
+			break;
 
-			case ECodecType::p25:
-				IMBEtoAudio(packet);
-				break;
-
-			default:	// none, ping: ReadReflectorThread queues neither
-				break;
-		}
+		default:	// none, ping: ReadReflectorThread queues neither
+			break;
 	}
 }
 
@@ -2431,9 +2564,7 @@ void CController::AudiotoUSRP(std::shared_ptr<CTranscoderPacket> packet)
 
 
 	// we might be all done...
-	send_mux.lock();
-	if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-	send_mux.unlock();
+	SendIfDone(packet);
 }
 
 void CController::USRPtoAudio(std::shared_ptr<CTranscoderPacket> packet)
@@ -2451,42 +2582,35 @@ void CController::USRPtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	g_Stats.UpdateLevelsOut(packet->GetModule(), tmp, 160);
 	FrameLevels(packet, "usrp");
 	ToDStar(packet);
-	codec2_queue.push(packet);
+	Dispatch(EStage::codec2, packet);
 
 	ToDmr(packet);
 
-	imbe_queue.push(packet);
+	Dispatch(EStage::imbe, packet);
 }
 
-void CController::ProcessUSRPThread()
+void CController::StageUSRP(std::shared_ptr<CTranscoderPacket> packet)
 {
-	while (keep_running)
+	switch (packet->GetCodecIn())
 	{
-		auto packet = usrp_queue.pop();
-		if (!packet)
-			break;	// the queue was shut down: tcd stops
+		case ECodecType::c2_1600:
+		case ECodecType::c2_3200:
+		case ECodecType::dstar:
+		case ECodecType::dmr:
+		case ECodecType::p25:
+			AudiotoUSRP(packet);
+			break;
 
-		switch (packet->GetCodecIn())
-		{
-			case ECodecType::c2_1600:
-			case ECodecType::c2_3200:
-			case ECodecType::dstar:
-			case ECodecType::dmr:
-			case ECodecType::p25:
-				AudiotoUSRP(packet);
-				break;
+		case ECodecType::usrp:
+			USRPtoAudio(packet);
+			break;
 
-			case ECodecType::usrp:
-				USRPtoAudio(packet);
-				break;
+		case ECodecType::svx:
+			SvxToAudio(packet);
+			break;
 
-			case ECodecType::svx:
-				SvxToAudio(packet);
-				break;
-
-			default:	// none, ping: ReadReflectorThread queues neither
-				break;
-		}
+		default:	// none, ping: ReadReflectorThread queues neither
+			break;
 	}
 }
 
@@ -2507,11 +2631,11 @@ void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
 	g_Stats.UpdateLevelsOut(packet->GetModule(), tmp, 160);
 	FrameLevels(packet, "svx");
 	ToDStar(packet);
-	codec2_queue.push(packet);
+	Dispatch(EStage::codec2, packet);
 
 	ToDmr(packet);
 
-	imbe_queue.push(packet);
+	Dispatch(EStage::imbe, packet);
 }
 
 void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
@@ -2567,17 +2691,15 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSof
 		if (decoded)	// a failed decode keeps the marks: no flicker
 			ModuleDirect(packet, direct);
 		// Output gains applied in encode functions and DVSI FeedDevice
-		codec2_queue.push(packet);
-		imbe_queue.push(packet);
-		usrp_queue.push(packet);
+		Dispatch(EStage::codec2, packet);
+		Dispatch(EStage::imbe, packet);
+		Dispatch(EStage::usrp, packet);
 		ToDmr(packet);
 	}
 	else
 	{
 		DeviceFrameOut(kChoiceDStar, packet);
-		send_mux.lock();
-		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-		send_mux.unlock();
+		SendIfDone(packet);
 	}
 }
 
@@ -2634,9 +2756,9 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 			m_ambeGain.Process(dmr_data, packet->GetStreamKey(), gain_db);
 			packet->SetDMRData(dmr_data);
 		}
-		codec2_queue.push(packet);
-		imbe_queue.push(packet);
-		usrp_queue.push(packet);
+		Dispatch(EStage::codec2, packet);
+		Dispatch(EStage::imbe, packet);
+		Dispatch(EStage::usrp, packet);
 		ToDStar(packet);
 	}
 	else
@@ -2650,9 +2772,7 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 			BitstreamDmrGain(dmr_data, packet->GetStreamKey());
 			packet->SetDMRData(dmr_data);
 		}
-		send_mux.lock();
-		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-		send_mux.unlock();
+		SendIfDone(packet);
 	}
 }
 

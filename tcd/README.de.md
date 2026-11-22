@@ -200,7 +200,7 @@ Zu diesem Repository gehört kein Codec-Plugin: Software-Umsetzungen von AMBE un
 
 ### Ein Plugin schreiben
 
-Die Schnittstelle ist reines C, [`CodecPlugin.h`](CodecPlugin.h): `open`/`close` eines Zustands je Stream, `encode`/`decode` von 160 Samples PCM mit 8 kHz zu und von einem Frame, `start`/`stop` am ersten und nach dem letzten Frame einer Aussendung; optional `decode_info` (wie ein Frame herauskam: korrigierte Bitfehler, Wiederholung, stumm, Ton, Stille), `frame_format` und `transcode` für den direkten Weg. tcd ruft ein Plugin immer nur aus einem Thread gleichzeitig auf und schließt den Zustand eines Streams, der 30 s still war. Ein Plugin wird nur gegen diesen Header gebaut und läuft auch in neueren tcd-Versionen, solange seine API-Version zwischen `TCD_CODEC_API_MIN` und `TCD_CODEC_API` liegt.
+Die Schnittstelle ist reines C, [`CodecPlugin.h`](CodecPlugin.h): `open`/`close` eines Zustands je Stream, `encode`/`decode` von 160 Samples PCM mit 8 kHz zu und von einem Frame, `start`/`stop` am ersten und nach dem letzten Frame einer Aussendung; optional `decode_info` (wie ein Frame herauskam: korrigierte Bitfehler, Wiederholung, stumm, Ton, Stille), `frame_format` und `transcode` für den direkten Weg. tcd schließt den Zustand eines Streams, der 30 s still war. Es ruft ein Plugin immer nur aus einem Thread gleichzeitig auf, außer das Plugin setzt `TCD_PLUGIN_CONCURRENT` (API 5): Dann rufen es die [Modul-Worker](#modul-worker) gleichzeitig für die Zustände verschiedener Streams auf, nie zweimal zugleich für denselben Zustand. Ein Plugin wird nur gegen diesen Header gebaut und läuft auch in neueren tcd-Versionen, solange seine API-Version zwischen `TCD_CODEC_API_MIN` und `TCD_CODEC_API` liegt.
 
 Frame-Formate: D-Star als die 9 Datenbytes eines DV-Frames, DMR/YSF als die 72 Bits eines AMBE2+-Frames in Sendereihenfolge, MSB zuerst (die Formate der DVSI-Geräte); P25 als die 88 IMBE-Parameterbits u0..u7 in 11 Bytes, MSB zuerst; M17 als die 64 Codec2-Bits von 20 ms (3200) oder 40 ms (1600, 320 Samples). tcd codiert M17 nur als 3200.
 
@@ -210,6 +210,12 @@ Frame-Formate: D-Star als die 9 Datenbytes eines DV-Frames, DMR/YSF als die 72 B
 - `decode`: decodiert eine Frame-Datei
 - `dvsitest <gerät> enc|dec dstar|dmr in out`: dasselbe auf einem DV3003 (`DVSI_TYPE=3000` für einen DV3000), um ein Plugin mit der Hardware zu vergleichen; `dvsitest <gerät> info` zeigt Produkt-ID und Version des Chips; `dvsitest <gerät> batch <jobs>` arbeitet eine Jobliste auf den drei Kanälen eines DV3003 ab. Vorher tcd stoppen oder das Gerät im Monitor ausphasen.
 - `ambecheck`: prüft die FEC einer Datei mit AMBE-Frames
+
+### Modul-Worker
+
+Jedes Modul gehört zu einem der Worker von tcd (`Workers` in der tcd.ini, `auto`: einer je CPU-Kern). Der Worker erledigt alles für die Frames seines Moduls: Decodieren, AGC, Codieren in die anderen Codecs in Software, die Antworten der AMBE-Geräte und das Zurücksenden an urfd. Die Worker laufen gleichzeitig, so teilen sich die Module die CPU-Kerne, und ein Modul, das lange braucht, hält die Module anderer Worker nicht auf. Die Module werden der Reihe nach in der Reihenfolge von `Modules` und `StandbyModules` verteilt; das Log nennt die Aufteilung beim Start (`4 module workers: AE BF CG DH`).
+
+Die AMBE-Geräte behalten ihre eigenen Threads für die serielle Leitung; ein Worker übergibt ihnen einen Frame und macht derweil mit anderen Frames weiter. Die eigenen Vocoder von tcd (OP25, Codec2) laufen parallel; ein Codec-Plugin dann, wenn es `TCD_PLUGIN_CONCURRENT` setzt (API 5), sonst nutzt es immer nur ein Worker zur Zeit, und das Log sagt das beim Start. Gemessen auf einem Raspberry Pi 5: 26 Module, die gleichzeitig in allen Protokollen transcodiert werden, brauchen weniger als einen halben Kern ([Messungen](docs/MEASUREMENTS.de.md#cpu-last-und-latenz)).
 
 ## tcd in Docker
 
@@ -282,6 +288,7 @@ Ein Gerät, das sich nicht öffnen lässt oder nicht antwortet, wird mit einer W
 | `CodecPlugin` | `op25`, `codec2` | zu ladendes Codec-Plugin, je eine Zeile: der Pfad eines Shared Objects, oder `op25` / `codec2` für die eigenen (siehe [Codec-Plugins](#codec-plugins)) |
 | `CodecDStar` / `CodecDMR` / `CodecP25` / `CodecM17` | — | der Vocoder für neue Streams: `dvsi`, `op25`, `codec2` oder der Name eines Plugins; von „Save“ gespeichert |
 | `Transcode` | `direct` | `direct`: D-Star, DMR/YSF und P25 werden, wo ein Plugin es kann, aus den Vocoder-Parametern ineinander codiert; `audio`: jeder Codec aus dem decodierten Audio (siehe [Codec-Plugins](#codec-plugins)) |
+| `Workers` | `auto` | die Threads, die die Module codieren, jedes Modul auf einem davon; `auto`: einer je CPU-Kern, höchstens einer je Modul; oder 1 bis 26 (siehe [Modul-Worker](#modul-worker)) |
 | `DeviceChannels` | — (Standard `fixed`) | `fixed`: die AMBE-Kanäle gehören den ersten Modulen; `pool`: ein Stream nimmt einen beliebigen freien Kanal (siehe [Kanal-Pool](#kanal-pool-devicechannels--pool)) |
 | `DeviceCompand` | — (Standard `linear`) | Audio zu und von den AMBE-Geräten: `linear` (16 Bit), `ulaw` oder `alaw` (8-Bit-G.711, siehe [Verlorene Antworten](#verlorene-antworten-devicecompand)); von „Save“ gespeichert |
 
@@ -490,6 +497,7 @@ Was tcd über [n7tae/tcd](https://github.com/n7tae/tcd) hinaus kann; die Einzelh
 
 - **Geräte**: serieller Zugriff über den Kernel-Treiber `ftdi_sio` statt libftd2xx (POSIX-Backend von Jason Kendall), Gerätetyp vom Chip, genaue Geräteauswahl, macOS, Mischbetrieb (DV3000 + DV3003 oder ein einzelner DV3003), drei Geräte und mehr, Kanal-Pool, ausgefallene Geräte gehen an die Codec-Plugins und werden wieder geöffnet, Erholung von verlorenen seriellen Antworten, `DeviceCompand`
 - **Vocoder**: Codec-Plugins mit einer reinen C-Schnittstelle, im Betrieb umschaltbar, direkte Transcodierung zwischen den MBE-Codecs; OP25 und Codec2 als eingebaute Plugins; keine MD380-Firmware in tcd
+- **Threads**: Modul-Worker, die die Module parallel codieren, statt eines Threads je Codec für alle Module
 - **Audio**: eine sprachgesteuerte AGC mit getrennten Profilen für digitale und analoge Quellen, Rauschunterdrückung für FM-Quellen, Ausgangs-Gains je Codec, der Gain der AGC im AMBE2+-Bitstrom für DMR → DMR/YSF, ein 300-Hz-Hochpass für P25 → M17
 - **Überwachung**: Web-Dashboard im Stil des urfd-Dashboards und `tcdmon`, ein Bericht jedes Durchgangs an urfd, Stream-Log mit FEC-Prüfung, Statistik-CSV mit `agc-analyze`
 - **Betrieb**: gebaut aus dem urfd-Repository mit `build.sh` oder in Docker, Standby-Module für einen zweiten tcd, ein Passwort für die Verbindung zum Reflektor, Hostnamen als `ServerAddress`, Neuverbinden mit Backoff, Pings und Timeouts auf der Verbindung zum Reflektor, `TCP_NODELAY`, Monitor standardmäßig nur auf Loopback mit optionalem Passwort, Webserver auf libwebsockets (GPL-kompatibel)

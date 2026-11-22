@@ -34,6 +34,11 @@
 #include "DeviceIO.h"
 #include "G711.h"
 
+// a device's answer to a packet, put into the packet by its module's worker
+// (CController::DeviceAnswer): audio, decoded speech in pcm, else the frame in
+// ambe of the channel's codec
+struct SDeviceAnswer { bool audio; uint8_t ambe[9]; int16_t pcm[160]; };
+
 class CDVDevice
 {
 public:
@@ -130,7 +135,8 @@ protected:
 	// stream runs, a lost answer whose channel is not known costs it 20 ms until then
 	void Resync(void);
 	// a packet with this device's output set, on to the controller
-	void Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc);
+	// the answer to the packet goes to its module's worker, which puts it into the packet
+	void Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, const SDeviceAnswer &answer);
 
 	// reading the answers while running: bytes read ahead first, then the device
 	std::deque<uint8_t> rx;

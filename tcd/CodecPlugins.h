@@ -19,11 +19,24 @@
 
 #include "CodecPlugin.h"
 
+// the locks of a plugin, shared by its codecs. A stream's states belong to its
+// module, and so do their lock and their map (CSoftCodec): the modules' workers
+// (Controller.h) code in parallel. A plugin without TCD_PLUGIN_CONCURRENT is
+// called by one of them at a time (plugin)
+struct SPluginLocks
+{
+	static constexpr int kShards = 27;	// A-Z, and one for a key of no module
+	static int Shard(uint32_t key) { const char m = char((key >> 16) & 0xffu); return (m >= 'A' && m <= 'Z') ? m - 'A' : kShards - 1; }
+	std::mutex module[kShards];
+	std::mutex plugin;
+	bool concurrent = false;
+};
+
 // one codec of one plugin, with a state per stream
 class CSoftCodec
 {
 public:
-	CSoftCodec(const tcd_codec_plugin *plugin, uint32_t codec, std::shared_ptr<std::mutex> mutex, bool builtin) : m_Plugin(plugin), m_Codec(codec), m_Mutex(mutex), m_Builtin(builtin) {}
+	CSoftCodec(const tcd_codec_plugin *plugin, uint32_t codec, std::shared_ptr<SPluginLocks> locks, bool builtin) : m_Plugin(plugin), m_Codec(codec), m_Locks(locks), m_Builtin(builtin) {}
 	~CSoftCodec();
 
 	const char *GetName(void) const { return m_Plugin->name; }
@@ -85,16 +98,33 @@ private:
 	// the codec thread's (shared, the decoder's newer frames made Encode start
 	// afresh at nearly every frame, tcd 0.22.5)
 	static uint32_t DirectKey(uint32_t stream, uint32_t from) { return 0x40000000u | (from << 24) | stream; }
-	SState *State(uint32_t key, uint32_t sequence);	// with m_Mutex held; started
-	void Stop(SState *s, bool last);	// after the frame, with m_Mutex held
+	// the states of one module's streams: a stream's keys all have its module
+	struct SShard
+	{
+		std::unordered_map<uint32_t, SState> states;	// by Key()
+		std::unordered_set<uint32_t> failed;	// the keys whose open failed, logged once
+		uint64_t starts = 0;	// the starts of its states so far
+	};
+	// the module's lock, and the plugin's when it is not TCD_PLUGIN_CONCURRENT
+	class CLock
+	{
+	public:
+		CLock(SPluginLocks &locks, int shard) : m_Module(locks.module[shard]), m_Plugin(locks.concurrent ? nullptr : &locks.plugin) { m_Module.lock(); if (m_Plugin) m_Plugin->lock(); }
+		~CLock() { if (m_Plugin) m_Plugin->unlock(); m_Module.unlock(); }
+		CLock(const CLock &) = delete;
+		CLock &operator=(const CLock &) = delete;
+	private:
+		std::mutex &m_Module;
+		std::mutex *m_Plugin;
+	};
+	SState *State(SShard &shard, uint32_t key, uint32_t sequence);	// with the shard's CLock held; started
+	void Stop(SState *s, bool last);	// after the frame, with the shard's CLock held
 
 	const tcd_codec_plugin *m_Plugin;
 	uint32_t m_Codec;
-	std::shared_ptr<std::mutex> m_Mutex;	// the plugin's: one call at a time, for all its codecs
+	std::shared_ptr<SPluginLocks> m_Locks;	// the plugin's, for all its codecs
 	bool m_Builtin;
-	std::unordered_map<uint32_t, SState> m_States;	// by Key()
-	std::unordered_set<uint32_t> m_Failed;	// the keys whose open failed, logged once
-	uint64_t m_Starts = 0;	// the starts of its states so far
+	SShard m_Shards[SPluginLocks::kShards];	// by SPluginLocks::Shard of the key
 };
 
 class CCodecPlugins
@@ -116,7 +146,7 @@ public:
 
 private:
 	// handle: nullptr for tcd's own
-	struct SLoaded { std::string path; void *handle; const tcd_codec_plugin *plugin; bool ready; std::shared_ptr<std::mutex> mutex; };
+	struct SLoaded { std::string path; void *handle; const tcd_codec_plugin *plugin; bool ready; std::shared_ptr<SPluginLocks> locks; };
 	std::vector<SLoaded> m_Loaded;
 	std::vector<CSoftCodec *> m_Codecs;	// made by Get, one per plugin and codec
 };

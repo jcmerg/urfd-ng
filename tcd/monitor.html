@@ -301,6 +301,12 @@ table.measure tr.grp { display: none; }
       <dl class="kv line" id="reflector"><dt>Link</dt><dd class="muted">No report yet</dd></dl>
     </section>
 
+    <section aria-labelledby="h-wrk" id="workers-box" hidden>
+      <header><h2 id="h-wrk">Workers</h2></header>
+      <dl class="kv line" id="workers"></dl>
+      <p class="legend">Each module is coded by one worker, the workers run at the same time. Per worker: its modules, the share of a CPU core it worked in the last second, and the longest a frame waited for it then (red from 70 % or 20 ms: more Workers in tcd.ini spread the modules wider).</p>
+    </section>
+
     <section aria-labelledby="h-dev">
       <header><h2 id="h-dev">Vocoders</h2></header>
       <div class="tbl"><table>
@@ -708,6 +714,16 @@ function render() {
   // Transcode as well: another browser or the API may have switched it
   if (document.activeElement !== $('transcode_direct')) $('transcode_direct').value = data.config.transcode_direct === false ? 'audio' : 'direct';
 
+  // the module workers: modules, load and the longest wait in the last second
+  var ws = data.workers || [];
+  $('workers-box').hidden = !ws.length;
+  var wrk = ws.map(function (w) {
+    var hot = w.busy >= 70 || w.wait_ms >= 20;
+    return '<dt>' + w.modules.split('').map(function (m) { return '<span class="mod-tag">' + esc(m) + '</span>'; }).join('') + '</dt>' +
+      '<dd' + (hot ? ' class="state-bad"' : '') + '>' + Math.round(w.busy) + ' % <span class="muted">·</span> ' + w.wait_ms.toFixed(1) + ' ms</dd>';
+  }).join('');
+  if (wrk !== lastWorkers) { $('workers').innerHTML = wrk; lastWorkers = wrk; }
+
   var r = data.reflector;
   $('reflector').innerHTML =
     '<dt>Link</dt><dd>' + (r.connected ? '<span class="state-ok">connected</span>' : '<span class="state-bad">not connected, tcd retries on its own</span>') + '</dd>' +
@@ -715,7 +731,7 @@ function render() {
 }
 
 // settings
-var lastDeviceRows = '', lastDeviceHead = '';
+var lastDeviceRows = '', lastDeviceHead = '', lastWorkers = '';
 // the vocoder table has a column per counter when its box takes it in that
 // width, else the counters of a group in one cell (narrow)
 var tableWide = true, wideNeed = 0;

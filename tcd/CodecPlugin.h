@@ -25,7 +25,10 @@
 //
 //   extern "C" const struct tcd_codec_plugin *tcd_codec_plugin(void);
 //
-// tcd calls a plugin from one thread at a time. A frame is 20 ms, 160 samples of
+// tcd calls a plugin from one thread at a time, unless the plugin sets
+// TCD_PLUGIN_CONCURRENT (api 5): then calls on different states may come from
+// several threads at once, while the calls on one state, and on the states of
+// one stream, still come one at a time. A frame is 20 ms, 160 samples of
 // 8 kHz PCM, except TCD_CODEC_M17_1600: 40 ms, 320 samples. Each stream gets a state of its own (open/close), so streams do not
 // mix their vocoder state; tcd closes the state of a stream that has been quiet
 // for 30 s. start and stop tell the plugin where a transmission begins and ends:
@@ -41,7 +44,7 @@
 extern "C" {
 #endif
 
-#define TCD_CODEC_API     4	// 2: start and stop; 3: decode_info, frame_format; 4: transcode
+#define TCD_CODEC_API     5	// 2: start and stop; 3: decode_info, frame_format; 4: transcode; 5: flags
 #define TCD_CODEC_API_MIN 2	// the oldest api tcd still loads
 
 // the codecs, also as bits in tcd_codec_plugin.codecs
@@ -50,6 +53,10 @@ extern "C" {
 #define TCD_CODEC_P25      0x04u   // P25 IMBE 4400, 11 bytes
 #define TCD_CODEC_M17      0x08u   // M17 Codec2 3200, 8 bytes (half an M17 payload), 160 samples
 #define TCD_CODEC_M17_1600 0x10u   // M17 Codec2 1600, 8 bytes (the voice half of the payload), 320 samples
+
+// what a plugin allows (api 5), as bits in tcd_codec_plugin.flags
+#define TCD_PLUGIN_CONCURRENT 0x01u   // calls on different states may run at the same time (no shared state
+                                      // between them that is not safe for that); see the top of this file
 
 // how a frame was decoded (api 3), as bits in tcd_frame_info.flags
 #define TCD_FRAME_REPEAT  0x01u   // played as a repeat of the last good frame
@@ -115,6 +122,10 @@ struct tcd_codec_plugin
 	// other for its rest, after start.
 	// A plugin without it, or an error, leaves tcd to encode the audio.
 	int (*transcode)(void *decoder, void *encoder, float gain_db, uint8_t *frame);
+
+	// api 5: TCD_PLUGIN_* bits; tcd reads it only from a plugin built for api 5
+	// or later, an older one is called from one thread at a time
+	uint32_t flags;
 };
 
 typedef const struct tcd_codec_plugin *(*tcd_codec_plugin_func)(void);
