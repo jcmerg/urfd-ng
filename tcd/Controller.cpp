@@ -1263,14 +1263,31 @@ static int UsableCores(void)
 	CPU_ZERO(&set);
 	if (0 == sched_getaffinity(0, sizeof(set), &set) && CPU_COUNT(&set) > 0)
 		cores = CPU_COUNT(&set);
-	std::ifstream f("/sys/fs/cgroup/cpu.max");	// cgroup v2: "<quota> <period>" or "max <period>"
-	std::string quota;
-	long period = 0;
-	if (f >> quota >> period && quota != "max" && period > 0)
+	// cgroup v2: the process's cgroup (/proc/self/cgroup "0::/<path>") and those above
+	// it, each with a cpu.max of "<quota> <period>" or "max <period>"; the smallest counts
+	std::string path;
 	{
-		const long q = atol(quota.c_str());
-		if (q > 0)
-			cores = std::min<long>(cores, (q + period - 1) / period);
+		std::ifstream cg("/proc/self/cgroup");
+		std::string line;
+		while (std::getline(cg, line))
+			if (0 == line.rfind("0::", 0))
+				path = line.substr(3);
+	}
+	for (;;)
+	{
+		std::ifstream f("/sys/fs/cgroup" + (path == "/" ? std::string() : path) + "/cpu.max");
+		std::string quota;
+		long period = 0;
+		if (f >> quota >> period && quota != "max" && period > 0)
+		{
+			const long q = atol(quota.c_str());
+			if (q > 0)
+				cores = std::min<long>(cores, (q + period - 1) / period);
+		}
+		if (path.empty() || path == "/")
+			break;
+		const auto slash = path.find_last_of('/');
+		path = slash == 0 || slash == std::string::npos ? std::string("/") : path.substr(0, slash);
 	}
 #endif
 	return std::max(1, cores);
@@ -1359,16 +1376,19 @@ void CController::WorkerThread(int i)
 // worker is dropped: that late it is of no use to urfd, and the worker catches up
 // (its channels and reports stay in time). Not a device's answer (that frame is
 // done) nor a stream's last frame (states, channel and line end with it). A
-// second packet whose first is missing is coded against silence (PairCheck).
+// second packet whose first is missing is coded against silence (SStoreTag).
 // In the module's worker
 bool CController::TooLate(const SJob &job, std::chrono::steady_clock::time_point now)
 {
-	if (job.answer.has_value() || job.packet->IsLast())
+	// nor a transmission's first frame: the direct path (Transcode) starts there only
+	if (job.answer.has_value() || job.packet->IsLast() || 0 == job.packet->GetSequence())
 		return false;
 	const int slot = ModuleSlot(job.packet->GetModule());
 	const bool drop = now - job.queued > WORKER_JOB_MAX_AGE;
 	if (drop)
 	{
+		// the stream is still going: its report waits for its last frame
+		g_Reports.Touch(job.packet->GetModule(), job.packet->GetStreamId());
 		auto &w = *workers[worker_of[slot]];
 		if (OncePerSecond(w.told_late))
 			std::cerr << "Worker " << worker_of[slot] << " (modules " << g_Stats.workers[worker_of[slot]].modules << ") is behind: frames older than "
@@ -1442,7 +1462,6 @@ void CController::RunJob(SJob &job)
 	const auto &packet = job.packet;
 	if (!job.answer.has_value())
 	{
-		PairCheck(packet);
 		StageIn(packet);	// from the reflector
 		return;
 	}
@@ -1457,22 +1476,6 @@ void CController::RunJob(SJob &job)
 		RouteDstPacket(packet);
 	else
 		RouteDmrPacket(packet);
-}
-
-// M17 codes a payload in two packets, the second with the first's half
-// (audio_store: the decoded 1600 audio, data_store: the coded 3200 half); a second
-// whose first did not come here (dropped as too late, or lost before urfd) is coded
-// against silence, not against a half of an older payload. In the module's worker
-void CController::PairCheck(const std::shared_ptr<CTranscoderPacket> &packet)
-{
-	const int slot = ModuleSlot(packet->GetModule());
-	auto &last = pair_last[slot];
-	if (packet->IsSecond() && !(last.valid && last.streamid == packet->GetStreamId() && last.sequence + 1 == packet->GetSequence()))
-	{
-		memset(audio_store[slot], 0, sizeof(audio_store[slot]));
-		memcpy(data_store[slot], C2_3200_SILENCE, sizeof(data_store[slot]));
-	}
-	last = SPairLast{ true, packet->GetStreamId(), packet->GetSequence() };
 }
 
 void CController::StageIn(std::shared_ptr<CTranscoderPacket> packet)
@@ -1554,16 +1557,23 @@ void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 
 	uint8_t m17data[16] = {};
 	memcpy(m17data + 8, C2_3200_SILENCE, sizeof(C2_3200_SILENCE));
+	const int slot = ModuleSlot(packet->GetModule());
 	if (packet->IsSecond())
 	{
-		memcpy(m17data, data_store[ModuleSlot(packet->GetModule())], 8);
+		// the first half of its payload, or silence when that one did not come here
+		// (dropped as too late, lost before urfd): not a half of an older payload
+		if (data_tag[slot].Of(packet))
+			memcpy(m17data, data_store[slot], 8);
+		else
+			memcpy(m17data, C2_3200_SILENCE, 8);
 		EncodeM17(packet, gained, m17data+8);
 		packet->SetM17Data(m17data);
 	}
 	else
 	{
 		EncodeM17(packet, gained, m17data);
-		memcpy(data_store[ModuleSlot(packet->GetModule())], m17data, 8);
+		memcpy(data_store[slot], m17data, 8);
+		data_tag[slot].Set(packet);
 		packet->SetM17Data(m17data);
 	}
 
@@ -1600,8 +1610,12 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 			if (packet->IsLast())
 				if (auto *sw = SwCodec(TCD_CODEC_M17_1600, packet))
 					sw->End(packet->GetStreamKey(), false);
-			int16_t tmp[160];
-			memcpy(tmp, audio_store[ModuleSlot(packet->GetModule())], sizeof(tmp));
+			// the payload's second half from its first packet, or silence when that
+			// one did not come here (dropped as too late, lost before urfd)
+			int16_t tmp[160] = {};
+			const int slot = ModuleSlot(packet->GetModule());
+			if (audio_tag[slot].Of(packet))
+				memcpy(tmp, audio_store[slot], sizeof(tmp));
 			g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 			float agc_db; bool agc_gate;
 			m_agcDigital.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
@@ -1632,6 +1646,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 			packet->SetAudioSamples(tmp, false);
 			// the second half goes through the AGC with the second packet
 			memcpy(audio_store[ModuleSlot(packet->GetModule())], &(tmp[160]), 320);
+			audio_tag[ModuleSlot(packet->GetModule())].Set(packet);
 		}
 		else /* codec_in is ECodecType::c2_3200 */
 		{

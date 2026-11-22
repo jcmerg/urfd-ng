@@ -79,6 +79,15 @@ public:
 		}
 	}
 
+	// a frame of the stream a module worker dropped as too late: the stream goes on
+	void Touch(char module, uint16_t sid)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		auto it = m_streams.find(module);
+		if (it != m_streams.end() && it->second.sid == sid)
+			it->second.seen = Clock::now();
+	}
+
 	// how a codec plugin decoded a frame of the stream (TCD_FRAME_REPEAT, TCD_FRAME_MUTE);
 	// a DVSI device does not say, its frames count only by their FEC
 	void Decoded(char module, uint16_t sid, bool repeat, bool mute)

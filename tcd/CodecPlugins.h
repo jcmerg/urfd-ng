@@ -108,6 +108,7 @@ private:
 		std::unordered_map<uint32_t, SState> states;	// by Key()
 		std::unordered_set<uint32_t> failed;	// the keys whose open failed, logged once
 		uint64_t starts = 0;	// the starts of its states so far
+		int streams = 0;	// Streams' count at its last look (the reflector thread's)
 	};
 	// the module's lock, and the plugin's before it when it is not
 	// TCD_PLUGIN_CONCURRENT: a worker waiting for the plugin holds no module lock

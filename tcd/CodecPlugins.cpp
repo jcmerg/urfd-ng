@@ -258,20 +258,25 @@ int CSoftCodec::Streams(void)
 	// the transmissions not ended with a frame in the last 2 s: a state stays 30 s
 	// after its stream ended, and a transmission whose last frame got lost gets no stop
 	const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(2);
-	std::unordered_set<uint32_t> active;	// a stream decoded and encoded counts once
+	int total = 0;
 	for (int i = 0; i < SPluginLocks::kShards; i++)
 	{
-		// no plugin call: the module's lock is enough; a module a worker codes on
-		// right now is left out of this count (a plugin call that hangs must not
+		// no plugin call: the module's lock is enough. A module a worker codes on
+		// right now counts as at the last look (a plugin call that hangs must not
 		// hold up the reflector thread)
+		auto &shard = m_Shards[i];
 		std::unique_lock<std::mutex> lock(m_Locks->module[i], std::try_to_lock);
-		if (!lock.owns_lock())
-			continue;
-		for (const auto &s : m_Shards[i].states)
-			if (s.second.running && s.second.last_used > cutoff)
-				active.insert(s.first & 0x00ffffffu);
+		if (lock.owns_lock())
+		{
+			std::unordered_set<uint32_t> active;	// a stream decoded and encoded counts once
+			for (const auto &s : shard.states)
+				if (s.second.running && s.second.last_used > cutoff)
+					active.insert(s.first & 0x00ffffffu);
+			shard.streams = int(active.size());
+		}
+		total += shard.streams;
 	}
-	return int(active.size());
+	return total;
 }
 
 CCodecPlugins::~CCodecPlugins()

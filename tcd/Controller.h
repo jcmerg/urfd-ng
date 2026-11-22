@@ -67,6 +67,17 @@ protected:
 	// first half of an M17 3200 payload being coded
 	int16_t audio_store[kModuleSlots][160] = {};
 	uint8_t data_store[kModuleSlots][8] = {};
+	// which first packet a store holds: a second packet uses it only when it is its
+	// pair's (the same stream, the sequence before), wherever the first was coded
+	struct SStoreTag
+	{
+		bool valid = false;
+		uint16_t streamid = 0;
+		uint32_t sequence = 0;
+		void Set(const std::shared_ptr<CTranscoderPacket> &p) { valid = true; streamid = p->GetStreamId(); sequence = p->GetSequence(); }
+		bool Of(const std::shared_ptr<CTranscoderPacket> &p) const { return valid && streamid == p->GetStreamId() && sequence + 1 == p->GetSequence(); }
+	};
+	SStoreTag audio_tag[kModuleSlots], data_tag[kModuleSlots];
 
 	// The modules' workers: every module belongs to one of them (worker_of), which
 	// does all the work on its packets: decoding, AGC, coding to the other codecs
@@ -97,10 +108,7 @@ protected:
 	static constexpr std::size_t WORKER_QUEUE_MAX = 2000;	// a bound for the memory; TooLate keeps the wait short
 	static constexpr auto WORKER_JOB_MAX_AGE = std::chrono::milliseconds(400);
 	bool TooLate(const SJob &job, std::chrono::steady_clock::time_point now);
-	// the module worker's last packet from the reflector, per module (PairCheck)
-	struct SPairLast { bool valid; uint16_t streamid; uint32_t sequence; };
-	SPairLast pair_last[kModuleSlots] = {};
-	void PairCheck(const std::shared_ptr<CTranscoderPacket> &packet);
+
 	std::vector<std::unique_ptr<SWorker>> workers;
 	int worker_of[kModuleSlots] = {};	// by ModuleSlot
 	void StartWorkers(void);
