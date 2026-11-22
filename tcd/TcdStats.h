@@ -13,6 +13,8 @@
 #include <unordered_map>
 #include <mutex>
 
+#include "ModuleIndex.h"
+
 #include "TCPacketDef.h"
 #include "CodecChoice.h"
 
@@ -116,7 +118,7 @@ public:
 	static constexpr int MAX_MODULES = 26;
 	static constexpr int MAX_DEVICES = 16;	// boards of four DV3003 chips, more than one
 
-	ModuleStats    modules[MAX_MODULES];    // indexed by module - 'A'
+	ModuleStats    modules[MAX_MODULES];    // indexed by ModuleSlot
 	DeviceStats    devices[MAX_DEVICES];
 	static constexpr int MAX_SW = 16;
 	SwVocoderStats sw[MAX_SW];              // the codecs of the codec plugins and tcd's own vocoders
@@ -195,8 +197,8 @@ public:
 	// Update pre-AGC levels for a module
 	void UpdateLevelsIn(char module, const int16_t *samples, int count)
 	{
-		int idx = module - 'A';
-		if (idx < 0 || idx >= MAX_MODULES) return;
+		const int idx = ModuleSlot(module);
+		if (idx == kModuleOther) return;
 		float rms, peak;
 		MeasureLevels(samples, count, rms, peak);
 		modules[idx].rms_in.store(rms, std::memory_order_relaxed);
@@ -206,8 +208,8 @@ public:
 	// Update post-AGC levels for a module
 	void UpdateLevelsOut(char module, const int16_t *samples, int count)
 	{
-		int idx = module - 'A';
-		if (idx < 0 || idx >= MAX_MODULES) return;
+		const int idx = ModuleSlot(module);
+		if (idx == kModuleOther) return;
 		float rms, peak;
 		MeasureLevels(samples, count, rms, peak);
 		modules[idx].rms_out.store(rms, std::memory_order_relaxed);
@@ -217,8 +219,8 @@ public:
 	// Update AGC state for a module (gate with hysteresis: 5 consecutive frames = ~100ms)
 	void UpdateAGC(char module, float gain_db, bool gate)
 	{
-		int idx = module - 'A';
-		if (idx < 0 || idx >= MAX_MODULES) return;
+		const int idx = ModuleSlot(module);
+		if (idx == kModuleOther) return;
 		modules[idx].agc_gain_db.store(gain_db, std::memory_order_relaxed);
 		if (gate)
 		{
@@ -235,8 +237,8 @@ public:
 	// Record incoming packet
 	void PacketIn(char module, uint16_t sid, ECodecType codec)
 	{
-		int idx = module - 'A';
-		if (idx < 0 || idx >= MAX_MODULES) return;
+		const int idx = ModuleSlot(module);
+		if (idx == kModuleOther) return;
 		modules[idx].packets_in.fetch_add(1, std::memory_order_relaxed);
 		if (modules[idx].stream_id.exchange(sid, std::memory_order_relaxed) != sid)
 			modules[idx].direct.store(0, std::memory_order_relaxed);	// a new stream: no direct targets until its decoder says
@@ -248,8 +250,8 @@ public:
 	// Record outgoing packet
 	void PacketOut(char module)
 	{
-		int idx = module - 'A';
-		if (idx < 0 || idx >= MAX_MODULES) return;
+		const int idx = ModuleSlot(module);
+		if (idx == kModuleOther) return;
 		modules[idx].packets_out.fetch_add(1, std::memory_order_relaxed);
 	}
 };

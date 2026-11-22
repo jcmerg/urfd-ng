@@ -1198,8 +1198,8 @@ void CController::ReadReflectorThread()
 			{
 				const bool linked = tcClient.GetFD(m) >= 0;
 				conn = conn || linked;
-				if (m >= 'A' && m <= 'Z')
-					g_Stats.modules[m - 'A'].linked.store(linked, std::memory_order_relaxed);
+				if (ModuleSlot(m) != kModuleOther)
+					g_Stats.modules[ModuleSlot(m)].linked.store(linked, std::memory_order_relaxed);
 			}
 			g_Stats.reflector.connected.store(conn, std::memory_order_relaxed);
 		}
@@ -1243,7 +1243,7 @@ void CController::ReadReflectorThread()
 			// (not here, because the packet still flows through the pipeline
 			// and Route functions would overwrite the reset values)
 			// on to the module's worker
-			ToWorker(EStage::in, packet);
+			ToWorker(packet);
 		}
 	}
 }
@@ -1317,8 +1317,10 @@ void CController::WorkerThread(int i)
 		job.packet.reset();
 		job.answer.reset();
 		const int64_t end_ns = SteadyNs(std::chrono::steady_clock::now());
-		w.busy_ns.fetch_add(uint64_t(std::max<int64_t>(0, end_ns - start_ns)), std::memory_order_relaxed);
+		// the running job's mark off first: a tick in between misses this job's
+		// time for now (the next one has it), it never counts it twice
 		w.job_start_ns.store(0, std::memory_order_relaxed);
+		w.busy_ns.fetch_add(uint64_t(std::max<int64_t>(0, end_ns - start_ns)), std::memory_order_relaxed);
 	}
 }
 
@@ -1353,19 +1355,21 @@ void CController::WorkerStatsTick(void)
 	}
 }
 
-void CController::ToWorker(EStage stage, std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer *answer)
+void CController::ToWorker(std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer *answer)
 {
 	if (workers.empty())
 		return;	// not started
 	const int w = worker_of[ModuleSlot(packet->GetModule())];
-	SJob job{ stage, std::move(packet), std::nullopt, std::chrono::steady_clock::now() };
+	SJob job{ std::move(packet), std::nullopt, std::chrono::steady_clock::now() };
 	if (answer)
 		job.answer = *answer;
-	// a worker that cannot keep up (a send that blocks, a plugin that hangs) gets
-	// at most WORKER_QUEUE_MAX jobs, some seconds of its modules; more are
-	// dropped, said once a second at most
+	// a worker that cannot keep up (a send that blocks, a plugin that hangs) takes
+	// at most WORKER_QUEUE_MAX packets from the reflector, some seconds of its
+	// modules; more are dropped, said once a second at most. A device's answer is
+	// always taken: the device's FIFO bounds them, and the frame is done there
 	auto &wk = *workers[w];
-	if (wk.queue.push(std::move(job), WORKER_QUEUE_MAX) == 0)
+	const bool from_device = job.answer.has_value();
+	if (wk.queue.push(std::move(job), from_device ? SIZE_MAX : WORKER_QUEUE_MAX) == 0 && keep_running)
 	{
 		const int64_t now = SteadyMs();
 		int64_t last = wk.told_full.load(std::memory_order_relaxed);
@@ -1376,35 +1380,28 @@ void CController::ToWorker(EStage stage, std::shared_ptr<CTranscoderPacket> pack
 
 void CController::DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer &answer)
 {
-	ToWorker(EStage::answer, std::move(packet), &answer);
+	ToWorker(std::move(packet), &answer);
 }
 
 void CController::RunJob(SJob &job)
 {
 	const auto &packet = job.packet;
-	switch (job.stage)
+	if (!job.answer.has_value())
 	{
-	case EStage::in:
-		StageIn(packet);
-		break;
-	case EStage::answer:
-	{
-		if (!job.answer.has_value())
-			break;
-		const bool dstar = Encoding::dstar == job.answer->enc;
-		if (job.answer->audio)
-			packet->SetAudioSamples(job.answer->pcm, false);
-		else if (dstar)
-			packet->SetDStarData(job.answer->ambe);
-		else
-			packet->SetDMRData(job.answer->ambe);
-		if (dstar)
-			RouteDstPacket(packet);
-		else
-			RouteDmrPacket(packet);
-		break;
+		StageIn(packet);	// from the reflector
+		return;
 	}
-	}
+	const bool dstar = Encoding::dstar == job.answer->enc;
+	if (job.answer->audio)
+		packet->SetAudioSamples(job.answer->pcm, false);
+	else if (dstar)
+		packet->SetDStarData(job.answer->ambe);
+	else
+		packet->SetDMRData(job.answer->ambe);
+	if (dstar)
+		RouteDstPacket(packet);
+	else
+		RouteDmrPacket(packet);
 }
 
 void CController::StageIn(std::shared_ptr<CTranscoderPacket> packet)

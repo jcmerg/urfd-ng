@@ -638,9 +638,7 @@ void CDVDevice::FeedDevice()
 					{
 						auto &ds = g_Stats.devices[m_statsIndex];
 						ds.ch_module[index].store(packet->GetModule(), std::memory_order_relaxed);
-						auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-							std::chrono::steady_clock::now().time_since_epoch()).count();
-						ds.ch_last_ms[index].store(now, std::memory_order_relaxed);
+						ds.ch_last_ms[index].store(SteadyMs(), std::memory_order_relaxed);
 					}
 
 					// stamped before it goes out, so its answer cannot come first

@@ -77,8 +77,8 @@ protected:
 	// per CPU core, at most one per module
 	// what comes to a worker from another thread: a packet from the reflector, or
 	// an AMBE device's answer to one; the rest of a packet's work the worker calls itself
-	enum class EStage : uint8_t { in, answer };
-	struct SJob { EStage stage; std::shared_ptr<CTranscoderPacket> packet; std::optional<SDeviceAnswer> answer; std::chrono::steady_clock::time_point queued; };	// answer: of the answer stage only
+	// answer: a device's answer to the packet, else the packet came from the reflector
+	struct SJob { std::shared_ptr<CTranscoderPacket> packet; std::optional<SDeviceAnswer> answer; std::chrono::steady_clock::time_point queued; };
 	// busy_ns: the time it worked in jobs done, job_start_ns: the start of the
 	// one it is in (0: none), so a long one counts in the seconds it takes;
 	// wait_us: the longest a job waited since the last look (WorkerStatsTick, in
@@ -102,7 +102,7 @@ protected:
 	void WorkerStatsTick(void);	// once a second: g_Stats.workers
 	std::chrono::steady_clock::time_point worker_tick;
 	// a job to the worker of the packet's module (from the reflector thread or a device's reader)
-	void ToWorker(EStage stage, std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer *answer = nullptr);
+	void ToWorker(std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer *answer = nullptr);
 	void RunJob(SJob &job);
 	// the packet to the reflector once every codec is set (only its worker sets them)
 	void SendIfDone(const std::shared_ptr<CTranscoderPacket> &packet);
