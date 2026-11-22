@@ -215,6 +215,14 @@ void CSoftCodec::Purge(void)
 	const auto now = std::chrono::steady_clock::now();
 	for (int i = 0; i < SPluginLocks::kShards; i++)
 	{
+		// a look under the module's lock first: the plugin's (when it is not
+		// concurrent) only when a state is to be closed
+		{
+			std::lock_guard<std::mutex> look(m_Locks->module[i]);
+			const auto &states = m_Shards[i].states;
+			if (std::none_of(states.begin(), states.end(), [&](const std::pair<const uint32_t, SState> &s) { return now - s.second.last_used > STATE_TIMEOUT; }))
+				continue;
+		}
 		CLock lock(*m_Locks, i);
 		auto &states = m_Shards[i].states;
 		for (auto it = states.begin(); it != states.end(); )

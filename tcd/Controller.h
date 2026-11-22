@@ -94,6 +94,7 @@ protected:
 		uint64_t last_busy_ns = 0;	// the reflector thread's
 	};
 	static constexpr std::size_t WORKER_QUEUE_MAX = 2000;	// about 6 s of 7 busy modules
+	bool m17_first_dropped[kModuleSlots] = {};	// ToWorker's (the reflector thread): the first half of an M17 payload was dropped
 	std::vector<std::unique_ptr<SWorker>> workers;
 	int worker_of[kModuleSlots] = {};	// by ModuleSlot
 	void StartWorkers(void);

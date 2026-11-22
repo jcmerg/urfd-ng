@@ -30,6 +30,7 @@
 #include <fstream>
 #include <thread>
 #include <pthread.h>
+#include <sched.h>
 #include <queue>
 #include <vector>
 #include "TranscoderPacket.h"
@@ -1248,15 +1249,35 @@ void CController::ReadReflectorThread()
 	}
 }
 
+// the CPU cores tcd may use: those of its affinity mask (docker --cpuset-cpus),
+// at most its cgroup's CPU quota rounded up (docker --cpus); the host's cores elsewhere
+static int UsableCores(void)
+{
+	int cores = int(std::thread::hardware_concurrency());
+#if defined(__linux__)
+	cpu_set_t set;
+	CPU_ZERO(&set);
+	if (0 == sched_getaffinity(0, sizeof(set), &set) && CPU_COUNT(&set) > 0)
+		cores = CPU_COUNT(&set);
+	std::ifstream f("/sys/fs/cgroup/cpu.max");	// cgroup v2: "<quota> <period>" or "max <period>"
+	std::string quota;
+	long period = 0;
+	if (f >> quota >> period && quota != "max" && period > 0)
+	{
+		const long q = atol(quota.c_str());
+		if (q > 0)
+			cores = std::min<long>(cores, (q + period - 1) / period);
+	}
+#endif
+	return std::max(1, cores);
+}
+
 void CController::StartWorkers(void)
 {
 	const std::string mods(g_Conf.GetTCMods());
 	int n = g_Conf.GetWorkers();
 	if (n <= 0)
-	{
-		const unsigned cores = std::thread::hardware_concurrency();
-		n = cores ? int(cores) : 1;
-	}
+		n = UsableCores();
 	n = std::max(1, std::min(n, int(mods.size())));	// at most 26, a worker per module
 	static_assert(CTcdStats::MAX_WORKERS >= 26, "a worker per module at most, 26");
 	// the modules in turn, in the order of Modules and StandbyModules
@@ -1301,7 +1322,7 @@ void CController::WorkerThread(int i)
 	{
 		const auto start = std::chrono::steady_clock::now();
 		const int64_t start_ns = std::max<int64_t>(1, SteadyNs(start));
-		w.job_start_ns.store(start_ns, std::memory_order_relaxed);
+		w.job_start_ns.store(start_ns, std::memory_order_release);
 		const uint32_t waited = uint32_t(std::min<int64_t>(UINT32_MAX, std::chrono::duration_cast<std::chrono::microseconds>(start - job.queued).count()));
 		for (uint32_t prev = w.wait_us.load(std::memory_order_relaxed); waited > prev && !w.wait_us.compare_exchange_weak(prev, waited, std::memory_order_relaxed); )
 			;
@@ -1319,8 +1340,8 @@ void CController::WorkerThread(int i)
 		const int64_t end_ns = SteadyNs(std::chrono::steady_clock::now());
 		// the running job's mark off first: a tick in between misses this job's
 		// time for now (the next one has it), it never counts it twice
-		w.job_start_ns.store(0, std::memory_order_relaxed);
-		w.busy_ns.fetch_add(uint64_t(std::max<int64_t>(0, end_ns - start_ns)), std::memory_order_relaxed);
+		w.job_start_ns.store(0, std::memory_order_release);
+		w.busy_ns.fetch_add(uint64_t(std::max<int64_t>(0, end_ns - start_ns)), std::memory_order_release);
 	}
 }
 
@@ -1341,9 +1362,10 @@ void CController::WorkerStatsTick(void)
 		uint64_t busy;
 		for (int tries = 0; ; tries++)
 		{
-			const uint64_t done = w.busy_ns.load(std::memory_order_relaxed);
-			const int64_t start = w.job_start_ns.load(std::memory_order_relaxed);
-			if (w.busy_ns.load(std::memory_order_relaxed) != done && tries < 3)
+			// acquire: a busy_ns with a job's time comes with its job_start_ns cleared
+			const uint64_t done = w.busy_ns.load(std::memory_order_acquire);
+			const int64_t start = w.job_start_ns.load(std::memory_order_acquire);
+			if (w.busy_ns.load(std::memory_order_acquire) != done && tries < 3)
 				continue;
 			busy = done + uint64_t(start > 0 && now_ns > start ? now_ns - start : 0);
 			break;
@@ -1370,7 +1392,20 @@ void CController::ToWorker(std::shared_ptr<CTranscoderPacket> packet, const SDev
 	auto &wk = *workers[w];
 	// a stream's last frame too: its states, its channel and its line end with it
 	const bool always = job.answer.has_value() || job.packet->IsLast();
-	if (wk.queue.push(std::move(job), always ? SIZE_MAX : WORKER_QUEUE_MAX) == 0 && keep_running)
+	// an M17 payload comes in two packets, the second coded with the first's half
+	// (audio_store, data_store): after a first one is dropped, its second goes too
+	const bool m17 = !job.answer.has_value() && (ECodecType::c2_1600 == job.packet->GetCodecIn() || ECodecType::c2_3200 == job.packet->GetCodecIn());
+	const int slot = ModuleSlot(job.packet->GetModule());
+	if (m17 && job.packet->IsSecond() && m17_first_dropped[slot] && !always)
+	{
+		m17_first_dropped[slot] = false;
+		return;
+	}
+	const bool first = m17 && !job.packet->IsSecond();
+	const bool taken = wk.queue.push(std::move(job), always ? SIZE_MAX : WORKER_QUEUE_MAX) != 0;
+	if (first)
+		m17_first_dropped[slot] = !taken;
+	if (!taken && keep_running)
 	{
 		if (OncePerSecond(wk.told_full))
 			std::cerr << "Worker " << w << " (modules " << g_Stats.workers[w].modules << ") is " << WORKER_QUEUE_MAX << " jobs behind: frames dropped" << std::endl;
@@ -1519,12 +1554,9 @@ void CController::DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, co
 	SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
 }
 
-// The original incoming coded was M17, so we will calculate the audio and then
-// push the packet onto both the dstar and the dmr queue.
+// an M17 packet: decoded to audio, then coded to D-Star, DMR, P25 and USRP
 void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
-	uint8_t imbe[11];
-
 	if (packet->IsSecond())
 	{
 		if (packet->GetCodecIn() == ECodecType::c2_1600)
@@ -2296,7 +2328,11 @@ void CController::PhaseOut(int i)
 		}
 		if (!s.draining)
 		{
-			s.draining = true;
+			{
+				// under the devices' lock: a worker taking a channel sees it at once
+				std::lock_guard<std::mutex> lock(hw_mux);
+				s.draining = true;
+			}
 			if (!asked)
 				std::cout << s.desc << " changes to DeviceCompand = " << CompandName(g_Stats.config.device_compand.load()) << ": no new streams, the ones on it run to their end" << std::endl;
 		}
@@ -2342,8 +2378,9 @@ void CController::PhaseOut(int i)
 }
 
 // its streams are done when its channels are free and quiet for a second and the
-// device has answered every frame (the last one is freed at its Pick, before the
-// device has it); with hw_mux
+// device has answered every frame (a stream's last frame frees its channel once it
+// is in the device's input queue, which GetBufferDepth does not count: the second
+// of quiet covers it); with hw_mux
 bool CController::SlotBusyLocked(int i)
 {
 	auto &s = *slots[i];
