@@ -168,8 +168,8 @@ function refreshTGList() {
                     '<td>' + esc(m.ts || '-') + '</td>' +
                     '<td>' + typeLabel + '</td>' +
                     '<td>' + dirStr + '</td>' +
-                    '<td>' + timeoutStr + '</td>' +
-                    '<td>' + actions + '</td>' +
+                    '<td class="nw">' + timeoutStr + '</td>' +
+                    '<td class="nw">' + actions + '</td>' +
                     '</tr>'
                 );
             });
@@ -737,7 +737,7 @@ function showAlert(resp, target) {
 
 function formatSeconds(s) {
     if (s < 0) return '<span class="muted">none</span>';
-    return Math.floor(s / 60) + ' min ' + (s % 60) + ' s';
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 }
 
 // the timeslot belongs to MMDVMClient talkgroups only
