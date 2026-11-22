@@ -565,11 +565,7 @@ bool CController::Start()
 	if (InitVocoders() || tcClient.Open(g_Conf.GetAddress(), g_Conf.GetTCMods(), g_Conf.GetPort()))
 	{
 		keep_running = false;
-		for (auto &w : workers)
-			w->queue.Shutdown();
-		for (auto &w : workers)
-			if (w->thread.joinable())
-				w->thread.join();
+		StopWorkers();
 		return true;
 	}
 	reflectorFuture = std::async(std::launch::async, &CController::ReadReflectorThread, this);
@@ -620,16 +616,11 @@ void CController::Stop()
 {
 	keep_running = false;
 
-	// the workers wait in their queues: wake them up, then wait for all; a device's
-	// answer that comes after is dropped by the queue it would go to
-	for (auto &w : workers)
-		w->queue.Shutdown();
+	// the workers wait in their queues: wake them up, then wait for all
 	for (auto *f : { &reflectorFuture, &watchFuture })
 		if (f->valid())
 			f->get();
-	for (auto &w : workers)
-		if (w->thread.joinable())
-			w->thread.join();
+	StopWorkers();
 
 	tcClient.Close();
 	// all closed before any is dropped: a reader still running routes to the others
@@ -1246,45 +1237,9 @@ void CController::ReadReflectorThread()
 			// (not here, because the packet still flows through the pipeline
 			// and Route functions would overwrite the reset values)
 			// on to the module's worker
-			Dispatch(EStage::in, packet);
+			ToWorker(EStage::in, packet);
 		}
 	}
-}
-
-thread_local int CController::t_worker = -1;
-
-void CController::CWorkerQueue::push(SJob &&job)
-{
-	{
-		std::lock_guard<std::mutex> lock(mx);
-		if (stop)
-			return;
-		q.push_back(std::move(job));
-	}
-	cv.notify_one();
-}
-
-bool CController::CWorkerQueue::pop(SJob &job)
-{
-	std::unique_lock<std::mutex> lock(mx);
-	cv.wait(lock, [this] { return stop || !q.empty(); });
-	if (stop)
-	{
-		q.clear();
-		return false;
-	}
-	job = std::move(q.front());
-	q.pop_front();
-	return true;
-}
-
-void CController::CWorkerQueue::Shutdown()
-{
-	{
-		std::lock_guard<std::mutex> lock(mx);
-		stop = true;
-	}
-	cv.notify_all();
 }
 
 void CController::StartWorkers(void)
@@ -1296,17 +1251,17 @@ void CController::StartWorkers(void)
 		const unsigned cores = std::thread::hardware_concurrency();
 		n = cores ? int(cores) : 1;
 	}
-	n = std::max(1, std::min(n, int(mods.size())));
+	n = std::max(1, std::min(n, int(mods.size())));	// at most 26, a worker per module
+	static_assert(CTcdStats::MAX_WORKERS >= 26, "a worker per module at most, 26");
 	// the modules in turn, in the order of Modules and StandbyModules
 	std::vector<std::string> of(n);
 	for (size_t i = 0; i < mods.size(); i++)
 	{
-		worker_of[ModuleIndex(mods[i])] = int(i % size_t(n));
+		worker_of[ModuleSlot(mods[i])] = int(i % size_t(n));
 		of[i % size_t(n)] += mods[i];
 	}
 	for (int i = 0; i < n; i++)
 		workers.push_back(std::make_unique<SWorker>());
-	static_assert(CTcdStats::MAX_WORKERS >= 26, "a worker per module at most, 26");
 	for (int i = 0; i < n; i++)
 		g_Stats.workers[i].modules = of[i];
 	worker_tick = std::chrono::steady_clock::now();
@@ -1319,9 +1274,23 @@ void CController::StartWorkers(void)
 	std::cout << std::endl;
 }
 
+void CController::StopWorkers(void)
+{
+	// a job that comes after (a device's answer) is dropped by the queue
+	for (auto &w : workers)
+		w->queue.Shutdown();
+	for (auto &w : workers)
+		if (w->thread.joinable())
+			w->thread.join();
+}
+
+static int64_t SteadyNs(std::chrono::steady_clock::time_point t)
+{
+	return std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch()).count();
+}
+
 void CController::WorkerThread(int i)
 {
-	t_worker = i;
 	char name[16];
 	snprintf(name, sizeof(name), "tcd-worker%d", i);
 	SetThreadName(name);
@@ -1330,13 +1299,17 @@ void CController::WorkerThread(int i)
 	while (w.queue.pop(job))
 	{
 		const auto start = std::chrono::steady_clock::now();
+		const int64_t start_ns = std::max<int64_t>(1, SteadyNs(start));
+		w.job_start_ns.store(start_ns, std::memory_order_relaxed);
 		const uint32_t waited = uint32_t(std::min<int64_t>(UINT32_MAX, std::chrono::duration_cast<std::chrono::microseconds>(start - job.queued).count()));
 		for (uint32_t prev = w.wait_us.load(std::memory_order_relaxed); waited > prev && !w.wait_us.compare_exchange_weak(prev, waited, std::memory_order_relaxed); )
 			;
-		RunStage(job.stage, job.packet, job.answer.get());
+		RunJob(job);
 		job.packet.reset();
 		job.answer.reset();
-		w.busy_ns.fetch_add(uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count()), std::memory_order_relaxed);
+		const int64_t end_ns = SteadyNs(std::chrono::steady_clock::now());
+		w.busy_ns.fetch_add(uint64_t(std::max<int64_t>(0, end_ns - start_ns)), std::memory_order_relaxed);
+		w.job_start_ns.store(0, std::memory_order_relaxed);
 	}
 }
 
@@ -1348,59 +1321,61 @@ void CController::WorkerStatsTick(void)
 	if (elapsed < 1.0)
 		return;
 	worker_tick = now;
+	const int64_t now_ns = SteadyNs(now);
 	for (size_t i = 0; i < workers.size(); i++)
 	{
 		auto &w = *workers[i];
-		const uint64_t busy = w.busy_ns.load(std::memory_order_relaxed);
-		const double pct = double(busy - w.last_busy_ns) / 1e9 / elapsed * 100.0;
-		w.last_busy_ns = busy;
+		// the time in jobs done, and of the one it is in so far; read again when a
+		// job ended in between, so it is not counted twice
+		uint64_t busy;
+		for (int tries = 0; ; tries++)
+		{
+			const uint64_t done = w.busy_ns.load(std::memory_order_relaxed);
+			const int64_t start = w.job_start_ns.load(std::memory_order_relaxed);
+			if (w.busy_ns.load(std::memory_order_relaxed) != done && tries < 3)
+				continue;
+			busy = done + uint64_t(start > 0 && now_ns > start ? now_ns - start : 0);
+			break;
+		}
+		const double pct = busy > w.last_busy_ns ? double(busy - w.last_busy_ns) / 1e9 / elapsed * 100.0 : 0.0;
+		w.last_busy_ns = std::max(w.last_busy_ns, busy);
 		g_Stats.workers[i].busy_pct.store(float(std::min(100.0, pct)), std::memory_order_relaxed);
 		g_Stats.workers[i].wait_ms.store(float(w.wait_us.exchange(0, std::memory_order_relaxed)) / 1000.0f, std::memory_order_relaxed);
 	}
 }
 
-void CController::Dispatch(EStage stage, std::shared_ptr<CTranscoderPacket> packet)
+void CController::ToWorker(EStage stage, std::shared_ptr<CTranscoderPacket> packet, std::unique_ptr<SDeviceAnswer> answer)
 {
 	if (workers.empty())
 		return;	// not started
-	const int w = worker_of[ModuleIndex(packet->GetModule())];
-	if (t_worker == w)
-		RunStage(stage, packet, nullptr);
-	else
-		workers[w]->queue.push(SJob{ stage, std::move(packet), nullptr, std::chrono::steady_clock::now() });
+	const int w = worker_of[ModuleSlot(packet->GetModule())];
+	workers[w]->queue.push(SJob{ stage, std::move(packet), std::move(answer), std::chrono::steady_clock::now() });
 }
 
-void CController::DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, Encoding ch_enc, const SDeviceAnswer &answer)
+void CController::DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, Encoding ch_enc, std::unique_ptr<SDeviceAnswer> answer)
 {
-	if (workers.empty())
-		return;
-	// from a device's reader (never a worker): always queued
-	const EStage stage = Encoding::dstar == ch_enc ? EStage::dstar_answer : EStage::dmr_answer;
-	const int w = worker_of[ModuleIndex(packet->GetModule())];
-	workers[w]->queue.push(SJob{ stage, std::move(packet), std::make_unique<SDeviceAnswer>(answer), std::chrono::steady_clock::now() });
+	ToWorker(Encoding::dstar == ch_enc ? EStage::dstar_answer : EStage::dmr_answer, std::move(packet), std::move(answer));
 }
 
-void CController::RunStage(EStage stage, const std::shared_ptr<CTranscoderPacket> &packet, const SDeviceAnswer *answer)
+void CController::RunJob(SJob &job)
 {
-	switch (stage)
+	const auto &packet = job.packet;
+	switch (job.stage)
 	{
-	case EStage::in:      StageIn(packet);      break;
-	case EStage::codec2:  StageC2(packet);      break;
-	case EStage::imbe:    StageIMBE(packet);    break;
-	case EStage::usrp:    StageUSRP(packet);    break;
-	case EStage::swdmr:   StageSWAMBE2(packet); break;
-	case EStage::swdstar: StageSWDStar(packet); break;
+	case EStage::in:
+		StageIn(packet);
+		break;
 	case EStage::dstar_answer:
 	case EStage::dmr_answer:
-		if (!answer)
+		if (!job.answer)
 			break;
-		if (answer->audio)
-			packet->SetAudioSamples(answer->pcm, false);
-		else if (EStage::dstar_answer == stage)
-			packet->SetDStarData(answer->ambe);
+		if (job.answer->audio)
+			packet->SetAudioSamples(job.answer->pcm, false);
+		else if (EStage::dstar_answer == job.stage)
+			packet->SetDStarData(job.answer->ambe);
 		else
-			packet->SetDMRData(answer->ambe);
-		if (EStage::dstar_answer == stage)
+			packet->SetDMRData(job.answer->ambe);
+		if (EStage::dstar_answer == job.stage)
 			RouteDstPacket(packet);
 		else
 			RouteDmrPacket(packet);
@@ -1452,7 +1427,7 @@ void CController::HighPass(char module, uint16_t streamid, int16_t *samples)
 		{ 0.734407998f, -1.468815996f, 0.734407998f, -1.5997196711f, 0.6451760153f },
 		{ 1.0f, -2.0f, 1.0f, -1.7852530573f, 0.8359813686f }
 	};
-	auto &hp = c2_highpass[ModuleIndex(module)];
+	auto &hp = c2_highpass[ModuleSlot(module)];
 	if (hp.streamid != streamid)
 	{
 		hp = SHighPass{ {{0.0f, 0.0f}, {0.0f, 0.0f}}, streamid };
@@ -1490,14 +1465,14 @@ void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 	memcpy(m17data + 8, C2_3200_SILENCE, sizeof(C2_3200_SILENCE));
 	if (packet->IsSecond())
 	{
-		memcpy(m17data, data_store[ModuleIndex(packet->GetModule())], 8);
+		memcpy(m17data, data_store[ModuleSlot(packet->GetModule())], 8);
 		EncodeM17(packet, gained, m17data+8);
 		packet->SetM17Data(m17data);
 	}
 	else
 	{
 		EncodeM17(packet, gained, m17data);
-		memcpy(data_store[ModuleIndex(packet->GetModule())], m17data, 8);
+		memcpy(data_store[ModuleSlot(packet->GetModule())], m17data, 8);
 		packet->SetM17Data(m17data);
 	}
 
@@ -1538,7 +1513,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 				if (auto *sw = SwCodec(TCD_CODEC_M17_1600, packet))
 					sw->End(packet->GetStreamKey(), false);
 			int16_t tmp[160];
-			memcpy(tmp, audio_store[ModuleIndex(packet->GetModule())], sizeof(tmp));
+			memcpy(tmp, audio_store[ModuleSlot(packet->GetModule())], sizeof(tmp));
 			g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 			float agc_db; bool agc_gate;
 			m_agcDigital.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
@@ -1568,7 +1543,7 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 			g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 			packet->SetAudioSamples(tmp, false);
 			// the second half goes through the AGC with the second packet
-			memcpy(audio_store[ModuleIndex(packet->GetModule())], &(tmp[160]), 320);
+			memcpy(audio_store[ModuleSlot(packet->GetModule())], &(tmp[160]), 320);
 		}
 		else /* codec_in is ECodecType::c2_3200 */
 		{
@@ -1700,9 +1675,9 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	if (decoded)	// a failed decode keeps the marks: no flicker
 		ModuleDirect(packet, direct);
 	ToDStar(packet);
-	Dispatch(EStage::codec2, packet);
-	Dispatch(EStage::imbe, packet);
-	Dispatch(EStage::usrp, packet);
+	StageC2(packet);
+	StageIMBE(packet);
+	StageUSRP(packet);
 }
 
 void CController::StageSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
@@ -2444,7 +2419,7 @@ void CController::ToDStar(std::shared_ptr<CTranscoderPacket> packet)
 	std::shared_ptr<CDVDevice> dev;
 	uint8_t ch = 0;
 	if (SwCodec(TCD_CODEC_DSTAR, packet, &dev, &ch))
-		Dispatch(EStage::swdstar, packet);
+		StageSWDStar(packet);
 	else if (dev)
 		dev->AddPacketToChannel(packet, ch);
 	else
@@ -2456,7 +2431,7 @@ void CController::ToDmr(std::shared_ptr<CTranscoderPacket> packet)
 	std::shared_ptr<CDVDevice> dev;
 	uint8_t ch = 0;
 	if (SwCodec(TCD_CODEC_DMR, packet, &dev, &ch))
-		Dispatch(EStage::swdmr, packet);
+		StageSWAMBE2(packet);
 	else if (dev)
 		dev->AddPacketToChannel(packet, ch);
 	else
@@ -2531,8 +2506,8 @@ void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	// the AMBE codecs first: a device gets its frame before the software encodes
 	ToDStar(packet);
 	ToDmr(packet);
-	Dispatch(EStage::codec2, packet);
-	Dispatch(EStage::usrp, packet);
+	StageC2(packet);
+	StageUSRP(packet);
 }
 
 void CController::StageIMBE(std::shared_ptr<CTranscoderPacket> packet)
@@ -2586,8 +2561,8 @@ void CController::USRPtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	// the AMBE codecs first: a device gets its frame before the software encodes
 	ToDStar(packet);
 	ToDmr(packet);
-	Dispatch(EStage::codec2, packet);
-	Dispatch(EStage::imbe, packet);
+	StageC2(packet);
+	StageIMBE(packet);
 }
 
 void CController::StageUSRP(std::shared_ptr<CTranscoderPacket> packet)
@@ -2634,8 +2609,8 @@ void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
 	// the AMBE codecs first: a device gets its frame before the software encodes
 	ToDStar(packet);
 	ToDmr(packet);
-	Dispatch(EStage::codec2, packet);
-	Dispatch(EStage::imbe, packet);
+	StageC2(packet);
+	StageIMBE(packet);
 }
 
 void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
@@ -2651,9 +2626,10 @@ void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
 			return;
 		}
 		// also a module whose connection is closed (Send() says so without a log):
-		// the reconnect may bring it back within the retries
+		// the reflector thread's reconnect (every 100 ms at most) may bring it back
+		// within the retries; a worker does not reconnect itself, ReConnect is the
+		// reflector thread's alone
 		std::cerr << "SendToReflector: send failed, attempt " << (attempt + 1) << "/" << max_retries << std::endl;
-		tcClient.ReConnect();
 		std::this_thread::sleep_for(std::chrono::milliseconds(100 * (1 << attempt)));
 	}
 	std::cerr << "SendToReflector: dropping packet after " << max_retries << " retries" << std::endl;
@@ -2693,9 +2669,9 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSof
 		// Output gains applied in encode functions and DVSI FeedDevice
 		// DMR first: a device gets its frame before the software encodes
 		ToDmr(packet);
-		Dispatch(EStage::codec2, packet);
-		Dispatch(EStage::imbe, packet);
-		Dispatch(EStage::usrp, packet);
+		StageC2(packet);
+		StageIMBE(packet);
+		StageUSRP(packet);
 	}
 	else
 	{
@@ -2759,9 +2735,9 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 		}
 		// D-Star first: a device gets its frame before the software encodes
 		ToDStar(packet);
-		Dispatch(EStage::codec2, packet);
-		Dispatch(EStage::imbe, packet);
-		Dispatch(EStage::usrp, packet);
+		StageC2(packet);
+		StageIMBE(packet);
+		StageUSRP(packet);
 	}
 	else
 	{

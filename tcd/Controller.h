@@ -40,6 +40,8 @@
 #include "CodecPlugin.h"
 #include "CodecChoice.h"
 #include "TcdStats.h"
+#include "ModuleIndex.h"
+#include "PacketQueue.h"
 
 class CController
 {
@@ -55,18 +57,17 @@ public:
 	// an AMBE device's answer to a packet (DVSIDevice: its reader, or a lost
 	// answer's silence): the packet's module worker puts it into the packet and
 	// routes it on (RouteDstPacket, RouteDmrPacket)
-	void DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, Encoding ch_enc, const SDeviceAnswer &answer);
+	void DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, Encoding ch_enc, std::unique_ptr<SDeviceAnswer> answer);
 	void ReconfigureAGC();  // re-read AGC params from g_Stats.config
 	void Dump(const std::shared_ptr<CTranscoderPacket> packet, const std::string &title) const;
 
 protected:
 	std::atomic<bool> keep_running;
 	std::future<void> reflectorFuture;
-	// per module (ModuleIndex): M17 1600 audio of the payload's second half, and the
+	// per module (ModuleSlot): M17 1600 audio of the payload's second half, and the
 	// first half of an M17 3200 payload being coded
-	int16_t audio_store[27][160] = {};
-	uint8_t data_store[27][8] = {};
-	static int ModuleIndex(char module) { return (module >= 'A' && module <= 'Z') ? module - 'A' : 26; }
+	int16_t audio_store[kModuleSlots][160] = {};
+	uint8_t data_store[kModuleSlots][8] = {};
 
 	// The modules' workers: every module belongs to one of them (worker_of), which
 	// does all the work on its packets: decoding, AGC, coding to the other codecs
@@ -75,35 +76,33 @@ protected:
 	// the other; a packet's frames are only ever touched by its module's worker
 	// (an AMBE device reads it while it has it). Workers in tcd.ini, auto: one
 	// per CPU core, at most one per module
-	enum class EStage : uint8_t { in, codec2, imbe, usrp, swdmr, swdstar, dstar_answer, dmr_answer };
+	// what comes to a worker from another thread: a packet from the reflector, or
+	// an AMBE device's answer to one; the rest of a packet's work the worker calls itself
+	enum class EStage : uint8_t { in, dstar_answer, dmr_answer };
 	struct SJob { EStage stage; std::shared_ptr<CTranscoderPacket> packet; std::unique_ptr<SDeviceAnswer> answer; std::chrono::steady_clock::time_point queued; };	// answer: the device answer stages only
-	class CWorkerQueue
+	// busy_ns: the time it worked in jobs done, job_start_ns: the start of the
+	// one it is in (0: none), so a long one counts in the seconds it takes;
+	// wait_us: the longest a job waited since the last look (WorkerStatsTick, in
+	// the reflector thread, takes them)
+	struct SWorker
 	{
-	public:
-		void push(SJob &&job);
-		bool pop(SJob &job);	// false when shut down
-		void Shutdown();
-	private:
-		std::mutex mx;
-		std::condition_variable cv;
-		std::deque<SJob> q;
-		bool stop = false;
+		CBlockingQueue<SJob> queue;
+		std::thread thread;
+		std::atomic<uint64_t> busy_ns{0};
+		std::atomic<int64_t> job_start_ns{0};
+		std::atomic<uint32_t> wait_us{0};
+		uint64_t last_busy_ns = 0;	// the reflector thread's
 	};
-	// busy_ns: the time it worked, wait_us: the longest a job waited since the
-	// monitor's last look (WorkerStatsTick, in the reflector thread, takes both)
-	struct SWorker { CWorkerQueue queue; std::thread thread; std::atomic<uint64_t> busy_ns{0}; std::atomic<uint32_t> wait_us{0}; uint64_t last_busy_ns = 0; };
 	std::vector<std::unique_ptr<SWorker>> workers;
-	int worker_of[27] = {};	// by ModuleIndex
-	// the worker of the calling thread, -1 for none (reflector, devices, monitor)
-	static thread_local int t_worker;
+	int worker_of[kModuleSlots] = {};	// by ModuleSlot
 	void StartWorkers(void);
-	void WorkerStatsTick(void);	// every second: g_Stats.workers
-	std::chrono::steady_clock::time_point worker_tick;
+	void StopWorkers(void);
 	void WorkerThread(int i);
-	// the stage of a packet: right here when the caller is the packet's module
-	// worker, else queued for it
-	void Dispatch(EStage stage, std::shared_ptr<CTranscoderPacket> packet);
-	void RunStage(EStage stage, const std::shared_ptr<CTranscoderPacket> &packet, const SDeviceAnswer *answer);
+	void WorkerStatsTick(void);	// once a second: g_Stats.workers
+	std::chrono::steady_clock::time_point worker_tick;
+	// a job to the worker of the packet's module (from the reflector thread or a device's reader)
+	void ToWorker(EStage stage, std::shared_ptr<CTranscoderPacket> packet, std::unique_ptr<SDeviceAnswer> answer = nullptr);
+	void RunJob(SJob &job);
 	// the packet to the reflector once every codec is set (only its worker sets them)
 	void SendIfDone(const std::shared_ptr<CTranscoderPacket> &packet);
 	CTCClient tcClient;
@@ -248,7 +247,7 @@ protected:
 	std::atomic<int32_t> outgain_dstar_num{256}, outgain_dmr_num{256}, outgain_usrp_num{256}, outgain_imbe_num{256}, outgain_m17_num{256};
 	// P25 to M17: a 300 Hz high-pass in front of the Codec2 encoder, per module
 	struct SHighPass { float z[2][2]; uint16_t streamid; };
-	SHighPass c2_highpass[27] = {};	// by ModuleIndex
+	SHighPass c2_highpass[kModuleSlots] = {};	// by ModuleSlot
 	void HighPass(char module, uint16_t streamid, int16_t *samples);
 	CAGC m_agcDigital;  // D-Star, DMR/YSF/NXDN, M17, P25
 	CAGC m_agcAnalog;   // SVX and USRP: FM audio, gate above its noise floor

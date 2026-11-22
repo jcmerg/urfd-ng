@@ -834,9 +834,9 @@ std::shared_ptr<CTranscoderPacket> CDVDevice::PopWaiting(uint8_t channel, bool *
 	return packet;
 }
 
-void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, const SDeviceAnswer &answer)
+void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, std::unique_ptr<SDeviceAnswer> answer)
 {
-	g_Cont.DeviceAnswer(packet, ch_enc, answer);
+	g_Cont.DeviceAnswer(packet, ch_enc, std::move(answer));
 }
 
 void CDVDevice::LostAnswer(uint8_t channel, const char *why)
@@ -858,11 +858,11 @@ void CDVDevice::LostAnswer(uint8_t channel, const char *why)
 	if (LogLost())
 		std::cerr << description << line << std::endl;
 	const Encoding ch_enc = GetChannelEncoding(channel);
-	SDeviceAnswer answer{};
-	answer.audio = decode;
+	auto answer = std::make_unique<SDeviceAnswer>();
+	answer->audio = decode;
 	if (!decode)
-		memcpy(answer.ambe, Encoding::dstar == ch_enc ? DSTAR_SILENCE : DMR_SILENCE, sizeof(answer.ambe));
-	Deliver(packet, ch_enc, answer);
+		memcpy(answer->ambe, Encoding::dstar == ch_enc ? DSTAR_SILENCE : DMR_SILENCE, sizeof(answer->ambe));
+	Deliver(packet, ch_enc, std::move(answer));
 }
 
 bool CDVDevice::LogLost(void)

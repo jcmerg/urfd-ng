@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "CodecPlugin.h"
+#include "ModuleIndex.h"
 
 // the locks of a plugin, shared by its codecs. A stream's states belong to its
 // module, and so do their lock and their map (CSoftCodec): the modules' workers
@@ -25,8 +26,8 @@
 // called by one of them at a time (plugin)
 struct SPluginLocks
 {
-	static constexpr int kShards = 27;	// A-Z, and one for a key of no module
-	static int Shard(uint32_t key) { const char m = char((key >> 16) & 0xffu); return (m >= 'A' && m <= 'Z') ? m - 'A' : kShards - 1; }
+	static constexpr int kShards = kModuleSlots;
+	static int Shard(uint32_t key) { return ModuleSlotOfKey(key); }
 	std::mutex module[kShards];
 	std::mutex plugin;
 	bool concurrent = false;
@@ -94,9 +95,9 @@ private:
 	// stream: CTranscoderPacket::GetStreamKey, the module above the stream id (bits 16-23)
 	static uint32_t Key(uint32_t stream, bool encode) { return (encode ? 0x80000000u : 0u) | stream; }
 	// the target's encoder state for Transcode from codec `from` (TCD_CODEC_*, bits
-	// 24-28): one of its own, used by the decoder's thread only, while Encode's is
-	// the codec thread's (shared, the decoder's newer frames made Encode start
-	// afresh at nearly every frame, tcd 0.22.5)
+	// 24-28): one of its own besides Encode's (a shared one made Encode start
+	// afresh at nearly every frame, tcd 0.22.5); both are the module worker's,
+	// under the module's lock
 	static uint32_t DirectKey(uint32_t stream, uint32_t from) { return 0x40000000u | (from << 24) | stream; }
 	// the states of one module's streams: a stream's keys all have its module
 	struct SShard
@@ -105,12 +106,14 @@ private:
 		std::unordered_set<uint32_t> failed;	// the keys whose open failed, logged once
 		uint64_t starts = 0;	// the starts of its states so far
 	};
-	// the module's lock, and the plugin's when it is not TCD_PLUGIN_CONCURRENT
+	// the module's lock, and the plugin's before it when it is not
+	// TCD_PLUGIN_CONCURRENT: a worker waiting for the plugin holds no module lock
+	// meanwhile (Streams takes the module locks only)
 	class CLock
 	{
 	public:
-		CLock(SPluginLocks &locks, int shard) : m_Module(locks.module[shard]), m_Plugin(locks.concurrent ? nullptr : &locks.plugin) { m_Module.lock(); if (m_Plugin) m_Plugin->lock(); }
-		~CLock() { if (m_Plugin) m_Plugin->unlock(); m_Module.unlock(); }
+		CLock(SPluginLocks &locks, int shard) : m_Module(locks.module[shard]), m_Plugin(locks.concurrent ? nullptr : &locks.plugin) { if (m_Plugin) m_Plugin->lock(); m_Module.lock(); }
+		~CLock() { m_Module.unlock(); if (m_Plugin) m_Plugin->unlock(); }
 		CLock(const CLock &) = delete;
 		CLock &operator=(const CLock &) = delete;
 	private:

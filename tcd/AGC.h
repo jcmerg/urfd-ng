@@ -42,6 +42,8 @@
 #include <mutex>
 #include <chrono>
 
+#include "ModuleIndex.h"
+
 namespace agc
 {
 	static constexpr int   MIN_LAG = 20;         // 400 Hz highest pitch
@@ -126,20 +128,33 @@ struct AGCState
 
 class CAGC
 {
+	// the settings, set by Configure; each frame works with a copy
+	struct SParams
+	{
+		bool  enabled = false;
+		float targetDb = -20.0f + 3.0f;	// + ENVELOPE_OFFSET
+		float maxGainUpDb = 20.0f;
+		float maxGainDownDb = 24.0f;
+		float attackAlpha = 0.33f;
+		float releaseAlpha = 0.04f;
+		float noiseGateDb = -55.0f;
+		float gateFloor = 1.0f;          // gain limit with the gate closed (0 dB)
+	};
+
 public:
 	void Configure(bool enable, float targetDbfs, float attackMs, float releaseMs,
 	               float maxGainUpDb, float maxGainDownDb, float noiseGateDbfs = -55.0f,
 	               float gateFloorDb = 0.0f)
 	{
-		std::lock_guard<std::mutex> lock(m_mutex);
-		m_gateFloor = powf(10.0f, std::min(gateFloorDb, 0.0f) / 20.0f);
-		m_enabled = enable;
-		m_targetDb = targetDbfs + ENVELOPE_OFFSET;
-		m_maxGainUpDb = maxGainUpDb;
-		m_maxGainDownDb = maxGainDownDb;
-		m_attackAlpha  = (attackMs  > 0.0f) ? 1.0f - expf(-20.0f / attackMs)  : 1.0f;
-		m_releaseAlpha = (releaseMs > 0.0f) ? 1.0f - expf(-20.0f / releaseMs) : 1.0f;
-		m_noiseGateDb = noiseGateDbfs;
+		std::lock_guard<std::mutex> lock(m_paramMutex);
+		m_params.gateFloor = powf(10.0f, std::min(gateFloorDb, 0.0f) / 20.0f);
+		m_params.enabled = enable;
+		m_params.targetDb = targetDbfs + ENVELOPE_OFFSET;
+		m_params.maxGainUpDb = maxGainUpDb;
+		m_params.maxGainDownDb = maxGainDownDb;
+		m_params.attackAlpha  = (attackMs  > 0.0f) ? 1.0f - expf(-20.0f / attackMs)  : 1.0f;
+		m_params.releaseAlpha = (releaseMs > 0.0f) ? 1.0f - expf(-20.0f / releaseMs) : 1.0f;
+		m_params.noiseGateDb = noiseGateDbfs;
 	}
 
 	void Configure(bool enable, float targetDbfs, float attackMs, float releaseMs, float maxGainDb)
@@ -151,8 +166,8 @@ private:
 	// the upper envelope L of active speech reads this much above its RMS
 	static constexpr float ENVELOPE_OFFSET = 3.0f;
 
-	// Core AGC processing, called with m_mutex held
-	void ProcessCore(int16_t *samples, int count, AGCState &state, float &gain_db_out, bool &gate_out)
+	// Core AGC processing, with the module's lock held and the parameters of the frame
+	void ProcessCore(int16_t *samples, int count, AGCState &state, const SParams &p, float &gain_db_out, bool &gate_out)
 	{
 		using namespace agc;
 		static constexpr int   HOLD_FRAMES = 12;     // 240ms before the gate closes
@@ -210,7 +225,7 @@ private:
 		// update it, and the minimum of the last 2.4 s lifts it when the noise rose
 		if (state.frames == 0)
 		{
-			state.level = m_targetDb;  // start at unity gain
+			state.level = p.targetDb;  // start at unity gain
 			state.minCur = E;
 		}
 		if (E < state.noise)
@@ -235,7 +250,7 @@ private:
 
 		const float snr = E - state.noise;
 		const bool voiced = r >= VOICED;
-		const bool speech = E >= m_noiseGateDb && (snr >= GATE_SNR || (voiced && snr >= 3.0f));
+		const bool speech = E >= p.noiseGateDb && (snr >= GATE_SNR || (voiced && snr >= 3.0f));
 
 		// Track the speech level, asymmetric: fast up, down only on voiced speech
 		if (speech)
@@ -245,20 +260,20 @@ private:
 			if (d > JUMP_DB)
 				alpha = 0.5f;
 			else if (d > 0.0f)
-				alpha = m_attackAlpha;
+				alpha = p.attackAlpha;
 			else if (voiced && state.voicedFrames < ACQUIRE_FRAMES && snr >= 15.0f)
-				alpha = std::max(m_releaseAlpha, ACQUIRE_ALPHA);
+				alpha = std::max(p.releaseAlpha, ACQUIRE_ALPHA);
 			else if (voiced && snr >= RELEASE_SNR)
-				alpha = m_releaseAlpha;
+				alpha = p.releaseAlpha;
 			else if (r >= WEAK_VOICED && snr >= WEAK_SNR)
-				alpha = 0.2f * m_releaseAlpha;
+				alpha = 0.2f * p.releaseAlpha;
 			state.level += alpha * d;
 			if (voiced && snr >= 15.0f)
 				state.voicedFrames++;
 		}
 
 		// Gain toward the target, the boost scaled down on noisy signals
-		float gainDb = std::clamp(m_targetDb - state.level, -m_maxGainDownDb, m_maxGainUpDb);
+		float gainDb = std::clamp(p.targetDb - state.level, -p.maxGainDownDb, p.maxGainUpDb);
 		if (gainDb > 0.0f)
 			gainDb *= std::clamp((state.level - state.noise) / SNR_SPAN, 0.0f, 1.0f);
 		const float gain = powf(10.0f, gainDb / 20.0f);
@@ -286,7 +301,7 @@ private:
 		{
 			// Fade the applied gain to at most the gate floor: no noise amplification,
 			// for analog sources the noise between words is lowered
-			target = std::max(std::min(gain, m_gateFloor), state.applied * GATE_FADE);
+			target = std::max(std::min(gain, p.gateFloor), state.applied * GATE_FADE);
 			target = std::min(target, state.applied);  // a fade never raises the gain
 		}
 
@@ -350,49 +365,51 @@ public:
 	{
 		gate_out = false;
 		gain_db_out = 0.0f;
-		std::lock_guard<std::mutex> lock(m_mutex);
-		if (!m_enabled) return;
-
-		const auto now = std::chrono::steady_clock::now();
-		auto it = m_streams.find(streamKey);
-		if (it == m_streams.end())
+		SParams p;
 		{
-			DropEndedStreams(now);
-			it = m_streams.emplace(streamKey, AGCState{}).first;
+			std::lock_guard<std::mutex> lock(m_paramMutex);
+			p = m_params;
+		}
+		if (!p.enabled) return;
+
+		// the streams of a module, under its lock: the modules' workers run in parallel
+		auto &shard = m_shards[ModuleSlotOfKey(streamKey)];
+		std::lock_guard<std::mutex> lock(shard.mutex);
+		const auto now = std::chrono::steady_clock::now();
+		auto it = shard.streams.find(streamKey);
+		if (it == shard.streams.end())
+		{
+			DropEndedStreams(shard.streams, now);
+			it = shard.streams.emplace(streamKey, AGCState{}).first;
 		}
 		it->second.lastUsed = now;
 
-		ProcessCore(samples, count, it->second, gain_db_out, gate_out);
+		ProcessCore(samples, count, it->second, p, gain_db_out, gate_out);
 	}
 
 	bool IsEnabled() const
 	{
-		std::lock_guard<std::mutex> lock(m_mutex);
-		return m_enabled;
+		std::lock_guard<std::mutex> lock(m_paramMutex);
+		return m_params.enabled;
 	}
 
 private:
 	// streams not heard for 30 s have ended
-	void DropEndedStreams(std::chrono::steady_clock::time_point now)
+	static void DropEndedStreams(std::unordered_map<uint32_t, AGCState> &streams, std::chrono::steady_clock::time_point now)
 	{
-		for (auto it = m_streams.begin(); it != m_streams.end(); )
+		for (auto it = streams.begin(); it != streams.end(); )
 		{
 			if (now - it->second.lastUsed > std::chrono::seconds(30))
-				it = m_streams.erase(it);
+				it = streams.erase(it);
 			else
 				++it;
 		}
 	}
 
 	const agc::Filters m_filters;
-	bool  m_enabled = false;
-	float m_targetDb = -20.0f + ENVELOPE_OFFSET;
-	float m_maxGainUpDb = 20.0f;
-	float m_maxGainDownDb = 24.0f;
-	float m_attackAlpha = 0.33f;
-	float m_releaseAlpha = 0.04f;
-	float m_noiseGateDb = -55.0f;
-	float m_gateFloor = 1.0f;          // gain limit with the gate closed (0 dB)
-	std::unordered_map<uint32_t, AGCState> m_streams;	// by CTranscoderPacket::GetStreamKey
-	mutable std::mutex m_mutex;
+	SParams m_params;
+	mutable std::mutex m_paramMutex;	// m_params: Configure (once a second) and each frame's copy
+	// the streams by CTranscoderPacket::GetStreamKey, per module (ModuleSlotOfKey)
+	struct SShard { std::mutex mutex; std::unordered_map<uint32_t, AGCState> streams; };
+	SShard m_shards[kModuleSlots];
 };

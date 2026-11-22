@@ -20,6 +20,8 @@
 #include <mutex>
 #include <speex/speex_preprocess.h>
 
+#include "ModuleIndex.h"
+
 class CNoiseSuppress
 {
 public:
@@ -48,9 +50,9 @@ public:
 	// one 20 ms frame (160 samples at 8 kHz) of the module, in place
 	void Process(int16_t *samples, char module)
 	{
-		int i = module - 'A';
-		if (i < 0 || i >= 26)
-			return;
+		const int i = ModuleSlot(module);
+		if (i >= 26)
+			return;	// no module
 		// the module's lock: the modules' workers run in parallel
 		std::lock_guard<std::mutex> lock(m_mutex[i]);
 		int db = m_suppressDb.load();
