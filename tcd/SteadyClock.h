@@ -20,3 +20,12 @@ inline bool OncePerSecond(std::atomic<int64_t> &stamp)
 	int64_t last = stamp.load(std::memory_order_relaxed);
 	return now - last >= 1000 && stamp.compare_exchange_strong(last, now);
 }
+
+// tcd's time limits that depend on each other: a module worker drops a packet from
+// the reflector that waited longer than kWorkerMaxAgeMs for it; a stream's report to
+// urfd waits kReportDelayMs after its last frame, longer than that, so its last
+// frames are coded by then; a frame that waited kDeviceMaxWaitMs for its AMBE device
+// goes back with silence
+constexpr int kWorkerMaxAgeMs = 400;
+constexpr int kReportDelayMs = kWorkerMaxAgeMs + 200;
+constexpr int kDeviceMaxWaitMs = 1000;

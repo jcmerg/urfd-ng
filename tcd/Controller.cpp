@@ -1511,10 +1511,9 @@ void CController::ToWorker(std::shared_ptr<CTranscoderPacket> packet, const SDev
 	// always taken: the device's FIFO bounds them, and the frame is done there
 	auto &wk = *workers[w];
 	const bool always = MustKeep(job);
-	std::shared_ptr<CTranscoderPacket> dropped = always ? nullptr : job.packet;
 	const bool taken = wk.queue.push(std::move(job), always ? SIZE_MAX : WORKER_QUEUE_MAX) != 0;
-	if (!taken && dropped)
-		DroppedFrame(dropped);
+	if (!taken && job.packet)	// a refused job stays here (push moves only what it takes)
+		DroppedFrame(job.packet);
 	if (!taken && keep_running)
 	{
 		if (OncePerSecond(wk.told_full))
@@ -2361,6 +2360,7 @@ std::shared_ptr<CDVDevice> CController::OpenSlot(int i, const std::string &node)
 
 // the codec (D-Star or DMR) slot i has channels for that no codec plugin does, -1
 // for none: without it the device may go (phased out, or lost while tcd runs)
+// with hw_mux, or before the workers run (it reads the slots' up and draining)
 int CController::UncoveredChoice(int i) const
 {
 	for (int k : { kChoiceDStar, kChoiceDMR })
@@ -2390,26 +2390,29 @@ void CController::DeviceLost(int i, const CDVDevice *dev)
 	if (!keep_running)
 		return;
 	auto &s = *slots[i];
+	int k;
 	{
+		// the check and the slot going out in one step: two devices lost at once
+		// (a USB hub reset) must not each count on the other
 		std::lock_guard<std::mutex> lock(hw_mux);
 		if (s.dev.get() != dev || !s.up)
 			return;	// an older device of the slot, or already out
+		k = UncoveredChoice(i);
+		if (k < 0)
+		{
+			s.next_try = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+			s.up = false;
+			for (auto &list : hw_channels)
+				for (auto &c : list)
+					if (c.slot == i)
+						c.busy = false;
+		}
 	}
-	const int k = UncoveredChoice(i);
 	if (k >= 0)
 	{
 		std::cerr << "No codec plugin does " << g_CodecChoices[k].label << " in place of " << s.desc << ": shutting down" << std::endl;
 		kill(getpid(), SIGINT);
 		return;
-	}
-	{
-		std::lock_guard<std::mutex> lock(hw_mux);
-		s.next_try = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-		s.up = false;
-		for (auto &list : hw_channels)
-			for (auto &c : list)
-				if (c.slot == i)
-					c.busy = false;
 	}
 	if (s.stats >= 0)
 		g_Stats.devices[s.stats].online.store(false);
@@ -2533,9 +2536,12 @@ void CController::DeviceWatchThread()
 				other = other || (j != i && (slots[j]->recompand	// draining for it, or closed and not yet open again
 					|| (slots[j]->out && slots[j]->stats >= 0 && !g_Stats.devices[slots[j]->stats].want_out.load())
 					|| (!slots[j]->up && !slots[j]->out && slots[j]->compand != compand)));	// or it did not open again
-			if (!other && s.up && !s.draining && !s.out && s.compand != compand
-				&& (UncoveredChoice(int(i)) < 0 || !SlotBusy(int(i))))
-				s.recompand = true;
+			if (!other && s.up && !s.draining && !s.out && s.compand != compand)
+			{
+				std::lock_guard<std::mutex> lock(hw_mux);
+				if (UncoveredChoice(int(i)) < 0 || !SlotBusyLocked(int(i)))
+					s.recompand = true;
+			}
 			PhaseOut(int(i));
 			if (s.up || s.out || now < s.next_try)
 				continue;

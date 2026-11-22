@@ -30,8 +30,9 @@ template <typename T>
 class CBlockingQueue
 {
 public:
-	// the queue's size after it, 0 when it is shut down or holds max items already (dropped)
-	std::size_t push(T item, std::size_t max = SIZE_MAX)
+	// the queue's size after it, 0 when it is shut down or holds max items already:
+	// then item is left as it was (moved from only when taken)
+	std::size_t push(T &&item, std::size_t max = SIZE_MAX)
 	{
 		std::size_t size;
 		{

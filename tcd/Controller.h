@@ -40,6 +40,7 @@
 #include "CodecChoice.h"
 #include "TcdStats.h"
 #include "ModuleIndex.h"
+#include "SteadyClock.h"
 #include "PacketQueue.h"
 
 class CController
@@ -106,7 +107,7 @@ protected:
 		uint64_t last_busy_ns = 0;	// the reflector thread's
 	};
 	static constexpr std::size_t WORKER_QUEUE_MAX = 2000;	// a bound for the memory; TooLate keeps the wait short
-	static constexpr auto WORKER_JOB_MAX_AGE = std::chrono::milliseconds(400);
+	static constexpr auto WORKER_JOB_MAX_AGE = std::chrono::milliseconds(kWorkerMaxAgeMs);
 	bool TooLate(const SJob &job, std::chrono::steady_clock::time_point now);
 	static bool MustKeep(const SJob &job);
 	void DroppedFrame(const std::shared_ptr<CTranscoderPacket> &packet);

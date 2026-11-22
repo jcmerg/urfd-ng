@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "TCPacketDef.h"
+#include "SteadyClock.h"
 
 class CStreamReports
 {
@@ -103,8 +104,8 @@ public:
 			it->second.mutes++;
 	}
 
-	// the reports that are due go to send: 600 ms after the last frame of a stream
-	// (its audio is through by then, a module worker drops frames older than 400 ms),
+	// the reports that are due go to send: kReportDelayMs after the last frame of a
+	// stream (its audio is through by then, SteadyClock.h),
 	// 2 s after anything of one whose last frame got lost
 	void Flush(const std::function<void(const STCPacket &)> &send)
 	{
@@ -116,7 +117,7 @@ public:
 			for (auto it = m_streams.begin(); it != m_streams.end();)
 			{
 				const auto quiet = now - it->second.seen;
-				if ((it->second.last && quiet >= std::chrono::milliseconds(600)) || quiet >= std::chrono::seconds(2))
+				if ((it->second.last && quiet >= std::chrono::milliseconds(kReportDelayMs)) || quiet >= std::chrono::seconds(2))
 				{
 					Report(it->first, it->second, due);
 					it = m_streams.erase(it);

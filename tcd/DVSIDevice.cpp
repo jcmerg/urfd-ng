@@ -618,7 +618,7 @@ void CDVDevice::FeedDevice()
 		// a device slower than the frames come (but not silent) would queue them
 		// without end: a frame that waited a second goes back with silence, like a
 		// lost answer, without the device
-		if (SteadyMs() - feed.queued_ms > 1000)
+		if (SteadyMs() - feed.queued_ms > kDeviceMaxWaitMs)
 		{
 			if (OncePerSecond(m_toldStale))
 				std::cerr << description << ": frames waited more than a second to go to the device, silence instead" << std::endl;
