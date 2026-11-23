@@ -30,9 +30,15 @@
 #include <condition_variable>
 
 #include "PacketQueue.h"
+#include "TranscoderPacket.h"
 #include "DVSIPacket.h"
 #include "DeviceIO.h"
 #include "G711.h"
+
+// a device's answer to a packet, put into the packet by its module's worker
+// (CController::DeviceAnswer): enc, the channel's codec; audio, decoded speech
+// in pcm, else the frame of enc in ambe
+struct SDeviceAnswer { Encoding enc; bool audio; uint8_t ambe[9]; int16_t pcm[160]; };
 
 class CDVDevice
 {
@@ -51,7 +57,6 @@ public:
 	bool ConfigureChannel(uint8_t pkt_ch, Encoding enc, int8_t in_gain, int8_t out_gain);
 	void Start();
 	void CloseDevice();
-	void AddPacket(const std::shared_ptr<CTranscoderPacket> packet);
 	// a packet for a channel the controller chose (a DV3000 has only channel 0)
 	void AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> packet, uint8_t channel);
 	// called once from the reader thread when the device is lost (unplugged, or it
@@ -60,6 +65,8 @@ public:
 	std::string GetProductID() { return productid; }
 	Edvtype GetType() const { return devtype; }
 	unsigned int GetBufferDepth() const { return buffer_depth.load(std::memory_order_relaxed); }
+	// the frames handed to it and not sent yet
+	std::size_t QueuedPackets() { return input_queue.Size(); }
 	// output gain per encoding: a DV3003 in mixed mode encodes D-Star and DMR
 	void SetOutputGains(int32_t dstar_num, int32_t dmr_num) { m_outputGainDStar.store(dstar_num, std::memory_order_relaxed); m_outputGainDmr.store(dmr_num, std::memory_order_relaxed); }
 	void SetStatsIndex(int idx) { m_statsIndex = idx; }
@@ -68,7 +75,6 @@ public:
 
 	// Virtual hooks for mixed-mode support
 	virtual Encoding GetChannelEncoding(uint8_t /*channel*/) const { return type; }
-	virtual uint8_t MapPacketToChannel(const std::shared_ptr<CTranscoderPacket> &packet) const;
 
 protected:
 	const Encoding type;
@@ -87,7 +93,13 @@ protected:
 	int64_t m_logWindow = 0;
 	int m_logged = 0, m_suppressed = 0;
 	bool LogLost(void);
-	CPacketQueue input_queue;
+	// a packet for a channel, as the module's worker handed it over: one packet can
+	// come twice, for a D-Star and a DMR channel of one device (mixed mode, pool);
+	// decode: the channel decodes its AMBE frame, else it encodes its audio
+	struct SFeed { std::shared_ptr<CTranscoderPacket> packet; uint8_t channel; bool decode; int64_t queued_ms; };
+	std::atomic<int64_t> m_toldStale{0};	// SteadyMs of the last "too late for the device" line
+	CBlockingQueue<SFeed> input_queue;
+	std::atomic<int64_t> m_toldQueue{0};	// SteadyMs of the last "packets wait" line
 	std::future<void> feedFuture, readFuture;
 	std::string description, productid;
 	std::atomic<int32_t> m_outputGainDStar{256}, m_outputGainDmr{256};
@@ -100,11 +112,6 @@ protected:
 	size_t SpeechOut(const int16_t *audio, void *samples) const;
 	bool probing = false;	// Probe: fewer messages
 	std::function<void()> m_onLost;
-	// the channel AddPacketToChannel chose for a packet, until FeedDevice takes it
-	mutable std::unordered_map<CTranscoderPacket *, uint8_t> target_channel;
-	mutable std::mutex target_mutex;
-	// the channel of a packet from AddPacketToChannel (and forgets it), 0xFF without one
-	uint8_t TargetChannel(const std::shared_ptr<CTranscoderPacket> &packet) const;
 	void Lost(void);
 
 	// the packets a vocoder channel works on, oldest first: a device answers them in
@@ -130,7 +137,9 @@ protected:
 	// stream runs, a lost answer whose channel is not known costs it 20 ms until then
 	void Resync(void);
 	// a packet with this device's output set, on to the controller
-	void Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc);
+	// the answer to the packet goes to its module's worker, which puts it into the packet
+	void Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer);
+	SDeviceAnswer SilenceAnswer(uint8_t channel, bool decode) const;
 
 	// reading the answers while running: bytes read ahead first, then the device
 	std::deque<uint8_t> rx;

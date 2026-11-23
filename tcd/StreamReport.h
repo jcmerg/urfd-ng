@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "TCPacketDef.h"
+#include "SteadyClock.h"
 
 class CStreamReports
 {
@@ -79,6 +80,15 @@ public:
 		}
 	}
 
+	// a frame of the stream a module worker dropped as too late: the stream goes on
+	void Touch(char module, uint16_t sid)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		auto it = m_streams.find(module);
+		if (it != m_streams.end() && it->second.sid == sid)
+			it->second.seen = Clock::now();
+	}
+
 	// how a codec plugin decoded a frame of the stream (TCD_FRAME_REPEAT, TCD_FRAME_MUTE);
 	// a DVSI device does not say, its frames count only by their FEC
 	void Decoded(char module, uint16_t sid, bool repeat, bool mute)
@@ -94,8 +104,9 @@ public:
 			it->second.mutes++;
 	}
 
-	// the reports that are due go to send: 300 ms after the last frame of a stream
-	// (its audio is through by then), 2 s after anything of one whose last frame got lost
+	// the reports that are due go to send: kReportDelayMs after the last frame of a
+	// stream (its audio is through by then, SteadyClock.h),
+	// 2 s after anything of one whose last frame got lost
 	void Flush(const std::function<void(const STCPacket &)> &send)
 	{
 		std::vector<STCPacket> due;
@@ -106,7 +117,7 @@ public:
 			for (auto it = m_streams.begin(); it != m_streams.end();)
 			{
 				const auto quiet = now - it->second.seen;
-				if ((it->second.last && quiet >= std::chrono::milliseconds(300)) || quiet >= std::chrono::seconds(2))
+				if ((it->second.last && quiet >= std::chrono::milliseconds(kReportDelayMs)) || quiet >= std::chrono::seconds(2))
 				{
 					Report(it->first, it->second, due);
 					it = m_streams.erase(it);

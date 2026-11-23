@@ -26,6 +26,8 @@
 #include <future>
 #include <mutex>
 #include <list>
+#include <optional>
+#include <thread>
 #include <utility>
 
 #include "DV3000.h"
@@ -37,12 +39,13 @@
 #include "CodecPlugin.h"
 #include "CodecChoice.h"
 #include "TcdStats.h"
+#include "ModuleIndex.h"
+#include "SteadyClock.h"
+#include "PacketQueue.h"
 
 class CController
 {
 public:
-	std::mutex dstar_mux, dmrst_mux;
-
 	CController();
 	bool Start();
 	void Stop();
@@ -51,14 +54,77 @@ public:
 	// decoded: from's decode succeeded (a failed one gets no transcode, only its End)
 	void RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, class CSoftCodec *from = nullptr, bool decoded = true);
 	void RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet);
+	// an AMBE device's answer to a packet (DVSIDevice: its reader, or a lost
+	// answer's silence): the packet's module worker puts it into the packet and
+	// routes it on (RouteDstPacket, RouteDmrPacket)
+	void DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer &answer);
 	void ReconfigureAGC();  // re-read AGC params from g_Stats.config
 	void Dump(const std::shared_ptr<CTranscoderPacket> packet, const std::string &title) const;
 
 protected:
 	std::atomic<bool> keep_running;
-	std::future<void> reflectorFuture, c2Future, imbeFuture, usrpFuture;
-	std::unordered_map<char, int16_t[160]> audio_store;
-	std::unordered_map<char, uint8_t[8]> data_store;
+	std::future<void> reflectorFuture;
+	// per module (ModuleSlot): M17 1600 audio of the payload's second half, and the
+	// first half of an M17 3200 payload being coded
+	int16_t audio_store[kModuleSlots][160] = {};
+	uint8_t data_store[kModuleSlots][8] = {};
+	// which first packet a store holds: a second packet uses it only when it is its
+	// pair's (the same stream, the sequence before), wherever the first was coded
+	struct SStoreTag
+	{
+		bool valid = false;
+		uint16_t streamid = 0;
+		uint32_t sequence = 0;
+		void Set(const std::shared_ptr<CTranscoderPacket> &p) { valid = true; streamid = p->GetStreamId(); sequence = p->GetSequence(); }
+		bool Of(const std::shared_ptr<CTranscoderPacket> &p) const { return valid && streamid == p->GetStreamId() && sequence + 1 == p->GetSequence(); }
+	};
+	SStoreTag audio_tag[kModuleSlots], data_tag[kModuleSlots];
+
+	// The modules' workers: every module belongs to one of them (worker_of), which
+	// does all the work on its packets: decoding, AGC, coding to the other codecs
+	// in software, sending them back, and the AMBE devices' answers. The modules
+	// of different workers are coded in parallel, those of one worker one after
+	// the other; a packet's frames are only ever touched by its module's worker
+	// (an AMBE device reads it while it has it). Workers in tcd.ini, auto: one
+	// per CPU core, at most one per module
+	// what comes to a worker from another thread: a packet from the reflector, or
+	// an AMBE device's answer to one; the rest of a packet's work the worker calls itself
+	// answer: a device's answer to the packet, else the packet came from the reflector
+	struct SJob { std::shared_ptr<CTranscoderPacket> packet; std::optional<SDeviceAnswer> answer; std::chrono::steady_clock::time_point queued; };
+	// busy_ns: the time it worked in jobs done, job_start_ns: the start of the
+	// one it is in (0: none), so a long one counts in the seconds it takes;
+	// wait_us: the longest a job waited since the last look (WorkerStatsTick, in
+	// the reflector thread, takes them)
+	struct SWorker
+	{
+		CBlockingQueue<SJob> queue;
+		std::thread thread;
+		std::atomic<uint64_t> busy_ns{0};
+		std::atomic<int64_t> job_start_ns{0};
+		std::atomic<uint32_t> wait_us{0};
+		std::atomic<int64_t> told_full{0};	// SteadyMs of the last "jobs behind"
+		std::atomic<int64_t> told_late{0};	// SteadyMs of the last "frames older than"
+		uint64_t last_busy_ns = 0;	// the reflector thread's
+	};
+	static constexpr std::size_t WORKER_QUEUE_MAX = 2000;	// a bound for the memory; TooLate keeps the wait short
+	static constexpr auto WORKER_JOB_MAX_AGE = std::chrono::milliseconds(kWorkerMaxAgeMs);
+	bool TooLate(const SJob &job, std::chrono::steady_clock::time_point now);
+	static bool MustKeep(const SJob &job);
+	void DroppedFrame(const std::shared_ptr<CTranscoderPacket> &packet);
+	CSoftCodec *SiblingOf(const CSoftCodec *from, uint32_t to) const;
+
+	std::vector<std::unique_ptr<SWorker>> workers;
+	int worker_of[kModuleSlots] = {};	// by ModuleSlot
+	void StartWorkers(void);
+	void StopWorkers(void);
+	void WorkerThread(int i);
+	void WorkerStatsTick(void);	// once a second: g_Stats.workers
+	std::chrono::steady_clock::time_point worker_tick;
+	// a job to the worker of the packet's module (from the reflector thread or a device's reader)
+	void ToWorker(std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer *answer = nullptr);
+	void RunJob(SJob &job);
+	// the packet to the reflector once every codec is set (only its worker sets them)
+	void SendIfDone(const std::shared_ptr<CTranscoderPacket> &packet);
 	CTCClient tcClient;
 	// an AMBE device in use: how to open it again, its channels' codecs, and
 	// whether it answers. A lost device is left to the codec plugins and opened
@@ -98,6 +164,7 @@ protected:
 		std::chrono::steady_clock::time_point last;
 	};
 	std::vector<SHwChannel> hw_channels[kNumChoices];
+	std::mutex hw_mux;
 	// DeviceChannels for the streams that start from now on (the monitor switches it)
 	static bool Pool(void) { return g_Stats.config.device_pool.load(std::memory_order_relaxed) != 0; }
 	std::future<void> watchFuture;
@@ -113,12 +180,14 @@ protected:
 	void PhaseOut(int slot);
 	// its channels in use, or quiet for less than a second, or frames still on the device
 	bool SlotBusy(int slot);
-	bool SlotBusyLocked(int slot);	// with pinned_mux
+	bool SlotBusyLocked(int slot);	// with hw_mux
 	int UncoveredChoice(int slot) const;
-	// the channel of codec k for a stream, -1 for none (under pinned_mux):
+	// the channel of codec k for a stream, -1 for none (under hw_mux):
 	// FindChannel only looks, TakeChannel takes it
 	int FindChannel(int k, char module) const;
 	int TakeChannel(int k, char module, uint16_t streamid);
+	// frees the stream's channel after its last frame went to the device (takes hw_mux)
+	void ReleaseChannel(int k, const std::shared_ptr<CTranscoderPacket> &packet);
 	// a channel whose device is up and not phased out takes new streams
 	bool Usable(const SHwChannel &c) const { return slots[c.slot]->up && !slots[c.slot]->draining; }
 	bool HasChannel(int k, int hw, char module, uint16_t streamid) const;
@@ -126,11 +195,6 @@ protected:
 	// a name for channel c of codec k in the log: DV3003 ch1
 	std::string ChannelName(int k, size_t c) const;
 
-	CPacketQueue codec2_queue;
-
-	CPacketQueue imbe_queue;
-	CPacketQueue usrp_queue;
-	std::mutex send_mux;
 	// per vocoder choice (CodecChoice.h), what may do it: nullptr = the AMBE
 	// devices, else a codec of tcd's own vocoders (OP25, Codec2) or of a codec
 	// plugin (CodecPlugins.h), as g_Stats.codec_options names them; a stream keeps
@@ -149,14 +213,27 @@ protected:
 	// is done, or when the stream has been quiet for 5 s (its last frame lost)
 	struct SStreamPart { int k; std::string by; bool device, decode, done; uint32_t frames, fec, unc, bad; };
 	struct SStreamLog { char module; std::chrono::steady_clock::time_point first, last; std::vector<SStreamPart> parts; };
-	std::unordered_map<uint32_t, SStreamLog> stream_log;	// by GetStreamKey, under pinned_mux
-	SStreamPart *StreamLogPart(int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw, bool note);
-	void StreamLogCount(int k, const std::shared_ptr<CTranscoderPacket> &packet);
-	void StreamLogFlush(uint32_t key);
-	void DeviceFrameIn(int k, int hw, const std::shared_ptr<CTranscoderPacket> &packet);
+	// a module's streams: their pins (by GetStreamKey) and their lines, under the
+	// module's lock, so the workers of different modules do not wait for each other
+	struct SModuleState
+	{
+		std::mutex mx;
+		std::unordered_map<uint32_t, SPinned> pinned[kNumChoices];
+		std::unordered_map<uint32_t, SStreamLog> stream_log;
+	};
+	SModuleState module_state[kModuleSlots];	// by ModuleSlotOfKey
+	SModuleState &StateOf(uint32_t key) { return module_state[ModuleSlotOfKey(key)]; }
+	// stream lines made under a lock, printed once it is released (no output under a lock)
+	using LogLines = std::vector<std::string>;
+	static void PrintLines(const LogLines &lines);
+	// with the module's lock (ms of the packet's stream)
+	SStreamPart *StreamLogPart(SModuleState &ms, int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw, bool note);
+	void StreamLogCount(SModuleState &ms, int k, const std::shared_ptr<CTranscoderPacket> &packet, LogLines &lines);
+	void StreamLogFlush(SModuleState &ms, uint32_t key, LogLines &lines);
+	void DeviceFrameIn(SModuleState &ms, int k, int hw, const std::shared_ptr<CTranscoderPacket> &packet);
 	void DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket> &packet);
-	std::mutex pinned_mux;
-	std::unordered_map<uint32_t, SPinned> pinned[kNumChoices];	// by GetStreamKey
+	// the AMBE devices: slots (their dev, up, ...) and hw_channels (busy, last, the
+	// stream on it); taken after a module's lock, never before it
 	// the modules the devices do D-Star and DMR for; the other modules go to a
 	// plugin (empty for P25 and M17, which have no device)
 	std::string hw_modules[kNumChoices];
@@ -187,7 +264,7 @@ protected:
 	// the stream's choice for `to` is that plugin and it can (CodecPlugin.h api 4);
 	// the AGC's gain and the source's output gain in source_db, the target's gains
 	// added here. Sets the packet's frame of `to` and its bit in direct; false
-	// leaves `to` to the audio path. Called in the decoder's thread for every frame
+	// leaves `to` to the audio path. Called by the module's worker for every frame
 	// (a transmission is coded directly from its first frame on, and after a frame
 	// that was not, its rest goes the audio path: CSoftCodec::Transcode)
 	bool Transcode(uint32_t to, class CSoftCodec *from, bool decoded, float source_db, const std::shared_ptr<CTranscoderPacket> &packet, uint8_t *direct);
@@ -206,7 +283,7 @@ protected:
 	std::atomic<int32_t> outgain_dstar_num{256}, outgain_dmr_num{256}, outgain_usrp_num{256}, outgain_imbe_num{256}, outgain_m17_num{256};
 	// P25 to M17: a 300 Hz high-pass in front of the Codec2 encoder, per module
 	struct SHighPass { float z[2][2]; uint16_t streamid; };
-	std::unordered_map<char, SHighPass> c2_highpass;
+	SHighPass c2_highpass[kModuleSlots] = {};	// by ModuleSlot
 	void HighPass(char module, uint16_t streamid, int16_t *samples);
 	CAGC m_agcDigital;  // D-Star, DMR/YSF/NXDN, M17, P25
 	CAGC m_agcAnalog;   // SVX and USRP: FM audio, gate above its noise floor
@@ -221,12 +298,11 @@ protected:
 	bool DiscoverFtdiDevices(std::list<std::pair<std::string, std::string>> &found);
 	bool IsAmbeDevice(const std::string &desc);
 	bool InitVocoders();
-	// processing threads
+	// the reflector's packets in, and the stages of the workers
 	void ReadReflectorThread();
-	void ProcessC2Thread();
-
-	void ProcessIMBEThread();
-	void ProcessUSRPThread();
+	void StageIn(std::shared_ptr<CTranscoderPacket> packet);
+	void StageSWAMBE2(std::shared_ptr<CTranscoderPacket> packet);
+	void StageSWDStar(std::shared_ptr<CTranscoderPacket> packet);
 	void Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet);
 	void AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet);
 	void IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet);
@@ -235,12 +311,8 @@ protected:
 	void AudiotoUSRP(std::shared_ptr<CTranscoderPacket> packet);
 	void SvxToAudio(std::shared_ptr<CTranscoderPacket> packet);
 	void SendToReflector(std::shared_ptr<CTranscoderPacket> packet);
-	std::future<void> swambe2Future, swdstarFuture;
-	CPacketQueue swambe2_queue, swdstar_queue;
-	void ProcessSWAMBE2Thread();
 	void SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet);
 	void AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet);
-	void ProcessSWDStarThread();
 	void SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet);
 	void AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet);
 	// a packet to the D-Star or the DMR codec: a DVSI device or a codec plugin

@@ -126,8 +126,8 @@ std::string CMonitorServer::BuildStatsJson()
 	bool first = true;
 	for (char mod : g_Stats.module_letters)
 	{
-		int idx = mod - 'A';
-		if (idx < 0 || idx >= CTcdStats::MAX_MODULES) continue;
+		const int idx = ModuleSlot(mod);
+		if (idx == kModuleOther) continue;
 		auto &m = g_Stats.modules[idx];
 
 		if (!first) js << ",";
@@ -220,6 +220,15 @@ std::string CMonitorServer::BuildStatsJson()
 	js << ",\"pool_available\":" << (g_Stats.pool_available.load(std::memory_order_relaxed) ? "true" : "false");
 	js << ",\"hw_channels\":{\"dstar\":{\"total\":" << g_Stats.hw_total[kChoiceDStar].load() << ",\"busy\":" << g_Stats.hw_busy[kChoiceDStar].load()
 	   << "},\"dmr\":{\"total\":" << g_Stats.hw_total[kChoiceDMR].load() << ",\"busy\":" << g_Stats.hw_busy[kChoiceDMR].load() << "}}";
+	js << ",\"workers\":[";
+	for (int i = 0; i < g_Stats.num_workers.load(); i++)
+	{
+		const auto &w = g_Stats.workers[i];
+		char num[64];
+		snprintf(num, sizeof(num), "%.1f,\"wait_ms\":%.2f", w.busy_pct.load(std::memory_order_relaxed), w.wait_ms.load(std::memory_order_relaxed));
+		js << (i ? "," : "") << "{\"modules\":\"" << jstr(w.modules) << "\",\"busy\":" << num << "}";
+	}
+	js << "]";
 	js << ",\"reflector\":{"
 	   << "\"connected\":" << (g_Stats.reflector.connected.load(std::memory_order_relaxed) ? "true" : "false")
 	   << ",\"pkts_rx\":" << g_Stats.reflector.packets_rx.load(std::memory_order_relaxed)

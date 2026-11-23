@@ -38,6 +38,7 @@
 #include "Configure.h"
 #include "TcdStats.h"
 #include "Controller.h"
+#include "SteadyClock.h"
 
 // a device that leaves a packet unanswered for this long is taken as lost, like an
 // unplugged one: a codec plugin takes its streams (or tcd stops, without one). An
@@ -54,10 +55,6 @@
 static const uint8_t DSTAR_SILENCE[9] { 0x9EU, 0x8DU, 0x32U, 0x88U, 0x26U, 0x1AU, 0x3FU, 0x61U, 0xE8U };
 static const uint8_t DMR_SILENCE[9]   { 0xB9U, 0xE8U, 0x81U, 0x52U, 0x61U, 0x73U, 0x00U, 0x2AU, 0x6BU };
 
-static int64_t SteadyMs()
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-}
 
 extern CConfigure g_Conf;
 extern CController g_Cont;
@@ -66,24 +63,14 @@ CDVDevice::CDVDevice(Encoding t) : type(t), devtype(Edvtype::dv3000), buffer_dep
 {
 }
 
-uint8_t CDVDevice::TargetChannel(const std::shared_ptr<CTranscoderPacket> &packet) const
-{
-	std::lock_guard<std::mutex> lock(target_mutex);
-	auto it = target_channel.find(packet.get());
-	if (it == target_channel.end())
-		return 0xFF;
-	const uint8_t ch = it->second;
-	target_channel.erase(it);
-	return ch;
-}
-
 void CDVDevice::AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> packet, uint8_t channel)
 {
-	{
-		std::lock_guard<std::mutex> lock(target_mutex);
-		target_channel[packet.get()] = channel;
-	}
-	AddPacket(packet);
+	// what the channel does, decided here in the packet's worker: it decodes the
+	// frame of its codec when the packet has one, else it encodes the audio
+	const bool decode = (Encoding::dstar == GetChannelEncoding(channel)) ? packet->DStarIsSet() : packet->DMRIsSet();
+	const auto size = input_queue.push(SFeed{ packet, channel, decode, SteadyMs() });
+	if (size > 200 && OncePerSecond(m_toldQueue))
+		std::cerr << description << ": " << size << " packets wait to go to the device" << std::endl;
 }
 
 // the device is gone or hung: the controller hands its channels to a codec plugin,
@@ -94,17 +81,6 @@ void CDVDevice::Lost(void)
 		m_onLost();
 	else
 		kill(getpid(), SIGINT);
-}
-
-uint8_t CDVDevice::MapPacketToChannel(const std::shared_ptr<CTranscoderPacket> &packet) const
-{
-	const uint8_t target = TargetChannel(packet);
-	if (target != 0xFF)
-		return target;
-	const std::string modules(g_Conf.GetTCMods());
-	auto index = modules.find(packet->GetModule());
-	const size_t channels = (Edvtype::dv3000 == devtype) ? 1 : 3;
-	return (index < channels) ? (uint8_t)index : 0xFF;
 }
 
 bool CDVDevice::ConfigureChannel(uint8_t pkt_ch, Encoding enc, int8_t in_gain, int8_t out_gain)
@@ -583,15 +559,6 @@ bool CDVDevice::GetResponse(SDV_Packet &packet)
 	return false;
 }
 
-void CDVDevice::AddPacket(const std::shared_ptr<CTranscoderPacket> packet)
-{
-	auto size = input_queue.push(packet);
-	if (size > 200)
-	{
-		std::cerr << ((type==Encoding::dstar) ? "DStar" : "DMR/YSF") << " inQ size=" << size << ", dropping packet" << std::endl;
-	}
-}
-
 void CDVDevice::dump(const char *title, const void *pointer, int length) const
 {
 	const uint8_t *data = (const uint8_t *)pointer;
@@ -642,13 +609,23 @@ void CDVDevice::dump(const char *title, const void *pointer, int length) const
 
 void CDVDevice::FeedDevice()
 {
-	const std::string modules(g_Conf.GetTCMods());
-	const auto n = modules.size();
 	while (keep_running)
 	{
-		auto packet = input_queue.pop();	// blocks until there is something to pop, unless shutting down
-
-		if (packet)
+		SFeed feed;
+		if (!input_queue.pop(feed))	// blocks until there is something to pop, unless shutting down
+			break;
+		const auto &packet = feed.packet;
+		// a device slower than the frames come (but not silent) would queue them
+		// without end: a frame that waited a second goes back with silence, like a
+		// lost answer, without the device
+		if (SteadyMs() - feed.queued_ms > kDeviceMaxWaitMs)
+		{
+			if (OncePerSecond(m_toldStale))
+				std::cerr << description << ": frames waited more than a second to go to the device, silence instead" << std::endl;
+			SDeviceAnswer answer = SilenceAnswer(feed.channel, feed.decode);
+			Deliver(packet, answer.enc, answer);
+			continue;
+		}
 		{
 			{	// wait until there is room in chip FIFO
 				const unsigned int max_depth = (Edvtype::dv3003 == devtype) ? 5 : 2;
@@ -659,16 +636,11 @@ void CDVDevice::FeedDevice()
 
 			if (keep_running)
 			{
-				auto index = MapPacketToChannel(packet);
+				const uint8_t index = feed.channel;
 				// save the packet in the vocoder's queue while the vocoder does its magic
-				if (index == 0xFF)
-				{
-					std::cerr << "Module '" << packet->GetModule() << "' is not configured on " << description << std::endl;
-				}
-				else
 				{
 					Encoding ch_enc = GetChannelEncoding(index);
-					const bool needs_audio = (Encoding::dstar==ch_enc) ? packet->DStarIsSet() : packet->DMRIsSet();
+					const bool needs_audio = feed.decode;	// decodes the frame: its answer is audio
 					PushWaiting(index, packet, needs_audio);
 
 					// Track channel activity in stats
@@ -677,9 +649,7 @@ void CDVDevice::FeedDevice()
 					{
 						auto &ds = g_Stats.devices[m_statsIndex];
 						ds.ch_module[index].store(packet->GetModule(), std::memory_order_relaxed);
-						auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-							std::chrono::steady_clock::now().time_since_epoch()).count();
-						ds.ch_last_ms[index].store(now, std::memory_order_relaxed);
+						ds.ch_last_ms[index].store(SteadyMs(), std::memory_order_relaxed);
 					}
 
 					// stamped before it goes out, so its answer cannot come first
@@ -834,18 +804,22 @@ std::shared_ptr<CTranscoderPacket> CDVDevice::PopWaiting(uint8_t channel, bool *
 	return packet;
 }
 
-void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc)
+// the answer for a frame the device did not answer: silent audio for one it was to
+// decode, else the channel's codec's silence frame
+SDeviceAnswer CDVDevice::SilenceAnswer(uint8_t channel, bool decode) const
 {
-	if (Encoding::dstar == ch_enc)
-	{
-		std::lock_guard<std::mutex> lock(g_Cont.dstar_mux);
-		g_Cont.RouteDstPacket(packet);
-	}
-	else
-	{
-		std::lock_guard<std::mutex> lock(g_Cont.dmrst_mux);
-		g_Cont.RouteDmrPacket(packet);
-	}
+	SDeviceAnswer answer{};
+	answer.enc = GetChannelEncoding(channel);
+	answer.audio = decode;
+	if (!decode)
+		memcpy(answer.ambe, Encoding::dstar == answer.enc ? DSTAR_SILENCE : DMR_SILENCE, sizeof(answer.ambe));
+	return answer;
+}
+
+void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer)
+{
+	answer.enc = ch_enc;
+	g_Cont.DeviceAnswer(packet, answer);
 }
 
 void CDVDevice::LostAnswer(uint8_t channel, const char *why)
@@ -866,17 +840,8 @@ void CDVDevice::LostAnswer(uint8_t channel, const char *why)
 		unsigned(channel), packet->GetModule(), unsigned(packet->GetStreamId()), unsigned(packet->GetSequence()), why);
 	if (LogLost())
 		std::cerr << description << line << std::endl;
-	const Encoding ch_enc = GetChannelEncoding(channel);
-	if (decode)
-	{
-		const int16_t silence[160] = {};
-		packet->SetAudioSamples(silence, false);
-	}
-	else if (Encoding::dstar == ch_enc)
-		packet->SetDStarData(DSTAR_SILENCE);
-	else
-		packet->SetDMRData(DMR_SILENCE);
-	Deliver(packet, ch_enc);
+	SDeviceAnswer answer = SilenceAnswer(channel, decode);
+	Deliver(packet, answer.enc, answer);
 }
 
 bool CDVDevice::LogLost(void)

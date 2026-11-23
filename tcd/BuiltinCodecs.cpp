@@ -85,7 +85,8 @@ static int Op25FrameFormat(uint32_t codec, uint32_t *bytes, uint32_t *samples)
 const tcd_codec_plugin g_BuiltinOp25 = {
 	TCD_CODEC_API, "op25", "the OP25 IMBE vocoder, built in", TCD_CODEC_P25,
 	nullptr, Op25Init, nullptr, Op25Open, Op25Close, Op25Encode, Op25Decode,
-	Op25Start, Op25Stop, nullptr, Op25FrameFormat, nullptr
+	Op25Start, Op25Stop, nullptr, Op25FrameFormat, nullptr,
+	TCD_PLUGIN_CONCURRENT	// a vocoder object per state; the basic operators' flags are per thread
 };
 
 // Codec2: M17 3200 (8 bytes, 160 samples) and 1600 (8 bytes, 320 samples)
@@ -152,5 +153,6 @@ static int Codec2FrameFormat(uint32_t codec, uint32_t *bytes, uint32_t *samples)
 const tcd_codec_plugin g_BuiltinCodec2 = {
 	TCD_CODEC_API, "codec2", "Codec2 3200 and 1600, built in", TCD_CODEC_M17 | TCD_CODEC_M17_1600,
 	nullptr, Codec2Init, nullptr, Codec2Open, Codec2Close, Codec2Encode, Codec2Decode,
-	Codec2Start, Codec2Stop, nullptr, Codec2FrameFormat, nullptr
+	Codec2Start, Codec2Stop, nullptr, Codec2FrameFormat, nullptr,
+	TCD_PLUGIN_CONCURRENT	// a CCodec2 per state, no shared state besides constant tables
 };

@@ -29,6 +29,8 @@
 #include <sstream>
 #include <fstream>
 #include <thread>
+#include <pthread.h>
+#include <sched.h>
 #include <queue>
 #include <vector>
 #include "TranscoderPacket.h"
@@ -41,6 +43,7 @@
 #include "AmbeGain.h"
 #include "AmbeFrameCheck.h"
 #include "StreamReport.h"
+#include "SteadyClock.h"
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
@@ -51,12 +54,28 @@ extern CTcdStats g_Stats;
 
 extern CConfigure g_Conf;
 
+// Codec2 3200 silence: the second half of a payload not encoded yet, and what
+// a plugin that fails to encode gives instead
+static const uint8_t C2_3200_SILENCE[8] = { 0x01U, 0x00U, 0x09U, 0x43U, 0x9CU, 0xE4U, 0x21U, 0x08U };
+
+// the thread's name in top -H and the like
+static void SetThreadName(const char *name)
+{
+#if defined(__linux__)
+	pthread_setname_np(pthread_self(), name);
+#elif defined(__APPLE__)
+	pthread_setname_np(name);
+#else
+	(void)name;
+#endif
+}
+
 // a frame's levels, after the AGC (UpdateLevelsIn/Out, UpdateAGC): to the CSV log
 // (StatsLog) and the stream's report
 static void FrameLevels(const std::shared_ptr<CTranscoderPacket> &packet, const char *codec)
 {
-	const int i = packet->GetModule() - 'A';
-	if (i < 0 || i >= CTcdStats::MAX_MODULES)
+	const int i = ModuleSlot(packet->GetModule());
+	if (i == kModuleOther)
 		return;
 	const auto &ms = g_Stats.modules[i];
 	g_StatsLog.LogFrame(packet->GetModule(), packet->GetStreamId(), codec,
@@ -405,10 +424,7 @@ static void Stat(int stats, char module, std::atomic<uint32_t> SwVocoderStats::*
 	auto &st = g_Stats.sw[stats];
 	(st.*counter).fetch_add(1, std::memory_order_relaxed);
 	st.active_module.store(module, std::memory_order_relaxed);
-	st.last_active_ms.store(
-		(uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count(),
-		std::memory_order_relaxed);
+	st.last_active_ms.store((uint64_t)SteadyMs(), std::memory_order_relaxed);
 }
 
 // counts a call of a codec plugin for the monitor
@@ -448,8 +464,8 @@ static float GainDb(int32_t num)
 // the monitor: which codecs the module's stream is coded into directly
 static void ModuleDirect(const std::shared_ptr<CTranscoderPacket> &packet, uint8_t direct)
 {
-	const int i = packet->GetModule() - 'A';
-	if (i >= 0 && i < CTcdStats::MAX_MODULES)
+	const int i = ModuleSlot(packet->GetModule());
+	if (i != kModuleOther)
 		g_Stats.modules[i].direct.store(direct, std::memory_order_relaxed);
 }
 
@@ -466,9 +482,10 @@ CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTra
 		return nullptr;
 	const auto &list = choices[k];
 	{
-		std::lock_guard<std::mutex> lock(pinned_mux);
-		auto it = pinned[k].find(packet->GetStreamKey());
-		if (it != pinned[k].end())
+		auto &ms = StateOf(packet->GetStreamKey());
+		std::lock_guard<std::mutex> lock(ms.mx);
+		auto it = ms.pinned[k].find(packet->GetStreamKey());
+		if (it != ms.pinned[k].end())
 			return (it->second.choice >= 0 && it->second.choice < int(list.size())) ? list[it->second.choice] : nullptr;
 		int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
 		if (c < 0 || c >= int(list.size()))
@@ -483,7 +500,10 @@ CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTra
 			// Pick pins it below: a device back in the meantime is taken there
 			// instead, and the stream goes the device path whole, not split
 			const bool device = k == kChoiceDStar || k == kChoiceDMR;
-			if (!device || FindChannel(k, packet->GetModule()) >= 0)
+			if (!device)
+				return nullptr;
+			std::lock_guard<std::mutex> hw(hw_mux);
+			if (FindChannel(k, packet->GetModule()) >= 0)
 				return nullptr;
 			if (std::none_of(list.begin(), list.end(), [](CSoftCodec *sw) { return sw != nullptr; }))
 				return nullptr;
@@ -491,6 +511,19 @@ CSoftCodec *CController::PluginChoice(uint32_t codec, const std::shared_ptr<CTra
 	}
 	// pinned now (or before): a plugin, or nullptr for a device's channel
 	return list[Pick(k, list.size(), packet, nullptr, nullptr, false)];
+}
+
+// the codec `to` of from's plugin, nullptr without one: from the choice lists, set
+// at start (no lock, unlike g_Codecs.Get)
+CSoftCodec *CController::SiblingOf(const CSoftCodec *from, uint32_t to) const
+{
+	const int k = ChoiceOfCodec(to);
+	if (k < 0)
+		return nullptr;
+	for (auto *sw : choices[k])
+		if (sw && sw->SamePlugin(from) && sw->GetCodec() == to)
+			return sw;
+	return nullptr;
 }
 
 bool CController::Transcode(uint32_t to, CSoftCodec *from, bool decoded, float source_db, const std::shared_ptr<CTranscoderPacket> &packet, uint8_t *direct)
@@ -501,7 +534,7 @@ bool CController::Transcode(uint32_t to, CSoftCodec *from, bool decoded, float s
 	// audio path for its rest (its target, if direct, is on the decoder's plugin)
 	if (!decoded || !g_Stats.config.transcode_direct.load(std::memory_order_relaxed))
 	{
-		from->LeaveDirect(packet->GetStreamKey(), packet->IsLast(), g_Codecs.Get(to, from->GetName()));
+		from->LeaveDirect(packet->GetStreamKey(), packet->IsLast(), SiblingOf(from, to));
 		return false;
 	}
 	auto *sw = PluginChoice(to, packet);
@@ -547,21 +580,15 @@ bool CController::Start()
 
 	tcClient.SetPassword(g_Conf.GetPassword());
 	tcClient.SetStandby(g_Conf.GetStandbyMods());
+	// the workers first: the AMBE devices InitVocoders opens deliver to them
+	StartWorkers();
 	if (InitVocoders() || tcClient.Open(g_Conf.GetAddress(), g_Conf.GetTCMods(), g_Conf.GetPort()))
 	{
 		keep_running = false;
+		StopWorkers();
 		return true;
 	}
 	reflectorFuture = std::async(std::launch::async, &CController::ReadReflectorThread, this);
-	c2Future        = std::async(std::launch::async, &CController::ProcessC2Thread,     this);
-	imbeFuture      = std::async(std::launch::async, &CController::ProcessIMBEThread,   this);
-	usrpFuture      = std::async(std::launch::async, &CController::ProcessUSRPThread,   this);
-	// the threads of the codec plugins, when there is one for the codec
-	const auto &dmr_choices = choices[kChoiceDMR], &dstar_choices = choices[kChoiceDStar];
-	if (std::count(dmr_choices.begin(), dmr_choices.end(), nullptr) < (long)dmr_choices.size())
-		swambe2Future = std::async(std::launch::async, &CController::ProcessSWAMBE2Thread, this);
-	if (std::count(dstar_choices.begin(), dstar_choices.end(), nullptr) < (long)dstar_choices.size())
-		swdstarFuture = std::async(std::launch::async, &CController::ProcessSWDStarThread, this);
 	return false;
 }
 
@@ -599,7 +626,7 @@ void CController::ReconfigureAGC()
 	outgain_usrp_num = calcNumerator(g_Stats.config.outgain_usrp.load());
 	outgain_imbe_num = calcNumerator(g_Stats.config.outgain_imbe.load());
 	outgain_m17_num = calcNumerator(g_Stats.config.outgain_m17.load());
-	std::lock_guard<std::mutex> lock(pinned_mux);
+	std::lock_guard<std::mutex> lock(hw_mux);
 	for (auto &s : slots)
 		if (s->dev)
 			s->dev->SetOutputGains(outgain_dstar_num, PcmDmrGainNum());
@@ -609,22 +636,19 @@ void CController::Stop()
 {
 	keep_running = false;
 
-	// the worker threads wait in their queues: wake them up, then wait for all
-	codec2_queue.Shutdown();
-	imbe_queue.Shutdown();
-	usrp_queue.Shutdown();
-	swambe2_queue.Shutdown();
-	swdstar_queue.Shutdown();
-	for (auto *f : { &reflectorFuture, &c2Future, &imbeFuture, &usrpFuture, &swambe2Future, &swdstarFuture, &watchFuture })
+	// the reflector thread and the device watch end first (no new packets), then
+	// the workers are woken in their queues and joined (StopWorkers)
+	for (auto *f : { &reflectorFuture, &watchFuture })
 		if (f->valid())
 			f->get();
+	StopWorkers();
 
 	tcClient.Close();
 	// all closed before any is dropped: a reader still running routes to the others
 	for (auto &s : slots)
 		if (s->dev && !s->closed)
 			s->dev->CloseDevice();
-	std::lock_guard<std::mutex> lock(pinned_mux);
+	std::lock_guard<std::mutex> lock(hw_mux);
 	for (auto &s : slots)
 		s->dev.reset();
 }
@@ -705,7 +729,6 @@ bool CController::InitVocoders()
 			std::cerr << "Transcoded modules[" << i << "] is not an uppercase letter!" << std::endl;
 			return true;
 		}
-		c2_highpass[c] = SHighPass{ {{0.0f, 0.0f}, {0.0f, 0.0f}}, 0 };
 	}
 
 	// the vocoder each choice names in tcd.ini, empty for the default: the
@@ -1072,11 +1095,13 @@ bool CController::InitVocoders()
 // based on packet's codec_in.
 void CController::ReadReflectorThread()
 {
+	SetThreadName("tcd-reflector");
 	uint32_t reconf_counter = 0;
 	while (keep_running)
 	{
 		// preemptively check the connection(s)...
 		tcClient.ReConnect();
+		WorkerStatsTick();
 
 		// Every ~1s: re-read config + age idle modules
 		if (++reconf_counter >= 10)
@@ -1087,8 +1112,8 @@ void CController::ReadReflectorThread()
 			// Age idle timers and reset stale modules
 			for (char mod : g_Conf.GetTCMods())
 			{
-				int idx = mod - 'A';
-				if (idx < 0 || idx >= CTcdStats::MAX_MODULES) continue;
+				const int idx = ModuleSlot(mod);
+				if (idx == kModuleOther) continue;
 				auto &ms = g_Stats.modules[idx];
 				float idle = ms.last_activity.load(std::memory_order_relaxed);
 				if (idle < 1.0e6f)  // whole seconds stay exact in a float far beyond this
@@ -1111,8 +1136,7 @@ void CController::ReadReflectorThread()
 
 			// Sync DVSI device stats (buf_depth, active channels)
 			{
-				auto now_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-					std::chrono::steady_clock::now().time_since_epoch()).count();
+				const auto now_ms = (uint64_t)SteadyMs();
 				for (int di = 0; di < g_Stats.num_devices; di++)
 				{
 					auto &ds = g_Stats.devices[di];
@@ -1124,7 +1148,7 @@ void CController::ReadReflectorThread()
 							ds.ch_module[ch].store(' ', std::memory_order_relaxed);
 					}
 				}
-				std::lock_guard<std::mutex> lock(pinned_mux);
+				std::lock_guard<std::mutex> lock(hw_mux);
 				for (auto &s : slots)
 					if (s->dev && s->stats >= 0)
 						g_Stats.devices[s->stats].buf_depth.store(s->up ? s->dev->GetBufferDepth() : 0, std::memory_order_relaxed);
@@ -1150,8 +1174,7 @@ void CController::ReadReflectorThread()
 
 			// Sync the stats of the codec plugins
 			{
-				auto now_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-					std::chrono::steady_clock::now().time_since_epoch()).count();
+				const auto now_ms = (uint64_t)SteadyMs();
 				const bool reencode = dmr_sw && HwAny(kChoiceDMR) &&
 					(g_Stats.config.dmr_gain_mode.load(std::memory_order_relaxed) == 2) &&
 					(m_agcDigital.IsEnabled() || outgain_dmr_num != 256 || dmr_reencode_num != 256);
@@ -1178,6 +1201,11 @@ void CController::ReadReflectorThread()
 						st.reencode_active.store(reencode && sw == dmr_sw, std::memory_order_relaxed);
 					}
 				PurgePinned();
+				// the states of streams quiet for 30 s, on modules where no new stream came
+				g_Codecs.Purge();
+				m_agcDigital.Purge();
+				m_agcAnalog.Purge();
+				m_ambeGain.Purge();
 			}
 		}
 
@@ -1188,8 +1216,8 @@ void CController::ReadReflectorThread()
 			{
 				const bool linked = tcClient.GetFD(m) >= 0;
 				conn = conn || linked;
-				if (m >= 'A' && m <= 'Z')
-					g_Stats.modules[m - 'A'].linked.store(linked, std::memory_order_relaxed);
+				if (ModuleSlot(m) != kModuleOther)
+					g_Stats.modules[ModuleSlot(m)].linked.store(linked, std::memory_order_relaxed);
 			}
 			g_Stats.reflector.connected.store(conn, std::memory_order_relaxed);
 		}
@@ -1232,31 +1260,326 @@ void CController::ReadReflectorThread()
 			// Idle reset is handled by 2s timeout in reconf loop
 			// (not here, because the packet still flows through the pipeline
 			// and Route functions would overwrite the reset values)
-			switch (packet->GetCodecIn())
+			// on to the module's worker
+			ToWorker(packet);
+		}
+	}
+}
+
+// the CPU cores tcd may use: those of its affinity mask (docker --cpuset-cpus),
+// at most its cgroup's CPU quota rounded up (docker --cpus); the host's cores elsewhere
+static int UsableCores(void)
+{
+	int cores = int(std::thread::hardware_concurrency());
+#if defined(__linux__)
+	cpu_set_t set;
+	CPU_ZERO(&set);
+	if (0 == sched_getaffinity(0, sizeof(set), &set) && CPU_COUNT(&set) > 0)
+		cores = CPU_COUNT(&set);
+	// cgroup v2: the process's cgroup (/proc/self/cgroup "0::/<path>") and those above
+	// it, each with a cpu.max of "<quota> <period>" or "max <period>"; the smallest counts
+	std::string path;
+	{
+		std::ifstream cg("/proc/self/cgroup");
+		std::string line;
+		while (std::getline(cg, line))
+			if (0 == line.rfind("0::", 0))
+				path = line.substr(3);
+	}
+	for (;;)
+	{
+		std::ifstream f("/sys/fs/cgroup" + (path == "/" ? std::string() : path) + "/cpu.max");
+		std::string quota;
+		long period = 0;
+		if (f >> quota >> period && quota != "max" && period > 0)
+		{
+			const long q = atol(quota.c_str());
+			if (q > 0)
+				cores = std::min<long>(cores, (q + period - 1) / period);
+		}
+		if (path.empty() || path == "/")
+			break;
+		const auto slash = path.find_last_of('/');
+		path = slash == 0 || slash == std::string::npos ? std::string("/") : path.substr(0, slash);
+	}
+	// cgroup v1: the cpu controller's cfs quota and period, of tcd's cgroup (a
+	// container sees its own at the mount's top)
+	{
+		std::string v1;
+		std::ifstream cg("/proc/self/cgroup");
+		std::string line;
+		while (std::getline(cg, line))
+		{
+			const auto a = line.find(':'), b = line.find(':', a + 1);
+			if (a == std::string::npos || b == std::string::npos)
+				continue;
+			const std::string ctrl = "," + line.substr(a + 1, b - a - 1) + ",";
+			if (ctrl.find(",cpu,") != std::string::npos)
+				v1 = line.substr(b + 1);
+		}
+		for (const std::string &dir : { "/sys/fs/cgroup/cpu" + (v1 == "/" ? std::string() : v1), std::string("/sys/fs/cgroup/cpu"), std::string("/sys/fs/cgroup/cpu,cpuacct") })
+		{
+			std::ifstream fq(dir + "/cpu.cfs_quota_us"), fp(dir + "/cpu.cfs_period_us");
+			long q = 0, p = 0;
+			if (fq >> q && fp >> p && q > 0 && p > 0)
 			{
-			case ECodecType::dstar:
-				ToDStar(packet);
-				break;
-			case ECodecType::dmr:
-				ToDmr(packet);
-				break;
-			case ECodecType::p25:
-				imbe_queue.push(packet);
-				break;
-			case ECodecType::usrp:
-			case ECodecType::svx:
-				usrp_queue.push(packet);
-				break;
-			case ECodecType::c2_1600:
-			case ECodecType::c2_3200:
-				codec2_queue.push(packet);
-				break;
-			default:
-				Dump(packet, "ERROR: Received a reflector packet with unknown Codec:");
+				cores = std::min<long>(cores, (q + p - 1) / p);
 				break;
 			}
 		}
 	}
+#endif
+	return std::max(1, cores);
+}
+
+void CController::StartWorkers(void)
+{
+	const std::string mods(g_Conf.GetTCMods());
+	int n = g_Conf.GetWorkers();
+	if (n <= 0)
+		n = UsableCores();
+	n = std::max(1, std::min(n, int(mods.size())));	// at most 26, a worker per module
+	static_assert(CTcdStats::MAX_WORKERS >= 26, "a worker per module at most, 26");
+	// the modules in turn, in the order of Modules and StandbyModules
+	std::vector<std::string> of(n);
+	for (size_t i = 0; i < mods.size(); i++)
+	{
+		worker_of[ModuleSlot(mods[i])] = int(i % size_t(n));
+		of[i % size_t(n)] += mods[i];
+	}
+	for (int i = 0; i < n; i++)
+		workers.push_back(std::make_unique<SWorker>());
+	for (int i = 0; i < n; i++)
+		g_Stats.workers[i].modules = of[i];
+	worker_tick = std::chrono::steady_clock::now();
+	g_Stats.num_workers.store(n);
+	for (int i = 0; i < n; i++)
+		workers[i]->thread = std::thread(&CController::WorkerThread, this, i);
+	std::cout << n << (n == 1 ? " module worker:" : " module workers:");
+	for (const auto &m : of)
+		std::cout << " " << m;
+	std::cout << std::endl;
+}
+
+void CController::StopWorkers(void)
+{
+	// a job that comes after (a device's answer) is dropped by the queue
+	for (auto &w : workers)
+		w->queue.Shutdown();
+	for (auto &w : workers)
+		if (w->thread.joinable())
+			w->thread.join();
+}
+
+void CController::WorkerThread(int i)
+{
+	char name[16];
+	snprintf(name, sizeof(name), "tcd-worker%d", i);
+	SetThreadName(name);
+	auto &w = *workers[i];
+	SJob job;
+	while (w.queue.pop(job))
+	{
+		const auto start = std::chrono::steady_clock::now();
+		const int64_t start_ns = std::max<int64_t>(1, SteadyNs(start));
+		const uint32_t waited = uint32_t(std::min<int64_t>(UINT32_MAX, std::chrono::duration_cast<std::chrono::microseconds>(start - job.queued).count()));
+		for (uint32_t prev = w.wait_us.load(std::memory_order_relaxed); waited > prev && !w.wait_us.compare_exchange_weak(prev, waited, std::memory_order_relaxed); )
+			;
+		if (TooLate(job, start))
+		{
+			job.packet.reset();
+			job.answer.reset();
+			continue;
+		}
+		w.job_start_ns.store(start_ns, std::memory_order_release);
+		try
+		{
+			RunJob(job);
+		}
+		catch (const std::exception &e)
+		{
+			// one frame lost, not tcd: the other modules of the worker go on
+			std::cerr << "Worker " << i << ": a frame of module " << job.packet->GetModule() << " failed: " << e.what() << std::endl;
+		}
+		job.packet.reset();
+		job.answer.reset();
+		const int64_t end_ns = SteadyNs(std::chrono::steady_clock::now());
+		// the running job's mark off first: a tick in between misses this job's
+		// time for now (the next one has it), it never counts it twice
+		w.job_start_ns.store(0, std::memory_order_release);
+		w.busy_ns.fetch_add(uint64_t(std::max<int64_t>(0, end_ns - start_ns)), std::memory_order_release);
+	}
+}
+
+// what is never dropped, by the queue's bound or as too late: a device's answer
+// (that frame is done), a stream's last frame (its states, channel and line end
+// with it) and its first (the direct path, Transcode, starts there only)
+bool CController::MustKeep(const SJob &job)
+{
+	return job.answer.has_value() || job.packet->IsLast() || 0 == job.packet->GetSequence();
+}
+
+// a dropped frame: its stream goes on, so its report waits and its AMBE channels
+// stay its own (PurgePinned frees a channel quiet for 1.5 s)
+void CController::DroppedFrame(const std::shared_ptr<CTranscoderPacket> &packet)
+{
+	g_Reports.Touch(packet->GetModule(), packet->GetStreamId());
+	auto &ms = StateOf(packet->GetStreamKey());
+	std::lock_guard<std::mutex> lock(ms.mx);
+	const auto now = std::chrono::steady_clock::now();
+	for (int k : { kChoiceDStar, kChoiceDMR })
+	{
+		auto it = ms.pinned[k].find(packet->GetStreamKey());
+		if (it == ms.pinned[k].end())
+			continue;
+		it->second.last = now;
+		if (it->second.hw >= 0)
+		{
+			std::lock_guard<std::mutex> hw(hw_mux);
+			auto &c = hw_channels[k][it->second.hw];
+			if (c.busy && c.module == packet->GetModule() && c.streamid == packet->GetStreamId())
+				c.last = now;
+		}
+	}
+}
+
+// a packet from the reflector that waited longer than WORKER_JOB_MAX_AGE for its
+// worker is dropped: that late it is of no use to urfd, and the worker catches up
+// (its channels and reports stay in time). Not what MustKeep keeps. A second
+// packet whose first is missing is coded against silence (SStoreTag).
+// In the module's worker
+bool CController::TooLate(const SJob &job, std::chrono::steady_clock::time_point now)
+{
+	if (MustKeep(job))
+		return false;
+	const int slot = ModuleSlot(job.packet->GetModule());
+	const bool drop = now - job.queued > WORKER_JOB_MAX_AGE;
+	if (drop)
+	{
+		DroppedFrame(job.packet);
+		auto &w = *workers[worker_of[slot]];
+		if (OncePerSecond(w.told_late))
+			std::cerr << "Worker " << worker_of[slot] << " (modules " << g_Stats.workers[worker_of[slot]].modules << ") is behind: frames older than "
+			          << std::chrono::duration_cast<std::chrono::milliseconds>(WORKER_JOB_MAX_AGE).count() << " ms dropped" << std::endl;
+	}
+	return drop;
+}
+
+void CController::WorkerStatsTick(void)
+{
+	// once a second: the reflector loop runs more often while packets come
+	const auto now = std::chrono::steady_clock::now();
+	const double elapsed = std::chrono::duration<double>(now - worker_tick).count();
+	if (elapsed < 1.0)
+		return;
+	worker_tick = now;
+	const int64_t now_ns = SteadyNs(now);
+	for (size_t i = 0; i < workers.size(); i++)
+	{
+		auto &w = *workers[i];
+		// the time in jobs done, and of the one it is in so far; read again when a
+		// job ended in between, so it is not counted twice
+		uint64_t busy;
+		for (int tries = 0; ; tries++)
+		{
+			// acquire: a busy_ns with a job's time comes with its job_start_ns cleared
+			const uint64_t done = w.busy_ns.load(std::memory_order_acquire);
+			const int64_t start = w.job_start_ns.load(std::memory_order_acquire);
+			if (w.busy_ns.load(std::memory_order_acquire) != done && tries < 3)
+				continue;
+			busy = done + uint64_t(start > 0 && now_ns > start ? now_ns - start : 0);
+			break;
+		}
+		const double pct = busy > w.last_busy_ns ? double(busy - w.last_busy_ns) / 1e9 / elapsed * 100.0 : 0.0;
+		w.last_busy_ns = std::max(w.last_busy_ns, busy);
+		g_Stats.workers[i].busy_pct.store(float(std::min(100.0, pct)), std::memory_order_relaxed);
+		g_Stats.workers[i].wait_ms.store(float(w.wait_us.exchange(0, std::memory_order_relaxed)) / 1000.0f, std::memory_order_relaxed);
+	}
+}
+
+void CController::ToWorker(std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer *answer)
+{
+	if (workers.empty())
+		return;	// not started
+	const int w = worker_of[ModuleSlot(packet->GetModule())];
+	SJob job{ std::move(packet), std::nullopt, std::chrono::steady_clock::now() };
+	if (answer)
+		job.answer = *answer;
+	// a worker that cannot keep up (a send that blocks, a plugin that hangs) takes
+	// at most WORKER_QUEUE_MAX packets from the reflector, some seconds of its
+	// modules; more are dropped, said once a second at most. A device's answer is
+	// always taken: the device's FIFO bounds them, and the frame is done there
+	auto &wk = *workers[w];
+	const bool always = MustKeep(job);
+	const bool taken = wk.queue.push(std::move(job), always ? SIZE_MAX : WORKER_QUEUE_MAX) != 0;
+	if (!taken && job.packet)	// a refused job stays here (push moves only what it takes)
+		DroppedFrame(job.packet);
+	if (!taken && keep_running)
+	{
+		if (OncePerSecond(wk.told_full))
+			std::cerr << "Worker " << w << " (modules " << g_Stats.workers[w].modules << ") is " << WORKER_QUEUE_MAX << " jobs behind: frames dropped" << std::endl;
+	}
+}
+
+void CController::DeviceAnswer(std::shared_ptr<CTranscoderPacket> packet, const SDeviceAnswer &answer)
+{
+	ToWorker(std::move(packet), &answer);
+}
+
+void CController::RunJob(SJob &job)
+{
+	const auto &packet = job.packet;
+	if (!job.answer.has_value())
+	{
+		StageIn(packet);	// from the reflector
+		return;
+	}
+	const bool dstar = Encoding::dstar == job.answer->enc;
+	if (job.answer->audio)
+		packet->SetAudioSamples(job.answer->pcm, false);
+	else if (dstar)
+		packet->SetDStarData(job.answer->ambe);
+	else
+		packet->SetDMRData(job.answer->ambe);
+	if (dstar)
+		RouteDstPacket(packet);
+	else
+		RouteDmrPacket(packet);
+}
+
+void CController::StageIn(std::shared_ptr<CTranscoderPacket> packet)
+{
+	switch (packet->GetCodecIn())
+	{
+	case ECodecType::dstar:
+		ToDStar(packet);
+		break;
+	case ECodecType::dmr:
+		ToDmr(packet);
+		break;
+	case ECodecType::p25:
+		IMBEtoAudio(packet);
+		break;
+	case ECodecType::usrp:
+		USRPtoAudio(packet);
+		break;
+	case ECodecType::svx:
+		SvxToAudio(packet);
+		break;
+	case ECodecType::c2_1600:
+	case ECodecType::c2_3200:
+		Codec2toAudio(packet);
+		break;
+	default:
+		Dump(packet, "ERROR: Received a reflector packet with unknown Codec:");
+		break;
+	}
+}
+
+void CController::SendIfDone(const std::shared_ptr<CTranscoderPacket> &packet)
+{
+	if (packet->AllCodecsAreSet() && packet->HasNotBeenSent())
+		SendToReflector(packet);
 }
 
 // 4th order Butterworth high-pass, 300 Hz at 8 kHz, two biquads (direct form II
@@ -1270,7 +1593,7 @@ void CController::HighPass(char module, uint16_t streamid, int16_t *samples)
 		{ 0.734407998f, -1.468815996f, 0.734407998f, -1.5997196711f, 0.6451760153f },
 		{ 1.0f, -2.0f, 1.0f, -1.7852530573f, 0.8359813686f }
 	};
-	auto &hp = c2_highpass[module];
+	auto &hp = c2_highpass[ModuleSlot(module)];
 	if (hp.streamid != streamid)
 	{
 		hp = SHighPass{ {{0.0f, 0.0f}, {0.0f, 0.0f}}, streamid };
@@ -1292,9 +1615,6 @@ void CController::HighPass(char module, uint16_t streamid, int16_t *samples)
 // This is only called when codec_in was not M17. Obviously, the incoming
 // packet was already decoded to audio.
 // This might complete the packet. If so, send it back to the reflector
-// Codec2 3200 silence: the second half of a payload not encoded yet, and what
-// a plugin that fails to encode gives instead
-static const uint8_t C2_3200_SILENCE[8] = { 0x01U, 0x00U, 0x09U, 0x43U, 0x9CU, 0xE4U, 0x21U, 0x08U };
 
 void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 {
@@ -1306,23 +1626,28 @@ void CController::AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet)
 
 	uint8_t m17data[16] = {};
 	memcpy(m17data + 8, C2_3200_SILENCE, sizeof(C2_3200_SILENCE));
+	const int slot = ModuleSlot(packet->GetModule());
 	if (packet->IsSecond())
 	{
-		memcpy(m17data, data_store[packet->GetModule()], 8);
+		// the first half of its payload, or silence when that one did not come here
+		// (dropped as too late, lost before urfd): not a half of an older payload
+		if (data_tag[slot].Of(packet))
+			memcpy(m17data, data_store[slot], 8);
+		else
+			memcpy(m17data, C2_3200_SILENCE, 8);
 		EncodeM17(packet, gained, m17data+8);
 		packet->SetM17Data(m17data);
 	}
 	else
 	{
 		EncodeM17(packet, gained, m17data);
-		memcpy(data_store[packet->GetModule()], m17data, 8);
+		memcpy(data_store[slot], m17data, 8);
+		data_tag[slot].Set(packet);
 		packet->SetM17Data(m17data);
 	}
 
 	// we might be all done...
-	send_mux.lock();
-	if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-	send_mux.unlock();
+	SendIfDone(packet);
 }
 
 void CController::EncodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *bits)
@@ -1342,12 +1667,9 @@ void CController::DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, co
 	SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
 }
 
-// The original incoming coded was M17, so we will calculate the audio and then
-// push the packet onto both the dstar and the dmr queue.
+// an M17 packet: decoded to audio, then coded to D-Star, DMR, P25 and USRP
 void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 {
-	uint8_t imbe[11];
-
 	if (packet->IsSecond())
 	{
 		if (packet->GetCodecIn() == ECodecType::c2_1600)
@@ -1357,8 +1679,12 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 			if (packet->IsLast())
 				if (auto *sw = SwCodec(TCD_CODEC_M17_1600, packet))
 					sw->End(packet->GetStreamKey(), false);
-			int16_t tmp[160];
-			memcpy(tmp, audio_store[packet->GetModule()], sizeof(tmp));
+			// the payload's second half from its first packet, or silence when that
+			// one did not come here (dropped as too late, lost before urfd)
+			int16_t tmp[160] = {};
+			const int slot = ModuleSlot(packet->GetModule());
+			if (audio_tag[slot].Of(packet))
+				memcpy(tmp, audio_store[slot], sizeof(tmp));
 			g_Stats.UpdateLevelsIn(packet->GetModule(), tmp, 160);
 			float agc_db; bool agc_gate;
 			m_agcDigital.Process(tmp, 160, packet->GetStreamKey(), agc_db, agc_gate);
@@ -1388,7 +1714,8 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 			g_Stats.UpdateAGC(packet->GetModule(), agc_db, agc_gate);
 			packet->SetAudioSamples(tmp, false);
 			// the second half goes through the AGC with the second packet
-			memcpy(audio_store[packet->GetModule()], &(tmp[160]), 320);
+			memcpy(audio_store[ModuleSlot(packet->GetModule())], &(tmp[160]), 320);
+			audio_tag[ModuleSlot(packet->GetModule())].Set(packet);
 		}
 		else /* codec_in is ECodecType::c2_3200 */
 		{
@@ -1403,70 +1730,20 @@ void CController::Codec2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	}
 	g_Stats.UpdateLevelsOut(packet->GetModule(), packet->GetAudioSamples(), 160);
 	FrameLevels(packet, "codec2");
-	// IMBE/P25 and USRP first: the packet goes to the reflector when its last codec
-	// is set, and a codec plugin sets D-Star and DMR at once, before these would be
-	// (the packet was never sent; with the DVSI devices only when one answered fast)
-	{
-		int16_t imbe_buf[160];
-		memcpy(imbe_buf, packet->GetAudioSamples(), sizeof(imbe_buf));
-		ApplyGain(imbe_buf, 160, outgain_imbe_num);
-		EncodeIMBE(packet, imbe_buf, imbe);
-	}
-	packet->SetP25Data(imbe);
-
-	{
-		int16_t usrp_buf[160];
-		memcpy(usrp_buf, packet->GetAudioSamples(), sizeof(usrp_buf));
-		ApplyGain(usrp_buf, 160, outgain_usrp_num);
-		packet->SetUSRPData(usrp_buf);
-	}
-
-	// D-Star: DVSI (gain applied in FeedDevice) or a codec plugin
+	// D-Star and DMR first: an AMBE device gets its frame before the software
+	// encodes here (a codec plugin codes them right away, in this worker); the
+	// packet goes to the reflector when its last codec is set
 	ToDStar(packet);
-
-	// DMR/YSF: DVSI (gain applied in FeedDevice) or a codec plugin
 	ToDmr(packet);
-}
-
-void CController::ProcessC2Thread()
-{
-	while (keep_running)
-	{
-		auto packet = codec2_queue.pop();
-		if (!packet)
-			break;	// the queue was shut down: tcd stops
-
-		switch (packet->GetCodecIn())
-		{
-			case ECodecType::c2_1600:
-			case ECodecType::c2_3200:
-				// this is an original M17 packet, so decode it to audio
-				// Codec2toAudio will send it on for AMBE processing
-				Codec2toAudio(packet);
-				break;
-
-			case ECodecType::dstar:
-			case ECodecType::dmr:
-			case ECodecType::p25:
-			case ECodecType::usrp:
-			case ECodecType::svx:
-				// codec_in was AMBE, so we need to calculate the the M17 data
-				AudiotoCodec2(packet);
-				break;
-
-			default:	// none, ping: ReadReflectorThread queues neither
-				break;
-		}
-	}
+	AudiotoIMBE(packet);
+	AudiotoUSRP(packet);
 }
 
 void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 {
 	if (packet->DMRIsSet())	// coded from the source's frame already (Transcode)
 	{
-		send_mux.lock();
-		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-		send_mux.unlock();
+		SendIfDone(packet);
 		return;
 	}
 	uint8_t ambe2[9] = {};
@@ -1486,9 +1763,7 @@ void CController::AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 	packet->SetDMRData(ambe2);
 
 	// we might be all done...
-	send_mux.lock();
-	if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-	send_mux.unlock();
+	SendIfDone(packet);
 }
 
 void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
@@ -1534,38 +1809,17 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	if (decoded)	// a failed decode keeps the marks: no flicker
 		ModuleDirect(packet, direct);
 	ToDStar(packet);
-	codec2_queue.push(packet);
-	imbe_queue.push(packet);
-	usrp_queue.push(packet);
+	AudiotoCodec2(packet);
+	AudiotoIMBE(packet);
+	AudiotoUSRP(packet);
 }
 
-void CController::ProcessSWAMBE2Thread()
+void CController::StageSWAMBE2(std::shared_ptr<CTranscoderPacket> packet)
 {
-	while (keep_running)
-	{
-		auto packet = swambe2_queue.pop();
-		if (!packet)
-			break;	// the queue was shut down: tcd stops
-
-		switch (packet->GetCodecIn())
-		{
-			case ECodecType::c2_1600:
-			case ECodecType::c2_3200:
-			case ECodecType::dstar:
-			case ECodecType::p25:
-			case ECodecType::usrp:
-			case ECodecType::svx:
-				AudiotoSWAMBE2(packet);
-				break;
-
-			case ECodecType::dmr:
-				SWAMBE2toAudio(packet);
-				break;
-
-			default:	// none, ping: ReadReflectorThread queues neither
-				break;
-		}
-	}
+	if (ECodecType::dmr == packet->GetCodecIn())
+		SWAMBE2toAudio(packet);
+	else
+		AudiotoSWAMBE2(packet);
 }
 
 // D-Star from a codec plugin, when no device does it
@@ -1574,9 +1828,7 @@ void CController::AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 {
 	if (packet->DStarIsSet())	// coded from the source's frame already (Transcode)
 	{
-		dstar_mux.lock();
 		RouteDstPacket(packet);
-		dstar_mux.unlock();
 		return;
 	}
 	// OutputGainDStar and DStarGainIn, as a device applies them before its encoder
@@ -1589,9 +1841,7 @@ void CController::AudioToSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 	sw->Encode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), pcm, frame);
 	SwStat(sw, packet->GetModule(), &SwVocoderStats::encodes);
 	packet->SetDStarData(frame);
-	dstar_mux.lock();
 	RouteDstPacket(packet);
-	dstar_mux.unlock();
 }
 
 void CController::SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet)
@@ -1603,23 +1853,15 @@ void CController::SWDStarToAudio(std::shared_ptr<CTranscoderPacket> packet)
 	SwDecodeStat(sw, packet->GetModule(), packet->GetStreamId(), info);
 	ApplyGain(pcm, 160, dstar_out_num);
 	packet->SetAudioSamples(pcm, false);
-	dstar_mux.lock();
 	RouteDstPacket(packet, sw, decoded);
-	dstar_mux.unlock();
 }
 
-void CController::ProcessSWDStarThread()
+void CController::StageSWDStar(std::shared_ptr<CTranscoderPacket> packet)
 {
-	while (keep_running)
-	{
-		auto packet = swdstar_queue.pop();
-		if (!packet)
-			break;	// the queue was shut down: tcd stops
-		if (ECodecType::dstar == packet->GetCodecIn())
-			SWDStarToAudio(packet);
-		else
-			AudioToSWDStar(packet);
-	}
+	if (ECodecType::dstar == packet->GetCodecIn())
+		SWDStarToAudio(packet);
+	else
+		AudioToSWDStar(packet);
 }
 
 // the choice that decodes a stream whose input codec is `in`, -1 for none (USRP, SVX: audio)
@@ -1642,21 +1884,21 @@ static bool StreamDecodes(int k, ECodecType in)
 	return k >= 0 && ChoiceOfInput(in) == k;
 }
 
-// StreamLog, from Pick() under pinned_mux: the codec's part of the stream's line,
-// added at the stream's first frame with the vocoder it got; `note` when the
+// StreamLog, from Pick() with the module's lock: the codec's part of the stream's
+// line, added at the stream's first frame with the vocoder it got; `note` when the
 // vocoder was (re)chosen, so a change mid-stream is noted
-CController::SStreamPart *CController::StreamLogPart(int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw, bool note)
+CController::SStreamPart *CController::StreamLogPart(SModuleState &ms, int k, const std::shared_ptr<CTranscoderPacket> &packet, int choice, int hw, bool note)
 {
 	if (!g_Conf.GetStreamLog())
 		return nullptr;
-	auto &log = stream_log[packet->GetStreamKey()];
+	auto &log = ms.stream_log[packet->GetStreamKey()];
 	if (log.parts.empty())
 	{
 		// a stream's last frame comes by again after its line went out (the DMR
 		// re-encode picks it a second time): no line of one frame for it
 		if (packet->IsLast())
 		{
-			stream_log.erase(packet->GetStreamKey());
+			ms.stream_log.erase(packet->GetStreamKey());
 			return nullptr;
 		}
 		log.module = packet->GetModule();
@@ -1697,12 +1939,12 @@ CController::SStreamPart *CController::StreamLogPart(int k, const std::shared_pt
 
 // every packet counts; the last one completes the part, unless a device still has
 // to answer it (DeviceFrameOut); the line goes out when every part is done
-void CController::StreamLogCount(int k, const std::shared_ptr<CTranscoderPacket> &packet)
+void CController::StreamLogCount(SModuleState &ms, int k, const std::shared_ptr<CTranscoderPacket> &packet, LogLines &lines)
 {
 	if (!g_Conf.GetStreamLog())
 		return;
-	auto it = stream_log.find(packet->GetStreamKey());
-	if (it == stream_log.end())
+	auto it = ms.stream_log.find(packet->GetStreamKey());
+	if (it == ms.stream_log.end())
 		return;
 	auto &log = it->second;
 	log.last = std::chrono::steady_clock::now();
@@ -1714,14 +1956,25 @@ void CController::StreamLogCount(int k, const std::shared_ptr<CTranscoderPacket>
 				p.done = true;
 		}
 	if (std::all_of(log.parts.begin(), log.parts.end(), [](const SStreamPart &p) { return p.done; }))
-		StreamLogFlush(packet->GetStreamKey());
+		StreamLogFlush(ms, packet->GetStreamKey(), lines);
 }
 
-// the stream's line, under pinned_mux
-void CController::StreamLogFlush(uint32_t key)
+void CController::PrintLines(const LogLines &lines)
 {
-	auto it = stream_log.find(key);
-	if (it == stream_log.end())
+	if (lines.empty())
+		return;
+	// in one write, so the lines of several workers do not mix
+	std::string out;
+	for (const auto &l : lines)
+		out += l + '\n';
+	std::cout << out << std::flush;
+}
+
+// the stream's line, with the module's lock: into lines, printed after it
+void CController::StreamLogFlush(SModuleState &ms, uint32_t key, LogLines &lines)
+{
+	auto it = ms.stream_log.find(key);
+	if (it == ms.stream_log.end())
 		return;
 	const auto &log = it->second;
 	uint32_t frames = 0;
@@ -1747,13 +2000,13 @@ void CController::StreamLogFlush(uint32_t key)
 		if (!p.done)
 			line << " (no last frame)";
 	}
-	std::cout << line.str() << std::endl;
-	stream_log.erase(it);
+	lines.push_back(line.str());
+	ms.stream_log.erase(it);
 }
 
 // a frame an AMBE device decodes: its FEC as the device sees it, counted for the
-// stream's line and the device (from Pick, under pinned_mux)
-void CController::DeviceFrameIn(int k, int hw, const std::shared_ptr<CTranscoderPacket> &packet)
+// stream's line and the device (from Pick, with the module's lock)
+void CController::DeviceFrameIn(SModuleState &ms, int k, int hw, const std::shared_ptr<CTranscoderPacket> &packet)
 {
 	if (k != kChoiceDStar && k != kChoiceDMR)
 		return;
@@ -1768,8 +2021,8 @@ void CController::DeviceFrameIn(int k, int hw, const std::shared_ptr<CTranscoder
 		if (r.uncorrectable)
 			d.uncorrectable.fetch_add(1, std::memory_order_relaxed);
 	}
-	auto it = stream_log.find(packet->GetStreamKey());
-	if (it == stream_log.end())
+	auto it = ms.stream_log.find(packet->GetStreamKey());
+	if (it == ms.stream_log.end())
 		return;
 	for (auto &p : it->second.parts)
 		if (p.k == k)
@@ -1788,34 +2041,40 @@ void CController::DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket>
 {
 	if (k != kChoiceDStar && k != kChoiceDMR)
 		return;
-	std::lock_guard<std::mutex> lock(pinned_mux);
-	auto pin = pinned[k].find(packet->GetStreamKey());
-	if (pin == pinned[k].end() || pin->second.hw < 0 || choices[k][pin->second.choice])
-		return;	// not on an AMBE device
-	const SAmbeFec r = (k == kChoiceDStar) ? AmbeFrameCheck::DStar(packet->GetDStarData()) : AmbeFrameCheck::Dmr(packet->GetDMRData());
-	const int st = slots[hw_channels[k][pin->second.hw].slot]->stats;
-	if (st >= 0)
+	LogLines lines;
 	{
-		auto &d = g_Stats.devices[st];
-		d.encodes.fetch_add(1, std::memory_order_relaxed);
-		if (r.errors || r.uncorrectable)
-			d.bad_out.fetch_add(1, std::memory_order_relaxed);
-	}
-	auto it = stream_log.find(packet->GetStreamKey());
-	if (it == stream_log.end())
-		return;
-	auto &log = it->second;
-	log.last = std::chrono::steady_clock::now();
-	for (auto &p : log.parts)
-		if (p.k == k)
+		auto &ms = StateOf(packet->GetStreamKey());
+		std::lock_guard<std::mutex> lock(ms.mx);
+		auto pin = ms.pinned[k].find(packet->GetStreamKey());
+		if (pin == ms.pinned[k].end() || pin->second.hw < 0 || choices[k][pin->second.choice])
+			return;	// not on an AMBE device
+		// hw_channels' slot and the slots' stats are set at start only: no hw_mux
+		const SAmbeFec r = (k == kChoiceDStar) ? AmbeFrameCheck::DStar(packet->GetDStarData()) : AmbeFrameCheck::Dmr(packet->GetDMRData());
+		const int st = slots[hw_channels[k][pin->second.hw].slot]->stats;
+		if (st >= 0)
 		{
+			auto &d = g_Stats.devices[st];
+			d.encodes.fetch_add(1, std::memory_order_relaxed);
 			if (r.errors || r.uncorrectable)
-				p.bad++;
-			if (packet->IsLast())
-				p.done = true;
+				d.bad_out.fetch_add(1, std::memory_order_relaxed);
 		}
-	if (std::all_of(log.parts.begin(), log.parts.end(), [](const SStreamPart &p) { return p.done; }))
-		StreamLogFlush(packet->GetStreamKey());
+		auto it = ms.stream_log.find(packet->GetStreamKey());
+		if (it == ms.stream_log.end())
+			return;
+		auto &log = it->second;
+		log.last = std::chrono::steady_clock::now();
+		for (auto &p : log.parts)
+			if (p.k == k)
+			{
+				if (r.errors || r.uncorrectable)
+					p.bad++;
+				if (packet->IsLast())
+					p.done = true;
+			}
+		if (std::all_of(log.parts.begin(), log.parts.end(), [](const SStreamPart &p) { return p.done; }))
+			StreamLogFlush(ms, packet->GetStreamKey(), lines);
+	}
+	PrintLines(lines);
 }
 
 // the choice of a stream, made at its first packet: the one for new streams, but a
@@ -1823,116 +2082,147 @@ void CController::DeviceFrameOut(int k, const std::shared_ptr<CTranscoderPacket>
 int CController::Pick(int k, size_t list_size, const std::shared_ptr<CTranscoderPacket> &packet, std::shared_ptr<CDVDevice> *dev, uint8_t *ch, bool count)
 {
 	const auto &list = choices[k];	// M17 1600's list runs alongside, of the same size
-	auto &pins = pinned[k];
 	const uint16_t streamid = packet->GetStreamId();
 	const char module = packet->GetModule();
 	const uint32_t key = packet->GetStreamKey();
-	std::lock_guard<std::mutex> lock(pinned_mux);
-	const auto now = std::chrono::steady_clock::now();
-	// the plugin that decoded the stream's source (pinned before its targets), nullptr
-	// for a device, tcd's own vocoder or none
-	auto source = [&]() -> const CSoftCodec * {
-		const int ks = ChoiceOfInput(packet->GetCodecIn());
-		if (ks < 0 || ks == k)
-			return nullptr;
-		auto sp = pinned[ks].find(key);
-		if (sp == pinned[ks].end() || sp->second.choice < 0 || sp->second.choice >= int(choices[ks].size()))
-			return nullptr;
-		return choices[ks][sp->second.choice];
-	};
-	// for a stream no AMBE channel takes: the plugin that decoded its source when
-	// that one has the codec (one plugin for the transmission, which can code it
-	// directly), else the first plugin; c without one
-	auto plugin = [&](int c) {
-		if (const CSoftCodec *from = source())
+	auto &ms = StateOf(key);
+	auto &pins = ms.pinned[k];
+	LogLines lines;	// printed once the locks are released
+	int choice;
+	{
+		std::lock_guard<std::mutex> lock(ms.mx);
+		// the devices' lock, after the module's: only where a device comes in
+		std::unique_lock<std::mutex> hw(hw_mux, std::defer_lock);
+		auto with_hw = [&]() { if (!hw.owns_lock()) hw.lock(); };
+		const auto now = std::chrono::steady_clock::now();
+		// the plugin that decoded the stream's source (pinned before its targets), nullptr
+		// for a device, tcd's own vocoder or none
+		auto source = [&]() -> const CSoftCodec * {
+			const int ks = ChoiceOfInput(packet->GetCodecIn());
+			if (ks < 0 || ks == k)
+				return nullptr;
+			auto sp = ms.pinned[ks].find(key);
+			if (sp == ms.pinned[ks].end() || sp->second.choice < 0 || sp->second.choice >= int(choices[ks].size()))
+				return nullptr;
+			return choices[ks][sp->second.choice];
+		};
+		// for a stream no AMBE channel takes: the plugin that decoded its source when
+		// that one has the codec (one plugin for the transmission, which can code it
+		// directly), else the first plugin; c without one
+		auto plugin = [&](int c) {
+			if (const CSoftCodec *from = source())
+				for (size_t i = 0; i < list.size(); i++)
+					if (list[i] && list[i]->SamePlugin(from))
+						return int(i);
 			for (size_t i = 0; i < list.size(); i++)
-				if (list[i] && list[i]->SamePlugin(from))
+				if (list[i])
 					return int(i);
-		for (size_t i = 0; i < list.size(); i++)
-			if (list[i])
-				return int(i);
-		return c;
-	};
-	// a codec in software does every module; the devices only the streams they
-	// have a channel for (D-Star and DMR, whose list is the one asked for)
-	auto device = [&](int c) { return !list[c]; };
-	auto it = pins.find(key);
-	bool fresh = false, moved = false;
-	if (it == pins.end())
-	{
-		fresh = true;
-		int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
-		if (c < 0 || c >= int(list_size))
-			c = 0;
-		int hw = -1;
-		if (device(c))
+			return c;
+		};
+		// a codec in software does every module; the devices only the streams they
+		// have a channel for (D-Star and DMR, whose list is the one asked for)
+		auto device = [&](int c) { return !list[c]; };
+		auto it = pins.find(key);
+		bool fresh = false, moved = false;
+		if (it == pins.end())
 		{
-			hw = TakeChannel(k, module, streamid);
-			if (hw < 0)
-				c = plugin(c);
+			fresh = true;
+			int c = g_Stats.config.codec_choice[k].load(std::memory_order_relaxed);
+			if (c < 0 || c >= int(list_size))
+				c = 0;
+			int hw = -1;
+			if (device(c))
+			{
+				with_hw();
+				hw = TakeChannel(k, module, streamid);
+				if (hw < 0)
+					c = plugin(c);
+			}
+			it = pins.emplace(key, SPinned{ c, hw, now }).first;
 		}
-		it = pins.emplace(key, SPinned{ c, hw, now }).first;
-	}
-	else if (device(it->second.choice) && !HasChannel(k, it->second.hw, module, streamid))
-	{
-		// its channel is gone: the device was lost, or the channel went to another
-		// stream after a pause; another channel, else a plugin for the rest of the stream
-		it->second.hw = TakeChannel(k, module, streamid);
-		if (it->second.hw < 0)
-			it->second.choice = plugin(it->second.choice);
-		moved = true;
-	}
-	auto &pin = it->second;
-	pin.last = now;
-	if (device(pin.choice) && pin.hw >= 0)
-	{
-		auto &c = hw_channels[k][pin.hw];
-		c.last = now;
-		if (dev)
+		else if (device(it->second.choice) && (with_hw(), !HasChannel(k, it->second.hw, module, streamid)))
 		{
-			*dev = slots[c.slot]->dev;
-			*ch = c.ch;
+			// its channel is gone: the device was lost, or the channel went to another
+			// stream after a pause; another channel, else a plugin for the rest of the stream
+			it->second.hw = TakeChannel(k, module, streamid);
+			if (it->second.hw < 0)
+				it->second.choice = plugin(it->second.choice);
+			moved = true;
 		}
-		// a frame the device is to decode: its FEC, counted for the stream and the device
-		// (the first frame's part of the stream's line first, so the count has a place)
-		if (StreamDecodes(k, packet->GetCodecIn()))
+		auto &pin = it->second;
+		pin.last = now;
+		if (device(pin.choice) && pin.hw >= 0)
 		{
-			StreamLogPart(k, packet, pin.choice, pin.hw, fresh || moved);
-			DeviceFrameIn(k, pin.hw, packet);
+			with_hw();
+			auto &c = hw_channels[k][pin.hw];
+			c.last = now;
+			if (dev)
+			{
+				*dev = slots[c.slot]->dev;
+				*ch = c.ch;
+			}
+			// the channel is free after the stream's last frame, once that frame is
+			// queued to the device (ReleaseChannel in ToDStar, ToDmr): freed here,
+			// another module's worker could take it and queue its first frame before
+			// this last one (the device answers its frames in order). A last frame
+			// that does not reach the device frees it after 1.5 s (PurgePinned)
+			// the stream's part of its line under the devices' lock: ChannelName reads
+			// the slot's node, which the device watch sets when it opens the device again
+			// (once per stream, else a lookup)
+			StreamLogPart(ms, k, packet, pin.choice, pin.hw, fresh || moved);
+			// the FEC check needs no device lock: a channel's slot and the slots' stats
+			// are set at start only
+			hw.unlock();
+			// a frame the device is to decode: its FEC, counted for the stream and the device
+			if (StreamDecodes(k, packet->GetCodecIn()))
+				DeviceFrameIn(ms, k, pin.hw, packet);
 		}
-		// the channel is free after the stream's last frame (the device answers
-		// its frames in order, a new stream's come after them)
-		if (packet->IsLast())
-			c.busy = false;
+		else
+		{
+			// no device channel (a plugin, or none free): no device lock for the line
+			if (hw.owns_lock())
+				hw.unlock();
+			StreamLogPart(ms, k, packet, pin.choice, pin.hw, fresh || moved);
+		}
+		if (count)
+			StreamLogCount(ms, k, packet, lines);
+		choice = pin.choice;
 	}
-	StreamLogPart(k, packet, pin.choice, pin.hw, fresh || moved);
-	if (count)
-		StreamLogCount(k, packet);
-	return pin.choice;
+	PrintLines(lines);
+	return choice;
 }
 
 // streams quiet for 30 s are forgotten; a channel quiet for 1.5 s is free again
 // (a stream whose last frame was lost)
 void CController::PurgePinned(void)
 {
-	std::lock_guard<std::mutex> lock(pinned_mux);
 	const auto now = std::chrono::steady_clock::now();
 	const auto cutoff = now - std::chrono::seconds(30);
-	for (auto &p : pinned)
-		for (auto it = p.begin(); it != p.end(); )
-			it = it->second.last < cutoff ? p.erase(it) : std::next(it);
-	for (auto &list : hw_channels)
-		for (auto &c : list)
-			if (c.busy && now - c.last > std::chrono::milliseconds(1500))
-				c.busy = false;
-	// a stream's line whose last frame did not come: out after 5 s of quiet
-	for (auto it = stream_log.begin(); it != stream_log.end(); )
+	LogLines lines;
+	for (auto &ms : module_state)
 	{
-		const uint32_t id = it->first;
-		++it;
-		if (now - stream_log[id].last > std::chrono::seconds(5))
-			StreamLogFlush(id);
+		std::lock_guard<std::mutex> lock(ms.mx);
+		for (auto &p : ms.pinned)
+			for (auto it = p.begin(); it != p.end(); )
+				it = it->second.last < cutoff ? p.erase(it) : std::next(it);
+		// a stream's line whose last frame did not come: out after 5 s of quiet
+		for (auto it = ms.stream_log.begin(); it != ms.stream_log.end(); )
+		{
+			const uint32_t id = it->first;
+			const bool quiet = now - it->second.last > std::chrono::seconds(5);
+			++it;
+			if (quiet)
+				StreamLogFlush(ms, id, lines);
+		}
 	}
+	{
+		std::lock_guard<std::mutex> lock(hw_mux);
+		for (auto &list : hw_channels)
+			for (auto &c : list)
+				if (c.busy && now - c.last > std::chrono::milliseconds(1500))
+					c.busy = false;
+	}
+	PrintLines(lines);
 }
 
 int CController::FindChannel(int k, char module) const
@@ -1970,6 +2260,14 @@ int CController::FindChannel(int k, char module) const
 	return take;
 }
 
+void CController::ReleaseChannel(int k, const std::shared_ptr<CTranscoderPacket> &packet)
+{
+	std::lock_guard<std::mutex> lock(hw_mux);
+	for (auto &c : hw_channels[k])
+		if (c.busy && c.module == packet->GetModule() && c.streamid == packet->GetStreamId())
+			c.busy = false;
+}
+
 int CController::TakeChannel(int k, char module, uint16_t streamid)
 {
 	const int take = FindChannel(k, module);
@@ -1993,6 +2291,8 @@ bool CController::HasChannel(int k, int hw, char module, uint16_t streamid) cons
 	return slots[c.slot]->up && c.busy && c.module == module && c.streamid == streamid;
 }
 
+// with hw_mux, or before the workers run: the slot's node changes when the device
+// watch opens the device again
 std::string CController::ChannelName(int k, size_t c) const
 {
 	const auto &h = hw_channels[k][c];
@@ -2060,6 +2360,7 @@ std::shared_ptr<CDVDevice> CController::OpenSlot(int i, const std::string &node)
 
 // the codec (D-Star or DMR) slot i has channels for that no codec plugin does, -1
 // for none: without it the device may go (phased out, or lost while tcd runs)
+// with hw_mux, or before the workers run (it reads the slots' up and draining)
 int CController::UncoveredChoice(int i) const
 {
 	for (int k : { kChoiceDStar, kChoiceDMR })
@@ -2089,26 +2390,29 @@ void CController::DeviceLost(int i, const CDVDevice *dev)
 	if (!keep_running)
 		return;
 	auto &s = *slots[i];
+	int k;
 	{
-		std::lock_guard<std::mutex> lock(pinned_mux);
+		// the check and the slot going out in one step: two devices lost at once
+		// (a USB hub reset) must not each count on the other
+		std::lock_guard<std::mutex> lock(hw_mux);
 		if (s.dev.get() != dev || !s.up)
 			return;	// an older device of the slot, or already out
+		k = UncoveredChoice(i);
+		if (k < 0)
+		{
+			s.next_try = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+			s.up = false;
+			for (auto &list : hw_channels)
+				for (auto &c : list)
+					if (c.slot == i)
+						c.busy = false;
+		}
 	}
-	const int k = UncoveredChoice(i);
 	if (k >= 0)
 	{
 		std::cerr << "No codec plugin does " << g_CodecChoices[k].label << " in place of " << s.desc << ": shutting down" << std::endl;
 		kill(getpid(), SIGINT);
 		return;
-	}
-	{
-		std::lock_guard<std::mutex> lock(pinned_mux);
-		s.next_try = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-		s.up = false;
-		for (auto &list : hw_channels)
-			for (auto &c : list)
-				if (c.slot == i)
-					c.busy = false;
 	}
 	if (s.stats >= 0)
 		g_Stats.devices[s.stats].online.store(false);
@@ -2138,12 +2442,16 @@ void CController::PhaseOut(int i)
 		}
 		if (!s.draining)
 		{
-			s.draining = true;
+			{
+				// under the devices' lock: a worker taking a channel sees it at once
+				std::lock_guard<std::mutex> lock(hw_mux);
+				s.draining = true;
+			}
 			if (!asked)
 				std::cout << s.desc << " changes to DeviceCompand = " << CompandName(g_Stats.config.device_compand.load()) << ": no new streams, the ones on it run to their end" << std::endl;
 		}
 		{
-			std::lock_guard<std::mutex> lock(pinned_mux);
+			std::lock_guard<std::mutex> lock(hw_mux);
 			if (!SlotBusyLocked(i))
 			{
 				s.up = false;
@@ -2172,7 +2480,7 @@ void CController::PhaseOut(int i)
 	{
 		const bool was_out = s.out;
 		{
-			std::lock_guard<std::mutex> lock(pinned_mux);
+			std::lock_guard<std::mutex> lock(hw_mux);
 			s.draining = false;
 			s.out = false;
 			s.next_try = std::chrono::steady_clock::time_point::min();	// at this pass of the watch
@@ -2184,8 +2492,8 @@ void CController::PhaseOut(int i)
 }
 
 // its streams are done when its channels are free and quiet for a second and the
-// device has answered every frame (the last one is freed at its Pick, before the
-// device has it); with pinned_mux
+// device has every frame sent and answered (its input queue and its buffer are
+// empty); with hw_mux
 bool CController::SlotBusyLocked(int i)
 {
 	auto &s = *slots[i];
@@ -2194,12 +2502,12 @@ bool CController::SlotBusyLocked(int i)
 	for (const auto &list : hw_channels)
 		for (const auto &c : list)
 			busy = busy || (c.slot == i && (c.busy || now - c.last < std::chrono::seconds(1)));
-	return busy || (s.dev && s.up && s.dev->GetBufferDepth() > 0);
+	return busy || (s.dev && s.up && (s.dev->GetBufferDepth() > 0 || s.dev->QueuedPackets() > 0));
 }
 
 bool CController::SlotBusy(int i)
 {
-	std::lock_guard<std::mutex> lock(pinned_mux);
+	std::lock_guard<std::mutex> lock(hw_mux);
 	return SlotBusyLocked(i);
 }
 
@@ -2228,9 +2536,12 @@ void CController::DeviceWatchThread()
 				other = other || (j != i && (slots[j]->recompand	// draining for it, or closed and not yet open again
 					|| (slots[j]->out && slots[j]->stats >= 0 && !g_Stats.devices[slots[j]->stats].want_out.load())
 					|| (!slots[j]->up && !slots[j]->out && slots[j]->compand != compand)));	// or it did not open again
-			if (!other && s.up && !s.draining && !s.out && s.compand != compand
-				&& (UncoveredChoice(int(i)) < 0 || !SlotBusy(int(i))))
-				s.recompand = true;
+			if (!other && s.up && !s.draining && !s.out && s.compand != compand)
+			{
+				std::lock_guard<std::mutex> lock(hw_mux);
+				if (UncoveredChoice(int(i)) < 0 || !SlotBusyLocked(int(i)))
+					s.recompand = true;
+			}
 			PhaseOut(int(i));
 			if (s.up || s.out || now < s.next_try)
 				continue;
@@ -2269,7 +2580,7 @@ void CController::DeviceWatchThread()
 			}
 			// in the slot before its reader runs: a reader that fails at once finds it there
 			{
-				std::lock_guard<std::mutex> lock(pinned_mux);
+				std::lock_guard<std::mutex> lock(hw_mux);
 				s.dev = dev;
 				s.node = node;
 				s.closed = false;
@@ -2297,11 +2608,16 @@ void CController::ToDStar(std::shared_ptr<CTranscoderPacket> packet)
 	std::shared_ptr<CDVDevice> dev;
 	uint8_t ch = 0;
 	if (SwCodec(TCD_CODEC_DSTAR, packet, &dev, &ch))
-		swdstar_queue.push(packet);
-	else if (dev)
+	{
+		StageSWDStar(packet);
+		return;
+	}
+	if (dev)
 		dev->AddPacketToChannel(packet, ch);
 	else
 		NoChannel("D-Star", packet->GetModule());
+	if (packet->IsLast())
+		ReleaseChannel(kChoiceDStar, packet);	// after the frame is queued, see Pick
 }
 
 void CController::ToDmr(std::shared_ptr<CTranscoderPacket> packet)
@@ -2309,11 +2625,16 @@ void CController::ToDmr(std::shared_ptr<CTranscoderPacket> packet)
 	std::shared_ptr<CDVDevice> dev;
 	uint8_t ch = 0;
 	if (SwCodec(TCD_CODEC_DMR, packet, &dev, &ch))
-		swambe2_queue.push(packet);
-	else if (dev)
+	{
+		StageSWAMBE2(packet);
+		return;
+	}
+	if (dev)
 		dev->AddPacketToChannel(packet, ch);
 	else
 		NoChannel("DMR", packet->GetModule());
+	if (packet->IsLast())
+		ReleaseChannel(kChoiceDMR, packet);	// after the frame is queued, see Pick
 }
 
 // IMBE silence, as MMDVMHost and P25Gateway (and urfd's P25Protocol) fill a lost frame with
@@ -2345,9 +2666,7 @@ void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
 	if (packet->P25IsSet())	// coded from the source's frame already (Transcode)
 	{
 		SwCodec(TCD_CODEC_P25, packet);	// its StreamLog count, as EncodeIMBE's lookup would make it
-		send_mux.lock();
-		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-		send_mux.unlock();
+		SendIfDone(packet);
 		return;
 	}
 	uint8_t imbe[11];
@@ -2357,9 +2676,7 @@ void CController::AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet)
 	EncodeIMBE(packet, gained, imbe);
 	packet->SetP25Data(imbe);
 	// we might be all done...
-	send_mux.lock();
-	if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-	send_mux.unlock();
+	SendIfDone(packet);
 }
 
 void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
@@ -2385,41 +2702,11 @@ void CController::IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 		from->End(packet->GetStreamKey(), false);
 	if (decoded || !from)	// a failed decode keeps the marks: no flicker
 		ModuleDirect(packet, direct);
+	// the AMBE codecs first: a device gets its frame before the software encodes
 	ToDStar(packet);
-	codec2_queue.push(packet);
-
 	ToDmr(packet);
-
-	usrp_queue.push(packet);
-}
-
-void CController::ProcessIMBEThread()
-{
-	while (keep_running)
-	{
-		auto packet = imbe_queue.pop();
-		if (!packet)
-			break;	// the queue was shut down: tcd stops
-
-		switch (packet->GetCodecIn())
-		{
-			case ECodecType::c2_1600:
-			case ECodecType::c2_3200:
-			case ECodecType::dstar:
-			case ECodecType::dmr:
-			case ECodecType::usrp:
-			case ECodecType::svx:
-				AudiotoIMBE(packet);
-				break;
-
-			case ECodecType::p25:
-				IMBEtoAudio(packet);
-				break;
-
-			default:	// none, ping: ReadReflectorThread queues neither
-				break;
-		}
-	}
+	AudiotoCodec2(packet);
+	AudiotoUSRP(packet);
 }
 
 void CController::AudiotoUSRP(std::shared_ptr<CTranscoderPacket> packet)
@@ -2431,9 +2718,7 @@ void CController::AudiotoUSRP(std::shared_ptr<CTranscoderPacket> packet)
 
 
 	// we might be all done...
-	send_mux.lock();
-	if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-	send_mux.unlock();
+	SendIfDone(packet);
 }
 
 void CController::USRPtoAudio(std::shared_ptr<CTranscoderPacket> packet)
@@ -2450,44 +2735,11 @@ void CController::USRPtoAudio(std::shared_ptr<CTranscoderPacket> packet)
 	packet->SetAudioSamples(tmp, false);
 	g_Stats.UpdateLevelsOut(packet->GetModule(), tmp, 160);
 	FrameLevels(packet, "usrp");
+	// the AMBE codecs first: a device gets its frame before the software encodes
 	ToDStar(packet);
-	codec2_queue.push(packet);
-
 	ToDmr(packet);
-
-	imbe_queue.push(packet);
-}
-
-void CController::ProcessUSRPThread()
-{
-	while (keep_running)
-	{
-		auto packet = usrp_queue.pop();
-		if (!packet)
-			break;	// the queue was shut down: tcd stops
-
-		switch (packet->GetCodecIn())
-		{
-			case ECodecType::c2_1600:
-			case ECodecType::c2_3200:
-			case ECodecType::dstar:
-			case ECodecType::dmr:
-			case ECodecType::p25:
-				AudiotoUSRP(packet);
-				break;
-
-			case ECodecType::usrp:
-				USRPtoAudio(packet);
-				break;
-
-			case ECodecType::svx:
-				SvxToAudio(packet);
-				break;
-
-			default:	// none, ping: ReadReflectorThread queues neither
-				break;
-		}
-	}
+	AudiotoCodec2(packet);
+	AudiotoIMBE(packet);
 }
 
 void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
@@ -2506,34 +2758,29 @@ void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
 	packet->SetAudioSamples(tmp, false);
 	g_Stats.UpdateLevelsOut(packet->GetModule(), tmp, 160);
 	FrameLevels(packet, "svx");
+	// the AMBE codecs first: a device gets its frame before the software encodes
 	ToDStar(packet);
-	codec2_queue.push(packet);
-
 	ToDmr(packet);
-
-	imbe_queue.push(packet);
+	AudiotoCodec2(packet);
+	AudiotoIMBE(packet);
 }
 
 void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
 {
-	constexpr int max_retries = 5;
-	for (int attempt = 0; attempt < max_retries; ++attempt)
-	{
-		if (!tcClient.Send(packet->GetTCPacket()))
-		{
-			packet->Sent();
-			g_Stats.PacketOut(packet->GetModule());
-			g_Stats.reflector.packets_tx.fetch_add(1, std::memory_order_relaxed);
-			return;
-		}
-		// also a module whose connection is closed (Send() says so without a log):
-		// the reconnect may bring it back within the retries
-		std::cerr << "SendToReflector: send failed, attempt " << (attempt + 1) << "/" << max_retries << std::endl;
-		tcClient.ReConnect();
-		std::this_thread::sleep_for(std::chrono::milliseconds(100 * (1 << attempt)));
-	}
-	std::cerr << "SendToReflector: dropping packet after " << max_retries << " retries" << std::endl;
 	packet->Sent();
+	if (!tcClient.Send(packet->GetTCPacket()))
+	{
+		g_Stats.PacketOut(packet->GetModule());
+		g_Stats.reflector.packets_tx.fetch_add(1, std::memory_order_relaxed);
+		return;
+	}
+	// the module's connection is closed (Send() logs why, or says nothing when it
+	// was closed before): the frame is dropped at once. Waiting for the reflector
+	// thread's reconnect here held up every module of this worker, and a frame
+	// that late is of no use to urfd. Said once a second at most per module
+	static std::atomic<int64_t> told[kModuleSlots] = {};
+	if (OncePerSecond(told[ModuleSlot(packet->GetModule())]))
+		std::cerr << "SendToReflector: no connection for module " << packet->GetModule() << ", frame dropped (the reflector thread reconnects)" << std::endl;
 }
 
 void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSoftCodec *from, bool decoded)
@@ -2567,17 +2814,16 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSof
 		if (decoded)	// a failed decode keeps the marks: no flicker
 			ModuleDirect(packet, direct);
 		// Output gains applied in encode functions and DVSI FeedDevice
-		codec2_queue.push(packet);
-		imbe_queue.push(packet);
-		usrp_queue.push(packet);
+		// DMR first: a device gets its frame before the software encodes
 		ToDmr(packet);
+		AudiotoCodec2(packet);
+		AudiotoIMBE(packet);
+		AudiotoUSRP(packet);
 	}
 	else
 	{
 		DeviceFrameOut(kChoiceDStar, packet);
-		send_mux.lock();
-		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-		send_mux.unlock();
+		SendIfDone(packet);
 	}
 }
 
@@ -2634,10 +2880,11 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 			m_ambeGain.Process(dmr_data, packet->GetStreamKey(), gain_db);
 			packet->SetDMRData(dmr_data);
 		}
-		codec2_queue.push(packet);
-		imbe_queue.push(packet);
-		usrp_queue.push(packet);
+		// D-Star first: a device gets its frame before the software encodes
 		ToDStar(packet);
+		AudiotoCodec2(packet);
+		AudiotoIMBE(packet);
+		AudiotoUSRP(packet);
 	}
 	else
 	{
@@ -2650,9 +2897,7 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet)
 			BitstreamDmrGain(dmr_data, packet->GetStreamKey());
 			packet->SetDMRData(dmr_data);
 		}
-		send_mux.lock();
-		if (packet->AllCodecsAreSet() && packet->HasNotBeenSent()) SendToReflector(packet);
-		send_mux.unlock();
+		SendIfDone(packet);
 	}
 }
 

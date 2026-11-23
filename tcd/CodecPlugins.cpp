@@ -13,11 +13,11 @@
 
 CCodecPlugins g_Codecs;
 
-// a stream quiet this long loses its state; at most this many states are kept,
-// more than streams can run at once (one per stream and direction, on every
-// module); beyond it the one quiet longest goes first
+// a stream quiet this long loses its state; at most this many states are kept
+// per module, more than its streams can have at once (one per stream and
+// direction); beyond it the one quiet longest goes first
 #define STATE_TIMEOUT std::chrono::seconds(30)
-#define STATE_MAX     128	// a stream decoded and encoded has two, coded directly one more
+#define STATE_MAX     32	// a stream decoded and encoded has two, coded directly one more
 // a state this long without a frame starts afresh at the next: a transmission
 // before whose last frame got lost, or a target on the audio path only after
 // its transmission went the direct path a while. More than urfd's stream
@@ -26,52 +26,56 @@ CCodecPlugins g_Codecs;
 
 CSoftCodec::~CSoftCodec()
 {
-	std::lock_guard<std::mutex> lock(*m_Mutex);
-	for (auto &s : m_States)
-		m_Plugin->close(s.second.state);
+	for (int i = 0; i < SPluginLocks::kShards; i++)
+	{
+		CLock lock(*m_Locks, i);
+		for (auto &s : m_Shards[i].states)
+			m_Plugin->close(s.second.state);
+	}
 }
 
-CSoftCodec::SState *CSoftCodec::State(uint32_t key, uint32_t sequence)
+CSoftCodec::SState *CSoftCodec::State(SShard &shard, uint32_t key, uint32_t sequence)
 {
+	auto &states = shard.states;
 	const uint16_t streamid = uint16_t(key);
 	const char module = char((key >> 16) & 0xffu);
 	const auto now = std::chrono::steady_clock::now();
-	auto it = m_States.find(key);
-	if (it == m_States.end())
+	auto it = states.find(key);
+	if (it == states.end())
 	{
 		// a new stream: first make room, the stale ones and then the oldest go
-		for (auto si = m_States.begin(); si != m_States.end(); )
+		for (auto si = states.begin(); si != states.end(); )
 		{
 			if (now - si->second.last_used > STATE_TIMEOUT)
 			{
 				m_Plugin->close(si->second.state);
-				si = m_States.erase(si);
+				si = states.erase(si);
 			}
 			else
 				++si;
 		}
-		while (m_States.size() >= STATE_MAX)
+		while (states.size() >= STATE_MAX)
 		{
-			auto oldest = m_States.begin();
-			for (auto si = m_States.begin(); si != m_States.end(); ++si)
+			auto oldest = states.begin();
+			for (auto si = states.begin(); si != states.end(); ++si)
 				if (si->second.last_used < oldest->second.last_used)
 					oldest = si;
 			m_Plugin->close(oldest->second.state);
-			m_States.erase(oldest);
+			states.erase(oldest);
 		}
 		void *state = m_Plugin->open(m_Codec);
 		if (!state)
 		{
 			// asked again at every frame: said once per stream and direction
-			if (m_Failed.size() >= STATE_MAX)
-				m_Failed.clear();
-			if (m_Failed.insert(key).second)
+			if (shard.failed.size() >= STATE_MAX)
+				shard.failed.clear();
+			if (shard.failed.insert(key).second)
 				std::cerr << "Codec plugin " << m_Plugin->name << ": no state for stream " << streamid << " of module " << module
 				          << ((key & 0x40000000u) ? ", it is coded from the audio" : ", its frames stay empty") << std::endl;
 			return nullptr;
 		}
-		m_Failed.erase(key);
-		it = m_States.emplace(key, SState{ state, now, sequence, false, kUnused, 0, 0 }).first;
+		shard.failed.erase(key);
+		it = states.emplace(key, SState{ state, now, sequence, false, kUnused, 0, 0 }).first;
 	}
 	if (it->second.running && (NewTransmission(it->second.sequence, sequence) || now - it->second.last_used > STATE_IDLE))
 		it->second.running = false;
@@ -81,7 +85,7 @@ CSoftCodec::SState *CSoftCodec::State(uint32_t key, uint32_t sequence)
 			m_Plugin->start(it->second.state);
 		it->second.running = true;
 		it->second.use = kUnused;
-		it->second.start = ++m_Starts;
+		it->second.start = ++shard.starts;
 	}
 	it->second.last_used = now;
 	it->second.sequence = sequence;
@@ -100,8 +104,10 @@ void CSoftCodec::Stop(SState *s, bool last)
 
 bool CSoftCodec::Encode(uint32_t stream, uint32_t sequence, bool last, const int16_t *pcm, uint8_t *frame)
 {
-	std::lock_guard<std::mutex> lock(*m_Mutex);
-	SState *s = State(Key(stream, true), sequence);
+	const uint32_t key = Key(stream, true);
+	const int sh = SPluginLocks::Shard(key);
+	CLock lock(*m_Locks, sh);
+	SState *s = State(m_Shards[sh], key, sequence);
 	const bool ok = s && 0 == m_Plugin->encode(s->state, pcm, frame);
 	Stop(s, last);
 	return ok;
@@ -109,8 +115,10 @@ bool CSoftCodec::Encode(uint32_t stream, uint32_t sequence, bool last, const int
 
 bool CSoftCodec::Decode(uint32_t stream, uint32_t sequence, bool last, const uint8_t *frame, int16_t *pcm, tcd_frame_info *info, bool hold)
 {
-	std::lock_guard<std::mutex> lock(*m_Mutex);
-	SState *s = State(Key(stream, false), sequence);
+	const uint32_t key = Key(stream, false);
+	const int sh = SPluginLocks::Shard(key);
+	CLock lock(*m_Locks, sh);
+	SState *s = State(m_Shards[sh], key, sequence);
 	tcd_frame_info none{ 0, 0 };
 	if (!info)
 		info = &none;
@@ -126,13 +134,15 @@ bool CSoftCodec::Transcode(uint32_t stream, uint32_t sequence, bool last, CSoftC
 {
 	if (!CanTranscode(to))
 		return false;
-	std::lock_guard<std::mutex> lock(*m_Mutex);	// the plugin's, shared by both codecs
-	auto it = m_States.find(Key(stream, false));
-	if (it == m_States.end())
-		return false;	// nothing decoded to code from
 	const uint32_t key = DirectKey(stream, m_Codec);
-	auto dt = to->m_States.find(key);
-	if (dt != to->m_States.end() && dt->second.running && dt->second.source == it->second.start)
+	const int sh = SPluginLocks::Shard(key);
+	CLock lock(*m_Locks, sh);	// the plugin's, shared by both codecs
+	auto &states = m_Shards[sh].states, &to_states = to->m_Shards[sh].states;
+	auto it = states.find(Key(stream, false));
+	if (it == states.end())
+		return false;	// nothing decoded to code from
+	auto dt = to_states.find(key);
+	if (dt != to_states.end() && dt->second.running && dt->second.source == it->second.start)
 	{
 		// the transmission it codes: on directly while no frame went the audio path
 		// (a gap in the sequence), else its rest goes the audio path
@@ -147,14 +157,14 @@ bool CSoftCodec::Transcode(uint32_t stream, uint32_t sequence, bool last, CSoftC
 	else
 	{
 		// one before, whose last frame was not coded here: done
-		if (dt != to->m_States.end() && dt->second.running)
+		if (dt != to_states.end() && dt->second.running)
 			to->Stop(&dt->second, true);
 		// the direct path from the first frame on only: the audio path's encoder
 		// has the frames before, the rest would be coded from two histories
 		if (sequence != 0)
 			return false;
 	}
-	SState *s = to->State(key, sequence);
+	SState *s = to->State(to->m_Shards[sh], key, sequence);
 	if (!s)
 		return false;
 	if (s->use == kUnused)
@@ -178,9 +188,12 @@ void CSoftCodec::LeaveDirect(uint32_t stream, bool last, CSoftCodec *to)
 {
 	if (!CanTranscode(to))
 		return;
-	std::lock_guard<std::mutex> lock(*m_Mutex);
-	auto dt = to->m_States.find(DirectKey(stream, m_Codec));
-	if (dt == to->m_States.end() || !dt->second.running)
+	const uint32_t key = DirectKey(stream, m_Codec);
+	const int sh = SPluginLocks::Shard(key);
+	CLock lock(*m_Locks, sh);
+	auto &to_states = to->m_Shards[sh].states;
+	auto dt = to_states.find(key);
+	if (dt == to_states.end() || !dt->second.running)
 		return;
 	dt->second.use = kAudio;
 	to->Stop(&dt->second, last);
@@ -188,23 +201,87 @@ void CSoftCodec::LeaveDirect(uint32_t stream, bool last, CSoftCodec *to)
 
 void CSoftCodec::End(uint32_t stream, bool encode)
 {
-	std::lock_guard<std::mutex> lock(*m_Mutex);
-	auto it = m_States.find(Key(stream, encode));
-	if (it != m_States.end())
+	const uint32_t key = Key(stream, encode);
+	const int sh = SPluginLocks::Shard(key);
+	CLock lock(*m_Locks, sh);
+	auto &states = m_Shards[sh].states;
+	auto it = states.find(key);
+	if (it != states.end())
 		Stop(&it->second, true);
+}
+
+void CSoftCodec::Purge(void)
+{
+	const auto now = std::chrono::steady_clock::now();
+	for (int i = 0; i < SPluginLocks::kShards; i++)
+	{
+		// a look under the module's lock first, skipped while a worker codes on the
+		// module (a plugin call that hangs must not hold up the reflector thread);
+		// the plugin's lock (when it is not concurrent) only when a state is to be closed
+		{
+			std::unique_lock<std::mutex> look(m_Locks->module[i], std::try_to_lock);
+			if (!look.owns_lock())
+				continue;
+			const auto &states = m_Shards[i].states;
+			if (std::none_of(states.begin(), states.end(), [&](const std::pair<const uint32_t, SState> &s) { return now - s.second.last_used > STATE_TIMEOUT; }))
+				continue;
+		}
+		// the plugin's lock only if free as well: the next second tries again
+		std::unique_lock<std::mutex> plugin(m_Locks->plugin, std::defer_lock);
+		if (!m_Locks->concurrent && !plugin.try_lock())
+			continue;
+		std::unique_lock<std::mutex> module(m_Locks->module[i], std::try_to_lock);
+		if (!module.owns_lock())
+			continue;
+		auto &states = m_Shards[i].states;
+		for (auto it = states.begin(); it != states.end(); )
+		{
+			if (now - it->second.last_used > STATE_TIMEOUT)
+			{
+				m_Plugin->close(it->second.state);
+				it = states.erase(it);
+			}
+			else
+				++it;
+		}
+	}
+}
+
+void CCodecPlugins::Purge(void)
+{
+	std::vector<CSoftCodec *> codecs;
+	{
+		std::lock_guard<std::mutex> lock(m_CodecsMutex);
+		codecs = m_Codecs;	// a CSoftCodec lives as long as tcd
+	}
+	for (auto *c : codecs)
+		c->Purge();
 }
 
 int CSoftCodec::Streams(void)
 {
 	// the transmissions not ended with a frame in the last 2 s: a state stays 30 s
 	// after its stream ended, and a transmission whose last frame got lost gets no stop
-	std::lock_guard<std::mutex> lock(*m_Mutex);
 	const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(2);
-	std::unordered_set<uint32_t> active;	// a stream decoded and encoded counts once
-	for (const auto &s : m_States)
-		if (s.second.running && s.second.last_used > cutoff)
-			active.insert(s.first & 0x00ffffffu);
-	return int(active.size());
+	int total = 0;
+	for (int i = 0; i < SPluginLocks::kShards; i++)
+	{
+		// no plugin call: the module's lock is enough. A module a worker codes on
+		// right now counts as at the last look (a plugin call that hangs must not
+		// hold up the reflector thread)
+		auto &shard = m_Shards[i];
+		std::unique_lock<std::mutex> lock(m_Locks->module[i], std::try_to_lock);
+		if (lock.owns_lock())
+		{
+			std::unordered_set<uint32_t> active;	// a stream decoded and encoded counts once
+			for (const auto &s : shard.states)
+				if (s.second.running && s.second.last_used > cutoff)
+					active.insert(s.first & 0x00ffffffu);
+			shard.streams = int(active.size());
+		}
+		total += shard.streams;
+	}
+	return total;
 }
 
 CCodecPlugins::~CCodecPlugins()
@@ -236,7 +313,13 @@ bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vecto
 				return &l;
 		return nullptr;
 	};
-	auto add_builtin = [&](const tcd_codec_plugin *plugin) { m_Loaded.push_back({ "built in", nullptr, plugin, false, std::make_shared<std::mutex>() }); };
+	// the plugin's locks; parallel calls when it allows them (api 5)
+	auto locks = [](const tcd_codec_plugin *plugin) {
+		auto l = std::make_shared<SPluginLocks>();
+		l->concurrent = plugin->api >= 5 && (plugin->flags & TCD_PLUGIN_CONCURRENT);
+		return l;
+	};
+	auto add_builtin = [&](const tcd_codec_plugin *plugin) { m_Loaded.push_back({ "built in", nullptr, plugin, false, locks(plugin) }); };
 	for (const auto &path : paths)
 	{
 		if (const auto *plugin = builtin(path))
@@ -309,7 +392,7 @@ bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vecto
 			dlclose(handle);
 			return true;
 		}
-		m_Loaded.push_back({ path, handle, plugin, false, std::make_shared<std::mutex>() });
+		m_Loaded.push_back({ path, handle, plugin, false, locks(plugin) });
 	}
 
 	// without its line tcd's own is left out only where CodecP25/CodecM17 names a
@@ -386,20 +469,29 @@ bool CCodecPlugins::Load(const std::vector<std::string> &paths, const std::vecto
 			if (l.plugin->codecs & bit)
 				codecs += (codecs.empty() ? "" : ", ") + std::string(name);
 		std::cout << "CodecPlugin " << l.plugin->name << " (" << codecs << ") loaded from " << l.path << (l.plugin->description ? std::string(": ") + l.plugin->description : std::string()) << std::endl;
+		if (!l.locks->concurrent)
+			std::cout << "CodecPlugin " << l.plugin->name << " is called by one module worker at a time (it does not allow parallel calls, CodecPlugin.h api 5)" << std::endl;
 	}
 	return false;
 }
 
 std::vector<CSoftCodec *> CCodecPlugins::All(uint32_t codec)
 {
+	std::lock_guard<std::mutex> lock(m_CodecsMutex);
 	std::vector<CSoftCodec *> all;
 	for (auto &l : m_Loaded)
 		if (l.ready && (l.plugin->codecs & codec))
-			all.push_back(Get(codec, l.plugin->name));
+			all.push_back(GetLocked(codec, l.plugin->name));
 	return all;
 }
 
 CSoftCodec *CCodecPlugins::Get(uint32_t codec, const std::string &name)
+{
+	std::lock_guard<std::mutex> lock(m_CodecsMutex);
+	return GetLocked(codec, name);
+}
+
+CSoftCodec *CCodecPlugins::GetLocked(uint32_t codec, const std::string &name)
 {
 	for (auto &l : m_Loaded)
 	{
@@ -408,7 +500,7 @@ CSoftCodec *CCodecPlugins::Get(uint32_t codec, const std::string &name)
 		for (auto *c : m_Codecs)
 			if (c->GetPlugin() == l.plugin && c->GetCodec() == codec)
 				return c;
-		m_Codecs.push_back(new CSoftCodec(l.plugin, codec, l.mutex, !l.handle));
+		m_Codecs.push_back(new CSoftCodec(l.plugin, codec, l.locks, !l.handle));
 		return m_Codecs.back();
 	}
 	return nullptr;

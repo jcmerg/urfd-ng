@@ -40,7 +40,10 @@
 #include <algorithm>
 #include <unordered_map>
 #include <mutex>
+#include <atomic>
 #include <chrono>
+
+#include "ModuleIndex.h"
 
 namespace agc
 {
@@ -126,20 +129,44 @@ struct AGCState
 
 class CAGC
 {
+	// the settings, set by Configure; each frame works with a copy
+	struct SParams
+	{
+		bool  enabled = false;
+		float targetDb = -20.0f + 3.0f;	// + ENVELOPE_OFFSET
+		float maxGainUpDb = 20.0f;
+		float maxGainDownDb = 24.0f;
+		float attackAlpha = 0.33f;
+		float releaseAlpha = 0.04f;
+		float noiseGateDb = -55.0f;
+		float gateFloor = 1.0f;          // gain limit with the gate closed (0 dB)
+		bool operator==(const SParams &o) const
+		{
+			return enabled == o.enabled && targetDb == o.targetDb && maxGainUpDb == o.maxGainUpDb && maxGainDownDb == o.maxGainDownDb &&
+			       attackAlpha == o.attackAlpha && releaseAlpha == o.releaseAlpha && noiseGateDb == o.noiseGateDb && gateFloor == o.gateFloor;
+		}
+	};
+
 public:
 	void Configure(bool enable, float targetDbfs, float attackMs, float releaseMs,
 	               float maxGainUpDb, float maxGainDownDb, float noiseGateDbfs = -55.0f,
 	               float gateFloorDb = 0.0f)
 	{
-		std::lock_guard<std::mutex> lock(m_mutex);
-		m_gateFloor = powf(10.0f, std::min(gateFloorDb, 0.0f) / 20.0f);
-		m_enabled = enable;
-		m_targetDb = targetDbfs + ENVELOPE_OFFSET;
-		m_maxGainUpDb = maxGainUpDb;
-		m_maxGainDownDb = maxGainDownDb;
-		m_attackAlpha  = (attackMs  > 0.0f) ? 1.0f - expf(-20.0f / attackMs)  : 1.0f;
-		m_releaseAlpha = (releaseMs > 0.0f) ? 1.0f - expf(-20.0f / releaseMs) : 1.0f;
-		m_noiseGateDb = noiseGateDbfs;
+		SParams p;
+		p.gateFloor = powf(10.0f, std::min(gateFloorDb, 0.0f) / 20.0f);
+		p.enabled = enable;
+		p.targetDb = targetDbfs + ENVELOPE_OFFSET;
+		p.maxGainUpDb = maxGainUpDb;
+		p.maxGainDownDb = maxGainDownDb;
+		p.attackAlpha  = (attackMs  > 0.0f) ? 1.0f - expf(-20.0f / attackMs)  : 1.0f;
+		p.releaseAlpha = (releaseMs > 0.0f) ? 1.0f - expf(-20.0f / releaseMs) : 1.0f;
+		p.noiseGateDb = noiseGateDbfs;
+		std::lock_guard<std::mutex> lock(m_paramMutex);
+		if (p == m_params)
+			return;	// the monitor's once-a-second Configure, nothing changed
+		m_params = p;
+		m_enabled.store(enable, std::memory_order_relaxed);
+		m_paramVersion.fetch_add(1, std::memory_order_release);	// the modules copy them at their next frame
 	}
 
 	void Configure(bool enable, float targetDbfs, float attackMs, float releaseMs, float maxGainDb)
@@ -151,8 +178,8 @@ private:
 	// the upper envelope L of active speech reads this much above its RMS
 	static constexpr float ENVELOPE_OFFSET = 3.0f;
 
-	// Core AGC processing, called with m_mutex held
-	void ProcessCore(int16_t *samples, int count, AGCState &state, float &gain_db_out, bool &gate_out)
+	// Core AGC processing, with the module's lock held and the parameters of the frame
+	void ProcessCore(int16_t *samples, int count, AGCState &state, const SParams &p, float &gain_db_out, bool &gate_out)
 	{
 		using namespace agc;
 		static constexpr int   HOLD_FRAMES = 12;     // 240ms before the gate closes
@@ -210,7 +237,7 @@ private:
 		// update it, and the minimum of the last 2.4 s lifts it when the noise rose
 		if (state.frames == 0)
 		{
-			state.level = m_targetDb;  // start at unity gain
+			state.level = p.targetDb;  // start at unity gain
 			state.minCur = E;
 		}
 		if (E < state.noise)
@@ -235,7 +262,7 @@ private:
 
 		const float snr = E - state.noise;
 		const bool voiced = r >= VOICED;
-		const bool speech = E >= m_noiseGateDb && (snr >= GATE_SNR || (voiced && snr >= 3.0f));
+		const bool speech = E >= p.noiseGateDb && (snr >= GATE_SNR || (voiced && snr >= 3.0f));
 
 		// Track the speech level, asymmetric: fast up, down only on voiced speech
 		if (speech)
@@ -245,20 +272,20 @@ private:
 			if (d > JUMP_DB)
 				alpha = 0.5f;
 			else if (d > 0.0f)
-				alpha = m_attackAlpha;
+				alpha = p.attackAlpha;
 			else if (voiced && state.voicedFrames < ACQUIRE_FRAMES && snr >= 15.0f)
-				alpha = std::max(m_releaseAlpha, ACQUIRE_ALPHA);
+				alpha = std::max(p.releaseAlpha, ACQUIRE_ALPHA);
 			else if (voiced && snr >= RELEASE_SNR)
-				alpha = m_releaseAlpha;
+				alpha = p.releaseAlpha;
 			else if (r >= WEAK_VOICED && snr >= WEAK_SNR)
-				alpha = 0.2f * m_releaseAlpha;
+				alpha = 0.2f * p.releaseAlpha;
 			state.level += alpha * d;
 			if (voiced && snr >= 15.0f)
 				state.voicedFrames++;
 		}
 
 		// Gain toward the target, the boost scaled down on noisy signals
-		float gainDb = std::clamp(m_targetDb - state.level, -m_maxGainDownDb, m_maxGainUpDb);
+		float gainDb = std::clamp(p.targetDb - state.level, -p.maxGainDownDb, p.maxGainUpDb);
 		if (gainDb > 0.0f)
 			gainDb *= std::clamp((state.level - state.noise) / SNR_SPAN, 0.0f, 1.0f);
 		const float gain = powf(10.0f, gainDb / 20.0f);
@@ -286,7 +313,7 @@ private:
 		{
 			// Fade the applied gain to at most the gate floor: no noise amplification,
 			// for analog sources the noise between words is lowered
-			target = std::max(std::min(gain, m_gateFloor), state.applied * GATE_FADE);
+			target = std::max(std::min(gain, p.gateFloor), state.applied * GATE_FADE);
 			target = std::min(target, state.applied);  // a fade never raises the gain
 		}
 
@@ -350,49 +377,69 @@ public:
 	{
 		gate_out = false;
 		gain_db_out = 0.0f;
-		std::lock_guard<std::mutex> lock(m_mutex);
-		if (!m_enabled) return;
+		// the streams of a module, under its lock: the modules' workers run in parallel;
+		// the module's copy of the settings, fetched again when Configure changed them
+		auto &shard = m_shards[ModuleSlotOfKey(streamKey)];
+		std::lock_guard<std::mutex> lock(shard.mutex);
+		const uint32_t version = m_paramVersion.load(std::memory_order_acquire);
+		if (shard.version != version)
+		{
+			std::lock_guard<std::mutex> plock(m_paramMutex);
+			shard.params = m_params;
+			shard.version = m_paramVersion.load(std::memory_order_relaxed);
+		}
+		const SParams &p = shard.params;
+		if (!p.enabled) return;
 
 		const auto now = std::chrono::steady_clock::now();
-		auto it = m_streams.find(streamKey);
-		if (it == m_streams.end())
+		auto it = shard.streams.find(streamKey);
+		if (it == shard.streams.end())
 		{
-			DropEndedStreams(now);
-			it = m_streams.emplace(streamKey, AGCState{}).first;
+			DropEndedStreams(shard.streams, now);
+			it = shard.streams.emplace(streamKey, AGCState{}).first;
 		}
 		it->second.lastUsed = now;
 
-		ProcessCore(samples, count, it->second, gain_db_out, gate_out);
+		ProcessCore(samples, count, it->second, p, gain_db_out, gate_out);
 	}
 
 	bool IsEnabled() const
 	{
-		std::lock_guard<std::mutex> lock(m_mutex);
-		return m_enabled;
+		return m_enabled.load(std::memory_order_relaxed);
 	}
 
+public:
+	// the streams not heard for 30 s, of every module (once a second, the reflector
+	// thread; a module's are otherwise dropped only when it gets a new stream)
+	void Purge(void)
+	{
+		const auto now = std::chrono::steady_clock::now();
+		for (auto &shard : m_shards)
+		{
+			std::lock_guard<std::mutex> lock(shard.mutex);
+			DropEndedStreams(shard.streams, now);
+		}
+	}
 private:
 	// streams not heard for 30 s have ended
-	void DropEndedStreams(std::chrono::steady_clock::time_point now)
+	static void DropEndedStreams(std::unordered_map<uint32_t, AGCState> &streams, std::chrono::steady_clock::time_point now)
 	{
-		for (auto it = m_streams.begin(); it != m_streams.end(); )
+		for (auto it = streams.begin(); it != streams.end(); )
 		{
 			if (now - it->second.lastUsed > std::chrono::seconds(30))
-				it = m_streams.erase(it);
+				it = streams.erase(it);
 			else
 				++it;
 		}
 	}
 
 	const agc::Filters m_filters;
-	bool  m_enabled = false;
-	float m_targetDb = -20.0f + ENVELOPE_OFFSET;
-	float m_maxGainUpDb = 20.0f;
-	float m_maxGainDownDb = 24.0f;
-	float m_attackAlpha = 0.33f;
-	float m_releaseAlpha = 0.04f;
-	float m_noiseGateDb = -55.0f;
-	float m_gateFloor = 1.0f;          // gain limit with the gate closed (0 dB)
-	std::unordered_map<uint32_t, AGCState> m_streams;	// by CTranscoderPacket::GetStreamKey
-	mutable std::mutex m_mutex;
+	SParams m_params;
+	mutable std::mutex m_paramMutex;	// m_params: Configure (once a second) and the modules' copies
+	std::atomic<uint32_t> m_paramVersion{1};	// counts Configure's calls
+	std::atomic<bool> m_enabled{false};	// m_params.enabled, for IsEnabled without the lock
+	// the streams by CTranscoderPacket::GetStreamKey, per module (ModuleSlotOfKey),
+	// with the module's copy of the settings (version: m_paramVersion when copied)
+	struct SShard { std::mutex mutex; std::unordered_map<uint32_t, AGCState> streams; SParams params; uint32_t version = 0; };
+	SShard m_shards[kModuleSlots];
 };

@@ -18,12 +18,26 @@
 #include <vector>
 
 #include "CodecPlugin.h"
+#include "ModuleIndex.h"
+
+// the locks of a plugin, shared by its codecs. A stream's states belong to its
+// module, and so do their lock and their map (CSoftCodec): the modules' workers
+// (Controller.h) code in parallel. A plugin without TCD_PLUGIN_CONCURRENT is
+// called by one of them at a time (plugin)
+struct SPluginLocks
+{
+	static constexpr int kShards = kModuleSlots;
+	static int Shard(uint32_t key) { return ModuleSlotOfKey(key); }
+	std::mutex module[kShards];
+	std::mutex plugin;
+	bool concurrent = false;
+};
 
 // one codec of one plugin, with a state per stream
 class CSoftCodec
 {
 public:
-	CSoftCodec(const tcd_codec_plugin *plugin, uint32_t codec, std::shared_ptr<std::mutex> mutex, bool builtin) : m_Plugin(plugin), m_Codec(codec), m_Mutex(mutex), m_Builtin(builtin) {}
+	CSoftCodec(const tcd_codec_plugin *plugin, uint32_t codec, std::shared_ptr<SPluginLocks> locks, bool builtin) : m_Plugin(plugin), m_Codec(codec), m_Locks(locks), m_Builtin(builtin) {}
 	~CSoftCodec();
 
 	const char *GetName(void) const { return m_Plugin->name; }
@@ -61,6 +75,9 @@ public:
 	void LeaveDirect(uint32_t stream, bool last, CSoftCodec *to);
 	// the streams it codes right now (a frame in the last 2 s)
 	int Streams(void);
+	// closes the states quiet for STATE_TIMEOUT (once a second, the reflector thread):
+	// a module's states are otherwise only made room for when it gets a new stream
+	void Purge(void);
 	// urfd counts the frames of a transmission from 0: frame 0, or a lower count
 	// than the last on the same stream id, is a new transmission (the last frame
 	// of the one before got lost). tcd's own vocoders tell transmissions apart the same way
@@ -81,20 +98,40 @@ private:
 	// stream: CTranscoderPacket::GetStreamKey, the module above the stream id (bits 16-23)
 	static uint32_t Key(uint32_t stream, bool encode) { return (encode ? 0x80000000u : 0u) | stream; }
 	// the target's encoder state for Transcode from codec `from` (TCD_CODEC_*, bits
-	// 24-28): one of its own, used by the decoder's thread only, while Encode's is
-	// the codec thread's (shared, the decoder's newer frames made Encode start
-	// afresh at nearly every frame, tcd 0.22.5)
+	// 24-28): one of its own besides Encode's (a shared one made Encode start
+	// afresh at nearly every frame, tcd 0.22.5); both are the module worker's,
+	// under the module's lock
 	static uint32_t DirectKey(uint32_t stream, uint32_t from) { return 0x40000000u | (from << 24) | stream; }
-	SState *State(uint32_t key, uint32_t sequence);	// with m_Mutex held; started
-	void Stop(SState *s, bool last);	// after the frame, with m_Mutex held
+	// the states of one module's streams: a stream's keys all have its module
+	struct SShard
+	{
+		std::unordered_map<uint32_t, SState> states;	// by Key()
+		std::unordered_set<uint32_t> failed;	// the keys whose open failed, logged once
+		uint64_t starts = 0;	// the starts of its states so far
+		int streams = 0;	// Streams' count at its last look (the reflector thread's)
+	};
+	// the module's lock, and the plugin's before it when it is not
+	// TCD_PLUGIN_CONCURRENT: a worker waiting for the plugin holds no module lock
+	// meanwhile (Streams takes the module locks only)
+	class CLock
+	{
+	public:
+		CLock(SPluginLocks &locks, int shard) : m_Module(locks.module[shard]), m_Plugin(locks.concurrent ? nullptr : &locks.plugin) { if (m_Plugin) m_Plugin->lock(); m_Module.lock(); }
+		~CLock() { m_Module.unlock(); if (m_Plugin) m_Plugin->unlock(); }
+		CLock(const CLock &) = delete;
+		CLock &operator=(const CLock &) = delete;
+	private:
+		std::mutex &m_Module;
+		std::mutex *m_Plugin;
+	};
+	SState *State(SShard &shard, uint32_t key, uint32_t sequence);	// with the shard's CLock held; started
+	void Stop(SState *s, bool last);	// after the frame, with the shard's CLock held
 
 	const tcd_codec_plugin *m_Plugin;
 	uint32_t m_Codec;
-	std::shared_ptr<std::mutex> m_Mutex;	// the plugin's: one call at a time, for all its codecs
+	std::shared_ptr<SPluginLocks> m_Locks;	// the plugin's, for all its codecs
 	bool m_Builtin;
-	std::unordered_map<uint32_t, SState> m_States;	// by Key()
-	std::unordered_set<uint32_t> m_Failed;	// the keys whose open failed, logged once
-	uint64_t m_Starts = 0;	// the starts of its states so far
+	SShard m_Shards[SPluginLocks::kShards];	// by SPluginLocks::Shard of the key
 };
 
 class CCodecPlugins
@@ -113,12 +150,16 @@ public:
 	CSoftCodec *Get(uint32_t codec, const std::string &name = std::string());
 	// every plugin's software codec for a TCD_CODEC_*: tcd's own first, then in the order of the CodecPlugin lines
 	std::vector<CSoftCodec *> All(uint32_t codec);
+	// CSoftCodec::Purge of every codec
+	void Purge(void);
 
 private:
 	// handle: nullptr for tcd's own
-	struct SLoaded { std::string path; void *handle; const tcd_codec_plugin *plugin; bool ready; std::shared_ptr<std::mutex> mutex; };
+	struct SLoaded { std::string path; void *handle; const tcd_codec_plugin *plugin; bool ready; std::shared_ptr<SPluginLocks> locks; };
 	std::vector<SLoaded> m_Loaded;
 	std::vector<CSoftCodec *> m_Codecs;	// made by Get, one per plugin and codec
+	std::mutex m_CodecsMutex;	// m_Codecs: Get (a worker may make one late) and Purge (the reflector thread)
+	CSoftCodec *GetLocked(uint32_t codec, const std::string &name);
 };
 
 extern CCodecPlugins g_Codecs;

@@ -18,82 +18,67 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#include <queue>
+#include <deque>
 #include <mutex>
 #include <condition_variable>
 #include <memory>
+#include <cstdint>
 
-#include "TranscoderPacket.h"
-
-// for holding CTranscoder packets while the vocoders are working their magic
-// thread safe
-class CPacketQueue
+// a blocking queue between threads: pop waits for an item; after Shutdown pop
+// gives up at once, and what is left or pushed after is dropped
+template <typename T>
+class CBlockingQueue
 {
 public:
-	CPacketQueue() : keep_running(true) {}
-
-	std::shared_ptr<CTranscoderPacket> pop()
+	// the queue's size after it, 0 when it is shut down or holds max items already:
+	// then item is left as it was (moved from only when taken)
+	std::size_t push(T &&item, std::size_t max = SIZE_MAX)
 	{
-		std::shared_ptr<CTranscoderPacket> rval;	// the return value
-
-		std::unique_lock<std::mutex> lock(mx);
-
-		while (keep_running && q.empty())
-			cv.wait(lock);
-
-		if (keep_running)
+		std::size_t size;
 		{
-			rval = q.front();
-			q.pop();
+			std::lock_guard<std::mutex> lock(mx);
+			if (stop || q.size() >= max)
+				return 0;
+			q.push_back(std::move(item));
+			size = q.size();
 		}
-		else
-		{
-			while (! q.empty())
-				q.pop();
-		}
-
-		return rval;
+		cv.notify_one();
+		return size;
 	}
 
-	// without waiting: nullptr when it is empty
-	std::shared_ptr<CTranscoderPacket> try_pop()
+	// false when shut down
+	bool pop(T &item)
+	{
+		std::unique_lock<std::mutex> lock(mx);
+		cv.wait(lock, [this] { return stop || !q.empty(); });
+		if (stop)
+		{
+			q.clear();
+			return false;
+		}
+		item = std::move(q.front());
+		q.pop_front();
+		return true;
+	}
+
+	std::size_t Size()
 	{
 		std::lock_guard<std::mutex> lock(mx);
-		if (q.empty())
-			return nullptr;
-		auto rval = q.front();
-		q.pop();
-		return rval;
-	}
-
-	std::size_t push(std::shared_ptr<CTranscoderPacket> item)
-	{
-		std::unique_lock<std::mutex> lock(mx);
-		bool was_empty = q.empty();
-		q.push(item);
-
-		if (was_empty)
-			cv.notify_one();
-
 		return q.size();
-	}
-
-	bool IsEmpty()
-	{
-		std::lock_guard<std::mutex> lock(mx);
-		return q.empty();
 	}
 
 	void Shutdown()
 	{
-		std::lock_guard<std::mutex> lock(mx);
-		keep_running = false;
+		{
+			std::lock_guard<std::mutex> lock(mx);
+			stop = true;
+		}
 		cv.notify_all();
 	}
 
 private:
 	std::mutex mx;
 	std::condition_variable cv;
-	std::queue<std::shared_ptr<CTranscoderPacket>> q;
-	std::atomic<bool> keep_running;
+	std::deque<T> q;
+	bool stop = false;
 };

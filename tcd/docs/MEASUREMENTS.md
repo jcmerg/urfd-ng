@@ -81,3 +81,13 @@ The IMBE decoder puts extra energy below 120 Hz into its audio, which threw Code
 - Built with `-O2`, a transcoded stream (Codec2, IMBE and AGC in software) takes about 7 % of one core on a Raspberry Pi 4 and 3 % on a Pi 5.
 - tcd's own P25 vocoder (OP25) with link-time optimization, `-O3` and a 64-bit pitch search, on a Raspberry Pi 4: encode 0.37 ms a frame (1.06 before), decode 0.15 ms (0.27), bit-identical frames. A Pi 4 keeps up with 26 modules talking P25 at once (99 % of the frames within 15 ms); before it fell behind at 18.
 - `TCP_NODELAY` on the reflector connection: a frame returns after about 23 ms instead of 60 ms.
+- Module workers, on a Raspberry Pi 5 (4 workers), a codec plugin with parallel calls for D-Star, DMR, P25 and M17, every module transcoding at once for 30 s from a test client in place of urfd, latency from a frame in to its frame of every codec out:
+
+  | Load | before: one thread per codec | module workers |
+  |---|---|---|
+  | one stream alone, each input codec in turn | median 0.2-0.7 ms, at most 5.7 ms | median 0.2-0.7 ms, at most 1.2 ms |
+  | 26 modules, all six input codecs mixed | 43 % of a core, 99 % within 0.8 ms, at most 4.8 ms | 36 %, 0.8 ms, at most 3.7 ms |
+  | the same, all 26 frames at the same instant | 38 %, 99 % within 8.0 ms, at most 9.9 ms | 37 %, 3.6 ms, at most 6.5 ms |
+  | 26 modules of USRP (heaviest: every codec encoded) | 60 %, 0.6 ms, at most 7.0 ms | 50 %, 0.5 ms, at most 3.3 ms |
+
+  No frame was lost. One thread per codec behaved the same on one core as on four: every codec thread waited for the plugin, which tcd called from one thread at a time.

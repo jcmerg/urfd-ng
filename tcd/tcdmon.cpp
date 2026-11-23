@@ -792,6 +792,42 @@ int main(int argc, char *argv[])
 			row++;
 		}
 
+		// the module workers: their modules, how busy each was and the longest wait
+		// of a frame in its queue in the last second (red from 70 % or 20 ms); waiting
+		// for a codec plugin without parallel calls counts as work
+		{
+			const auto items = json_arr_items(json_arr(last_json, "workers"));
+			if (!items.empty() && row < rows - 1)
+			{
+				attron(COLOR_PAIR(7) | A_BOLD);
+				mvprintw(row, 0, "Workers");
+				attroff(COLOR_PAIR(7) | A_BOLD);
+				int x = 7;	// after "Workers"
+				for (const auto &wj : items)
+				{
+					const double busy = json_num(wj, "busy"), wait = json_num(wj, "wait_ms");
+					const bool hot = busy >= 70.0 || wait >= 20.0;
+					const std::string mods = json_str(wj, "modules");
+					char load[32];
+					const int n = snprintf(load, sizeof(load), "%.0f%% %.1fms", busy, wait);
+					const int width = 2 + int(mods.size()) + 1 + n;
+					if (x + width >= cols && x > 7)
+					{
+						// on to the next line, indented as the first
+						if (++row >= rows - 1)
+							break;
+						x = 7;
+					}
+					mvprintw(row, x, "  %s ", mods.c_str());
+					attron(hot ? (COLOR_PAIR(3) | A_BOLD) : COLOR_PAIR(5));
+					printw("%s", load);
+					attroff(COLOR_PAIR(3) | COLOR_PAIR(5) | A_BOLD);
+					x += width;
+				}
+				row++;
+			}
+		}
+
 		// who codes AMBE (and P25, M17) for new streams, when it is not the default
 		{
 			auto codecs = json_obj(last_json, "codecs");

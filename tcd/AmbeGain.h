@@ -27,6 +27,7 @@
 #include <cmath>
 #include <algorithm>
 #include <mutex>
+#include "ModuleIndex.h"
 #include <chrono>
 #include <unordered_map>
 #include "Golay24128.h"
@@ -117,13 +118,15 @@ public:
 	// follows within a few frames on speech and no longer jumps on quiet frames
 	void Process(uint8_t *ambe, uint32_t streamKey, float gainDb, float maxStepDb = 0.0f)
 	{
-		std::lock_guard<std::mutex> lock(m_mutex);
+		// the streams of a module, under its lock: the modules' workers run in parallel
+		auto &shard = m_shards[ModuleSlotOfKey(streamKey)];
+		std::lock_guard<std::mutex> lock(shard.mutex);
 		const auto now = std::chrono::steady_clock::now();
-		auto it = m_streams.find(streamKey);
-		if (it == m_streams.end())
+		auto it = shard.streams.find(streamKey);
+		if (it == shard.streams.end())
 		{
-			DropEndedStreams(now);
-			it = m_streams.emplace(streamKey, SState{}).first;
+			DropEndedStreams(shard.streams, now);
+			it = shard.streams.emplace(streamKey, SState{}).first;
 		}
 		SState &st = it->second;
 		st.lastUsed = now;
@@ -171,20 +174,34 @@ private:
 		std::chrono::steady_clock::time_point lastUsed{};
 	};
 
-	// streams not heard for 30 s have ended
-	void DropEndedStreams(std::chrono::steady_clock::time_point now)
+public:
+	// the streams not heard for 30 s, of every module (once a second, the reflector
+	// thread; a module's are otherwise dropped only when it gets a new stream)
+	void Purge(void)
 	{
-		for (auto it = m_streams.begin(); it != m_streams.end(); )
+		const auto now = std::chrono::steady_clock::now();
+		for (auto &shard : m_shards)
+		{
+			std::lock_guard<std::mutex> lock(shard.mutex);
+			DropEndedStreams(shard.streams, now);
+		}
+	}
+private:
+	// streams not heard for 30 s have ended
+	static void DropEndedStreams(std::unordered_map<uint32_t, SState> &streams, std::chrono::steady_clock::time_point now)
+	{
+		for (auto it = streams.begin(); it != streams.end(); )
 		{
 			if (now - it->second.lastUsed > std::chrono::seconds(30))
-				it = m_streams.erase(it);
+				it = streams.erase(it);
 			else
 				++it;
 		}
 	}
 
-	std::mutex m_mutex;
-	std::unordered_map<uint32_t, SState> m_streams;	// by CTranscoderPacket::GetStreamKey
+	// the streams by CTranscoderPacket::GetStreamKey, per module (ModuleSlotOfKey)
+	struct SShard { std::mutex mutex; std::unordered_map<uint32_t, SState> streams; };
+	SShard m_shards[kModuleSlots];
 };
 
 #undef AMBE_READ_BIT
