@@ -32,6 +32,7 @@ SHA256.cpp
 SHA256.h
 RejectLog.cpp
 RejectLog.h
+ThreadName.h
 monitor_html.cpp
 # the templates and build options are part of the repository
 !config/tcd.ini
