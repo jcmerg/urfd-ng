@@ -65,6 +65,8 @@ public:
 	std::string GetProductID() { return productid; }
 	Edvtype GetType() const { return devtype; }
 	unsigned int GetBufferDepth() const { return buffer_depth.load(std::memory_order_relaxed); }
+	// the packets waiting for an answer, silent ones too
+	std::size_t Unanswered();
 	// the frames handed to it and not sent yet
 	std::size_t QueuedPackets() { return input_queue.Size(); }
 	// output gain per encoding: a DV3003 in mixed mode encodes D-Star and DMR
@@ -123,8 +125,8 @@ protected:
 		int64_t sent;	// steady clock ms
 		bool decode;	// AMBE in, audio expected back
 		// not sent to the device (it waited too long to go there): answered with
-		// silence once the packets before it are answered, so a stream's answers
-		// stay in order; never at the front, not in buffer_depth
+		// silence by the reader, in its place among the channel's answers (DrainSilent);
+		// not in buffer_depth
 		bool silent = false;
 	};
 	std::deque<SWaiting> waiting[3];
@@ -142,10 +144,14 @@ protected:
 	void Resync(void);
 	// a packet with this device's output set, on to the controller
 	// the answer to the packet goes to its module's worker, which puts it into the packet
-	// the answer to the channel's packet, then the silent ones that were waiting behind it
+	// the answer to the channel's packet, then the silent ones that were waiting behind
+	// it; the reader's alone (all of a channel's answers go out from one thread, in order)
 	void Deliver(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer);
-	// a packet the device does not get: silence at once, or behind the channel's waiting ones
-	void AnswerSilent(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, bool decode);
+	// the silent packets at the front of the channel answered with silence (the reader's)
+	void DrainSilent(uint8_t channel);
+	// all packets left when the device is closed (lost, phased out): silence, so their
+	// streams go on (the reader and the feeder have ended)
+	void AnswerLeft(void);
 	SDeviceAnswer SilenceAnswer(uint8_t channel, bool decode) const;
 
 	// reading the answers while running: bytes read ahead first, then the device

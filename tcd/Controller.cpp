@@ -2506,7 +2506,7 @@ bool CController::SlotBusyLocked(int i)
 	for (const auto &list : hw_channels)
 		for (const auto &c : list)
 			busy = busy || (c.slot == i && (c.busy || now - c.last < std::chrono::seconds(1)));
-	return busy || (s.dev && s.up && (s.dev->GetBufferDepth() > 0 || s.dev->QueuedPackets() > 0));
+	return busy || (s.dev && s.up && (s.dev->Unanswered() > 0 || s.dev->QueuedPackets() > 0));
 }
 
 bool CController::SlotBusy(int i)
@@ -2535,14 +2535,14 @@ void CController::DeviceWatchThread()
 				s.recompand = false;
 				std::cout << s.desc << " keeps DeviceCompand = " << CompandName(compand) << std::endl;
 			}
-			bool other = false;
-			for (size_t j = 0; j < slots.size(); j++)
-				other = other || (j != i && (slots[j]->recompand	// draining for it, or closed and not yet open again
-					|| (slots[j]->out && slots[j]->stats >= 0 && !g_Stats.devices[slots[j]->stats].want_out.load())
-					|| (!slots[j]->up && !slots[j]->out && slots[j]->compand != compand)));	// or it did not open again
 			{
-				// the slot's state as the workers and a lost device's reader see it
+				// the slots' state as the workers and a lost device's reader see it
 				std::lock_guard<std::mutex> lock(hw_mux);
+				bool other = false;
+				for (size_t j = 0; j < slots.size(); j++)
+					other = other || (j != i && (slots[j]->recompand	// draining for it, or closed and not yet open again
+						|| (slots[j]->out && slots[j]->stats >= 0 && !g_Stats.devices[slots[j]->stats].want_out.load())
+						|| (!slots[j]->up && !slots[j]->out && slots[j]->compand != compand)));	// or it did not open again
 				if (!other && s.up && !s.draining && !s.out && s.compand != compand
 					&& (UncoveredChoice(int(i)) < 0 || !SlotBusyLocked(int(i))))
 					s.recompand = true;

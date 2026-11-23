@@ -109,7 +109,8 @@ bool CDV3000::SendData(const uint8_t /* channel */, const uint8_t *data) const
 
 void CDV3000::ProcessPacket(const SDV_Packet &p)
 {
-	auto packet = PopWaiting(0);
+	bool decode = false;
+	auto packet = PopWaiting(0, &decode);
 	if (!packet)
 	{
 		// a blocking wait here held up the reader for good: nothing that will come
@@ -136,6 +137,9 @@ void CDV3000::ProcessPacket(const SDV_Packet &p)
 		else
 		{
 			dump("ReadDevice() ERROR: Read an unexpected device packet:", &p, packet_size(p));
+			// the packet it was taken for goes on with silence (and the silent ones behind it)
+			SDeviceAnswer silence = SilenceAnswer(0, decode);
+			Deliver(0, packet, silence.enc, silence);
 			return;
 		}
 		Deliver(0, packet, type, answer);	// a DMR or a DStar device
