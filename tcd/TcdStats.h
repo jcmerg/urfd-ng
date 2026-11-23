@@ -81,7 +81,7 @@ struct SwVocoderStats
 {
 	std::string name, codec;                  // the plugin's and "dstar"/"dmr"/"p25" ("m17" for Codec2), set once before the monitor starts
 	bool builtin{false};                      // tcd's own vocoder, not a plugin
-	std::atomic<bool> reencode_active{false}; // re-encode triggered by AGC/OutputGainDMR
+	std::atomic<bool> reencode_active{false}; // re-encode triggered by AGC/OutputGainDMR (DMR) or AGC/OutputGainDStar (D-Star)
 	std::atomic<uint32_t> encodes{0};        // total encode calls
 	std::atomic<uint32_t> decodes{0};        // total decode calls
 	std::atomic<uint32_t> reencodes{0};      // total re-encode calls
@@ -128,6 +128,7 @@ public:
 	// start; config.codec_choice is the one new streams get
 	std::vector<std::string> codec_options[kNumChoices];
 	std::atomic<bool> reencode_available{false};	// a codec plugin for DmrGainMode = reencode
+	std::atomic<bool> reencode_dstar_available{false};	// a codec plugin for DStarGainMode = reencode
 	std::atomic<bool> transcode_available{false};	// a codec plugin with transcode (API 4) for two of D-Star, DMR, P25
 	std::atomic<bool> pool_available{false};	// AMBE channels, so DeviceChannels means something
 	// the hardware (AMBE) channels of D-Star and DMR (kChoiceDStar, kChoiceDMR):
@@ -159,14 +160,21 @@ public:
 		std::atomic<int>   gain_dmr_in{0};
 		std::atomic<int>   gain_dmr_out{0};
 		std::atomic<int>   gain_dmr_reencode{0};
+		std::atomic<int>   gain_dstar_reencode{0};
 		std::atomic<int>   outgain_dstar{0};
 		std::atomic<int>   outgain_dmr{0};
 		std::atomic<int>   outgain_dmr_bitstream{-6};   // dB of OutputGainDMR through b2 for non-DMR sources
+		std::atomic<int>   outgain_dstar_bitstream{0};  // dB of OutputGainDStar through b2 for non-D-Star sources
 		std::atomic<int>   outgain_usrp{0};
 		std::atomic<int>   outgain_imbe{0};
 		std::atomic<int>   outgain_m17{0};
 		std::atomic<int>   dmr_gain_mode{1};   // 0=off, 1=ambe, 2=reencode
 		std::atomic<int>   ambe_gain_db{-2};
+		std::atomic<int>   dstar_gain_mode{1}; // 0=off, 1=ambe, 2=reencode (D-Star -> D-Star)
+		std::atomic<int>   dstar_ambe_gain_db{0};
+		std::atomic<int>   p25_gain_mode{1};   // 0=off, 1=bitstream (P25 -> P25)
+		std::atomic<int>   m17_gain_mode{1};   // 0=off, 1=bitstream (M17 -> M17)
+		std::atomic<int>   usrp_gain_mode{1};  // 0=off, 1=agc (USRP/SVX -> USRP/SVX)
 		std::atomic<int>   codec_choice[kNumChoices]{};   // index into codec_options
 		std::atomic<int>   monitor_view{0};    // 0 auto, 1 cards, 2 compact
 		std::atomic<bool>  transcode_direct{true}; // Transcode: direct (true) or audio, for the frames from now on

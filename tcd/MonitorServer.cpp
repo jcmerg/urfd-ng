@@ -216,6 +216,7 @@ std::string CMonitorServer::BuildStatsJson()
 		js << "],\"use\":\"" << jstr(c >= 0 && c < int(options.size()) ? options[c] : std::string()) << "\"}";
 	}
 	js << "},\"reencode_available\":" << (g_Stats.reencode_available.load(std::memory_order_relaxed) ? "true" : "false");
+	js << ",\"reencode_dstar_available\":" << (g_Stats.reencode_dstar_available.load(std::memory_order_relaxed) ? "true" : "false");
 	js << ",\"transcode_available\":" << (g_Stats.transcode_available.load(std::memory_order_relaxed) ? "true" : "false");
 	js << ",\"pool_available\":" << (g_Stats.pool_available.load(std::memory_order_relaxed) ? "true" : "false");
 	js << ",\"hw_channels\":{\"dstar\":{\"total\":" << g_Stats.hw_total[kChoiceDStar].load() << ",\"busy\":" << g_Stats.hw_busy[kChoiceDStar].load()
@@ -252,14 +253,21 @@ std::string CMonitorServer::BuildStatsJson()
 	   << ",\"gain_dmr_in\":" << g_Stats.config.gain_dmr_in.load()
 	   << ",\"gain_dmr_out\":" << g_Stats.config.gain_dmr_out.load()
 	   << ",\"gain_dmr_reencode\":" << g_Stats.config.gain_dmr_reencode.load()
+	   << ",\"gain_dstar_reencode\":" << g_Stats.config.gain_dstar_reencode.load()
 	   << ",\"outgain_dstar\":" << g_Stats.config.outgain_dstar.load()
 	   << ",\"outgain_dmr\":" << g_Stats.config.outgain_dmr.load()
 	   << ",\"outgain_dmr_bitstream\":" << g_Stats.config.outgain_dmr_bitstream.load()
+	   << ",\"outgain_dstar_bitstream\":" << g_Stats.config.outgain_dstar_bitstream.load()
 	   << ",\"outgain_usrp\":" << g_Stats.config.outgain_usrp.load()
 	   << ",\"outgain_imbe\":" << g_Stats.config.outgain_imbe.load()
 	   << ",\"outgain_m17\":" << g_Stats.config.outgain_m17.load()
 	   << ",\"dmr_gain_mode\":" << g_Stats.config.dmr_gain_mode.load()
 	   << ",\"ambe_gain_db\":" << g_Stats.config.ambe_gain_db.load()
+	   << ",\"dstar_gain_mode\":" << g_Stats.config.dstar_gain_mode.load()
+	   << ",\"dstar_ambe_gain_db\":" << g_Stats.config.dstar_ambe_gain_db.load()
+	   << ",\"p25_gain_mode\":" << g_Stats.config.p25_gain_mode.load()
+	   << ",\"m17_gain_mode\":" << g_Stats.config.m17_gain_mode.load()
+	   << ",\"usrp_gain_mode\":" << g_Stats.config.usrp_gain_mode.load()
 	   << ",\"transcode_direct\":" << (g_Stats.config.transcode_direct.load() ? "true" : "false")
 	   << ",\"device_pool\":" << g_Stats.config.device_pool.load()
 	   << ",\"device_compand\":" << g_Stats.config.device_compand.load()
@@ -336,6 +344,7 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 				else if (strncmp(p, "dmr_in", 6) == 0)        g_Stats.config.gain_dmr_in.store(db);
 				else if (strncmp(p, "dmr_out", 7) == 0)       g_Stats.config.gain_dmr_out.store(db);
 				else if (strncmp(p, "dmr_reencode", 12) == 0)  g_Stats.config.gain_dmr_reencode.store(db);
+				else if (strncmp(p, "dstar_reencode", 14) == 0) g_Stats.config.gain_dstar_reencode.store(db);
 				else if (strncmp(p, "outgain_dstar", 13) == 0) g_Stats.config.outgain_dstar.store(db);
 				else if (strncmp(p, "outgain_dmr", 11) == 0)   g_Stats.config.outgain_dmr.store(db);
 				else if (strncmp(p, "outgain_usrp", 12) == 0)  g_Stats.config.outgain_usrp.store(db);
@@ -355,6 +364,8 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 		int bitstream;
 		if (json_get_int(body.c_str(), body.size(), "outgain_dmr_bitstream", bitstream))
 			g_Stats.config.outgain_dmr_bitstream.store(std::clamp(bitstream, -24, 0));
+		if (json_get_int(body.c_str(), body.size(), "outgain_dstar_bitstream", bitstream))
+			g_Stats.config.outgain_dstar_bitstream.store(std::clamp(bitstream, -24, 0));
 		if (json_get_float(body.c_str(), body.size(), "target", target))
 			g_Stats.config.agc_target.store(std::clamp(target, AgcRange::target.lo, AgcRange::target.hi));
 		if (json_get_float(body.c_str(), body.size(), "attack", attack))
@@ -380,20 +391,30 @@ int CMonitorServer::HandleRest(const std::string &uri, const std::string &body, 
 			g_Stats.config.agc_analog_gatefloor.store(std::clamp(analog, AgcRange::floor.lo, AgcRange::floor.hi));
 		if (json_get_float(body.c_str(), body.size(), "analog_noisesuppress", analog))
 			g_Stats.config.agc_analog_noisesuppress.store(std::clamp(analog, AgcRange::noisesuppress.lo, AgcRange::noisesuppress.hi));
-		float dmr_gain_mode;
-		if (json_get_float(body.c_str(), body.size(), "dmr_gain_mode", dmr_gain_mode))
-		{
-			int m = (int)dmr_gain_mode < 0 ? 0 : (int)dmr_gain_mode > 2 ? 2 : (int)dmr_gain_mode;
-			if (m == 2 && !g_Stats.reencode_available.load())
-				m = 1;  // re-encode needs a codec plugin for DMR, fall back to the bitstream gain
-			g_Stats.config.dmr_gain_mode.store(m);
-		}
+		bool bitstream_on;
+		if (json_get_bool(body.c_str(), body.size(), "p25_gain_bitstream", bitstream_on))
+			g_Stats.config.p25_gain_mode.store(bitstream_on ? 1 : 0);
+		if (json_get_bool(body.c_str(), body.size(), "m17_gain_bitstream", bitstream_on))
+			g_Stats.config.m17_gain_mode.store(bitstream_on ? 1 : 0);
+		if (json_get_bool(body.c_str(), body.size(), "usrp_gain_agc", bitstream_on))
+			g_Stats.config.usrp_gain_mode.store(bitstream_on ? 1 : 0);
+		// DmrGainMode / DStarGainMode: 0 off, 1 ambe, 2 reencode (without a codec plugin
+		// of the codec it works as ambe, the setting stays: a save keeps it)
+		auto setMode = [&body](const char *key, std::atomic<int> &mode) {
+			float v;
+			if (json_get_float(body.c_str(), body.size(), key, v))
+				mode.store(int(std::clamp(v, 0.0f, 2.0f)));	// clamped as a float: a huge value is no int
+		};
+		setMode("dmr_gain_mode", g_Stats.config.dmr_gain_mode);
+		setMode("dstar_gain_mode", g_Stats.config.dstar_gain_mode);
 		bool direct;
 		if (json_get_bool(body.c_str(), body.size(), "transcode_direct", direct))
 			g_Stats.config.transcode_direct.store(direct);
 		float ambe_db;
 		if (json_get_float(body.c_str(), body.size(), "ambe_gain_db", ambe_db))
-			g_Stats.config.ambe_gain_db.store((int)ambe_db < -30 ? -30 : (int)ambe_db > 10 ? 10 : (int)ambe_db);
+			g_Stats.config.ambe_gain_db.store(int(std::clamp(ambe_db, -30.0f, 10.0f)));
+		if (json_get_float(body.c_str(), body.size(), "dstar_ambe_gain_db", ambe_db))
+			g_Stats.config.dstar_ambe_gain_db.store(int(std::clamp(ambe_db, -30.0f, 10.0f)));
 
 		reply = "{\"status\":\"ok\"}";
 		return 200;
@@ -1112,7 +1133,20 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 	// keys of AGC digital and AGC analog: replaced where they stand, else written
 	// after AGCMaxGainDown (or at the end), so an ini without them gets them
 	struct SKey { const char *key; float value; bool present; bool written; };
-	bool bitstreamPresent = false;
+	// keys that follow another: replaced where they stand, else written after the
+	// key they follow (or at the end when not at their default)
+	auto modeName = [](int m) { return std::string(CConfigure::GainModeName(CConfigure::EGainMode(std::clamp(m, 0, 2)))); };
+	struct SFollowKey { const char *key, *after; std::string value; bool isDefault, present, written; };
+	std::vector<SFollowKey> followKeys = {
+		{ "OutputGainDMRBitstream", "OutputGainDMR", std::to_string(g_Stats.config.outgain_dmr_bitstream.load()), g_Stats.config.outgain_dmr_bitstream.load() == -6, false, false },
+		{ "DStarGainMode", "DmrGainMode", modeName(g_Stats.config.dstar_gain_mode.load()), g_Stats.config.dstar_gain_mode.load() == 1, false, false },
+		{ "DStarAmbeGainDb", "AmbeGainDb", std::to_string(g_Stats.config.dstar_ambe_gain_db.load()), g_Stats.config.dstar_ambe_gain_db.load() == 0, false, false },
+		{ "DStarReencodeGain", "DmrReencodeGain", std::to_string(g_Stats.config.gain_dstar_reencode.load()), g_Stats.config.gain_dstar_reencode.load() == 0, false, false },
+		{ "P25GainMode", "DmrGainMode", g_Stats.config.p25_gain_mode.load() ? "bitstream" : "off", g_Stats.config.p25_gain_mode.load() == 1, false, false },
+		{ "M17GainMode", "DmrGainMode", g_Stats.config.m17_gain_mode.load() ? "bitstream" : "off", g_Stats.config.m17_gain_mode.load() == 1, false, false },
+		{ "USRPGainMode", "OutputGainUSRP", g_Stats.config.usrp_gain_mode.load() ? "agc" : "off", g_Stats.config.usrp_gain_mode.load() == 1, false, false },
+		{ "OutputGainDStarBitstream", "OutputGainDStar", std::to_string(g_Stats.config.outgain_dstar_bitstream.load()), g_Stats.config.outgain_dstar_bitstream.load() == 0, false, false },
+	};
 	std::vector<SKey> profile = {
 		{ "AGCDigitalNoiseGate", g_Stats.config.agc_digital_noisegate.load(), false, false },
 		{ "AGCDigitalMaxGainUp", g_Stats.config.agc_digital_maxgain_up.load(), false, false },
@@ -1142,7 +1176,8 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 				own_lines.erase(std::remove(own_lines.begin(), own_lines.end(), IniValue(l)), own_lines.end());
 			for (auto &a : profile)
 				if (k == a.key) a.present = true;
-			if (k == "OutputGainDMRBitstream") bitstreamPresent = true;
+			for (auto &d : followKeys)
+				if (k == d.key) d.present = true;
 		}
 		in.clear();
 		in.seekg(0);
@@ -1174,25 +1209,27 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 		}
 		if (!key.empty())
 		{
+			bool followDone = false;
+			for (auto &d : followKeys)
+				if (key == d.key) { out << key << " = " << d.value << "\n"; d.written = true; followDone = true; }
+			if (followDone) continue;
+			// a following key the ini lacks comes after the line it follows
+			auto followAfter = [&](const std::string &k) {
+				for (auto &d : followKeys)
+					if (!d.present && !d.written && k == d.after) { out << d.key << " = " << d.value << "\n"; d.written = true; }
+			};
 			if (key == "DStarGainIn")       { out << key << " = " << g_Stats.config.gain_dstar_in.load() << "\n"; continue; }
 			if (key == "DStarGainOut")      { out << key << " = " << g_Stats.config.gain_dstar_out.load() << "\n"; continue; }
 			if (key == "DmrGainIn")         { out << key << " = " << g_Stats.config.gain_dmr_in.load() << "\n"; continue; }
 			if (key == "DmrGainOut")        { out << key << " = " << g_Stats.config.gain_dmr_out.load() << "\n"; continue; }
-			if (key == "DmrReencodeGain")   { out << key << " = " << g_Stats.config.gain_dmr_reencode.load() << "\n"; continue; }
-			if (key == "OutputGainDStar")   { out << key << " = " << g_Stats.config.outgain_dstar.load() << "\n"; continue; }
-			if (key == "OutputGainDMR")
-			{
-				out << key << " = " << g_Stats.config.outgain_dmr.load() << "\n";
-				if (!bitstreamPresent)
-					out << "OutputGainDMRBitstream = " << g_Stats.config.outgain_dmr_bitstream.load() << "\n";
-				continue;
-			}
-			if (key == "OutputGainDMRBitstream") { out << key << " = " << g_Stats.config.outgain_dmr_bitstream.load() << "\n"; continue; }
-			if (key == "OutputGainUSRP")   { out << key << " = " << g_Stats.config.outgain_usrp.load() << "\n"; continue; }
+			if (key == "DmrReencodeGain")   { out << key << " = " << g_Stats.config.gain_dmr_reencode.load() << "\n"; followAfter(key); continue; }
+			if (key == "OutputGainDStar")   { out << key << " = " << g_Stats.config.outgain_dstar.load() << "\n"; followAfter(key); continue; }
+			if (key == "OutputGainDMR")     { out << key << " = " << g_Stats.config.outgain_dmr.load() << "\n"; followAfter(key); continue; }
+			if (key == "OutputGainUSRP")   { out << key << " = " << g_Stats.config.outgain_usrp.load() << "\n"; followAfter(key); continue; }
 			if (key == "OutputGainIMBE")   { out << key << " = " << g_Stats.config.outgain_imbe.load() << "\n"; continue; }
 			if (key == "OutputGainM17")    { out << key << " = " << g_Stats.config.outgain_m17.load() << "\n"; continue; }
-			if (key == "DmrGainMode")      { int m = g_Stats.config.dmr_gain_mode.load(); out << key << " = " << (m==2 ? "reencode" : m==1 ? "ambe" : "off") << "\n"; continue; }
-			if (key == "AmbeGainDb")       { out << key << " = " << g_Stats.config.ambe_gain_db.load() << "\n"; continue; }
+			if (key == "DmrGainMode")      { out << key << " = " << modeName(g_Stats.config.dmr_gain_mode.load()) << "\n"; followAfter(key); continue; }
+			if (key == "AmbeGainDb")       { out << key << " = " << g_Stats.config.ambe_gain_db.load() << "\n"; followAfter(key); continue; }
 			if (key == "Transcode")        { out << key << " = " << (direct ? "direct" : "audio") << "\n"; transcodeWritten = true; continue; }
 			if (key == "MonitorView") { out << key << " = " << views[view] << "\n"; viewWritten = true; continue; }
 			// without devices at this start the setting is not in use: the line stays
@@ -1227,6 +1264,8 @@ bool CMonitorServer::SaveConfig(const std::string &ini_path)
 	in.close();
 	for (auto &a : profile)
 		if (!a.written) out << a.key << " = " << a.value << "\n";
+	for (auto &d : followKeys)
+		if (!d.written && !d.isDefault) out << d.key << " = " << d.value << "\n";
 	if (!ownWritten)
 		for (const auto &n : own_lines)
 			out << "CodecPlugin = " << n << "\n";

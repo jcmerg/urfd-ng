@@ -34,6 +34,7 @@
 #include <thread>
 #include <algorithm>
 
+#include "AmbeFrameCheck.h"	// the silence frames (and YSFDefines.h)
 #include "DVSIDevice.h"
 #include "Configure.h"
 #include "TcdStats.h"
@@ -47,8 +48,8 @@
 #define DEVICE_SILENCE_MS 1000
 
 // what goes on for a lost answer: the silence frames of the vocoders, silent audio
-static const uint8_t DSTAR_SILENCE[9] { 0x9EU, 0x8DU, 0x32U, 0x88U, 0x26U, 0x1AU, 0x3FU, 0x61U, 0xE8U };
-static const uint8_t DMR_SILENCE[9]   { 0xB9U, 0xE8U, 0x81U, 0x52U, 0x61U, 0x73U, 0x00U, 0x2AU, 0x6BU };
+static const uint8_t (&DSTAR_SILENCE)[9] = AmbeFrameCheck::DSTAR_SILENCE;
+static const unsigned char (&DMR_SILENCE)[9] = AMBE72_SILENCE;
 
 
 extern CConfigure g_Conf;
@@ -861,6 +862,7 @@ SDeviceAnswer CDVDevice::SilenceAnswer(uint8_t channel, bool decode) const
 	SDeviceAnswer answer{};
 	answer.enc = GetChannelEncoding(channel);
 	answer.audio = decode;
+	answer.lost = true;
 	if (!decode)
 		memcpy(answer.ambe, Encoding::dstar == answer.enc ? DSTAR_SILENCE : DMR_SILENCE, sizeof(answer.ambe));
 	return answer;

@@ -33,16 +33,23 @@
 #define DSTARGAININ    "DStarGainIn"
 #define DSTARGAINOUT   "DStarGainOut"
 #define DMRREENCODE    "DmrReencodeGain"
+#define DSTARREENCODE  "DStarReencodeGain"
 #define OUTGAIN_DSTAR  "OutputGainDStar"
 #define OUTGAIN_DMR    "OutputGainDMR"
 #define OUTGAIN_DMRBS  "OutputGainDMRBitstream"
+#define OUTGAIN_DSTARBS "OutputGainDStarBitstream"
 #define OUTGAIN_USRP   "OutputGainUSRP"
 #define OUTGAIN_IMBE   "OutputGainIMBE"
 #define OUTGAIN_M17    "OutputGainM17"
 #define DMRGAINMODE    "DmrGainMode"
+#define DSTARGAINMODE  "DStarGainMode"
+#define P25GAINMODE    "P25GainMode"
+#define M17GAINMODE    "M17GainMode"
+#define USRPGAINMODE   "USRPGainMode"
 #define TRANSCODE      "Transcode"
 #define WORKERS        "Workers"
 #define AMBEGAIN_DB    "AmbeGainDb"
+#define DSTARAMBEGAIN_DB "DStarAmbeGainDb"
 #define MODULES        "Modules"
 #define STANDBYMODULES "StandbyModules"
 #define SERVERADDRESS  "ServerAddress"
@@ -173,6 +180,8 @@ bool CConfigure::ReadData(const std::string &path)
 			dmr_out = getSigned(key, value, dmr_out);
 		else if (0 == key.compare(DMRREENCODE))
 			dmr_reencode = getSigned(key, value, dmr_reencode);
+		else if (0 == key.compare(DSTARREENCODE))
+			dstar_reencode = getSigned(key, value, dstar_reencode);
 		else if (0 == key.compare(OUTGAIN_DSTAR))
 			outgain_dstar = getSigned(key, value, outgain_dstar);
 		else if (0 == key.compare(OUTGAIN_DMR))
@@ -182,6 +191,8 @@ bool CConfigure::ReadData(const std::string &path)
 		}
 		else if (0 == key.compare(OUTGAIN_DMRBS))
 			outgain_dmr_bitstream = std::clamp(getSigned(key, value, outgain_dmr_bitstream), -24, 0);
+		else if (0 == key.compare(OUTGAIN_DSTARBS))
+			outgain_dstar_bitstream = std::clamp(getSigned(key, value, outgain_dstar_bitstream), -24, 0);
 		else if (0 == key.compare(OUTGAIN_USRP))
 			outgain_usrp = getSigned(key, value, outgain_usrp);
 		else if (0 == key.compare(OUTGAIN_IMBE))
@@ -199,13 +210,29 @@ bool CConfigure::ReadData(const std::string &path)
 			// a bad value keeps 0: auto
 			workers = value == "auto" ? 0 : int(getUnsigned(key, value, 1, 26, 0));
 		}
-		else if (0 == key.compare(DMRGAINMODE))
+		else if (0 == key.compare(DMRGAINMODE) || 0 == key.compare(DSTARGAINMODE))
 		{
-			if (value == "off")            dmr_gain_mode = EDmrGainMode::off;
-			else if (value == "ambe")      dmr_gain_mode = EDmrGainMode::ambe;
-			else if (value == "reencode")   dmr_gain_mode = EDmrGainMode::reencode;
-			else std::cerr << "Warning: unknown " << DMRGAINMODE << " '" << value << "', using 'ambe'" << std::endl;
+			EGainMode &mode = (0 == key.compare(DMRGAINMODE)) ? dmr_gain_mode : dstar_gain_mode;
+			if (value == "off")            mode = EGainMode::off;
+			else if (value == "ambe")      mode = EGainMode::ambe;
+			else if (value == "reencode")  mode = EGainMode::reencode;
+			else std::cerr << "Warning: unknown " << key << " '" << value << "', using 'ambe'" << std::endl;
 		}
+		else if (0 == key.compare(P25GAINMODE) || 0 == key.compare(M17GAINMODE))
+		{
+			bool &on = (0 == key.compare(P25GAINMODE)) ? p25_gain_bitstream : m17_gain_bitstream;
+			if (value == "off")            on = false;
+			else if (value == "bitstream") on = true;
+			else std::cerr << "Warning: unknown " << key << " '" << value << "', using 'bitstream'" << std::endl;
+		}
+		else if (0 == key.compare(USRPGAINMODE))
+		{
+			if (value == "off")      usrp_gain_agc = false;
+			else if (value == "agc") usrp_gain_agc = true;
+			else std::cerr << "Warning: unknown " << key << " '" << value << "', using 'agc'" << std::endl;
+		}
+		else if (0 == key.compare(DSTARAMBEGAIN_DB))
+			dstar_ambe_gain_db = std::clamp(getSigned(key, value, dstar_ambe_gain_db), -30, 10);
 		else if (0 == key.compare(AMBEGAIN_DB))
 		{
 			ambe_gain_db = getSigned(key, value, ambe_gain_db);
@@ -364,18 +391,25 @@ bool CConfigure::ReadData(const std::string &path)
 	std::cout << DMRGAINOUT << " = " << dmr_out << std::endl;
 	if (dmr_reencode != 0)
 		std::cout << DMRREENCODE << " = " << dmr_reencode << std::endl;
-	if (outgain_dstar != 0) std::cout << OUTGAIN_DSTAR << " = " << outgain_dstar << std::endl;
-	if (outgain_dmr != 0)   std::cout << OUTGAIN_DMR << " = " << outgain_dmr << (outgain_dmr_bitstream ? " (non-DMR sources: " + std::to_string(outgain_dmr_bitstream) + " dB of it through b2 after the encoder)" : std::string()) << std::endl;
+	if (dstar_reencode != 0)
+		std::cout << DSTARREENCODE << " = " << dstar_reencode << std::endl;
+	const int bs_dstar = BitstreamPart(outgain_dstar, outgain_dstar_bitstream), bs_dmr = BitstreamPart(outgain_dmr, outgain_dmr_bitstream);
+	if (outgain_dstar != 0) std::cout << OUTGAIN_DSTAR << " = " << outgain_dstar << (bs_dstar ? " (non-D-Star sources: " + std::to_string(bs_dstar) + " dB of it through b2 after the encoder)" : std::string()) << std::endl;
+	if (outgain_dmr != 0)   std::cout << OUTGAIN_DMR << " = " << outgain_dmr << (bs_dmr ? " (non-DMR sources: " + std::to_string(bs_dmr) + " dB of it through b2 after the encoder)" : std::string()) << std::endl;
 	if (outgain_usrp != 0)  std::cout << OUTGAIN_USRP << " = " << outgain_usrp << std::endl;
 	if (outgain_imbe != 0)  std::cout << OUTGAIN_IMBE << " = " << outgain_imbe << std::endl;
 	if (outgain_m17 != 0)   std::cout << OUTGAIN_M17 << " = " << outgain_m17 << std::endl;
-	{
-		const char *mode_str = (dmr_gain_mode == EDmrGainMode::reencode) ? "reencode" : (dmr_gain_mode == EDmrGainMode::ambe) ? "ambe" : "off";
-		std::cout << DMRGAINMODE << " = " << mode_str;
-		if (dmr_gain_mode == EDmrGainMode::ambe) std::cout << " (DMR -> DMR/YSF: AGC gain + OutputGainDMR + " << ambe_gain_db << " dB through b2 in the bitstream)";
-		if (dmr_gain_mode == EDmrGainMode::reencode) std::cout << " (DMR -> DMR/YSF: AGC and re-encode by a codec plugin)";
-		std::cout << std::endl;
-	}
+	std::cout << DMRGAINMODE << " = " << GainModeName(dmr_gain_mode);
+	if (dmr_gain_mode == EGainMode::ambe) std::cout << " (DMR -> DMR/YSF: AGC gain + DmrGainOut/In + OutputGainDMR + " << ambe_gain_db << " dB through b2 in the bitstream)";
+	if (dmr_gain_mode == EGainMode::reencode) std::cout << " (DMR -> DMR/YSF: AGC and re-encode by a codec plugin)";
+	std::cout << std::endl;
+	std::cout << DSTARGAINMODE << " = " << GainModeName(dstar_gain_mode);
+	if (dstar_gain_mode == EGainMode::ambe) std::cout << " (D-Star -> D-Star: AGC gain + DStarGainOut/In + OutputGainDStar + " << dstar_ambe_gain_db << " dB through b2 in the bitstream)";
+	if (dstar_gain_mode == EGainMode::reencode) std::cout << " (D-Star -> D-Star: AGC and re-encode by a codec plugin)";
+	std::cout << std::endl;
+	std::cout << P25GAINMODE << " = " << (p25_gain_bitstream ? "bitstream (P25 -> P25: AGC gain + OutputGainIMBE through b2 in the IMBE frame)" : "off") << std::endl;
+	std::cout << M17GAINMODE << " = " << (m17_gain_bitstream ? "bitstream (M17 -> M17: AGC gain + OutputGainM17 through the Codec2 energy)" : "off") << std::endl;
+	std::cout << USRPGAINMODE << " = " << (usrp_gain_agc ? "agc (USRP/SVX -> USRP/SVX: noise suppression, AGC and OutputGainUSRP)" : "off") << std::endl;
 	std::cout << WORKERS << " = " << (workers ? std::to_string(workers) : std::string("auto")) << std::endl;
 	std::cout << TRANSCODE << " = " << (transcode_direct ? "direct (a codec plugin codes D-Star, DMR/YSF and P25 from each other's frames where it can)" : "audio (every codec is encoded from the decoded audio)") << std::endl;
 	if (agc_enabled)
@@ -466,6 +500,7 @@ int CConfigure::GetGain(EGainType gt) const
 		case EGainType::dstarin:  return dstar_in;
 		case EGainType::dstarout: return dstar_out;
 		case EGainType::dmrreencode:  return dmr_reencode;
+		case EGainType::dstarreencode: return dstar_reencode;
 		case EGainType::outgain_dstar: return outgain_dstar;
 		case EGainType::outgain_dmr:   return outgain_dmr;
 		case EGainType::outgain_usrp:  return outgain_usrp;

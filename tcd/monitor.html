@@ -187,6 +187,7 @@ table:not(.narrow) td.slot.first { padding-left: 1.4rem; }
 .settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.75rem 3rem; }
 @media (max-width: 760px) { .settings { grid-template-columns: minmax(0, 1fr); } }
 .group { display: grid; gap: 0.15rem; align-content: start; }
+.group h4 { margin: 0.7rem 0 0.1rem; font-size: var(--fs-s); font-weight: 600; }
 .group h3 { margin-bottom: 0.35rem; }
 .group p { margin: 0 0 0.4rem; font-size: var(--fs-xs); color: var(--graphite); }
 .group.codecs { grid-column: 1 / -1; }
@@ -344,6 +345,7 @@ table.measure tr.grp { display: none; }
           <h3>Output gain</h3>
           <p>After the AGC, per target, in dB</p>
           <div class="row"><label for="og_dstar">D-Star</label><input type="range" min="-24" max="10" id="og_dstar"><output id="v_og_dstar" for="og_dstar">0</output></div>
+          <div class="row"><label for="og_dstar_bs">Of it in the bitstream (b2), other codecs</label><input type="range" min="-24" max="0" id="og_dstar_bs"><output id="v_og_dstar_bs" for="og_dstar_bs">0</output></div>
           <div class="row"><label for="og_m17">M17</label><input type="range" min="-24" max="10" id="og_m17"><output id="v_og_m17" for="og_m17">0</output></div>
           <div class="row"><label for="og_dmr">DMR and YSF</label><input type="range" min="-24" max="10" id="og_dmr"><output id="v_og_dmr" for="og_dmr">0</output></div>
           <div class="row"><label for="og_dmr_bs">Of it in the bitstream (b2), other codecs</label><input type="range" min="-24" max="0" id="og_dmr_bs"><output id="v_og_dmr_bs" for="og_dmr_bs">-6</output></div>
@@ -357,22 +359,6 @@ table.measure tr.grp { display: none; }
           <div class="row"><label for="g_dstar_out">D-Star out</label><input type="range" min="-24" max="24" id="g_dstar_out"><output id="v_dstar_out" for="g_dstar_out">0</output></div>
           <div class="row"><label for="g_dmr_in">DMR in</label><input type="range" min="-24" max="24" id="g_dmr_in"><output id="v_dmr_in" for="g_dmr_in">0</output></div>
           <div class="row"><label for="g_dmr_out">DMR out</label><input type="range" min="-24" max="24" id="g_dmr_out"><output id="v_dmr_out" for="g_dmr_out">0</output></div>
-          <h3 style="margin-top:0.9rem">DMR to DMR and YSF</h3>
-          <div class="row"><label for="dmr_gain_mode">Level</label><select id="dmr_gain_mode">
-            <option value="off">Pass through unchanged</option>
-            <option value="ambe">AGC in the bitstream (b2)</option>
-            <option value="reencode">AGC and re-encode (codec plugin)</option>
-          </select></div>
-          <div class="row" id="dmr_gain_ambe" hidden><label for="ambe_gain_db">Offset</label><input type="range" min="-30" max="10" id="ambe_gain_db"><output id="v_ambe_gain_db" for="ambe_gain_db">0</output></div>
-          <div class="row" id="dmr_gain_reencode" hidden><label for="g_dmr_reencode">Offset</label><input type="range" min="-24" max="24" id="g_dmr_reencode"><output id="v_dmr_reencode" for="g_dmr_reencode">0</output></div>
-          <div id="transcode_group" hidden>
-            <h3 style="margin-top:0.9rem">D-Star, DMR and P25 to each other</h3>
-            <p>When the codec plugin of the source also codes the target</p>
-            <div class="row"><label for="transcode_direct">Transcode</label><select id="transcode_direct">
-              <option value="direct">From the frames (direct)</option>
-              <option value="audio">From the audio</option>
-            </select></div>
-          </div>
         </div>
         <div class="group">
           <h3>AGC</h3>
@@ -394,6 +380,41 @@ table.measure tr.grp { display: none; }
           <div class="row"><label for="agc_analog_maxgain_up">Max boost in dB</label><input type="range" min="0" max="40" id="agc_analog_maxgain_up"><output id="v_agc_analog_maxgain_up" for="agc_analog_maxgain_up">12</output></div>
           <div class="row"><label for="agc_analog_gatefloor">Gate floor in dB</label><input type="range" min="-40" max="0" id="agc_analog_gatefloor"><output id="v_agc_analog_gatefloor" for="agc_analog_gatefloor">0</output></div>
           <div class="row"><label for="agc_analog_noisesuppress">Noise suppression in dB (0 = off)</label><input type="range" min="-40" max="0" id="agc_analog_noisesuppress"><output id="v_agc_analog_noisesuppress" for="agc_analog_noisesuppress">-10</output></div>
+        </div>
+        <div class="group">
+          <h3>Same mode: DMR and D-Star</h3>
+          <p>A source's frames passed on in its own mode: the AGC and the output gain in the frame (b2), or the frame coded again</p>
+          <h4>DMR to DMR and YSF</h4>
+          <div class="row"><label for="dmr_gain_mode">Level</label><select id="dmr_gain_mode">
+            <option value="off">Pass through unchanged</option>
+            <option value="ambe">AGC in the bitstream (b2)</option>
+            <option value="reencode">AGC and re-encode (codec plugin)</option>
+          </select></div>
+          <div class="row" id="dmr_gain_ambe" hidden><label for="ambe_gain_db">Offset</label><input type="range" min="-30" max="10" id="ambe_gain_db"><output id="v_ambe_gain_db" for="ambe_gain_db">0</output></div>
+          <div class="row" id="dmr_gain_reencode" hidden><label for="g_dmr_reencode">Offset</label><input type="range" min="-24" max="24" id="g_dmr_reencode"><output id="v_dmr_reencode" for="g_dmr_reencode">0</output></div>
+          <h4>D-Star to D-Star</h4>
+          <div class="row"><label for="dstar_gain_mode">Level</label><select id="dstar_gain_mode">
+            <option value="off">Pass through unchanged</option>
+            <option value="ambe">AGC in the bitstream (b2)</option>
+            <option value="reencode">AGC and re-encode (codec plugin)</option>
+          </select></div>
+          <div class="row" id="dstar_gain_ambe" hidden><label for="dstar_ambe_gain_db">Offset</label><input type="range" min="-30" max="10" id="dstar_ambe_gain_db"><output id="v_dstar_ambe_gain_db" for="dstar_ambe_gain_db">0</output></div>
+          <div class="row" id="dstar_gain_reencode" hidden><label for="g_dstar_reencode">Offset</label><input type="range" min="-24" max="24" id="g_dstar_reencode"><output id="v_dstar_reencode" for="g_dstar_reencode">0</output></div>
+        </div>
+        <div class="group">
+          <h3>Same mode: P25, M17, USRP and SVX</h3>
+          <p>On: the AGC and the output gain in the frame (P25: b2, M17: the Codec2 energy), for USRP and SVX the audio after noise suppression and AGC; off: unchanged</p>
+          <div class="row"><label for="p25_gain_bitstream">P25 to P25</label><input type="checkbox" id="p25_gain_bitstream"></div>
+          <div class="row"><label for="m17_gain_bitstream">M17 to M17</label><input type="checkbox" id="m17_gain_bitstream"></div>
+          <div class="row"><label for="usrp_gain_agc">USRP and SVX to themselves</label><input type="checkbox" id="usrp_gain_agc"></div>
+          <div id="transcode_group" hidden>
+            <h4>D-Star, DMR and P25 to each other</h4>
+            <p>When the codec plugin of the source also codes the target</p>
+            <div class="row"><label for="transcode_direct">Transcode</label><select id="transcode_direct">
+              <option value="direct">From the frames (direct)</option>
+              <option value="audio">From the audio</option>
+            </select></div>
+          </div>
         </div>
       </div>
       <div class="save">
@@ -484,8 +505,12 @@ function connect() {
       // hidden, not removed: a restarted tcd may have it again
       var o = document.querySelector('#dmr_gain_mode option[value="reencode"]');
       o.hidden = o.disabled = !data.reencode_available;
-      if (o.disabled && $('dmr_gain_mode').value === 'reencode') $('dmr_gain_mode').value = 'off';
+      if (o.disabled && $('dmr_gain_mode').value === 'reencode') $('dmr_gain_mode').value = 'ambe';	// works as ambe without a plugin
       updateDmrGainMode();
+      o = document.querySelector('#dstar_gain_mode option[value="reencode"]');
+      o.hidden = o.disabled = !data.reencode_dstar_available;
+      if (o.disabled && $('dstar_gain_mode').value === 'reencode') $('dstar_gain_mode').value = 'ambe';	// works as ambe without a plugin
+      updateDStarGainMode();
       $('transcode_group').hidden = !data.transcode_available;
       configLoaded = true;
     }
@@ -752,7 +777,7 @@ function fitTable() {
   if (wide !== tableWide) { tableWide = wide; lastDeviceRows = ''; render(); }
 }
 if (window.ResizeObserver) new ResizeObserver(function () { if (data) fitTable(); }).observe(document.querySelector('.tbl'));
-var gainKeys = ['dstar_in', 'dstar_out', 'dmr_in', 'dmr_out', 'dmr_reencode'];
+var gainKeys = ['dstar_in', 'dstar_out', 'dmr_in', 'dmr_out', 'dmr_reencode', 'dstar_reencode'];
 var outgainKeys = ['outgain_dstar', 'outgain_m17', 'outgain_dmr', 'outgain_imbe', 'outgain_usrp'];
 var agcKeys = ['agc_target', 'agc_attack', 'agc_release', 'agc_maxgain_down',
   'agc_digital_noisegate', 'agc_digital_maxgain_up', 'agc_digital_gatefloor',
@@ -768,9 +793,15 @@ function loadConfig(cfg) {
   outgainKeys.forEach(function (k) { var s = k.replace('outgain_', ''); setVal('og_' + s, 'v_og_' + s, cfg[k]); });
   $('dmr_gain_mode').value = ['off', 'ambe', 'reencode'][cfg.dmr_gain_mode] || 'off';
   setVal('ambe_gain_db', 'v_ambe_gain_db', cfg.ambe_gain_db);
+  $('dstar_gain_mode').value = ['off', 'ambe', 'reencode'][cfg.dstar_gain_mode] || 'off';
+  setVal('dstar_ambe_gain_db', 'v_dstar_ambe_gain_db', cfg.dstar_ambe_gain_db);
+  $('p25_gain_bitstream').checked = cfg.p25_gain_mode !== 0;
+  $('m17_gain_bitstream').checked = cfg.m17_gain_mode !== 0;
+  $('usrp_gain_agc').checked = cfg.usrp_gain_mode !== 0;
   $('transcode_direct').value = cfg.transcode_direct === false ? 'audio' : 'direct';
   $('agc_en').checked = cfg.agc_enabled;
   setVal('og_dmr_bs', 'v_og_dmr_bs', cfg.outgain_dmr_bitstream);
+  setVal('og_dstar_bs', 'v_og_dstar_bs', cfg.outgain_dstar_bitstream);
   agcKeys.forEach(function (k) { setVal(k, 'v_' + k, cfg[k]); });
 }
 function post(path, body) {
@@ -868,6 +899,24 @@ function updateDmrGainMode() {
   var m = $('dmr_gain_mode').value;
   $('dmr_gain_ambe').hidden = m !== 'ambe';
   $('dmr_gain_reencode').hidden = m !== 'reencode';
+}
+$('og_dstar_bs').addEventListener('input', function (e) { $('v_og_dstar_bs').textContent = e.target.value; post('api/agc', { outgain_dstar_bitstream: parseInt(e.target.value, 10) }); });
+$('dstar_gain_mode').addEventListener('change', function (e) {
+  post('api/agc', { dstar_gain_mode: { off: 0, ambe: 1, reencode: 2 }[e.target.value] || 0 });
+  updateDStarGainMode();
+});
+$('dstar_ambe_gain_db').addEventListener('input', function (e) {
+  $('v_dstar_ambe_gain_db').textContent = e.target.value;
+  post('api/agc', { dstar_ambe_gain_db: parseInt(e.target.value, 10) });
+});
+$('usrp_gain_agc').addEventListener('change', function (e) { post('api/agc', { usrp_gain_agc: e.target.checked }); });
+['p25', 'm17'].forEach(function (c) {
+  $(c + '_gain_bitstream').addEventListener('change', function (e) { var b = {}; b[c + '_gain_bitstream'] = e.target.checked; post('api/agc', b); });
+});
+function updateDStarGainMode() {
+  var m = $('dstar_gain_mode').value;
+  $('dstar_gain_ambe').hidden = m !== 'ambe';
+  $('dstar_gain_reencode').hidden = m !== 'reencode';
 }
 
 var saveTimer = null;
