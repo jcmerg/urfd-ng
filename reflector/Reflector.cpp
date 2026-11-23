@@ -39,6 +39,7 @@
 #include "Plugins.h"
 #include "ProtocolNames.h"
 #include "ThreadName.h"
+#include <cctype>
 
 CReflector::CReflector()
 {
@@ -776,7 +777,7 @@ static bool CarriesCodec(EProtocol p, ECodecType c)
 
 void CReflector::RouterThread(const char ThisModule)
 {
-	SetThreadName(std::string("urfd-router-") + ThisModule);
+	SetThreadName(std::string("urfd-router-") + char(std::tolower((unsigned char)ThisModule)));
 	auto pitem = m_Stream.find(ThisModule);
 	if (m_Stream.end() == pitem)
 	{
