@@ -438,7 +438,7 @@ void CUSRPProtocol::EncodeUSRPHeaderPacket(const CDvHeaderPacket &Header, uint32
 	memcpy(Buffer.data()+46, cs.c_str(), cs.size());
 }
 
-void CUSRPProtocol::EncodeUSRPPacket(const CDvHeaderPacket &Header, const CDvFramePacket &DvFrame, uint32_t iSeq, CBuffer &Buffer, bool islast) const
+void CUSRPProtocol::EncodeUSRPPacket(const CDvHeaderPacket &/*Header*/, const CDvFramePacket &DvFrame, uint32_t iSeq, CBuffer &Buffer, bool islast) const
 {
 	if(islast)
 	{

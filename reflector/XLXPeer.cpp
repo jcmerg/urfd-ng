@@ -56,7 +56,7 @@ bool CXlxPeer::IsAlive(void) const
 ////////////////////////////////////////////////////////////////////////////////////////
 // revision helper
 
-EProtoRev CXlxPeer::GetProtocolRevision(const CVersion &version)
+EProtoRev CXlxPeer::GetProtocolRevision(const CVersion &/*version*/)
 {
 	return EProtoRev::ambe;
 }

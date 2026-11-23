@@ -96,6 +96,6 @@ void CWiresxInfo::UpdateId(void)
 	hash += (hash << 3);
 	hash ^= (hash >> 11);
 	hash += (hash << 15);
-	::sprintf((char *)m_id, "%05u", hash % 100000U);
+	::snprintf((char *)m_id, sizeof(m_id), "%05u", hash % 100000U);
 	UpdateCsds();
 }

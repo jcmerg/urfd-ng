@@ -27,6 +27,10 @@
 #include "G3Protocol.h"
 #include "ThreadName.h"
 
+// Linux's name; the BSDs and macOS call it ICMP_UNREACH (3 on all of them)
+#ifndef ICMP_DEST_UNREACH
+#define ICMP_DEST_UNREACH ICMP_UNREACH
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // operation

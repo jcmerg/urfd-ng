@@ -53,10 +53,10 @@ class CYsfClientProtocol : public CProtocol
 {
 public:
 	// initialization
-	bool Initialize(const char *type, const EProtocol ptype, const uint16_t port, const bool has_ipv4, const bool has_ipv6);
+	bool Initialize(const char *type, const EProtocol ptype, const uint16_t port, const bool has_ipv4, const bool has_ipv6) override;
 
 	// task
-	void Task(void);
+	void Task(void) override;
 
 	// admin API
 	void RequestReconnect(void) { m_ReconnectRequested = true; Wake(); }
@@ -75,8 +75,8 @@ protected:
 	void OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &Header, const CIp &Ip);
 
 	// outbound queue
-	void HandleQueue(void);
-	void HandleKeepalives(void) {}
+	void HandleQueue(void) override;
+	void HandleKeepalives(void) override {}
 
 	// packet decoding (YSF wire format)
 	bool IsValidPollPacket(const CBuffer &, CCallsign *);

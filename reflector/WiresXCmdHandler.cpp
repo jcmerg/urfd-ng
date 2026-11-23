@@ -267,7 +267,7 @@ bool CWiresxCmdHandler::ReplyToWiresxDxReqPacket(const CIp &Ip, const CWiresxInf
 		// linked room
 		char item[16U];
 		// refl->m_id
-		::sprintf(item, "%05d", 4001U + RoomId);
+		::snprintf(item, sizeof(item), "%05d", 4001U + RoomId);
 		memcpy(data + 36U, item, 5U);
 		// refl->name
 		memset(item, ' ', 16U);
@@ -275,7 +275,7 @@ bool CWiresxCmdHandler::ReplyToWiresxDxReqPacket(const CIp &Ip, const CWiresxInf
 		item[7] = 'A' + RoomId;
 		memcpy(data + 41U, item, 16U);
 		// refl->count
-		::sprintf(item, "%03d", RoomId + 1);
+		::snprintf(item, sizeof(item), "%03d", RoomId + 1);
 		memcpy(data + 57U, item, 3U);
 		// other
 		memset(data + 60U, ' ', 10U);
@@ -301,7 +301,7 @@ bool CWiresxCmdHandler::ReplyToWiresxDxReqPacket(const CIp &Ip, const CWiresxInf
 		//unsigned int freqkHz = (freqHz + 500U) / 1000U;
 
 		char freq[30U];
-		::sprintf(freq, "%05u.%06u%c%03u.%06u", WiresxInfo.GetTxFrequency() / 1000000U, freqHz, sign, offset / 1000000U, offset % 1000000U);
+		::snprintf(freq, sizeof(freq), "%05u.%06u%c%03u.%06u", WiresxInfo.GetTxFrequency() / 1000000U, freqHz, sign, offset / 1000000U, offset % 1000000U);
 
 		memcpy(data + 84U, freq, 23U);
 	}
@@ -345,7 +345,7 @@ bool CWiresxCmdHandler::ReplyToWiresxAllReqPacket(const CIp &Ip, const CWiresxIn
 	uint n = NB_OF_MODULES - Start;
 	if (n > 20U)
 		n = 20U;
-	::sprintf((char*)(data + 22U), "%03u%03u", n, total);
+	::snprintf((char*)(data + 22U), sizeof(data) - 22U, "%03u%03u", n, total);
 	data[28U] = 0x0DU;
 
 	// entries
@@ -362,7 +362,7 @@ bool CWiresxCmdHandler::ReplyToWiresxAllReqPacket(const CIp &Ip, const CWiresxIn
 		data[offset + 0U] = '5';
 
 		// refl->m_id
-		::sprintf(item, "%05d", 4001U + RoomId);
+		::snprintf(item, sizeof(item), "%05d", 4001U + RoomId);
 		memcpy(data + offset + 1U, item, 5U);
 		// refl->name
 		memset(item, ' ', 16U);
@@ -370,7 +370,7 @@ bool CWiresxCmdHandler::ReplyToWiresxAllReqPacket(const CIp &Ip, const CWiresxIn
 		item[7] = RoomMod;
 		memcpy(data + offset + 6U, item, 16U);
 		// refl->count
-		::sprintf(item, "%03d", RoomId + 1);
+		::snprintf(item, sizeof(item), "%03d", RoomId + 1);
 		memcpy(data + offset + 22U, item, 3U);
 		// other
 		memset(data + offset + 25U, ' ', 10U);
@@ -459,7 +459,7 @@ bool CWiresxCmdHandler::ReplyToWiresxConnReqPacket(const CIp &Ip, const CWiresxI
 		char item[16U];
 
 		// refl->m_id
-		::sprintf(item, "%05d", 4001U + RoomId);
+		::snprintf(item, sizeof(item), "%05d", 4001U + RoomId);
 		memcpy(data + 36U, item, 5U);
 		// refl->name
 		memset(item, ' ', 16U);
@@ -467,7 +467,7 @@ bool CWiresxCmdHandler::ReplyToWiresxConnReqPacket(const CIp &Ip, const CWiresxI
 		item[7] = 'A' + RoomId;
 		memcpy(data + 41U, item, 16U);
 		// refl->count
-		::sprintf(item, "%03d", RoomId + 1);
+		::snprintf(item, sizeof(item), "%03d", RoomId + 1);
 		memcpy(data + 57U, item, 3U);
 		// refl->m_desc
 		memcpy(data + 70U, "Description   ", 14U);

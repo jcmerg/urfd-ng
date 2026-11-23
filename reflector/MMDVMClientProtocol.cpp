@@ -752,7 +752,7 @@ void CMMDVMClientProtocol::OnDMRDPacketIn(const CBuffer &Buffer)
 	}
 }
 
-void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &Buffer, uint32_t srcId, uint32_t dstId, uint32_t streamId, bool echoChecked)
+void CMMDVMClientProtocol::OnDMRDVoiceHeaderIn(const CBuffer &/*Buffer*/, uint32_t srcId, uint32_t dstId, uint32_t streamId, bool echoChecked)
 {
 	char module = m_TGMap.TGToModule(dstId);
 	if (module == ' ')
@@ -1035,7 +1035,7 @@ void CMMDVMClientProtocol::OnDMRDVoiceFrameIn(const CBuffer &Buffer, uint32_t sr
 	}
 }
 
-void CMMDVMClientProtocol::OnDMRDTerminatorIn(const CBuffer &Buffer, uint32_t srcId, uint32_t dstId, uint32_t streamId)
+void CMMDVMClientProtocol::OnDMRDTerminatorIn(const CBuffer &/*Buffer*/, uint32_t srcId, uint32_t dstId, uint32_t streamId)
 {
 	// an unknown ID whose call ended before its talker alias was whole: what
 	// came of it, so a log tells a source without one from a call too short
@@ -1339,7 +1339,7 @@ void CMMDVMClientProtocol::HandleQueue(void)
 ////////////////////////////////////////////////////////////////////////////////////////
 // DMRD encoding: Reflector -> Master
 
-bool CMMDVMClientProtocol::EncodeDMRDHeader(const CDvHeaderPacket &header, char module, CBuffer &buffer)
+bool CMMDVMClientProtocol::EncodeDMRDHeader(const CDvHeaderPacket &/*header*/, char module, CBuffer &buffer)
 {
 	const uint32_t tg = CallTG(module);
 	auto it = m_OutboundCache.find(module);

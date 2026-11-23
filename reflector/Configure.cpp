@@ -710,6 +710,7 @@ bool CConfigure::ReadData(const std::string &path)
 					case ESection::dmrid:   pdb = &g_Keys.dmriddb;   break;
 					case ESection::nxdnid:  pdb = &g_Keys.nxdniddb;  break;
 					case ESection::ysffreq: pdb = &g_Keys.ysftxrxdb; break;
+					default: break;	// only these three come here
 				}
 				if (0 == key.compare(JURL))
 					data[pdb->url] = value;

@@ -38,12 +38,12 @@ public:
 	virtual ~CDmrmmdvmClient() {};
 
 	// identity
-	EProtocol GetProtocol(void) const           { return EProtocol::dmrmmdvm; }
-	const char *GetProtocolName(void) const     { return "MMDVM"; }
-	bool IsNode(void) const                     { return true; }
+	EProtocol GetProtocol(void) const override       { return EProtocol::dmrmmdvm; }
+	const char *GetProtocolName(void) const override { return "MMDVM"; }
+	bool IsNode(void) const override                 { return true; }
 
 	// status
-	bool IsAlive(void) const;
+	bool IsAlive(void) const override;
 
 	// raw DMR ID (base or with extension, as received in RPTL/RPTK)
 	void SetRawDmrId(uint32_t id)               { m_uiRawDmrId = id; }
