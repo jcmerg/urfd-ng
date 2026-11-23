@@ -2,7 +2,7 @@
 
 [English](README.md) | **Deutsch**
 
-**Version 0.23.4** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd). Was sich von Version zu Version geändert hat, steht in den [Release Notes](https://github.com/jcmerg/urfd-ng/releases).
+**Version 0.23.5** — der Transcoder von [urfd-ng](../README.de.md), im Ordner `tcd/` desselben Repositorys. Basiert auf [n7tae/tcd](https://github.com/n7tae/tcd). Was sich von Version zu Version geändert hat, steht in den [Release Notes](https://github.com/jcmerg/urfd-ng/releases).
 
 tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um, damit ein D-Star-Nutzer einen DMR-Nutzer hört und umgekehrt. Der Reflektor gibt das Audio seiner transcodierten Module über TCP an tcd und bekommt alle anderen Betriebsarten zurück.
 
@@ -305,8 +305,8 @@ Alle Verstärkungen in dB, -40 bis +40 (die Schieberegler im Web-Dashboard: Ausg
 | `OutputGainM17` | `0` | M17/Codec2-Ausgang, nach der AGC |
 | `OutputGainIMBE` | `0` | P25-Ausgang, nach der AGC |
 | `OutputGainUSRP` | `0` | USRP- und SVX-Ausgang, nach der AGC (beide bekommen dasselbe PCM von tcd), auch USRP/SVX → USRP/SVX |
-| `DStarGainIn` / `DStarGainOut` | `0` | D-Star: GainIn vor dem Encoder, GainOut nach dem Decoder; im DVSI-Chip (aus der `tcd.ini`, wenn das Gerät öffnet), für ein Codec-Plugin wendet tcd sie in Software an (der Monitor ändert sie sofort) |
-| `DmrGainIn` / `DmrGainOut` | `0` | DMR/YSF: GainIn vor dem Encoder, GainOut nach dem Decoder; im DVSI-Chip (aus der `tcd.ini`, wenn das Gerät öffnet), für ein Codec-Plugin wendet tcd sie in Software an (der Monitor ändert sie sofort) |
+| `DStarGainIn` / `DStarGainOut` | `0` | D-Star: GainIn vor dem Encoder, GainOut nach dem Decoder; im DVSI-Chip, für ein Codec-Plugin wendet tcd sie in Software an. Der Monitor ändert sie für ein Plugin sofort; ein AMBE-Gerät wird damit etwa 2 s nach der letzten Änderung neu geöffnet, sobald seine Streams fertig sind. Ein DV3003 im Mixed-Betrieb hält ein Gain-Paar für alle Kanäle: Dort wendet tcd sie in Software an, sofort |
+| `DmrGainIn` / `DmrGainOut` | `0` | DMR/YSF: GainIn vor dem Encoder, GainOut nach dem Decoder; im DVSI-Chip, für ein Codec-Plugin wendet tcd sie in Software an. Der Monitor ändert sie für ein Plugin sofort; ein AMBE-Gerät wird damit etwa 2 s nach der letzten Änderung neu geöffnet, sobald seine Streams fertig sind. Ein DV3003 im Mixed-Betrieb hält ein Gain-Paar für alle Kanäle: Dort wendet tcd sie in Software an, sofort |
 
 SVX- und USRP-Verstärkungen je Verbindung stehen in der `urfd.ini` des Reflektors (`RxGain`/`TxGain` in `[SvxReflector]`, `[SVXServer]` und `[USRP]`).
 
@@ -408,7 +408,7 @@ Nach jedem Durchgang sagt tcd urfd, wie er klang: Pegel und Spitze vor der AGC, 
 
 - eine LCD-Karte je Modul mit dem Eingangs-Codec, den Zielen, Pegelanzeigen vor und nach der AGC (mit Spitzenwert und markiertem AGC-Ziel) und dem Signalweg mit dem Pegel jeder Stufe; direkt codierte Ziele sind mit „direct“ markiert
 - eine kompakte Ansicht für viele Module (ab fünf oder per „Compact“): eine Taste je Modul, volle Karten nur für die Module auf Sendung und die angehefteten
-- AGC- und Verstärkungsregler, die sofort wirken (die DVSI-Gains: bei Codec-Plugins; ein AMBE-Gerät nimmt sie beim Öffnen aus der `tcd.ini`), und „Save“, um sie in die `tcd.ini` zu schreiben
+- AGC- und Verstärkungsregler, die sofort wirken (die DVSI-Gains eines AMBE-Geräts etwa 2 s nach der letzten Änderung: ein Mixed-DV3003 sofort, ein anderes, sobald seine Streams fertig sind), und „Save“, um sie in die `tcd.ini` zu schreiben
 - die Vocoder: die belegten AMBE-Kanäle (fest oder Pool), jedes Gerät mit Seriennummer, Typ, Kanälen und Modulen, jedes Codec-Plugin und die eigenen Vocoder von tcd, mit ihren Frames und Fehlern (`fec` korrigiert, `unc` unkorrigierbar, `bad` codierte Frames mit ungültiger FEC, `rep`/`mute` von einem Plugin wiederholt/stummgeschaltet, `lost` auf der seriellen Leitung verlorene Antworten)
 - „Phase out“ nimmt ein Gerät außer Betrieb (die Streams darauf laufen zu Ende, dann kann es abgezogen werden), „Take back“ öffnet es wieder; nur für ein Gerät, dessen Codecs ein Codec-Plugin abdeckt
 - der Vocoder für neue D-Star-, DMR-, P25- und M17-Streams, „AMBE channels“ (fest oder Pool), „AMBE speech“ (`DeviceCompand`) und die direkte Transcodierung, im Betrieb umschaltbar

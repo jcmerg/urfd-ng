@@ -396,7 +396,7 @@ static std::vector<SAmbeDevice> SortedDevices(const std::list<SAmbeDevice> &set)
 	return devs;
 }
 
-int32_t CController::calcNumerator(int32_t db) const
+int32_t CController::calcNumerator(int32_t db)
 {
 	float num = 256.0f * powf(10.0f, (float(db)/20.0f));
 
@@ -570,9 +570,6 @@ CController::CController() : keep_running(true), ambe_in_num(256), ambe_out_num(
 bool CController::Start()
 {
 	UpdateSplits();	// the live config is filled (Main), the devices open below
-	// the GainIn/Out the devices are opened with (tcd.ini, not changed while tcd runs)
-	dev_dstar = SDeviceGains{ float(g_Conf.GetGain(EGainType::dstarout)), calcNumerator(g_Conf.GetGain(EGainType::dstarin)) };
-	dev_dmr = SDeviceGains{ float(g_Conf.GetGain(EGainType::dmrout)), calcNumerator(g_Conf.GetGain(EGainType::dmrin)) };
 	outgain_dstar_num = calcNumerator(g_Conf.GetGain(EGainType::outgain_dstar));
 	outgain_dmr_num = calcNumerator(g_Conf.GetGain(EGainType::outgain_dmr));
 	outgain_usrp_num = calcNumerator(g_Conf.GetGain(EGainType::outgain_usrp));
@@ -928,6 +925,9 @@ bool CController::InitVocoders()
 
 	// the devices in the monitor, then open them
 	g_Stats.config.device_compand.store(g_Conf.GetDeviceCompand());
+	// the devices open with the settings of tcd.ini
+	device_target = watch_live = LiveDeviceSettings();
+	watch_since = std::chrono::steady_clock::now();
 	for (size_t i = 0; i < slots.size() && int(i) < CTcdStats::MAX_DEVICES; i++)
 	{
 		auto &s = *slots[i];
@@ -1549,10 +1549,12 @@ void CController::RunJob(SJob &job)
 	else
 		packet->SetDMRData(job.answer->ambe);
 	// a lost answer (silence in its place) counts as a frame that did not decode
+	// the GainOut the device decoded with and its GainIn, for the same mode
+	const SDeviceGains dev{ float(job.answer->gain_out), float(job.answer->gain_in) };
 	if (dstar)
-		RouteDstPacket(packet, nullptr, !job.answer->lost);
+		RouteDstPacket(packet, nullptr, !job.answer->lost, 256, &dev);
 	else
-		RouteDmrPacket(packet, !job.answer->lost);
+		RouteDmrPacket(packet, !job.answer->lost, &dev);
 }
 
 void CController::StageIn(std::shared_ptr<CTranscoderPacket> packet)
@@ -1804,7 +1806,7 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	Transcode(TCD_CODEC_P25, sw, decoded, source_db, packet, &direct);
 	// DMR -> DMR/YSF: the AGC in b2 (DmrGainMode); after the direct path, which
 	// codes from the decoder's frame
-	AmbeSameMode(packet, agc_db, decoded, false, GainDb(out_num), ambe_in_num);
+	AmbeSameMode(packet, agc_db, decoded, false, GainDb(out_num), GainDb(ambe_in_num));
 	if (packet->IsLast())
 		sw->End(packet->GetStreamKey(), false);
 	if (decoded)	// a failed decode keeps the marks: no flicker
@@ -2320,10 +2322,14 @@ void CController::AddSlot(const std::string &node, const std::string &desc, Edvt
 	s->per_channel = ch_enc != nullptr;
 	for (int c = 0; c < 3; c++)
 		s->ch_enc[c] = ch_enc ? ch_enc[c] : enc;
-	const bool dmr = Encoding::dmrsf == enc;
-	s->in_gain = int8_t(g_Conf.GetGain(dmr ? EGainType::dmrin : EGainType::dstarin));
-	s->out_gain = int8_t(g_Conf.GetGain(dmr ? EGainType::dmrout : EGainType::dstarout));
 	s->role = role;
+	s->has_dstar = Encoding::dstar == enc;
+	s->has_dmr = Encoding::dmrsf == enc;
+	for (int c = 0; ch_enc && c < 3; c++)
+	{
+		s->has_dstar = s->has_dstar || Encoding::dstar == ch_enc[c];
+		s->has_dmr = s->has_dmr || Encoding::dmrsf == ch_enc[c];
+	}
 	slots.push_back(std::move(s));
 }
 
@@ -2352,12 +2358,12 @@ std::shared_ptr<CDVDevice> CController::OpenSlot(int i, const std::string &node)
 				dv3003->SetChannelEncoding(c, s.ch_enc[c]);
 		dev = dv3003;
 	}
-	const int compand = g_Stats.config.device_compand.load();
-	dev->SetCompand(compand);
-	if (dev->OpenDevice(node, s.desc, s.type, s.baud, s.in_gain, s.out_gain))
+	const SDeviceSettings set = device_target;
+	dev->SetCompand(set.compand);
+	if (dev->OpenDevice(node, s.desc, s.type, s.baud, int8_t(set.dstar_in), int8_t(set.dstar_out), int8_t(set.dmr_in), int8_t(set.dmr_out)))
 		return nullptr;
-	s.compand = compand;
-	s.recompand = false;
+	s.opened = set;
+	s.reopen = false;
 	SetDeviceGains(*dev);
 	dev->SetStatsIndex(s.stats);
 	const CDVDevice *raw = dev.get();
@@ -2435,13 +2441,13 @@ void CController::PhaseOut(int i)
 	if (s.stats < 0)
 		return;
 	auto &st = g_Stats.devices[s.stats];
-	// asked from the monitor, or a new DeviceCompand: the device is opened again for it
+	// asked from the monitor, or new settings (DeviceCompand, DVSI gains): the device is opened again for them
 	// when its streams are done (not shown as phased out)
 	const bool asked = st.want_out.load();
-	const bool want = asked || s.recompand;
+	const bool want = asked || s.reopen;
 	if (want && !s.out)
 	{
-		// asked also while it drains for a new DeviceCompand
+		// asked also while it drains for new settings
 		if (asked && 0 == st.phase.load())
 		{
 			st.phase.store(1);
@@ -2455,7 +2461,7 @@ void CController::PhaseOut(int i)
 				s.draining = true;
 			}
 			if (!asked)
-				std::cout << s.desc << " changes to DeviceCompand = " << CompandName(g_Stats.config.device_compand.load()) << ": no new streams, the ones on it run to their end" << std::endl;
+				std::cout << s.desc << " is opened again for new settings (DeviceCompand, DVSI gains): no new streams, the ones on it run to their end" << std::endl;
 		}
 		{
 			std::lock_guard<std::mutex> lock(hw_mux);
@@ -2473,7 +2479,7 @@ void CController::PhaseOut(int i)
 				s.closed = true;
 			}
 			st.online.store(false);
-			s.recompand = false;	// taken back (now, or by the monitor) it is opened with it
+			s.reopen = false;	// taken back (now, or by the monitor) it is opened with them
 			if (asked)
 			{
 				st.phase.store(2);
@@ -2526,33 +2532,49 @@ void CController::DeviceWatchThread()
 	{
 		std::this_thread::sleep_for(std::chrono::milliseconds(500));
 		const auto now = std::chrono::steady_clock::now();
+		// the monitor's settings the devices take: DeviceCompand at once, the gains once
+		// they held for 2 s (a slider dragged sends every value on its way)
+		const SDeviceSettings live = LiveDeviceSettings();
+		if (live != watch_live)
+		{
+			watch_live = live;
+			watch_since = now;
+		}
+		// a new DeviceCompand takes the gains of the moment along: one reopen
+		if (now - watch_since >= std::chrono::seconds(2) || live.compand != device_target.compand)
+			device_target = live;
+		const SDeviceSettings &target = device_target;
 		for (size_t i = 0; i < slots.size() && keep_running; i++)
 		{
 			auto &s = *slots[i];
-			// a new DeviceCompand: a device opened with another one is opened again, one
-			// at a time, when a codec plugin or another device takes its streams meanwhile,
-			// else when it is idle; set back before it closed, it stays as it is
-			const int compand = g_Stats.config.device_compand.load();
-			if (s.recompand && !s.out && s.compand == compand)
+			// a mixed DV3003 (gains in software) takes new gains at once, no reopen to spare
+			if (s.up && s.dev && s.dev->IsMixed() && s.opened.compand == live.compand && s.opened != live
+				&& s.dev->SetSoftGains(int8_t(live.dstar_in), int8_t(live.dstar_out), int8_t(live.dmr_in), int8_t(live.dmr_out)))
+				s.opened = live;
+			// new settings (DeviceCompand, the DVSI gains of its codecs): a device opened
+			// with others is opened again, one at a time, when a codec plugin or another
+			// device takes its streams meanwhile, else when it is idle; set back before
+			// it closed, it stays as it is
+			if (s.reopen && !s.out && !SettingsDiffer(s, target))
 			{
-				s.recompand = false;
-				std::cout << s.desc << " keeps DeviceCompand = " << CompandName(compand) << std::endl;
+				s.reopen = false;
+				std::cout << s.desc << " keeps its settings" << std::endl;
 			}
 			// this thread's own fields and the slot's atomics first: the lock only for a
-			// slot that could change its DeviceCompand now
-			if (!s.recompand && s.compand != compand && s.up && !s.draining && !s.out)
+			// slot that could take new settings now
+			if (!s.reopen && SettingsDiffer(s, target) && s.up && !s.draining && !s.out)
 			{
 				// the slots' up, out and draining as the workers and a lost device's
-				// reader set and see them (recompand and compand are this thread's)
+				// reader set and see them (reopen and opened are this thread's)
 				std::lock_guard<std::mutex> lock(hw_mux);
 				bool other = false;
 				for (size_t j = 0; j < slots.size(); j++)
-					other = other || (j != i && (slots[j]->recompand	// draining for it, or closed and not yet open again
+					other = other || (j != i && (slots[j]->reopen	// draining for it, or closed and not yet open again
 						|| (slots[j]->out && slots[j]->stats >= 0 && !g_Stats.devices[slots[j]->stats].want_out.load())
-						|| (!slots[j]->up && !slots[j]->out && slots[j]->compand != compand)));	// or it did not open again
+						|| (!slots[j]->up && !slots[j]->out && !slots[j]->told && SettingsDiffer(*slots[j], target))));	// or it did not open again (not a device that is gone)
 				if (!other && s.up && !s.draining && !s.out
 					&& (UncoveredChoice(int(i)) < 0 || !SlotBusyLocked(int(i))))
-					s.recompand = true;
+					s.reopen = true;
 			}
 			PhaseOut(int(i));
 			if (s.up || s.out || now < s.next_try)
@@ -2783,7 +2805,7 @@ void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
 		std::cerr << "SendToReflector: no connection for module " << packet->GetModule() << ", frame dropped (the reflector thread reconnects)" << std::endl;
 }
 
-void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSoftCodec *from, bool decoded, int32_t dec_out_num)
+void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSoftCodec *from, bool decoded, int32_t dec_out_num, const SDeviceGains *dev)
 {
 	if (ECodecType::dstar == packet->GetCodecIn())
 	{
@@ -2812,8 +2834,8 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSof
 		if (decoded)	// a failed decode keeps the marks: no flicker
 			ModuleDirect(packet, direct);
 		// D-Star -> D-Star: the AGC in b2 (DStarGainMode), with the GainOut the
-		// decoder used: a plugin's from the monitor, a device's from tcd.ini
-		AmbeSameMode(packet, agc_db, decoded, true, from ? GainDb(dec_out_num) : dev_dstar.out_db, from ? dstar_in_num.load() : dev_dstar.in_num);
+		// decoder used: a plugin's from the monitor, a device's as it was opened with them
+		AmbeSameMode(packet, agc_db, decoded, true, from ? GainDb(dec_out_num) : (dev ? dev->out_db : 0.0f), from ? GainDb(dstar_in_num) : (dev ? dev->in_db : 0.0f));
 		// the decoder's state ends with the stream, as on the DMR path
 		if (from && packet->IsLast())
 			from->End(packet->GetStreamKey(), false);
@@ -2860,7 +2882,7 @@ float CController::HeldAgc(const std::shared_ptr<CTranscoderPacket> &packet, boo
 // (OutputGain, then the encoder's GainIn; the decoder's GainOut is in the audio
 // the AGC measured), put into the frame's b2. A frame that did not decode gets
 // the stream's last AGC gain (HeldAgc)
-void CController::AmbeSameMode(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, bool decoded, bool dstar, float dec_out_db, int32_t in_num)
+void CController::AmbeSameMode(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, bool decoded, bool dstar, float dec_out_db, float in_db)
 {
 	if (!g_Stats.config.same_mode[dstar ? CConfigure::kSameDStar : CConfigure::kSameDmr].load(std::memory_order_relaxed))
 	{
@@ -2869,7 +2891,7 @@ void CController::AmbeSameMode(const std::shared_ptr<CTranscoderPacket> &packet,
 			m_ambeGain.Follow(packet->GetDMRData(), packet->GetStreamKey());
 		return;
 	}
-	const float gain_db = HeldAgc(packet, decoded, agc_db) + dec_out_db + GainDb(in_num)
+	const float gain_db = HeldAgc(packet, decoded, agc_db) + dec_out_db + in_db
 		+ GainDb(dstar ? outgain_dstar_num.load() : outgain_dmr_num.load());
 	uint8_t frame[9];
 	if (dstar)
@@ -2954,7 +2976,7 @@ void CController::M17SameCodecGain(const std::shared_ptr<CTranscoderPacket> &pac
 	packet->SetM17Data(m17);
 }
 
-void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet, bool decoded)
+void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet, bool decoded, const SDeviceGains *dev)
 {
 	if (ECodecType::dmr == packet->GetCodecIn())
 	{
@@ -2973,7 +2995,7 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet, bool
 		g_Stats.UpdateLevelsOut(packet->GetModule(), packet->GetAudioSamples(), 160);
 		FrameLevels(packet, "dmr");
 		// DMR -> DMR/YSF: the AGC in b2 (DmrGainMode)
-		AmbeSameMode(packet, agc_db, decoded, false, dev_dmr.out_db, dev_dmr.in_num);
+		AmbeSameMode(packet, agc_db, decoded, false, dev ? dev->out_db : 0.0f, dev ? dev->in_db : 0.0f);
 		// D-Star first: a device gets its frame before the software encodes
 		ToDStar(packet);
 		AudiotoCodec2(packet);
@@ -2994,6 +3016,29 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet, bool
 		}
 		SendIfDone(packet);
 	}
+}
+
+// the settings differ for this device: DeviceCompand, or a gain of one of its codecs
+bool CController::SettingsDiffer(const SDeviceSlot &s, const SDeviceSettings &live)
+{
+	if (s.opened.compand != live.compand)
+		return true;
+	// a mixed DV3003 applies its gains in software and takes them without a reopen
+	if (s.dev && s.dev->IsMixed())
+		return false;
+	return (s.has_dstar && (s.opened.dstar_in != live.dstar_in || s.opened.dstar_out != live.dstar_out))
+		|| (s.has_dmr && (s.opened.dmr_in != live.dmr_in || s.opened.dmr_out != live.dmr_out));
+}
+
+CController::SDeviceSettings CController::LiveDeviceSettings(void)
+{
+	SDeviceSettings s;
+	s.compand = g_Stats.config.device_compand.load();
+	s.dstar_in = g_Stats.config.gain_dstar_in.load();
+	s.dstar_out = g_Stats.config.gain_dstar_out.load();
+	s.dmr_in = g_Stats.config.gain_dmr_in.load();
+	s.dmr_out = g_Stats.config.gain_dmr_out.load();
+	return s;
 }
 
 // the devices' output gains: the PCM part of OutputGainDStar/DMR in the

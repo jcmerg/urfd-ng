@@ -47,6 +47,9 @@
 class CController
 {
 public:
+	// a gain in dB as a numerator of 256, and that numerator on PCM (clipped)
+	static int32_t calcNumerator(int32_t db);
+	static void ApplyGain(int16_t *samples, int count, int32_t num);
 	CController();
 	bool Start();
 	void Stop();
@@ -54,9 +57,11 @@ public:
 	// from: the plugin codec that decoded a D-Star packet, for Transcode (nullptr: a device did)
 	// decoded: from's decode succeeded (a failed one gets no transcode, only its End)
 	// dec_out_num: the DStarGainOut a plugin decoded `from` with (one value for the frame)
-	void RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, class CSoftCodec *from = nullptr, bool decoded = true, int32_t dec_out_num = 256);
+	// the GainOut and GainIn (dB) of the AMBE device that decoded a packet
+	struct SDeviceGains { float out_db; float in_db; };
+	void RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, class CSoftCodec *from = nullptr, bool decoded = true, int32_t dec_out_num = 256, const SDeviceGains *dev = nullptr);
 	// decoded: false for a device's lost answer (silence in its place)
-	void RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet, bool decoded = true);
+	void RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet, bool decoded = true, const SDeviceGains *dev = nullptr);
 	// an AMBE device's answer to a packet (DVSIDevice: its reader, or a lost
 	// answer's silence): the packet's module worker puts it into the packet and
 	// routes it on (RouteDstPacket, RouteDmrPacket)
@@ -138,6 +143,16 @@ protected:
 	// the packet to the reflector once every codec is set (only its worker sets them)
 	void SendIfDone(const std::shared_ptr<CTranscoderPacket> &packet);
 	CTCClient tcClient;
+	// what an AMBE device is opened with, from the monitor (tcd.ini at the start):
+	// DeviceCompand and the DVSI gains in dB. A change opens a device again once
+	// its streams are done, when it concerns one of its codecs
+	struct SDeviceSettings
+	{
+		int compand = 0, dstar_in = 0, dstar_out = 0, dmr_in = 0, dmr_out = 0;
+		bool operator==(const SDeviceSettings &o) const { return compand == o.compand && dstar_in == o.dstar_in && dstar_out == o.dstar_out && dmr_in == o.dmr_in && dmr_out == o.dmr_out; }
+		bool operator!=(const SDeviceSettings &o) const { return !(*this == o); }
+	};
+	static SDeviceSettings LiveDeviceSettings(void);
 	// an AMBE device in use: how to open it again, its channels' codecs, and
 	// whether it answers. A lost device is left to the codec plugins and opened
 	// again when it is back (DeviceWatchThread)
@@ -149,7 +164,6 @@ protected:
 		Encoding enc;			// the device's codec
 		Encoding ch_enc[3];		// per channel, a DV3003 in mixed mode has both
 		bool per_channel;		// a DV3003 with ch_enc set
-		int8_t in_gain, out_gain;	// for enc, the other codec's come from tcd.ini
 		const char *role;		// for the monitor: dstar, dmr, mixed
 		std::shared_ptr<CDVDevice> dev;
 		std::atomic<bool> up{false};
@@ -159,10 +173,19 @@ protected:
 		int stats = -1;			// g_Stats.devices
 		std::chrono::steady_clock::time_point next_try;
 		bool told = false;		// the watch said why it cannot open it yet
-		int compand = 0;		// the DeviceCompand it was opened with
-		std::atomic<bool> recompand{false};	// to be opened again for another DeviceCompand
+		SDeviceSettings opened;		// what it was opened with
+		std::atomic<bool> reopen{false};	// to be opened again for new settings
+		bool has_dstar = false, has_dmr = false;	// the codecs of its channels
 	};
+	// the settings differ for this device: DeviceCompand, or a gain of one of its codecs
+	static bool SettingsDiffer(const SDeviceSlot &s, const SDeviceSettings &live);
 	std::vector<std::unique_ptr<SDeviceSlot>> slots;
+	// the monitor's device settings as DeviceWatchThread saw them last, and since when
+	SDeviceSettings watch_live;
+	// the settings the devices are opened with (InitVocoders, then DeviceWatchThread,
+	// which also calls OpenSlot; no other thread)
+	SDeviceSettings device_target;
+	std::chrono::steady_clock::time_point watch_since{};
 	// the AMBE channels for D-Star and for DMR (indexed by kChoiceDStar and
 	// kChoiceDMR): fixed, channel i belongs to the i-th module of Modules; with
 	// DeviceChannels = pool a stream takes a free one, whatever its module
@@ -302,24 +325,19 @@ protected:
 	CNoiseSuppress m_nsAnalog;  // SVX and USRP: FM noise removed before the AGC
 	CAmbeGain m_ambeGain;  // DmrGainMode = on: AGC and gains in the AMBE2+ bitstream
 
-	int32_t calcNumerator(int32_t db) const;
-	static void ApplyGain(int16_t *samples, int count, int32_t num);
 	void OutputSplit(bool dstar, int32_t &pcm_num, int &bs) const;
 	void UpdateSplits(void);
 	// [0] D-Star, [1] DMR: the PCM numerator (high 32 bits) and the b2 dB (low 32)
 	std::atomic<uint64_t> split[2] = { { 256ULL << 32 }, { 256ULL << 32 } };
 	// D-Star -> D-Star (DStarGainMode), DMR -> DMR/YSF (DmrGainMode): the AGC's gain
 	// for this frame (agc_db) in b2 of the packet's frame of the source codec;
-	// dec_out_db: the GainOut the decoder used, in_num: the GainIn an encoder would
-	// (a device's from tcd.ini, a plugin's live)
-	void AmbeSameMode(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, bool decoded, bool dstar, float dec_out_db, int32_t in_num);
+	// dec_out_db: the GainOut the decoder used, in_db: the GainIn an encoder would
+	// (a device's as it was opened, a plugin's live)
+	void AmbeSameMode(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, bool decoded, bool dstar, float dec_out_db, float in_db);
 	// the AGC's gain of a frame that did not decode: the stream's last one that did
 	struct SHeldAgc { bool valid; uint16_t streamid; float db; };
 	SHeldAgc held_agc[kModuleSlots] = {};
 	float HeldAgc(const std::shared_ptr<CTranscoderPacket> &packet, bool decoded, float agc_db);
-	// the GainOut (dB) and GainIn (numerator) an AMBE device uses, from tcd.ini (Start)
-	struct SDeviceGains { float out_db; int32_t in_num; };
-	SDeviceGains dev_dstar{ 0.0f, 256 }, dev_dmr{ 0.0f, 256 };
 	// the b2 part of OutputGainDStar/DMR the devices were given with their PCM part
 	std::atomic<int> device_bs_dstar{0}, device_bs_dmr{0};
 	void SetDeviceGains(class CDVDevice &dev);

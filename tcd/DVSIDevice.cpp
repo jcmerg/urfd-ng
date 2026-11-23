@@ -36,7 +36,6 @@
 
 #include "AmbeFrameCheck.h"	// the silence frames (and YSFDefines.h)
 #include "DVSIDevice.h"
-#include "Configure.h"
 #include "TcdStats.h"
 #include "Controller.h"
 #include "SteadyClock.h"
@@ -52,7 +51,6 @@ static const uint8_t (&DSTAR_SILENCE)[9] = AmbeFrameCheck::DSTAR_SILENCE;
 static const unsigned char (&DMR_SILENCE)[9] = AMBE72_SILENCE;
 
 
-extern CConfigure g_Conf;
 extern CController g_Cont;
 
 CDVDevice::CDVDevice(Encoding t) : type(t), devtype(Edvtype::dv3000), buffer_depth(0), keep_running(true)
@@ -105,6 +103,27 @@ void CDVDevice::Lost(void)
 		m_onLost();
 	else
 		kill(getpid(), SIGINT);
+}
+
+void CDVDevice::StoreGains(int8_t dstar_in, int8_t dstar_out, int8_t dmr_in, int8_t dmr_out)
+{
+	const int8_t in[2] { dstar_in, dmr_in }, out[2] { dstar_out, dmr_out };
+	for (int k = 0; k < 2; k++)
+		m_gains[k].store(PackGains(SGains{ in[k], out[k], m_mixed ? CController::calcNumerator(in[k]) : 256, m_mixed ? CController::calcNumerator(out[k]) : 256 }), std::memory_order_relaxed);
+}
+
+void CDVDevice::LogSoftGains(int8_t dstar_in, int8_t dstar_out, int8_t dmr_in, int8_t dmr_out) const
+{
+	std::cout << description << ": D-Star gain in " << int(dstar_in) << " dB, out " << int(dstar_out) << " dB, DMR gain in " << int(dmr_in) << " dB, out " << int(dmr_out) << " dB in software" << std::endl;
+}
+
+bool CDVDevice::SetSoftGains(int8_t dstar_in, int8_t dstar_out, int8_t dmr_in, int8_t dmr_out)
+{
+	if (!m_mixed)
+		return false;
+	StoreGains(dstar_in, dstar_out, dmr_in, dmr_out);
+	LogSoftGains(dstar_in, dstar_out, dmr_in, dmr_out);
+	return true;
 }
 
 bool CDVDevice::ConfigureChannel(uint8_t pkt_ch, Encoding enc, int8_t in_gain, int8_t out_gain)
@@ -237,7 +256,7 @@ bool CDVDevice::Probe(const std::string &node, const std::string &desc, Edvtype 
 	return failed;
 }
 
-bool CDVDevice::OpenDevice(const std::string &node, const std::string &desc, Edvtype dvtype, unsigned long baud, int8_t in_gain, int8_t out_gain)
+bool CDVDevice::OpenDevice(const std::string &node, const std::string &desc, Edvtype dvtype, unsigned long baud, int8_t dstar_in, int8_t dstar_out, int8_t dmr_in, int8_t dmr_out)
 {
 	if (OpenLine(node, desc, dvtype, baud))
 		return true;
@@ -246,20 +265,24 @@ bool CDVDevice::OpenDevice(const std::string &node, const std::string &desc, Edv
 		return true;
 
 	const uint8_t limit = (Edvtype::dv3000 == dvtype) ? PKT_CHANNEL0 : PKT_CHANNEL2;
+	// a DV3003 with D-Star and DMR channels: its one gain pair would be the last
+	// channel's, so the gains go to the PCM instead (m_gains)
+	bool mixed = false;
+	for (uint8_t ch=PKT_CHANNEL0; ch<=limit; ch++)
+		mixed = mixed || GetChannelEncoding(ch - PKT_CHANNEL0) != GetChannelEncoding(0);
+	m_mixed = mixed;
+	StoreGains(dstar_in, dstar_out, dmr_in, dmr_out);
 	for (uint8_t ch=PKT_CHANNEL0; ch<=limit; ch++)
 	{
 		Encoding ch_enc = GetChannelEncoding(ch - PKT_CHANNEL0);
-		// Use caller's gains for default codec, look up alternate gains for mixed channels
-		int8_t ig = in_gain, og = out_gain;
-		if (ch_enc != type)
-		{
-			// Mixed channel: use D-Star gains from config
-			ig = int8_t(g_Conf.GetGain(ch_enc == Encoding::dstar ? EGainType::dstarin : EGainType::dmrin));
-			og = int8_t(g_Conf.GetGain(ch_enc == Encoding::dstar ? EGainType::dstarout : EGainType::dmrout));
-		}
-		if (ConfigureVocoder(ch, ch_enc, ig, og))
+		// the gains of the channel's codec, in the chip unless it is mixed
+		const bool dstar = ch_enc == Encoding::dstar;
+		const int8_t ig = dstar ? dstar_in : dmr_in, og = dstar ? dstar_out : dmr_out;
+		if (ConfigureVocoder(ch, ch_enc, mixed ? 0 : ig, mixed ? 0 : og))
 			return true;
 	}
+	if (mixed && (dstar_in || dstar_out || dmr_in || dmr_out))
+		LogSoftGains(dstar_in, dstar_out, dmr_in, dmr_out);
 	return false;
 }
 
@@ -520,7 +543,8 @@ bool CDVDevice::ConfigureVocoder(uint8_t pkt_ch, Encoding type, int8_t in_gain, 
 	}
 
 	std::cout << description << " channel " << (unsigned int)(pkt_ch - PKT_CHANNEL0) << " is now configured for " << ((Encoding::dstar == type) ? "D-Star" : "DMR/YSF")
-		<< (COMPAND_LINEAR != compand ? std::string(", speech in ") + CompandName(compand) : std::string()) << std::endl;
+		<< (COMPAND_LINEAR != compand ? std::string(", speech in ") + CompandName(compand) : std::string())
+		<< ((in_gain || out_gain) ? ", gain in " + std::to_string(in_gain) + " dB, out " + std::to_string(out_gain) + " dB" : std::string()) << std::endl;
 
 	return false;
 }
@@ -710,17 +734,15 @@ void CDVDevice::FeedDevice()
 					}
 					else
 					{
-						int32_t gn = ((Encoding::dstar==ch_enc) ? m_outputGainDStar : m_outputGainDmr).load(std::memory_order_relaxed);
-						if (gn != 256)
+						const int32_t gn = ((Encoding::dstar==ch_enc) ? m_outputGainDStar : m_outputGainDmr).load(std::memory_order_relaxed);
+						// a mixed DV3003's GainIn, in software: each step clipped, as for a plugin
+						const int32_t soft = Gains(ch_enc).soft_in;
+						if (gn != 256 || soft != 256)
 						{
 							int16_t buf[160];
-							const int16_t *src = packet->GetAudioSamples();
-							for (int i = 0; i < 160; i++)
-							{
-								int32_t v = ((int32_t)src[i] * gn) >> 8;
-								if (v > 32767) v = 32767; else if (v < -32768) v = -32768;
-								buf[i] = (int16_t)v;
-							}
+							memcpy(buf, packet->GetAudioSamples(), sizeof(buf));
+							CController::ApplyGain(buf, 160, gn);
+							CController::ApplyGain(buf, 160, soft);
 							SendAudio(index, buf);
 						}
 						else
@@ -863,6 +885,9 @@ SDeviceAnswer CDVDevice::SilenceAnswer(uint8_t channel, bool decode) const
 	answer.enc = GetChannelEncoding(channel);
 	answer.audio = decode;
 	answer.lost = true;
+	const SGains g = Gains(answer.enc);
+	answer.gain_in = g.in;
+	answer.gain_out = g.out;
 	if (!decode)
 		memcpy(answer.ambe, Encoding::dstar == answer.enc ? DSTAR_SILENCE : DMR_SILENCE, sizeof(answer.ambe));
 	return answer;
@@ -905,6 +930,12 @@ void CDVDevice::AnswerWaitingLocked(bool dead)
 void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer)
 {
 	answer.enc = ch_enc;
+	// the gains the frame was coded with, and a mixed DV3003's GainOut in software
+	const SGains g = Gains(ch_enc);
+	answer.gain_in = g.in;
+	answer.gain_out = g.out;
+	if (answer.audio)
+		CController::ApplyGain(answer.pcm, 160, g.soft_out);
 	g_Cont.DeviceAnswer(packet, answer);
 }
 

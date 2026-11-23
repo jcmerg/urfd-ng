@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.23.4** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd). What changed from version to version is in the [release notes](https://github.com/jcmerg/urfd-ng/releases).
+**Version 0.23.5** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd). What changed from version to version is in the [release notes](https://github.com/jcmerg/urfd-ng/releases).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
@@ -305,8 +305,8 @@ All gains are in dB, -40 to +40 (the web dashboard's sliders: output gains -24 t
 | `OutputGainM17` | `0` | M17/Codec2 output, after the AGC |
 | `OutputGainIMBE` | `0` | P25 output, after the AGC |
 | `OutputGainUSRP` | `0` | USRP and SVX output, after the AGC (both get the same PCM from tcd), USRP/SVX → USRP/SVX included |
-| `DStarGainIn` / `DStarGainOut` | `0` | D-Star: GainIn before the encoder, GainOut after the decoder; in the DVSI chip (from `tcd.ini` when the device opens), for a codec plugin tcd applies them in software (the monitor changes them at once) |
-| `DmrGainIn` / `DmrGainOut` | `0` | DMR/YSF: GainIn before the encoder, GainOut after the decoder; in the DVSI chip (from `tcd.ini` when the device opens), for a codec plugin tcd applies them in software (the monitor changes them at once) |
+| `DStarGainIn` / `DStarGainOut` | `0` | D-Star: GainIn before the encoder, GainOut after the decoder; in the DVSI chip, for a codec plugin tcd applies them in software. The monitor changes them at once for a plugin; an AMBE device is opened again with them about 2 s after the last change, once its streams are done. A DV3003 in mixed mode holds one gain pair for all channels: tcd applies them in software there, at once |
+| `DmrGainIn` / `DmrGainOut` | `0` | DMR/YSF: GainIn before the encoder, GainOut after the decoder; in the DVSI chip, for a codec plugin tcd applies them in software. The monitor changes them at once for a plugin; an AMBE device is opened again with them about 2 s after the last change, once its streams are done. A DV3003 in mixed mode holds one gain pair for all channels: tcd applies them in software there, at once |
 
 SVX and USRP gains per connection are set in the reflector's `urfd.ini` (`RxGain`/`TxGain` in `[SvxReflector]`, `[SVXServer]` and `[USRP]`).
 
@@ -408,7 +408,7 @@ After every transmission tcd tells urfd how it sounded: the level and peak befor
 
 - an LCD card per module with the input codec, the targets, level meters before and after the AGC (with peak hold and the AGC target) and the signal path with the level at each stage; targets coded directly are marked "direct"
 - a compact view for many modules (from five on, or with "Compact"): a key per module, full cards only for the modules on the air and the ones pinned
-- AGC and gain controls that apply immediately (the DVSI gains: on codec plugins; an AMBE device takes them from `tcd.ini` when it opens), and Save to write them to `tcd.ini`
+- AGC and gain controls that apply immediately (the DVSI gains of an AMBE device about 2 s after the last change: a mixed DV3003 at once, another once its streams are done), and Save to write them to `tcd.ini`
 - the vocoders: the AMBE channels in use (fixed or pool), each device with its serial, type, channels and modules, each codec plugin and tcd's own vocoders, with their frames and errors (`fec` corrected, `unc` uncorrectable, `bad` encoded frames failing their FEC, `rep`/`mute` repeated/muted by a plugin, `lost` answers lost on the serial line)
 - "Phase out" takes a device out of service (the streams on it run to their end, then it can be unplugged), "Take back" opens it again; only for a device whose codecs a codec plugin covers
 - the vocoder for new D-Star, DMR, P25 and M17 streams, "AMBE channels" (fixed or pool), "AMBE speech" (`DeviceCompand`) and direct transcoding, switchable at run time
