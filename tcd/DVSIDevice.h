@@ -146,6 +146,8 @@ protected:
 	// under m_silenceMx, the frames it was sent first, so a stream's answers stay in
 	// order (urfd drops a frame that comes after a newer one of its stream)
 	void AnswerSilence(const SFeed &feed);
+	void AnswerSilenceLocked(const SFeed &feed);	// with m_silenceMx
+	std::atomic<bool> m_feeding{false};	// the feeder holds a frame to go (popped, not sent or answered)
 	// with m_silenceMx: the frames sent to it answered with silence; dead: from now on
 	// it takes none (Lost)
 	void AnswerWaitingLocked(bool dead);

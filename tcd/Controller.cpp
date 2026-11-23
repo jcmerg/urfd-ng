@@ -1325,10 +1325,11 @@ static int UsableCores(void)
 		{
 			if (0 != access(mount, F_OK))
 				continue;
-			for (const std::string &dir : { std::string(mount) + (v1 == "/" ? std::string() : v1), std::string(mount) })
+			std::vector<std::string> dirs{ std::string(mount) };
+			if (v1 != "/")
+				dirs.insert(dirs.begin(), std::string(mount) + v1);	// its own first, then the top
+			for (const auto &dir : dirs)
 			{
-				if (v1 == "/" && dir != mount)
-					continue;	// its own cgroup is the top: read once
 				std::ifstream fq(dir + "/cpu.cfs_quota_us"), fp(dir + "/cpu.cfs_period_us");
 				long q = 0, p = 0;
 				if (fq >> q && fp >> p && q > 0 && p > 0)
