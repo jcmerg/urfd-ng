@@ -49,7 +49,7 @@
 // a packet unanswered for this long lost its answer (bytes of it dropped on the
 // serial line, an FTDI receive overrun, and with them the channel it was for); a
 // channel answers in order, the busiest within some 60 ms
-#define LOST_ANSWER_MS 300
+#define LOST_ANSWER_MS kLostAnswerMs
 
 // what goes on for a lost answer: the silence frames of the vocoders, silent audio
 static const uint8_t DSTAR_SILENCE[9] { 0x9EU, 0x8DU, 0x32U, 0x88U, 0x26U, 0x1AU, 0x3FU, 0x61U, 0xE8U };
@@ -69,13 +69,6 @@ void CDVDevice::AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> pack
 	// frame of its codec when the packet has one, else it encodes the audio
 	const bool decode = (Encoding::dstar == GetChannelEncoding(channel)) ? packet->DStarIsSet() : packet->DMRIsSet();
 	const auto size = input_queue.push(SFeed{ packet, channel, decode });
-	if (0 == size)
-	{
-		// the device was closed meanwhile (lost, phased out): the frame goes back
-		// with silence instead of never
-		g_Cont.DeviceAnswer(packet, SilenceAnswer(channel, decode));
-		return;
-	}
 	if (size > 200 && OncePerSecond(m_toldQueue))
 		std::cerr << description << ": " << size << " packets wait to go to the device" << std::endl;
 }

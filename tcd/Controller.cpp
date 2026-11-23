@@ -1284,8 +1284,11 @@ static int UsableCores(void)
 		std::string line;
 		while (std::getline(cg, line))
 		{
-			const auto a = line.find(':'), b = line.find(':', a == std::string::npos ? a : a + 1);
-			if (a == std::string::npos || b == std::string::npos)
+			const auto a = line.find(':');
+			if (a == std::string::npos)
+				continue;
+			const auto b = line.find(':', a + 1);
+			if (b == std::string::npos)
 				continue;
 			const std::string ctrl = line.substr(a + 1, b - a - 1), path = line.substr(b + 1);
 			if (ctrl.empty() && line.compare(0, a, "0") == 0)
@@ -1322,12 +1325,17 @@ static int UsableCores(void)
 			q = atol(s.c_str());
 			return true;
 		});
-	if (have_v1)	// cpu.cfs_quota_us (-1: none) and cpu.cfs_period_us
+	if (have_v1)	// cpu.cfs_quota_us (-1: none) and cpu.cfs_period_us, at the first mount there is
 		for (const char *mount : { "/sys/fs/cgroup/cpu", "/sys/fs/cgroup/cpu,cpuacct" })
+		{
+			if (0 != access(mount, F_OK))
+				continue;
 			quota(mount, v1, [](const std::string &dir, long &q, long &p) {
 				std::ifstream fq(dir + "/cpu.cfs_quota_us"), fp(dir + "/cpu.cfs_period_us");
 				return bool(fq >> q && fp >> p);
 			});
+			break;
+		}
 #endif
 	return std::max(1, cores);
 }
@@ -2536,7 +2544,8 @@ void CController::DeviceWatchThread()
 				std::cout << s.desc << " keeps DeviceCompand = " << CompandName(compand) << std::endl;
 			}
 			{
-				// the slots' state as the workers and a lost device's reader see it
+				// the slots' up, out and draining as the workers and a lost device's
+				// reader set and see them (recompand and compand are this thread's)
 				std::lock_guard<std::mutex> lock(hw_mux);
 				bool other = false;
 				for (size_t j = 0; j < slots.size(); j++)
