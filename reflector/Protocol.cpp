@@ -22,7 +22,9 @@
 #include "Clients.h"
 #include "ProtocolNames.h"
 #include "MmdvmClientConfig.h"
+#include "ThreadName.h"
 #include <algorithm>
+#include <cctype>
 #include <sstream>
 #include <iostream>
 #include <poll.h>
@@ -128,6 +130,31 @@ bool CProtocol::Initialize(const char *type, const EProtocol ptype, const uint16
 
 void CProtocol::Thread()
 {
+	// urfd-dextra, urfd-mmdvm, ...: the name of BlockProtocols; a client
+	// (urfd links out) is <protocol>-cl, which keeps it within the 15
+	// characters of a thread name
+	std::string name;
+	switch (m_ProtocolType)
+	{
+		case EProtocol::dextraclient: name = "dextra-cl"; break;
+		case EProtocol::dplusclient:  name = "dplus-cl";  break;
+		case EProtocol::dcsclient:    name = "dcs-cl";    break;
+		case EProtocol::ysfclient:    name = "ysf-cl";    break;
+		case EProtocol::mmdvmclient:  name = "mmdvm-cl";  break;
+		case EProtocol::svxreflector: name = "svx-cl";    break;
+		default:
+			// a plugin's protocol, too: its name, cut at 15 characters
+			name = "proto";
+			for (const auto &n : ProtocolNames())
+				if (n.second == m_ProtocolType)
+				{
+					name.clear();
+					for (char c : n.first)
+						name += char(std::tolower((unsigned char)c));
+					break;
+				}
+	}
+	SetThreadName("urfd-" + name);
 	while (keep_running)
 	{
 		Task();

@@ -29,6 +29,7 @@
 #include "DExtraClientProtocol.h"
 #include "DPlusClientProtocol.h"
 #include "YSFClientProtocol.h"
+#include "ThreadName.h"
 
 #define ADMIN_TOKEN_TTL_SECONDS   3600   // a login ends after an hour without a command
 #define ADMIN_MAX_MSG_SIZE        8192
@@ -217,6 +218,7 @@ void CAdminSocket::Stop(void)
 
 void CAdminSocket::ListenThread(void)
 {
+	SetThreadName("urfd-admin");
 	while (m_Running)
 	{
 		struct pollfd pfd{};
@@ -244,6 +246,7 @@ void CAdminSocket::ListenThread(void)
 
 void CAdminSocket::ClientThread(int clientFd, const std::string &clientAddr)
 {
+	SetThreadName("urfd-admin-cl");
 	struct timeval tv;
 	tv.tv_sec = 5;
 	tv.tv_usec = 0;

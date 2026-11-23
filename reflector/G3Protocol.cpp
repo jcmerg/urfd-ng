@@ -25,6 +25,7 @@
 #include "Global.h"
 #include "G3Client.h"
 #include "G3Protocol.h"
+#include "ThreadName.h"
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -121,6 +122,7 @@ void CG3Protocol::Close(void)
 
 void CG3Protocol::PresenceThread()
 {
+	SetThreadName("urfd-g3-pres");
 	while (keep_running)
 	{
 		PresenceTask();
@@ -129,6 +131,7 @@ void CG3Protocol::PresenceThread()
 
 void CG3Protocol::ConfigThread()
 {
+	SetThreadName("urfd-g3-config");
 	while (keep_running)
 	{
 		ConfigTask();
@@ -137,6 +140,7 @@ void CG3Protocol::ConfigThread()
 
 void CG3Protocol::IcmpThread()
 {
+	SetThreadName("urfd-g3-icmp");
 	while (keep_running)
 	{
 		IcmpTask();

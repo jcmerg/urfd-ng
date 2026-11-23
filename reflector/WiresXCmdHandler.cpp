@@ -25,6 +25,7 @@
 #include "YSFUtils.h"
 #include "WiresXCmdHandler.h"
 #include "Global.h"
+#include "ThreadName.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructor
@@ -97,6 +98,7 @@ void CWiresxCmdHandler::Close(void)
 
 void CWiresxCmdHandler::Thread()
 {
+	SetThreadName("urfd-wiresx");
 	while (keep_running)
 	{
 		Task();

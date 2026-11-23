@@ -14,6 +14,7 @@
 #include "NXDNProtocol.h"
 #include "Plugins.h"
 #include "websocket_lws_notifier.h"
+#include "ThreadName.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // what a new client gets first: reflector, modules and protocols, then the state
@@ -362,6 +363,7 @@ void CWebsocketLwsNotifier::Stop(void)
 
 void CWebsocketLwsNotifier::ServiceLoop(void)
 {
+	SetThreadName("urfd-ws");
 	while (m_Running)
 		lws_service(m_Ctx, 0);
 }
@@ -607,6 +609,7 @@ void CWebsocketLwsNotifier::Request(struct lws *wsi, uint64_t serial, const nloh
 
 void CWebsocketLwsNotifier::AdminLoop(void)
 {
+	SetThreadName("urfd-ws-admin");
 	while (true)
 	{
 		SJob job;
