@@ -26,9 +26,12 @@ inline bool OncePerSecond(std::atomic<int64_t> &stamp)
 // or last frame, not a device's answer); an answer an AMBE device owes for
 // kLostAnswerMs (bytes of it dropped on the serial line, an FTDI receive overrun) is
 // taken as lost, the reader looks every 50 ms, and its frame goes on with silence;
-// a stream's report to urfd waits kReportDelayMs after its last activity, so its
-// last frames are coded by then. A device answers in some 20-100 ms; the decode
-// refreshes the report's activity, so one device pass (the encode) is left after it
+// a stream's report to urfd waits kReportDelayMs after its last activity (the last
+// frame in from urfd, a decode's levels), so its last frames are coded by then: the
+// last frame may wait up to kWorkerMaxAgeMs for its worker (it is never dropped, and
+// nothing refreshes the activity meanwhile), then its encode on a device may lose its
+// answer (kLostAnswerMs and up to 50 ms until the reader looks), and some 300 ms for
+// the queues and a device's 20-100 ms
 constexpr int kWorkerMaxAgeMs = 400;
 constexpr int kLostAnswerMs = 300;
 constexpr int kReportDelayMs = kWorkerMaxAgeMs + kLostAnswerMs + 50 + 300;

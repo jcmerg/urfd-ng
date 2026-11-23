@@ -2536,7 +2536,9 @@ void CController::DeviceWatchThread()
 				s.recompand = false;
 				std::cout << s.desc << " keeps DeviceCompand = " << CompandName(compand) << std::endl;
 			}
-			if (!s.recompand && s.compand != compand)	// this thread's own fields: no lock for them
+			// this thread's own fields and the slot's atomics first: the lock only for a
+			// slot that could change its DeviceCompand now
+			if (!s.recompand && s.compand != compand && s.up && !s.draining && !s.out)
 			{
 				// the slots' up, out and draining as the workers and a lost device's
 				// reader set and see them (recompand and compand are this thread's)
@@ -2546,7 +2548,7 @@ void CController::DeviceWatchThread()
 					other = other || (j != i && (slots[j]->recompand	// draining for it, or closed and not yet open again
 						|| (slots[j]->out && slots[j]->stats >= 0 && !g_Stats.devices[slots[j]->stats].want_out.load())
 						|| (!slots[j]->up && !slots[j]->out && slots[j]->compand != compand)));	// or it did not open again
-				if (!other && s.up && !s.draining && !s.out && s.compand != compand
+				if (!other && s.up && !s.draining && !s.out
 					&& (UncoveredChoice(int(i)) < 0 || !SlotBusyLocked(int(i))))
 					s.recompand = true;
 			}
