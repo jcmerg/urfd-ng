@@ -2778,6 +2778,28 @@ void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
 void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
 {
 	packet->Sent();
+	// never a frame older than one this module sent of the same stream: a late
+	// answer (a device's silence for a frame it did not code, the frames left on a
+	// lost device) is of no use to urfd after the newer ones. A lower count is a new
+	// transmission on the same stream id instead when it is frame 0, far below the
+	// last one (5 s of frames), or after 2 s without a frame sent (as urfd tells
+	// transmissions apart, CSoftCodec::NewTransmission)
+	{
+		auto &last = sent_last[ModuleSlot(packet->GetModule())];
+		const uint16_t sid = packet->GetStreamId();
+		const uint32_t seq = packet->GetSequence();
+		const auto now = std::chrono::steady_clock::now();
+		if (last.valid && last.streamid == sid && seq != 0 && seq <= last.sequence
+			&& last.sequence - seq < 250 && now - last.when < std::chrono::seconds(2))
+		{
+			static std::atomic<int64_t> told[kModuleSlots] = {};
+			if (OncePerSecond(told[ModuleSlot(packet->GetModule())]))
+				std::cerr << "Module " << packet->GetModule() << ": frame " << seq << " of stream 0x" << std::hex << sid << std::dec
+				          << " came after frame " << last.sequence << ", not sent" << std::endl;
+			return;
+		}
+		last = SSentLast{ true, sid, seq, now };
+	}
 	if (!tcClient.Send(packet->GetTCPacket()))
 	{
 		g_Stats.PacketOut(packet->GetModule());

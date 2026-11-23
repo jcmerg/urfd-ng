@@ -34,4 +34,6 @@ inline bool OncePerSecond(std::atomic<int64_t> &stamp)
 // the queues and a device's 20-100 ms
 constexpr int kWorkerMaxAgeMs = 400;
 constexpr int kLostAnswerMs = 300;
+// a frame that waited this long to go to its AMBE device goes back with silence
+constexpr int kDeviceMaxWaitMs = 1000;
 constexpr int kReportDelayMs = kWorkerMaxAgeMs + kLostAnswerMs + 50 + 300;

@@ -96,9 +96,10 @@ protected:
 	// a packet for a channel, as the module's worker handed it over: one packet can
 	// come twice, for a D-Star and a DMR channel of one device (mixed mode, pool);
 	// decode: the channel decodes its AMBE frame, else it encodes its audio
-	struct SFeed { std::shared_ptr<CTranscoderPacket> packet; uint8_t channel; bool decode; };
+	struct SFeed { std::shared_ptr<CTranscoderPacket> packet; uint8_t channel; bool decode; int64_t queued_ms; };
 	CBlockingQueue<SFeed> input_queue;
-	std::atomic<int64_t> m_toldQueue{0};	// SteadyMs of the last "packets wait" line
+	std::atomic<int64_t> m_toldQueue{0};
+	std::atomic<int64_t> m_toldStale{0};	// SteadyMs of the last "waited more than" line
 	std::future<void> feedFuture, readFuture;
 	std::string description, productid;
 	std::atomic<int32_t> m_outputGainDStar{256}, m_outputGainDmr{256};
@@ -139,6 +140,16 @@ protected:
 	// the answer to the packet goes to its module's worker, which puts it into the packet
 	void Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer);
 	SDeviceAnswer SilenceAnswer(uint8_t channel, bool decode) const;
+	// a packet the device does not code (too late for it, the device lost or closed):
+	// silence to its module's worker. It may come after newer frames of its stream;
+	// the controller does not send a frame older than one it sent (SendToReflector)
+	void AnswerSilence(const SFeed &feed);
+	// all packets left on a lost or closed device answered with silence: those it was
+	// sent (the reader's, or after the reader ended) and those not sent yet
+	void AnswerWaiting(void);
+	void AnswerQueued(void);
+	// the device was lost: the feeder answers what comes with silence, sends nothing
+	std::atomic<bool> m_dead{false};
 
 	// reading the answers while running: bytes read ahead first, then the device
 	std::deque<uint8_t> rx;

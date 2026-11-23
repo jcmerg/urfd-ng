@@ -125,6 +125,9 @@ protected:
 	void RunJob(SJob &job);
 	// the packet to the reflector once every codec is set (only its worker sets them)
 	void SendIfDone(const std::shared_ptr<CTranscoderPacket> &packet);
+	// the last frame each module sent (its worker's): SendToReflector sends none older
+	struct SSentLast { bool valid; uint16_t streamid; uint32_t sequence; std::chrono::steady_clock::time_point when; };
+	SSentLast sent_last[kModuleSlots] = {};
 	CTCClient tcClient;
 	// an AMBE device in use: how to open it again, its channels' codecs, and
 	// whether it answers. A lost device is left to the codec plugins and opened

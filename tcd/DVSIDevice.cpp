@@ -63,7 +63,13 @@ void CDVDevice::AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> pack
 	// what the channel does, decided here in the packet's worker: it decodes the
 	// frame of its codec when the packet has one, else it encodes the audio
 	const bool decode = (Encoding::dstar == GetChannelEncoding(channel)) ? packet->DStarIsSet() : packet->DMRIsSet();
-	const auto size = input_queue.push(SFeed{ packet, channel, decode });
+	SFeed feed{ packet, channel, decode, SteadyMs() };
+	const auto size = input_queue.push(std::move(feed));
+	if (0 == size)
+	{
+		AnswerSilence(feed);	// closed meanwhile (push leaves a refused feed as it was)
+		return;
+	}
 	if (size > 200 && OncePerSecond(m_toldQueue))
 		std::cerr << description << ": " << size << " packets wait to go to the device" << std::endl;
 }
@@ -72,6 +78,10 @@ void CDVDevice::AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> pack
 // or, without a handler, tcd stops and its service restarts it without the device
 void CDVDevice::Lost(void)
 {
+	// from the reader, which ends after this: what was sent gets silence now, what
+	// comes from now on too (the feeder), so the streams go on at once
+	m_dead = true;
+	AnswerWaiting();
 	if (m_onLost)
 		m_onLost();
 	else
@@ -103,6 +113,9 @@ void CDVDevice::CloseDevice()
 		readFuture.get();
 	if (device)
 		device->Close();
+	// what is left: sent but not answered, and not sent yet
+	AnswerWaiting();
+	AnswerQueued();
 }
 
 void CDVDevice::FTDI_Error(const char *where, int err) const
@@ -610,17 +623,35 @@ void CDVDevice::FeedDevice()
 		if (!input_queue.pop(feed))	// blocks until there is something to pop, unless shutting down
 			break;
 		const auto &packet = feed.packet;
+		// a lost device sends nothing; a device slower than the frames come (but not
+		// hung) would queue them without end: a frame that waited kDeviceMaxWaitMs
+		// goes back with silence
+		if (m_dead || SteadyMs() - feed.queued_ms > kDeviceMaxWaitMs)
 		{
-			{	// wait until there is room in chip FIFO, at most 50 ms: a frame then goes
-				// anyway, so a hung device keeps frames waiting and DEVICE_SILENCE_MS
-				// catches it (waiting for room without end hid a hung device)
+			if (!m_dead && OncePerSecond(m_toldStale))
+				std::cerr << description << ": frames waited more than " << kDeviceMaxWaitMs << " ms to go to the device, silence instead" << std::endl;
+			AnswerSilence(feed);
+			continue;
+		}
+		{
+			{	// wait until there is room in chip FIFO: an answer, or one the reader
+				// takes as lost (Resync), makes it; the 50 ms only guard a missed
+				// wake-up. A frame never goes into a full FIFO (the chip would drop it,
+				// and the next answer would go to the wrong packet); a hung chip is
+				// still caught by DEVICE_SILENCE_MS (Resync keeps its stamp while
+				// frames wait here)
 				const unsigned int max_depth = (Edvtype::dv3003 == devtype) ? 5 : 2;
 				std::unique_lock<std::mutex> lk(buffer_mutex);
-				buffer_cv.wait_for(lk, std::chrono::milliseconds(50),
-					[&]{ return !keep_running || buffer_depth < max_depth; });
+				while (!buffer_cv.wait_for(lk, std::chrono::milliseconds(50),
+					[&]{ return !keep_running || m_dead || buffer_depth < max_depth; }))
+					;
 			}
 
-			if (keep_running)
+			if (!keep_running || m_dead)
+			{
+				AnswerSilence(feed);	// closed or lost while it waited
+				continue;
+			}
 			{
 				const uint8_t index = feed.channel;
 				// save the packet in the vocoder's queue while the vocoder does its magic
@@ -802,6 +833,38 @@ SDeviceAnswer CDVDevice::SilenceAnswer(uint8_t channel, bool decode) const
 	return answer;
 }
 
+void CDVDevice::AnswerSilence(const SFeed &feed)
+{
+	g_Cont.DeviceAnswer(feed.packet, SilenceAnswer(feed.channel, feed.decode));
+}
+
+void CDVDevice::AnswerWaiting(void)
+{
+	std::vector<std::pair<uint8_t, SWaiting>> left;
+	{
+		std::lock_guard<std::mutex> lock(waiting_mx);
+		for (uint8_t ch = 0; ch < 3; ch++)
+		{
+			for (const auto &w : waiting[ch])
+				left.emplace_back(ch, w);
+			waiting[ch].clear();
+		}
+		buffer_depth = 0;
+	}
+	for (const auto &[ch, w] : left)
+		g_Cont.DeviceAnswer(w.packet, SilenceAnswer(ch, w.decode));
+	{	// a feeder waiting for room in the FIFO goes on
+		std::lock_guard<std::mutex> lk(buffer_mutex);
+	}
+	buffer_cv.notify_all();
+}
+
+void CDVDevice::AnswerQueued(void)
+{
+	for (const auto &f : input_queue.TakeAll())
+		AnswerSilence(f);
+}
+
 void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer)
 {
 	answer.enc = ch_enc;
@@ -865,11 +928,12 @@ void CDVDevice::Resync(void)
 			LostAnswer(ch, "no answer came");
 		}
 	}
-	// the last frames of a stream whose answers were lost: nothing waits any more, so
-	// this is no hung device (one keeps getting frames, which then wait)
+	// the last frames of a stream whose answers were lost: nothing waits any more, on
+	// the device or to go to it, so this is no hung device (one keeps getting frames,
+	// which then wait in the input queue while the FIFO is full)
 	{
 		std::lock_guard<std::mutex> lock(waiting_mx);
-		if (0 == buffer_depth)
+		if (0 == buffer_depth && 0 == input_queue.Size())
 			m_unanswered.store(0);
 	}
 }
