@@ -49,7 +49,6 @@
 // a packet unanswered for this long lost its answer (bytes of it dropped on the
 // serial line, an FTDI receive overrun, and with them the channel it was for); a
 // channel answers in order, the busiest within some 60 ms
-#define LOST_ANSWER_MS kLostAnswerMs
 
 // what goes on for a lost answer: the silence frames of the vocoders, silent audio
 static const uint8_t DSTAR_SILENCE[9] { 0x9EU, 0x8DU, 0x32U, 0x88U, 0x26U, 0x1AU, 0x3FU, 0x61U, 0xE8U };
@@ -616,11 +615,14 @@ void CDVDevice::FeedDevice()
 			break;
 		const auto &packet = feed.packet;
 		{
-			{	// wait until there is room in chip FIFO
+			{	// wait until there is room in chip FIFO: an answer, or one the reader
+				// takes as lost (Resync), makes it; the 50 ms only guard a missed wake-up,
+				// a frame never goes into a full FIFO (the chip would drop it)
 				const unsigned int max_depth = (Edvtype::dv3003 == devtype) ? 5 : 2;
 				std::unique_lock<std::mutex> lk(buffer_mutex);
-				buffer_cv.wait_for(lk, std::chrono::milliseconds(50),
-					[&]{ return !keep_running || buffer_depth < max_depth; });
+				while (!buffer_cv.wait_for(lk, std::chrono::milliseconds(50),
+					[&]{ return !keep_running || buffer_depth < max_depth; }))
+					;
 			}
 
 			if (keep_running)
@@ -862,7 +864,7 @@ void CDVDevice::Resync(void)
 		{
 			{
 				std::lock_guard<std::mutex> lock(waiting_mx);
-				if (waiting[ch].empty() || now - waiting[ch].front().sent < LOST_ANSWER_MS)
+				if (waiting[ch].empty() || now - waiting[ch].front().sent < kLostAnswerMs)
 					break;
 			}
 			LostAnswer(ch, "no answer came");

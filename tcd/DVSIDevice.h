@@ -131,7 +131,7 @@ protected:
 	// an answer of the channel was lost (a byte of it dropped on the serial line): its
 	// packet goes on with a silent frame, the next answer belongs to the next packet
 	void LostAnswer(uint8_t channel, const char *why);
-	// packets left unanswered for LOST_ANSWER_MS: their answers were lost. Mostly the
+	// packets left unanswered for kLostAnswerMs (SteadyClock.h): their answers were lost. Mostly the
 	// last ones of a stream, which no later answer of their channel follows; while a
 	// stream runs, a lost answer whose channel is not known costs it 20 ms until then
 	void Resync(void);

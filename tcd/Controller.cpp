@@ -1277,8 +1277,7 @@ static int UsableCores(void)
 	if (0 == sched_getaffinity(0, sizeof(set), &set) && CPU_COUNT(&set) > 0)
 		cores = CPU_COUNT(&set);
 	// the process's cgroup (/proc/self/cgroup): v2 "0::/<path>", v1 "<n>:cpu,cpuacct:/<path>"
-	std::string v2, v1;
-	bool have_v2 = false, have_v1 = false;
+	std::string v2, v1;	// empty: none (a path always starts with '/')
 	{
 		std::ifstream cg("/proc/self/cgroup");
 		std::string line;
@@ -1292,15 +1291,9 @@ static int UsableCores(void)
 				continue;
 			const std::string ctrl = line.substr(a + 1, b - a - 1), path = line.substr(b + 1);
 			if (ctrl.empty() && line.compare(0, a, "0") == 0)
-			{
 				v2 = path;
-				have_v2 = true;
-			}
 			else if (("," + ctrl + ",").find(",cpu,") != std::string::npos)
-			{
 				v1 = path;
-				have_v1 = true;
-			}
 		}
 	}
 	// its cgroup and those above it: the smallest quota counts, rounded up to whole cores
@@ -1316,7 +1309,7 @@ static int UsableCores(void)
 			path = slash == 0 || slash == std::string::npos ? std::string("/") : path.substr(0, slash);
 		}
 	};
-	if (have_v2)	// cpu.max: "<quota> <period>" or "max <period>"
+	if (!v2.empty())	// cpu.max: "<quota> <period>" or "max <period>"
 		quota("/sys/fs/cgroup", v2, [](const std::string &dir, long &q, long &p) {
 			std::ifstream f(dir + "/cpu.max");
 			std::string s;
@@ -1325,7 +1318,7 @@ static int UsableCores(void)
 			q = atol(s.c_str());
 			return true;
 		});
-	if (have_v1)	// cpu.cfs_quota_us (-1: none) and cpu.cfs_period_us, at the first mount there is
+	if (!v1.empty())	// cpu.cfs_quota_us (-1: none) and cpu.cfs_period_us, at the first mount there is
 		for (const char *mount : { "/sys/fs/cgroup/cpu", "/sys/fs/cgroup/cpu,cpuacct" })
 		{
 			if (0 != access(mount, F_OK))
@@ -2543,6 +2536,7 @@ void CController::DeviceWatchThread()
 				s.recompand = false;
 				std::cout << s.desc << " keeps DeviceCompand = " << CompandName(compand) << std::endl;
 			}
+			if (!s.recompand && s.compand != compand)	// this thread's own fields: no lock for them
 			{
 				// the slots' up, out and draining as the workers and a lost device's
 				// reader set and see them (recompand and compand are this thread's)
