@@ -32,7 +32,7 @@ tcd converts voice between the digital modes on a URF reflector, so a D-Star use
 - [Operation and troubleshooting](#operation-and-troubleshooting)
 - [Changes from upstream](#changes-from-upstream)
 
-The measurements and listening tests behind the defaults are in [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md).
+The measurements and listening tests behind the defaults are in [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md), the module workers in detail in [docs/WORKERS.md](docs/WORKERS.md).
 
 ## Install
 
@@ -148,7 +148,7 @@ By default the AMBE channels belong to the first modules of `Modules`. With `Dev
 
 ### A device lost while tcd runs
 
-A device that is unplugged, or that leaves a packet unanswered for 1 s (a hung chip), is taken out: its streams, also the ones on the air, go to a codec plugin, and tcd opens the device again as soon as it is back (looked for every 5 s by its `/dev/serial/by-id` name, so a replug may give it another node). New streams use it again from then on. Without a plugin for one of the device's codecs tcd stops instead; systemd (or Docker) restarts it, or a [standby tcd](#standby-a-second-tcd-for-the-same-modules) takes the modules. A device missing at the start is only used after the next start of tcd.
+A device that is unplugged, or that leaves a packet unanswered for 1 s (a hung chip), is taken out: the frames on it go on with silence, its streams, also the ones on the air, go to a codec plugin, and tcd opens the device again as soon as it is back (looked for every 5 s by its `/dev/serial/by-id` name, so a replug may give it another node). New streams use it again from then on. Without a plugin for one of the device's codecs tcd stops instead; systemd (or Docker) restarts it, or a [standby tcd](#standby-a-second-tcd-for-the-same-modules) takes the modules. A device missing at the start is only used after the next start of tcd.
 
 ### Lost answers (`DeviceCompand`)
 
@@ -213,9 +213,9 @@ Frame formats: D-Star as the 9 data bytes of a DV frame, DMR/YSF as the 72 bits 
 
 ### Module workers
 
-Each module belongs to one of tcd's workers (`Workers` in tcd.ini, `auto`: one per CPU core tcd may use, in Docker within its `--cpus` / `--cpuset-cpus`). The worker does everything for its module's frames, one codec after the other: decoding, AGC, encoding to the other codecs in software, the AMBE devices' answers and sending the frames back to urfd. Workers run at the same time, so the modules share the CPU cores and a module that takes long does not hold up the modules of other workers. A worker that falls behind (a codec plugin that hangs, a reflector that reads no more) drops the frames that waited for it longer than 400 ms, except a stream's first and last and the AMBE devices' answers, and says so in the log; the monitor shows each worker's load and longest wait. The modules are dealt out in turn in the order of `Modules` and `StandbyModules`; the log names the split at start (`4 module workers: AE BF CG DH`).
+Each module belongs to one of tcd's workers (`Workers` in tcd.ini, `auto`: one per CPU core tcd may use, in Docker within its `--cpus` / `--cpuset-cpus`), which does all the work on its frames. The workers run at the same time, so the modules share the CPU cores, and a module that takes long does not hold up the modules of other workers. The modules are dealt out in turn in the order of `Modules` and `StandbyModules`; the log names the split at start (`4 module workers: AE BF CG DH`), and the [web dashboard](#web-dashboard) and `tcdmon` show each worker's load and the longest a frame waited for it. A worker that falls behind drops frames that waited for it longer than 400 ms and says so in the log.
 
-The AMBE devices keep their own threads for the serial line; a worker hands them a frame and goes on with other frames meanwhile. tcd's own vocoders (OP25, Codec2) run in parallel; a codec plugin does when it sets `TCD_PLUGIN_CONCURRENT` (API 5), otherwise one worker at a time uses it and the log says so at start. Measured on a Raspberry Pi 5: 26 modules transcoding at the same time in all protocols take less than half of one core ([measurements](docs/MEASUREMENTS.md#cpu-load-and-latency)).
+tcd's own vocoders (OP25, Codec2) run in parallel; a codec plugin does when it sets `TCD_PLUGIN_CONCURRENT` (API 5), otherwise one worker at a time uses it and the log says so at start. Measured on a Raspberry Pi 5: 26 modules transcoding at the same time in all protocols take less than half of one core ([measurements](docs/MEASUREMENTS.md#cpu-load-and-latency)). How the workers, the AMBE devices and the report to urfd work in detail: [docs/WORKERS.md](docs/WORKERS.md).
 
 ## tcd in Docker
 

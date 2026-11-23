@@ -91,3 +91,4 @@ The IMBE decoder puts extra energy below 120 Hz into its audio, which threw Code
   | 26 modules of USRP (heaviest: every codec encoded) | 60 %, 0.6 ms, at most 7.0 ms | 50 %, 0.5 ms, at most 3.3 ms |
 
   No frame was lost. One thread per codec behaved the same on one core as on four: every codec thread waited for the plugin, which tcd called from one thread at a time.
+- Module workers on a Raspberry Pi 4, the same load: with 4 workers (`auto`) no frame lost, 26 modules mixed 99 % within 2.3 ms (all 26 frames at the same instant 9.4 ms), 26 × USRP 99 % within 2.0 ms at about a third of each core. One worker keeps up with 26 modules mixed (two thirds of a core) but not with 26 × USRP: the core is full and the worker drops frames older than 400 ms. A Pi 4 needs `Workers = auto` (or 2 and more) for 26 busy modules; on a Pi 5 one worker is enough.

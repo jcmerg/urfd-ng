@@ -97,9 +97,9 @@ protected:
 	// come twice, for a D-Star and a DMR channel of one device (mixed mode, pool);
 	// decode: the channel decodes its AMBE frame, else it encodes its audio
 	struct SFeed { std::shared_ptr<CTranscoderPacket> packet; uint8_t channel; bool decode; int64_t queued_ms; };
-	std::atomic<int64_t> m_toldStale{0};	// SteadyMs of the last "too late for the device" line
 	CBlockingQueue<SFeed> input_queue;
-	std::atomic<int64_t> m_toldQueue{0};	// SteadyMs of the last "packets wait" line
+	std::atomic<int64_t> m_toldQueue{0};
+	std::atomic<int64_t> m_toldStale{0};	// SteadyMs of the last "waited more than" line
 	std::future<void> feedFuture, readFuture;
 	std::string description, productid;
 	std::atomic<int32_t> m_outputGainDStar{256}, m_outputGainDmr{256};
@@ -125,14 +125,15 @@ protected:
 	};
 	std::deque<SWaiting> waiting[3];
 	std::mutex waiting_mx;
-	void PushWaiting(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, bool decode);
+	// false once the device is lost (the frame then goes on with silence)
+	bool PushWaiting(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, bool decode);
 	// the packet the next answer of the channel is for (nullptr when none waits);
 	// decode tells what it was sent for
 	std::shared_ptr<CTranscoderPacket> PopWaiting(uint8_t channel, bool *decode = nullptr);
 	// an answer of the channel was lost (a byte of it dropped on the serial line): its
 	// packet goes on with a silent frame, the next answer belongs to the next packet
 	void LostAnswer(uint8_t channel, const char *why);
-	// packets left unanswered for LOST_ANSWER_MS: their answers were lost. Mostly the
+	// packets left unanswered for kLostAnswerMs (SteadyClock.h): their answers were lost. Mostly the
 	// last ones of a stream, which no later answer of their channel follows; while a
 	// stream runs, a lost answer whose channel is not known costs it 20 ms until then
 	void Resync(void);
@@ -140,6 +141,21 @@ protected:
 	// the answer to the packet goes to its module's worker, which puts it into the packet
 	void Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer);
 	SDeviceAnswer SilenceAnswer(uint8_t channel, bool decode) const;
+	// a packet the device does not code (too late for it, the device lost or closed):
+	// silence to its module's worker. All silence of a lost or closed device goes out
+	// under m_silenceMx, the frames it was sent first, so a stream's answers stay in
+	// order (urfd drops a frame that comes after a newer one of its stream)
+	void AnswerSilence(const SFeed &feed);
+	void AnswerSilenceLocked(const SFeed &feed);	// with m_silenceMx
+	std::atomic<bool> m_feeding{false};	// the feeder holds a frame to go (popped, not sent or answered)
+	// with m_silenceMx: the frames sent to it answered with silence; dead: from now on
+	// it takes none (Lost)
+	void AnswerWaitingLocked(bool dead);
+	std::mutex m_silenceMx;
+	std::vector<SFeed> m_refused;	// pushed while it closed: answered after the frames left on it
+	bool m_leftAnswered = false;	// CloseDevice answered what was left (with m_silenceMx)
+	// the device was lost: the feeder answers what comes with silence, sends nothing
+	std::atomic<bool> m_dead{false};
 
 	// reading the answers while running: bytes read ahead first, then the device
 	std::deque<uint8_t> rx;
