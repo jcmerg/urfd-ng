@@ -748,11 +748,9 @@ int main(int argc, char *argv[])
 			std::string active_mod = json_str(sw_json, "active_module");
 			bool active = !active_mod.empty();
 			bool builtin = json_bool(sw_json, "builtin");
-			bool reencode = json_bool(sw_json, "reencode_active");
 			int cached = json_int(sw_json, "cached_streams");
 			int enc = json_int(sw_json, "encodes");
 			int dec = json_int(sw_json, "decodes");
-			int re = json_int(sw_json, "reencodes");
 			int direct = json_int(sw_json, "transcodes");
 
 			if (active) attron(COLOR_PAIR(7) | A_BOLD);
@@ -764,8 +762,6 @@ int main(int argc, char *argv[])
 				printw("  %s (built in) [%s]", name.c_str(), codec.c_str());
 			else
 				printw("  %s (codec plugin) [%s]  active:%d", name.c_str(), codec.c_str(), cached);
-			if (codec == "dmr")
-				printw("  re-enc:%s", reencode ? "ON" : "off");
 			if (active)
 			{
 				attron(COLOR_PAIR(7));
@@ -774,8 +770,6 @@ int main(int argc, char *argv[])
 			}
 			attron(COLOR_PAIR(5));
 			printw("  dec:%s enc:%s", TS(dec), TS(enc));
-			if (codec == "dmr")
-				printw(" re:%s", TS(re));
 			if (direct)
 				printw(" direct:%s", TS(direct));
 			attroff(COLOR_PAIR(5));
@@ -869,6 +863,11 @@ int main(int argc, char *argv[])
 			json_num(cfg_json, "outgain_dstar"), json_num(cfg_json, "outgain_m17"),
 			json_num(cfg_json, "outgain_dmr"),
 			json_num(cfg_json, "outgain_imbe"), json_num(cfg_json, "outgain_usrp"));
+		// X -> X: the AGC in the frames (+) or passed on unchanged (-)
+		printw("  X>X DMR%c DSt%c P25%c M17%c USRP%c",
+			json_bool(cfg_json, "same_dmr") ? '+' : '-', json_bool(cfg_json, "same_dstar") ? '+' : '-',
+			json_bool(cfg_json, "same_p25") ? '+' : '-', json_bool(cfg_json, "same_m17") ? '+' : '-',
+			json_bool(cfg_json, "same_usrp") ? '+' : '-');
 		attroff(COLOR_PAIR(5));
 		}
 

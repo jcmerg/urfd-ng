@@ -93,8 +93,8 @@ private:
 	// of the decoder's state it codes from (another start there: a new transmission)
 	enum EUse : uint8_t { kUnused, kTranscode, kAudio };
 	struct SState { void *state; std::chrono::steady_clock::time_point last_used; uint32_t sequence; bool running; EUse use; uint64_t start; uint64_t source; };
-	// a state per stream and direction: decoding and encoding the same stream (DMR
-	// reencode) each begin and end on their own, a start resets the plugin's state
+	// a state per stream and direction: decoding and encoding the same stream each
+	// begin and end on their own, a start resets the plugin's state
 	// stream: CTranscoderPacket::GetStreamKey, the module above the stream id (bits 16-23)
 	static uint32_t Key(uint32_t stream, bool encode) { return (encode ? 0x80000000u : 0u) | stream; }
 	// the target's encoder state for Transcode from codec `from` (TCD_CODEC_*, bits

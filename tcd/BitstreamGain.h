@@ -2,7 +2,7 @@
 
 // Level changes in the frames of P25 (IMBE 4400) and M17 (Codec2 3200 and
 // 1600) without decoding and coding them again, for P25 -> P25 and M17 -> M17
-// (P25GainMode, M17GainMode = bitstream), as CAmbeGain does for DMR and
+// (P25GainMode, M17GainMode = on), as CAmbeGain does for DMR and
 // DStarAmbe::Gain (AmbeGain.h) for D-Star.
 //
 // IMBE: tcd's P25 frame is the 88 parameter bits û0..û7 (most significant bit

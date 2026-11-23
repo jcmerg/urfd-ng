@@ -95,8 +95,6 @@ int main(int argc, char *argv[])
 	g_Stats.config.gain_dstar_out.store(g_Conf.GetGain(EGainType::dstarout));
 	g_Stats.config.gain_dmr_in.store(g_Conf.GetGain(EGainType::dmrin));
 	g_Stats.config.gain_dmr_out.store(g_Conf.GetGain(EGainType::dmrout));
-	g_Stats.config.gain_dmr_reencode.store(g_Conf.GetGain(EGainType::dmrreencode));
-	g_Stats.config.gain_dstar_reencode.store(g_Conf.GetGain(EGainType::dstarreencode));
 	g_Stats.config.outgain_dstar.store(g_Conf.GetGain(EGainType::outgain_dstar));
 	g_Stats.config.outgain_dmr.store(g_Conf.GetGain(EGainType::outgain_dmr));
 	g_Stats.config.outgain_dmr_bitstream.store(g_Conf.GetOutputGainDMRBitstream());
@@ -104,13 +102,9 @@ int main(int argc, char *argv[])
 	g_Stats.config.outgain_usrp.store(g_Conf.GetGain(EGainType::outgain_usrp));
 	g_Stats.config.outgain_imbe.store(g_Conf.GetGain(EGainType::outgain_imbe));
 	g_Stats.config.outgain_m17.store(g_Conf.GetGain(EGainType::outgain_m17));
-	g_Stats.config.dmr_gain_mode.store((int)g_Conf.GetDmrGainMode());
-	g_Stats.config.ambe_gain_db.store(g_Conf.GetAmbeGainDb());
-	g_Stats.config.dstar_gain_mode.store((int)g_Conf.GetDStarGainMode());
-	g_Stats.config.dstar_ambe_gain_db.store(g_Conf.GetDStarAmbeGainDb());
-	g_Stats.config.p25_gain_mode.store(g_Conf.GetP25GainBitstream() ? 1 : 0);
-	g_Stats.config.m17_gain_mode.store(g_Conf.GetM17GainBitstream() ? 1 : 0);
-	g_Stats.config.usrp_gain_mode.store(g_Conf.GetUSRPGainAgc() ? 1 : 0);
+	static_assert(std::size(decltype(g_Stats.config.same_mode){}) == CConfigure::kSameModes, "same_mode per ESameMode");
+	for (int k = 0; k < CConfigure::kSameModes; k++)
+		g_Stats.config.same_mode[k].store(g_Conf.GetSameMode(k));
 	g_Stats.config.transcode_direct.store(g_Conf.GetTranscodeDirect());
 
 	if (g_Cont.Start())
