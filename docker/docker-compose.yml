@@ -22,6 +22,7 @@ services:
         optfiles: .
       args:
         DHT: ${URFD_DHT:-true}
+        APT_MIRROR: ${APT_MIRROR:-}
     image: urfd:latest
     container_name: urfd
     # built here, not pulled: watchtower and the like must leave it alone
@@ -62,6 +63,8 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.tcd
+      args:
+        APT_MIRROR: ${APT_MIRROR:-}
     image: urfd-tcd:latest
     container_name: tcd
     # built here, not pulled: watchtower and the like must leave it alone
