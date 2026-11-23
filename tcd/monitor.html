@@ -175,6 +175,12 @@ table:not(.narrow) td.slot.first { padding-left: 1.4rem; }
 /* the reflector link in one line above the vocoder table, which takes the whole width */
 .kv.line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.6rem; }
 .kv.line dd + dt { margin-left: 1.4rem; }
+/* a worker's modules and its numbers stay together when the line wraps; many
+   modules (Workers = 1) wrap among themselves, the numbers stay next to them */
+.kv.line .wk { display: flex; align-items: baseline; gap: 0.35rem 0.6rem; max-width: 100%; }
+.kv.line .wk dt { display: flex; flex-wrap: wrap; row-gap: 0.2rem; min-width: 0; }
+.kv.line .wk dd { white-space: nowrap; }
+#workers { column-gap: 1.4rem; }	/* between the workers, no indent where a line wraps */
 .empty { color: var(--graphite); padding-block: 1.25rem; text-align: center; }
 
 /* settings */
@@ -719,8 +725,8 @@ function render() {
   $('workers-box').hidden = !ws.length;
   var wrk = ws.map(function (w) {
     var hot = w.busy >= 70 || w.wait_ms >= 20;
-    return '<dt>' + w.modules.split('').map(function (m) { return '<span class="mod-tag">' + esc(m) + '</span>'; }).join('') + '</dt>' +
-      '<dd' + (hot ? ' class="state-bad"' : '') + '>' + Math.round(w.busy) + ' % <span class="muted">·</span> ' + w.wait_ms.toFixed(1) + ' ms</dd>';
+    return '<div class="wk"><dt>' + w.modules.split('').map(function (m) { return '<span class="mod-tag">' + esc(m) + '</span>'; }).join('') + '</dt>' +
+      '<dd' + (hot ? ' class="state-bad"' : '') + '>' + Math.round(w.busy) + ' % <span class="muted">·</span> ' + w.wait_ms.toFixed(1) + ' ms</dd></div>';
   }).join('');
   if (wrk !== lastWorkers) { $('workers').innerHTML = wrk; lastWorkers = wrk; }
 

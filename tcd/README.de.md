@@ -288,7 +288,7 @@ Ein Gerät, das sich nicht öffnen lässt oder nicht antwortet, wird mit einer W
 | `CodecPlugin` | `op25`, `codec2` | zu ladendes Codec-Plugin, je eine Zeile: der Pfad eines Shared Objects, oder `op25` / `codec2` für die eigenen (siehe [Codec-Plugins](#codec-plugins)) |
 | `CodecDStar` / `CodecDMR` / `CodecP25` / `CodecM17` | — | der Vocoder für neue Streams: `dvsi`, `op25`, `codec2` oder der Name eines Plugins; von „Save“ gespeichert |
 | `Transcode` | `direct` | `direct`: D-Star, DMR/YSF und P25 werden, wo ein Plugin es kann, aus den Vocoder-Parametern ineinander codiert; `audio`: jeder Codec aus dem decodierten Audio (siehe [Codec-Plugins](#codec-plugins)) |
-| `Workers` | `auto` | die Threads, die die Module codieren, jedes Modul auf einem davon; `auto`: einer je CPU-Kern, höchstens einer je Modul; oder 1 bis 26 (siehe [Modul-Worker](#modul-worker)) |
+| `Workers` | `auto` | die Threads, die die Module codieren, jedes Modul auf einem davon; `auto`: einer je CPU-Kern, den tcd nutzen darf (in Docker innerhalb von `--cpus` / `--cpuset-cpus`), höchstens einer je Modul; oder 1 bis 26 (siehe [Modul-Worker](#modul-worker)) |
 | `DeviceChannels` | — (Standard `fixed`) | `fixed`: die AMBE-Kanäle gehören den ersten Modulen; `pool`: ein Stream nimmt einen beliebigen freien Kanal (siehe [Kanal-Pool](#kanal-pool-devicechannels--pool)) |
 | `DeviceCompand` | — (Standard `linear`) | Audio zu und von den AMBE-Geräten: `linear` (16 Bit), `ulaw` oder `alaw` (8-Bit-G.711, siehe [Verlorene Antworten](#verlorene-antworten-devicecompand)); von „Save“ gespeichert |
 
@@ -425,6 +425,7 @@ Nach jedem Durchgang sagt tcd urfd, wie er klang: Pegel und Spitze vor der AGC, 
 - „Phase out“ nimmt ein Gerät außer Betrieb (die Streams darauf laufen zu Ende, dann kann es abgezogen werden), „Take back“ öffnet es wieder; nur für ein Gerät, dessen Codecs ein Codec-Plugin abdeckt
 - der Vocoder für neue D-Star-, DMR-, P25- und M17-Streams, „AMBE channels“ (fest oder Pool), „AMBE speech“ (`DeviceCompand`) und die direkte Transcodierung, im Betrieb umschaltbar
 - die Verbindung zum Reflektor mit ihren Paketzählern; ein Standby-Modul zeigt „standby“ oder „taken over“
+- die [Modul-Worker](#modul-worker): je Worker seine Module, der Anteil eines CPU-Kerns, den er in der letzten Sekunde gearbeitet hat, und die längste Wartezeit eines Frames auf ihn (rot ab 70 % oder 20 ms)
 - helles und dunkles Design; die Seite lädt nichts von außen
 
 <details>
@@ -453,7 +454,7 @@ tcdmon                      # dieser Rechner, der MonitorStatsPort seiner tcd.in
 tcdmon 192.0.2.20 8081      # ein anderer Rechner
 ```
 
-Ohne Port nimmt tcdmon den `MonitorStatsPort` aus der `tcd.ini` dieses Rechners (`$TCD_INI`, `/usr/local/etc/tcd/tcd.ini` im Docker-Image oder `/usr/local/etc/tcd.ini`), sonst 8081. Er zeigt für jedes Modul auf Sendung eine Karte mit Pegelbalken und Signalweg und die übrigen in einer Zeile, den Zustand der AGC, die AMBE-Geräte und die Codec-Plugins sowie die Ausgangs-Gains. `q` beendet.
+Ohne Port nimmt tcdmon den `MonitorStatsPort` aus der `tcd.ini` dieses Rechners (`$TCD_INI`, `/usr/local/etc/tcd/tcd.ini` im Docker-Image oder `/usr/local/etc/tcd.ini`), sonst 8081. Er zeigt für jedes Modul auf Sendung eine Karte mit Pegelbalken und Signalweg und die übrigen in einer Zeile, den Zustand der AGC, die AMBE-Geräte und die Codec-Plugins, die Modul-Worker mit Auslastung und längster Wartezeit sowie die Ausgangs-Gains. `q` beendet.
 
 ### Statistik-CSV und agc-analyze
 
