@@ -19,15 +19,13 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <deque>
-#include <vector>
-#include <iterator>
 #include <mutex>
 #include <condition_variable>
 #include <memory>
 #include <cstdint>
 
 // a blocking queue between threads: pop waits for an item; after Shutdown pop
-// gives up at once, a push is refused, and what is left stays for TakeAll
+// gives up at once, and what is left or pushed after is dropped
 template <typename T>
 class CBlockingQueue
 {
@@ -54,19 +52,13 @@ public:
 		std::unique_lock<std::mutex> lock(mx);
 		cv.wait(lock, [this] { return stop || !q.empty(); });
 		if (stop)
-			return false;	// what is left stays for TakeAll
+		{
+			q.clear();
+			return false;
+		}
 		item = std::move(q.front());
 		q.pop_front();
 		return true;
-	}
-
-	// everything left (after Shutdown: what pop did not take)
-	std::vector<T> TakeAll()
-	{
-		std::lock_guard<std::mutex> lock(mx);
-		std::vector<T> all(std::make_move_iterator(q.begin()), std::make_move_iterator(q.end()));
-		q.clear();
-		return all;
 	}
 
 	std::size_t Size()

@@ -2506,7 +2506,7 @@ bool CController::SlotBusyLocked(int i)
 	for (const auto &list : hw_channels)
 		for (const auto &c : list)
 			busy = busy || (c.slot == i && (c.busy || now - c.last < std::chrono::seconds(1)));
-	return busy || (s.dev && s.up && (s.dev->Unanswered() > 0 || s.dev->QueuedPackets() > 0));
+	return busy || (s.dev && s.up && (s.dev->GetBufferDepth() > 0 || s.dev->QueuedPackets() > 0));
 }
 
 bool CController::SlotBusy(int i)

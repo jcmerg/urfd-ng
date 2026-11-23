@@ -128,8 +128,7 @@ void CDV3003::ProcessPacket(const SDV_Packet &p)
 		dump("ReadDevice() ERROR: a packet for no channel:", &p, packet_size(p));
 		return;
 	}
-	bool decode = false;
-	auto packet = PopWaiting(uint8_t(channel), &decode);
+	auto packet = PopWaiting(uint8_t(channel));
 	if (!packet)
 	{
 		// a blocking wait here held up the reader for good: nothing that will come
@@ -158,13 +157,10 @@ void CDV3003::ProcessPacket(const SDV_Packet &p)
 		else
 		{
 			dump("ReadDevice() ERROR: Read an unexpected device packet:", &p, packet_size(p));
-			// the packet it was taken for goes on with silence (and the silent ones behind it)
-			SDeviceAnswer silence = SilenceAnswer(uint8_t(channel), decode);
-			Deliver(uint8_t(channel), packet, silence.enc, silence);
 			return;
 		}
 
 		// Route based on per-channel encoding, not device type
-		Deliver(uint8_t(channel), packet, ch_enc, answer);
+		Deliver(packet, ch_enc, answer);
 	}
 }

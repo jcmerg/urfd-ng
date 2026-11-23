@@ -65,8 +65,6 @@ public:
 	std::string GetProductID() { return productid; }
 	Edvtype GetType() const { return devtype; }
 	unsigned int GetBufferDepth() const { return buffer_depth.load(std::memory_order_relaxed); }
-	// the packets waiting for an answer, silent ones too
-	std::size_t Unanswered();
 	// the frames handed to it and not sent yet
 	std::size_t QueuedPackets() { return input_queue.Size(); }
 	// output gain per encoding: a DV3003 in mixed mode encodes D-Star and DMR
@@ -98,8 +96,7 @@ protected:
 	// a packet for a channel, as the module's worker handed it over: one packet can
 	// come twice, for a D-Star and a DMR channel of one device (mixed mode, pool);
 	// decode: the channel decodes its AMBE frame, else it encodes its audio
-	struct SFeed { std::shared_ptr<CTranscoderPacket> packet; uint8_t channel; bool decode; int64_t queued_ms; };
-	std::atomic<int64_t> m_toldStale{0};	// SteadyMs of the last "too late for the device" line
+	struct SFeed { std::shared_ptr<CTranscoderPacket> packet; uint8_t channel; bool decode; };
 	CBlockingQueue<SFeed> input_queue;
 	std::atomic<int64_t> m_toldQueue{0};	// SteadyMs of the last "packets wait" line
 	std::future<void> feedFuture, readFuture;
@@ -124,10 +121,6 @@ protected:
 		std::shared_ptr<CTranscoderPacket> packet;
 		int64_t sent;	// steady clock ms
 		bool decode;	// AMBE in, audio expected back
-		// not sent to the device (it waited too long to go there): answered with
-		// silence by the reader, in its place among the channel's answers (DrainSilent);
-		// not in buffer_depth
-		bool silent = false;
 	};
 	std::deque<SWaiting> waiting[3];
 	std::mutex waiting_mx;
@@ -144,14 +137,7 @@ protected:
 	void Resync(void);
 	// a packet with this device's output set, on to the controller
 	// the answer to the packet goes to its module's worker, which puts it into the packet
-	// the answer to the channel's packet, then the silent ones that were waiting behind
-	// it; the reader's alone (all of a channel's answers go out from one thread, in order)
-	void Deliver(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer);
-	// the silent packets at the front of the channel answered with silence (the reader's)
-	void DrainSilent(uint8_t channel);
-	// all packets left when the device is closed (lost, phased out): silence, so their
-	// streams go on (the reader and the feeder have ended)
-	void AnswerLeft(void);
+	void Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer);
 	SDeviceAnswer SilenceAnswer(uint8_t channel, bool decode) const;
 
 	// reading the answers while running: bytes read ahead first, then the device
