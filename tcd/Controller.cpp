@@ -1276,58 +1276,58 @@ static int UsableCores(void)
 	CPU_ZERO(&set);
 	if (0 == sched_getaffinity(0, sizeof(set), &set) && CPU_COUNT(&set) > 0)
 		cores = CPU_COUNT(&set);
-	// cgroup v2: the process's cgroup (/proc/self/cgroup "0::/<path>") and those above
-	// it, each with a cpu.max of "<quota> <period>" or "max <period>"; the smallest counts
-	std::string path;
+	// the process's cgroup (/proc/self/cgroup): v2 "0::/<path>", v1 "<n>:cpu,cpuacct:/<path>"
+	std::string v2, v1;
+	bool have_v2 = false, have_v1 = false;
 	{
 		std::ifstream cg("/proc/self/cgroup");
 		std::string line;
 		while (std::getline(cg, line))
-			if (0 == line.rfind("0::", 0))
-				path = line.substr(3);
-	}
-	for (;;)
-	{
-		std::ifstream f("/sys/fs/cgroup" + (path == "/" ? std::string() : path) + "/cpu.max");
-		std::string quota;
-		long period = 0;
-		if (f >> quota >> period && quota != "max" && period > 0)
 		{
-			const long q = atol(quota.c_str());
-			if (q > 0)
-				cores = std::min<long>(cores, (q + period - 1) / period);
-		}
-		if (path.empty() || path == "/")
-			break;
-		const auto slash = path.find_last_of('/');
-		path = slash == 0 || slash == std::string::npos ? std::string("/") : path.substr(0, slash);
-	}
-	// cgroup v1: the cpu controller's cfs quota and period, of tcd's cgroup (a
-	// container sees its own at the mount's top)
-	{
-		std::string v1;
-		std::ifstream cg("/proc/self/cgroup");
-		std::string line;
-		while (std::getline(cg, line))
-		{
-			const auto a = line.find(':'), b = line.find(':', a + 1);
+			const auto a = line.find(':'), b = line.find(':', a == std::string::npos ? a : a + 1);
 			if (a == std::string::npos || b == std::string::npos)
 				continue;
-			const std::string ctrl = "," + line.substr(a + 1, b - a - 1) + ",";
-			if (ctrl.find(",cpu,") != std::string::npos)
-				v1 = line.substr(b + 1);
-		}
-		for (const std::string &dir : { "/sys/fs/cgroup/cpu" + (v1 == "/" ? std::string() : v1), std::string("/sys/fs/cgroup/cpu"), std::string("/sys/fs/cgroup/cpu,cpuacct") })
-		{
-			std::ifstream fq(dir + "/cpu.cfs_quota_us"), fp(dir + "/cpu.cfs_period_us");
-			long q = 0, p = 0;
-			if (fq >> q && fp >> p && q > 0 && p > 0)
+			const std::string ctrl = line.substr(a + 1, b - a - 1), path = line.substr(b + 1);
+			if (ctrl.empty() && line.compare(0, a, "0") == 0)
 			{
-				cores = std::min<long>(cores, (q + p - 1) / p);
-				break;
+				v2 = path;
+				have_v2 = true;
+			}
+			else if (("," + ctrl + ",").find(",cpu,") != std::string::npos)
+			{
+				v1 = path;
+				have_v1 = true;
 			}
 		}
 	}
+	// its cgroup and those above it: the smallest quota counts, rounded up to whole cores
+	auto quota = [&](const std::string &mount, std::string path, auto &&read) {
+		for (;;)
+		{
+			long q = 0, p = 0;
+			if (read(mount + (path == "/" ? std::string() : path), q, p) && q > 0 && p > 0)
+				cores = std::min<long>(cores, (q + p - 1) / p);
+			if (path.empty() || path == "/")
+				break;
+			const auto slash = path.find_last_of('/');
+			path = slash == 0 || slash == std::string::npos ? std::string("/") : path.substr(0, slash);
+		}
+	};
+	if (have_v2)	// cpu.max: "<quota> <period>" or "max <period>"
+		quota("/sys/fs/cgroup", v2, [](const std::string &dir, long &q, long &p) {
+			std::ifstream f(dir + "/cpu.max");
+			std::string s;
+			if (!(f >> s >> p) || s == "max")
+				return false;
+			q = atol(s.c_str());
+			return true;
+		});
+	if (have_v1)	// cpu.cfs_quota_us (-1: none) and cpu.cfs_period_us
+		for (const char *mount : { "/sys/fs/cgroup/cpu", "/sys/fs/cgroup/cpu,cpuacct" })
+			quota(mount, v1, [](const std::string &dir, long &q, long &p) {
+				std::ifstream fq(dir + "/cpu.cfs_quota_us"), fp(dir + "/cpu.cfs_period_us");
+				return bool(fq >> q && fp >> p);
+			});
 #endif
 	return std::max(1, cores);
 }
@@ -1427,6 +1427,10 @@ void CController::DroppedFrame(const std::shared_ptr<CTranscoderPacket> &packet)
 	auto &ms = StateOf(packet->GetStreamKey());
 	std::lock_guard<std::mutex> lock(ms.mx);
 	const auto now = std::chrono::steady_clock::now();
+	// its stream line too (PurgePinned puts out a line quiet for 5 s)
+	auto log = ms.stream_log.find(packet->GetStreamKey());
+	if (log != ms.stream_log.end())
+		log->second.last = now;
 	for (int k : { kChoiceDStar, kChoiceDMR })
 	{
 		auto it = ms.pinned[k].find(packet->GetStreamKey());
@@ -2536,10 +2540,11 @@ void CController::DeviceWatchThread()
 				other = other || (j != i && (slots[j]->recompand	// draining for it, or closed and not yet open again
 					|| (slots[j]->out && slots[j]->stats >= 0 && !g_Stats.devices[slots[j]->stats].want_out.load())
 					|| (!slots[j]->up && !slots[j]->out && slots[j]->compand != compand)));	// or it did not open again
-			if (!other && s.up && !s.draining && !s.out && s.compand != compand)
 			{
+				// the slot's state as the workers and a lost device's reader see it
 				std::lock_guard<std::mutex> lock(hw_mux);
-				if (UncoveredChoice(int(i)) < 0 || !SlotBusyLocked(int(i)))
+				if (!other && s.up && !s.draining && !s.out && s.compand != compand
+					&& (UncoveredChoice(int(i)) < 0 || !SlotBusyLocked(int(i))))
 					s.recompand = true;
 			}
 			PhaseOut(int(i));

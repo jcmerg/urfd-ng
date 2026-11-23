@@ -138,6 +138,6 @@ void CDV3000::ProcessPacket(const SDV_Packet &p)
 			dump("ReadDevice() ERROR: Read an unexpected device packet:", &p, packet_size(p));
 			return;
 		}
-		Deliver(packet, type, answer);	// a DMR or a DStar device
+		Deliver(0, packet, type, answer);	// a DMR or a DStar device
 	}
 }

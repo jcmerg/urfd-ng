@@ -69,6 +69,13 @@ void CDVDevice::AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> pack
 	// frame of its codec when the packet has one, else it encodes the audio
 	const bool decode = (Encoding::dstar == GetChannelEncoding(channel)) ? packet->DStarIsSet() : packet->DMRIsSet();
 	const auto size = input_queue.push(SFeed{ packet, channel, decode, SteadyMs() });
+	if (0 == size)
+	{
+		// the device was closed meanwhile (lost, phased out): the frame goes back
+		// with silence instead of never
+		AnswerSilent(channel, packet, decode);
+		return;
+	}
 	if (size > 200 && OncePerSecond(m_toldQueue))
 		std::cerr << description << ": " << size << " packets wait to go to the device" << std::endl;
 }
@@ -622,8 +629,7 @@ void CDVDevice::FeedDevice()
 		{
 			if (OncePerSecond(m_toldStale))
 				std::cerr << description << ": frames waited more than a second to go to the device, silence instead" << std::endl;
-			SDeviceAnswer answer = SilenceAnswer(feed.channel, feed.decode);
-			Deliver(packet, answer.enc, answer);
+			AnswerSilent(feed.channel, packet, feed.decode);
 			continue;
 		}
 		{
@@ -786,8 +792,14 @@ void CDVDevice::PushWaiting(uint8_t channel, const std::shared_ptr<CTranscoderPa
 std::shared_ptr<CTranscoderPacket> CDVDevice::PopWaiting(uint8_t channel, bool *decode)
 {
 	std::shared_ptr<CTranscoderPacket> packet;
+	std::vector<SWaiting> silent;	// in front of it (an answer dropped as improper left them there): answered first
 	{
 		std::lock_guard<std::mutex> lock(waiting_mx);
+		while (channel < 3 && !waiting[channel].empty() && waiting[channel].front().silent)
+		{
+			silent.push_back(waiting[channel].front());
+			waiting[channel].pop_front();
+		}
 		if (channel < 3 && !waiting[channel].empty())
 		{
 			packet = waiting[channel].front().packet;
@@ -797,6 +809,8 @@ std::shared_ptr<CTranscoderPacket> CDVDevice::PopWaiting(uint8_t channel, bool *
 			buffer_depth--;
 		}
 	}
+	for (const auto &w : silent)
+		g_Cont.DeviceAnswer(w.packet, SilenceAnswer(channel, w.decode));
 	{	// FeedDevice may send the next one (taken, so it cannot miss the wake-up)
 		std::lock_guard<std::mutex> lk(buffer_mutex);
 	}
@@ -816,10 +830,38 @@ SDeviceAnswer CDVDevice::SilenceAnswer(uint8_t channel, bool decode) const
 	return answer;
 }
 
-void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer)
+void CDVDevice::Deliver(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer)
 {
 	answer.enc = ch_enc;
 	g_Cont.DeviceAnswer(packet, answer);
+	// the silent packets that waited behind this one, up to the next sent one
+	if (channel >= 3)
+		return;
+	for (;;)
+	{
+		SWaiting w;
+		{
+			std::lock_guard<std::mutex> lock(waiting_mx);
+			if (waiting[channel].empty() || !waiting[channel].front().silent)
+				return;
+			w = waiting[channel].front();
+			waiting[channel].pop_front();
+		}
+		g_Cont.DeviceAnswer(w.packet, SilenceAnswer(channel, w.decode));
+	}
+}
+
+void CDVDevice::AnswerSilent(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, bool decode)
+{
+	{
+		std::lock_guard<std::mutex> lock(waiting_mx);
+		if (channel < 3 && !waiting[channel].empty())
+		{
+			waiting[channel].push_back(SWaiting{ packet, SteadyMs(), decode, true });
+			return;
+		}
+	}
+	g_Cont.DeviceAnswer(packet, SilenceAnswer(channel, decode));
 }
 
 void CDVDevice::LostAnswer(uint8_t channel, const char *why)
@@ -841,7 +883,7 @@ void CDVDevice::LostAnswer(uint8_t channel, const char *why)
 	if (LogLost())
 		std::cerr << description << line << std::endl;
 	SDeviceAnswer answer = SilenceAnswer(channel, decode);
-	Deliver(packet, answer.enc, answer);
+	Deliver(channel, packet, answer.enc, answer);
 }
 
 bool CDVDevice::LogLost(void)

@@ -122,6 +122,10 @@ protected:
 		std::shared_ptr<CTranscoderPacket> packet;
 		int64_t sent;	// steady clock ms
 		bool decode;	// AMBE in, audio expected back
+		// not sent to the device (it waited too long to go there): answered with
+		// silence once the packets before it are answered, so a stream's answers
+		// stay in order; never at the front, not in buffer_depth
+		bool silent = false;
 	};
 	std::deque<SWaiting> waiting[3];
 	std::mutex waiting_mx;
@@ -138,7 +142,10 @@ protected:
 	void Resync(void);
 	// a packet with this device's output set, on to the controller
 	// the answer to the packet goes to its module's worker, which puts it into the packet
-	void Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer);
+	// the answer to the channel's packet, then the silent ones that were waiting behind it
+	void Deliver(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer);
+	// a packet the device does not get: silence at once, or behind the channel's waiting ones
+	void AnswerSilent(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, bool decode);
 	SDeviceAnswer SilenceAnswer(uint8_t channel, bool decode) const;
 
 	// reading the answers while running: bytes read ahead first, then the device

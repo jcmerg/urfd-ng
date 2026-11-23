@@ -161,6 +161,6 @@ void CDV3003::ProcessPacket(const SDV_Packet &p)
 		}
 
 		// Route based on per-channel encoding, not device type
-		Deliver(packet, ch_enc, answer);
+		Deliver(uint8_t(channel), packet, ch_enc, answer);
 	}
 }
