@@ -3,14 +3,19 @@ FROM ubuntu:24.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# apt keeps its downloads in a BuildKit cache across builds: a new ubuntu:24.04
-# (Ubuntu refreshes it) rebuilds this layer, but only changed packages are
-# downloaded again (ports.ubuntu.com, the arm64 mirror, is often slow)
+# apt keeps its downloads and package lists in a BuildKit cache across builds: a
+# new ubuntu:24.04 (Ubuntu refreshes it) rebuilds this layer, but only changed
+# packages are downloaded again (ports.ubuntu.com, the arm64 mirror, is often
+# slow). A mirror that is down: apt-get update fails, the build goes on with
+# the lists of the last build and the packages in the cache
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
     && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 # the compiler without build-essential, which adds perl and the Debian packaging tools
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    { apt-get update -o Acquire::Retries=3 \
+      || { ls /var/lib/apt/lists/*_Packages >/dev/null 2>&1 \
+           && echo "apt-get update failed (mirror down?): the package lists of the last build" >&2; }; } \
+    && apt-get install -y --no-install-recommends \
     g++ \
     make \
     libcurl4-gnutls-dev \
@@ -44,9 +49,11 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# apt keeps its downloads in a BuildKit cache across builds: a new ubuntu:24.04
-# (Ubuntu refreshes it) rebuilds this layer, but only changed packages are
-# downloaded again (ports.ubuntu.com, the arm64 mirror, is often slow)
+# apt keeps its downloads and package lists in a BuildKit cache across builds: a
+# new ubuntu:24.04 (Ubuntu refreshes it) rebuilds this layer, but only changed
+# packages are downloaded again (ports.ubuntu.com, the arm64 mirror, is often
+# slow). A mirror that is down: apt-get update fails, the build goes on with
+# the lists of the last build and the packages in the cache
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
     && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 # NGINX_MIN: refuse to build with an nginx below Ubuntu's fixed version, here
@@ -54,7 +61,10 @@ RUN rm -f /etc/apt/apt.conf.d/docker-clean \
 # floor is part of this RUN, so raising it rebuilds the layer and fetches the update.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked \
     NGINX_MIN=1.24.0-2ubuntu7.20 \
-    && apt-get update && apt-get install -y --no-install-recommends \
+    && { apt-get update -o Acquire::Retries=3 \
+      || { ls /var/lib/apt/lists/*_Packages >/dev/null 2>&1 \
+           && echo "apt-get update failed (mirror down?): the package lists of the last build" >&2; }; } \
+    && apt-get install -y --no-install-recommends \
     libcurl3t64-gnutls \
     libopendht3t64 \
     libopus0 \
