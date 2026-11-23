@@ -39,7 +39,8 @@
 // (CController::DeviceAnswer): enc, the channel's codec; audio, decoded speech
 // in pcm, else the frame of enc in ambe
 // lost: the device did not answer, the frame is silence in its place (SilenceAnswer)
-struct SDeviceAnswer { Encoding enc; bool audio; uint8_t ambe[9]; int16_t pcm[160]; bool lost; };
+// gain_in, gain_out: the DVSI gains in dB the channel's codec is configured with
+struct SDeviceAnswer { Encoding enc; bool audio; uint8_t ambe[9]; int16_t pcm[160]; bool lost; int8_t gain_in, gain_out; };
 
 class CDVDevice
 {
@@ -48,7 +49,8 @@ public:
 	virtual ~CDVDevice();
 
 	// node is the device node, desc its name (/dev/serial/by-id); baud as Probe found it
-	bool OpenDevice(const std::string &node, const std::string &desc, Edvtype dvtype, unsigned long baud, int8_t in_gain, int8_t out_gain);
+	// the DVSI gains in dB of each codec (a DV3003 in mixed mode has both)
+	bool OpenDevice(const std::string &node, const std::string &desc, Edvtype dvtype, unsigned long baud, int8_t dstar_in, int8_t dstar_out, int8_t dmr_in, int8_t dmr_out);
 	// opens the device at baud, resets it, asks for its product ID (GetProductID)
 	// and closes it again: true when it cannot be opened (opened false) or does not
 	// answer. The control packets are the same for both types, so any device object
@@ -68,6 +70,10 @@ public:
 	unsigned int GetBufferDepth() const { return buffer_depth.load(std::memory_order_relaxed); }
 	// the frames handed to it and not sent yet
 	std::size_t QueuedPackets() { return input_queue.Size(); }
+	// a mixed DV3003 (D-Star and DMR channels) takes new DVSI gains at once, they
+	// are in software; false for another device, which is opened again for them
+	bool SetSoftGains(int8_t dstar_in, int8_t dstar_out, int8_t dmr_in, int8_t dmr_out);
+	bool IsMixed(void) const { return m_mixed; }
 	// output gain per encoding: a DV3003 in mixed mode encodes D-Star and DMR
 	void SetOutputGains(int32_t dstar_num, int32_t dmr_num) { m_outputGainDStar.store(dstar_num, std::memory_order_relaxed); m_outputGainDmr.store(dmr_num, std::memory_order_relaxed); }
 	void SetStatsIndex(int idx) { m_statsIndex = idx; }
@@ -106,6 +112,18 @@ protected:
 	std::atomic<int32_t> m_outputGainDStar{256}, m_outputGainDmr{256};
 	int m_statsIndex = -1;
 	int compand = COMPAND_LINEAR;	// the speech packets: 16-bit linear, or 8-bit µ-law or A-law
+	// the DVSI gains of D-Star [0] and DMR [1] in dB, and the numerators (of 256) tcd
+	// applies to the PCM: an AMBE3003 holds one PKT_GAIN for all its channels (the
+	// last one configured), so a mixed one runs with 0 there and tcd applies each
+	// codec's GainIn before the encoder and GainOut after the decoder. One atomic
+	// each: a frame sees the gains of one setting
+	struct SGains { int8_t in, out; int32_t soft_in, soft_out; };
+	std::atomic<uint64_t> m_gains[2]{ (uint64_t(256) << 16) | (uint64_t(256) << 40), (uint64_t(256) << 16) | (uint64_t(256) << 40) };
+	static uint64_t PackGains(const SGains &g) { return uint64_t(uint8_t(g.in)) | (uint64_t(uint8_t(g.out)) << 8) | (uint64_t(uint32_t(g.soft_in) & 0xffffff) << 16) | (uint64_t(uint32_t(g.soft_out) & 0xffffff) << 40); }
+	SGains Gains(Encoding enc) const { const uint64_t v = m_gains[Encoding::dstar == enc ? 0 : 1].load(std::memory_order_relaxed); return SGains{ int8_t(uint8_t(v)), int8_t(uint8_t(v >> 8)), int32_t((v >> 16) & 0xffffff), int32_t((v >> 40) & 0xffffff) }; }
+	void StoreGains(int8_t dstar_in, int8_t dstar_out, int8_t dmr_in, int8_t dmr_out);
+	void LogSoftGains(int8_t dstar_in, int8_t dstar_out, int8_t dmr_in, int8_t dmr_out) const;
+	bool m_mixed = false;	// D-Star and DMR channels: the gains in software
 	// the 160 samples of a speech packet as 16-bit linear: big-endian words, or bytes
 	// of the companding
 	void SpeechIn(const void *samples, int16_t *pcm) const;
