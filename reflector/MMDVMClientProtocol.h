@@ -95,10 +95,10 @@ public:
 	unsigned GetMmdvmConnection(void) const override { return m_Instance; }
 
 	// initialization
-	bool Initialize(const char *type, const EProtocol ptype, const uint16_t port, const bool has_ipv4, const bool has_ipv6);
+	bool Initialize(const char *type, const EProtocol ptype, const uint16_t port, const bool has_ipv4, const bool has_ipv6) override;
 
 	// task
-	void Task(void);
+	void Task(void) override;
 
 	// dynamic TG management (called from admin socket thread)
 	CTGModuleMap &GetTGMap(void) { return m_TGMap; }
@@ -123,8 +123,8 @@ protected:
 	// State machine
 	void HandleStateMachine(void);
 	void HandleIncoming(const CBuffer &Buffer, const CIp &Ip);
-	void HandleQueue(void);
-	void HandleKeepalives(void) {}  // keepalives handled by state machine
+	void HandleQueue(void) override;
+	void HandleKeepalives(void) override {}  // keepalives handled by state machine
 
 	// Auth packet helpers
 	void SendLogin(void);

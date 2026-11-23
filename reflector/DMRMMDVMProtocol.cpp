@@ -1024,7 +1024,7 @@ bool CDmrmmdvmProtocol::IsValidOptionPacket(const CBuffer &Buffer, CCallsign *ca
 	return valid;
 }
 
-bool CDmrmmdvmProtocol::IsValidRssiPacket(const CBuffer &Buffer, CCallsign *callsign, int *rssi)
+bool CDmrmmdvmProtocol::IsValidRssiPacket(const CBuffer &Buffer, CCallsign */*callsign*/, int */*rssi*/)
 {
 	uint8_t tag[] = { 'R','P','T','I','N','T','R' };
 
@@ -1334,14 +1334,14 @@ void CDmrmmdvmProtocol::EncodeKeepAlivePacket(CBuffer *Buffer, std::shared_ptr<C
 	Buffer->Append(id, 4);
 }
 
-void CDmrmmdvmProtocol::EncodeAckPacket(CBuffer *Buffer, const CCallsign &Callsign)
+void CDmrmmdvmProtocol::EncodeAckPacket(CBuffer *Buffer, const CCallsign &/*Callsign*/)
 {
 	uint8_t tag[] = { 'R','P','T','A','C','K' };
 
 	Buffer->Set(tag, sizeof(tag));
 }
 
-void CDmrmmdvmProtocol::EncodeConnectAckPacket(CBuffer *Buffer, const CCallsign &Callsign, uint32_t AuthSeed)
+void CDmrmmdvmProtocol::EncodeConnectAckPacket(CBuffer *Buffer, const CCallsign &/*Callsign*/, uint32_t AuthSeed)
 {
 	uint8_t tag[] = { 'R','P','T','A','C','K' };
 
@@ -1349,14 +1349,14 @@ void CDmrmmdvmProtocol::EncodeConnectAckPacket(CBuffer *Buffer, const CCallsign 
 	Buffer->Append(AuthSeed);
 }
 
-void CDmrmmdvmProtocol::EncodeNackPacket(CBuffer *Buffer, const CCallsign &Callsign)
+void CDmrmmdvmProtocol::EncodeNackPacket(CBuffer *Buffer, const CCallsign &/*Callsign*/)
 {
 	uint8_t tag[] = { 'M','S','T','N','A','K' };
 
 	Buffer->Set(tag, sizeof(tag));
 }
 
-void CDmrmmdvmProtocol::EncodeClosePacket(CBuffer *Buffer, std::shared_ptr<CClient>Client)
+void CDmrmmdvmProtocol::EncodeClosePacket(CBuffer *Buffer, std::shared_ptr<CClient>/*Client*/)
 {
 	uint8_t tag[] = { 'M','S','T','C','L' };
 

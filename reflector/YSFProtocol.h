@@ -79,18 +79,18 @@ public:
 	CYsfProtocol();
 
 	// initialization
-	bool Initialize(const char *type, const EProtocol ptype, const uint16_t port, const bool has_ipv4, const bool has_ipv6);
-	void Close(void);
+	bool Initialize(const char *type, const EProtocol ptype, const uint16_t port, const bool has_ipv4, const bool has_ipv6) override;
+	void Close(void) override;
 
 	// task
-	void Task(void);
+	void Task(void) override;
 
 protected:
 	// queue helper
-	void HandleQueue(void);
+	void HandleQueue(void) override;
 
 	// keepalive helpers
-	void HandleKeepalives(void);
+	void HandleKeepalives(void) override;
 
 	// stream helpers
 	void OnDvHeaderPacketIn(std::unique_ptr<CDvHeaderPacket> &, const CIp &, uint8_t = 0);

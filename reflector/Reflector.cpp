@@ -422,11 +422,6 @@ void CReflector::Stop(void)
 ////////////////////////////////////////////////////////////////////////////////////////
 // stream opening & closing
 
-bool CReflector::IsStreaming(char module)
-{
-	return false;
-}
-
 // the D-Star suffix of MY for a stream from this protocol, nullptr for none:
 // D-Star sources keep their own, a plugin's is its type ("HYT")
 static const char *SourceSuffix(EProtocol p)

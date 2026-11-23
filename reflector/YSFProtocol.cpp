@@ -1263,7 +1263,7 @@ bool CYsfProtocol::EncodeServerStatusPacket(CBuffer *Buffer) const
 	// hash
 	memcpy(callsign, m_RegistrationName.c_str(), 16);
 	char sz[16];
-	::sprintf(sz, "%05u", CalcHash(callsign, REG_NAME_SIZE) % 100000U);
+	::snprintf(sz, sizeof(sz), "%05u", CalcHash(callsign, REG_NAME_SIZE) % 100000U);
 	Buffer->Append((uint8_t *)sz, 5);
 	// name
 	Buffer->Append(callsign, REG_NAME_SIZE);
@@ -1274,7 +1274,7 @@ bool CYsfProtocol::EncodeServerStatusPacket(CBuffer *Buffer) const
 	CClients *clients = g_Reflector.GetClients();
 	int count = MIN(999, clients->GetSize());
 	g_Reflector.ReleaseClients();
-	::sprintf(sz, "%03u", count);
+	::snprintf(sz, sizeof(sz), "%03u", count);
 	Buffer->Append((uint8_t *)sz, 3);
 
 	// done
