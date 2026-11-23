@@ -16,6 +16,9 @@
 #   docker/build.sh               # rebuild, restart what runs
 #   docker/build.sh start         # rebuild and start
 #   docker/build.sh [start] urfd  # only urfd (or only tcd), the other one keeps running
+#
+# APT_MIRROR=<url> docker/build.sh: the images' packages from another Ubuntu mirror
+# (see the Dockerfiles), when Ubuntu's own is down or slow
 set -e
 
 START=false

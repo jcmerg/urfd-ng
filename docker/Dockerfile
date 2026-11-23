@@ -8,8 +8,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 # packages are downloaded again (ports.ubuntu.com, the arm64 mirror, is often
 # slow). A mirror that is down: apt-get update fails, the build goes on with
 # the lists of the last build and the packages in the cache
+# APT_MIRROR (build.sh passes it on): another Ubuntu mirror for all sources, e.g.
+# http://de.archive.ubuntu.com/ubuntu (amd64) or a ports mirror (arm64); it must
+# carry noble-security too. Empty: Ubuntu's own (archive/security, ports)
+ARG APT_MIRROR=
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
-    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache \
+    && if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s|^URIs: .*|URIs: $APT_MIRROR|" /etc/apt/sources.list.d/ubuntu.sources \
+        && echo "apt: $APT_MIRROR"; fi
 # the compiler without build-essential, which adds perl and the Debian packaging tools
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked \
     { apt-get update -o Acquire::Retries=3 \
@@ -54,8 +61,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 # packages are downloaded again (ports.ubuntu.com, the arm64 mirror, is often
 # slow). A mirror that is down: apt-get update fails, the build goes on with
 # the lists of the last build and the packages in the cache
+# APT_MIRROR (build.sh passes it on): another Ubuntu mirror for all sources, e.g.
+# http://de.archive.ubuntu.com/ubuntu (amd64) or a ports mirror (arm64); it must
+# carry noble-security too. Empty: Ubuntu's own (archive/security, ports)
+ARG APT_MIRROR=
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
-    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache \
+    && if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s|^URIs: .*|URIs: $APT_MIRROR|" /etc/apt/sources.list.d/ubuntu.sources \
+        && echo "apt: $APT_MIRROR"; fi
 # NGINX_MIN: refuse to build with an nginx below Ubuntu's fixed version, here
 # nginx2root (CVE-2026-123007/-123633) and CVE-2026-113425/-118899/-123634. The
 # floor is part of this RUN, so raising it rebuilds the layer and fetches the update.
