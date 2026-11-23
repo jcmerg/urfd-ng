@@ -2,7 +2,7 @@
 
 Docker deployment for the urfd reflector.
 
-The tcd transcoder (in [`../tcd`](../tcd/)) runs here too, with AMBE sticks or in software with a codec plugin: `Dockerfile.tcd` and the `tcd` service behind the profile `tcd`, see "tcd in Docker" in [tcd/README.md](../tcd/README.md#tcd-in-docker). `build.sh` builds and starts what this machine has a configuration for (urfd with `$URFD_DATA/config/urfd.ini`, tcd with `$URFD_DATA/tcd/tcd.ini`), with sticks it adds `docker-compose.tcd-sticks.yml`; nginx passes `/tcd/` to the tcd monitor (`TCD_MONITOR_PORT`, which `build.sh` takes from the `MonitorHttpPort` of that tcd.ini, default 8080).
+The tcd transcoder (in [`../tcd`](../tcd/)) runs here too, with AMBE sticks or in software with a codec plugin: `Dockerfile.tcd` and the `tcd` service behind the profile `tcd`, see "tcd in Docker" in [tcd/README.md](../tcd/README.md#tcd-in-docker). `build.sh` builds and starts what this machine has a configuration for (urfd with `$URFD_DATA/config/urfd.ini`, tcd with `$URFD_DATA/tcd/tcd.ini`), with sticks (a `DeviceSerial` other than `none`, or no codec plugin) it adds `docker-compose.tcd-sticks.yml`; nginx passes `/tcd/` to the tcd monitor (`TCD_MONITOR_PORT`, which `build.sh` takes from the `MonitorHttpPort` of that tcd.ini, default 8080).
 
 ## Quick Start
 

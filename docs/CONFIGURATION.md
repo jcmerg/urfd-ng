@@ -24,7 +24,8 @@ Callsign = URF999              # URF and three letters/digits (required)
 SysopEmail = me@example.com    # shown in the dashboard's footer
 Country = DE
 Sponsor = My Club
-DashboardUrl = https://my-reflector.example.com
+DashboardUrl = https://my-reflector.example.com   # required
+Bootstrap = xrf757.openquad.net  # required with DHT: a nearby reflector to join the DHT
 
 [Modules]
 Modules = ADFRSZ               # up to 26 modules, A-Z
@@ -61,7 +62,7 @@ Port = 20001
 
 ### External address
 
-Clients and directories need the address urfd is reached at on the internet, which behind NAT is not the bound one. `IPv4External` / `IPv6External` set it by hand. Without them urfd asks the services in `IPCheckUrl` (by default icanhazip.com, ifconfig.me, ipify.org and ident.me; the first well-formed answer wins), at start and every `IPCheckInterval` seconds (default 300, 0 = only at start). A changed address, e.g. after a switch to a fallback line, counts when a second check 10 s later confirms it; it is logged, goes to the XLX directory at once and into the DHT, and G3 and the plugins tell it to their clients. A check without answer changes nothing. When no service answers at the start (e.g. no DNS yet right after a boot), urfd starts with a warning and asks every 10 s until one does.
+Clients and directories need the address urfd is reached at on the internet, which behind NAT is not the bound one. `IPv4External` / `IPv6External` set it by hand. Without them urfd asks the services in `IPCheckUrl` (by default icanhazip.com, ifconfig.me, ipify.org and ident.me; the first well-formed answer wins), at start and every `IPCheckInterval` seconds (default 300, at least 30, 0 = only at start). A changed address, e.g. after a switch to a fallback line, counts when a second check 10 s later confirms it; it is logged, goes to the XLX directory at once and into the DHT, and G3 and the plugins tell it to their clients. A check without answer changes nothing. When no service answers at the start (e.g. no DNS yet right after a boot), urfd starts with a warning and asks every 10 s until one does.
 
 ```ini
 [IP Addresses]
@@ -88,6 +89,19 @@ URL = https://radioid.net/static/user.csv, http://www.pistar.uk/downloads/DMRIds
 - **Cache**: every complete download is kept as `<FilePath>.cache`. At start the cache is loaded first and replaced when a download is complete; with no source answering it stays, so the database is never empty because a directory is slow or down. With `Mode = both`, `FilePath` holds your own additional entries and is never overwritten.
 - No second publisher of the YSF TX/RX data is known, so there the cache is the only fallback; missing YSF frequencies only affect Wires-X frequency reporting.
 - NXDN IDs not in the NXDN database are looked up in the DMR database (many operators use their DMR ID for NXDN).
+
+### Files
+
+```ini
+[Files]
+PidPath = /var/run/xlxd.pid
+WhitelistPath = /usr/local/etc/urfd/urfd.whitelist
+BlacklistPath = /usr/local/etc/urfd/urfd.blacklist
+InterlinkPath = /usr/local/etc/urfd/urfd.interlink
+G3TerminalPath = /usr/local/etc/urfd/urfd.terminal
+```
+
+Where urfd keeps its PID and finds its lists. White-, blacklist and interlink are read again on SIGHUP, the G3 terminal file when it changes; the paths themselves need a restart.
 
 ### Module access by protocol
 
@@ -121,7 +135,9 @@ Country = Germany              # country name as shown in the directory
 Comment = My URF Reflector     # max 100 characters
 # Hash =                       # letters and digits; blank = made at first start
 # OverrideIP =                 # blank = the directory uses the address it sees
-# PushDelay = 300              # seconds between updates
+# PushDelay = 300              # seconds between updates (60-86400)
+# Server = http://xlxapi.rlx.lu/api.php   # the directory
+# Timeout = 5                  # seconds before giving up on it (1-60)
 ```
 
 It sends the name `XLXnnn`, uptime, `DashboardUrl` from `[Names]`, country, comment, version and interlinks. Nothing is sent unless `Enable = true`. The settings are read at startup.
@@ -256,7 +272,7 @@ TG91 = A,TS2                        # Worldwide -> module A (primary)
 
 **BrandMeisterApiKey** (optional; BrandMeister SelfCare → Profile → Security → API Keys): with it, urfd syncs the static TGs at startup (removes those not in the config, adds missing ones), registers a dynamic TG as static on BrandMeister and removes it there again when it is removed or expires. Without it urfd activates a TG by a short transmission (kerchunk).
 
-**Several connections**: further sections next to `[MMDVMClient]`, at most 9. Each is a hotspot of its own with two timeslots and its own TG map, so more modules can talk to BrandMeister at the same time, or the reflector joins other networks (TGIF, FreeDMR, ...). Use a hotspot ID of its own per connection (your DMR ID with the suffixes `01`, `02`, ...); one BrandMeister hotspot password covers all of them.
+**Several connections**: up to 8 further sections next to `[MMDVMClient]`, 9 connections in all. Each is a hotspot of its own with two timeslots and its own TG map, so more modules can talk to BrandMeister at the same time, or the reflector joins other networks (TGIF, FreeDMR, ...). Use a hotspot ID of its own per connection (your DMR ID with the suffixes `01`, `02`, ...); one BrandMeister hotspot password covers all of them.
 
 ```ini
 [MMDVMClient]                       # the shared settings of the connections below
@@ -607,6 +623,7 @@ IPAddress = 1.2.3.4            # AllStar node IP
 RxPort = 34000
 TxPort = 32000
 Module = A                     # must be a transcoded module
+# FilePath = /usr/local/etc/urfd/clients.txt   # optional: listen-only clients
 # RxGain = 0                   # incoming audio gain in dB (-40 to +40)
 # TxGain = 0                   # outgoing audio gain in dB (-40 to +40)
 ```
@@ -762,7 +779,7 @@ Table, cache, building and the admin commands: [docs/CREDENTIALS.md](CREDENTIALS
 
 ## WebSocket
 
-Everything the dashboard shows comes from here: clients, peers and talking stations (with the operator's name from the ID database) as they change, the last heard list with the length and audio report of each transmission, the bridges of each module (TG mappings, autolinks, connectors) and their changes, and the whole state when a client connects; IP addresses only masked, as `[Dashboard]` allows. The admin page sends its commands over the same connection. It listens on loopback (`127.0.0.1:10102`) and the dashboard's nginx passes `/ws` through. Always built in (needs `libwebsockets-dev`); `setup.sh` sets `[WebSocket] Enable = true`; changes need a restart. urfd writes no XML or JSON status file. Messages, requests and setup: [docs/WEBSOCKET.md](WEBSOCKET.md).
+Everything the dashboard shows comes from here: clients, peers and talking stations (with the operator's name from the ID database) as they change, the last heard list with the length and audio report of each transmission, the bridges of each module (TG mappings, autolinks, connectors) and their changes, and the whole state when a client connects; IP addresses only masked, as `[Dashboard]` allows. The admin page sends its commands over the same connection. It listens on loopback (`127.0.0.1:10102`) and the dashboard's nginx passes `/ws` through. Always built in (needs `libwebsockets-dev`); `[WebSocket]` is on without an `Enable` line (`Enable = false` switches it off, the dashboard then stays empty); changes need a restart. urfd writes no XML or JSON status file. Messages, requests and setup: [docs/WEBSOCKET.md](WEBSOCKET.md).
 
 ## Dashboard
 
@@ -802,11 +819,12 @@ sudo pkill -HUP -x urfd
 - Transcoded modules (`[Transcoder] Modules`, also to and from `auto`); a tcd connection for a module no longer listed is closed
 - Module access by protocol and hidden talkers (`[Modules] Protocols<M>`, `HideUnlisted`)
 - The plugins' sections, and logins changed in the credential database (its cache is flushed; `[Credentials]` itself needs a restart)
-- Reflector metadata (sponsor, country, URLs)
+- `[Dashboard]` and the reflector metadata (sponsor, country, URLs) for dashboards that connect from then on; the XLX directory keeps `DashboardUrl` until a restart
 
 **Needs a restart:**
 - Callsign, database settings (Mode, URL, RefreshMin)
-- `[MMDVM]` talkgroups and users (users can be changed at runtime on the admin page)
+- `[MMDVM]` talkgroups, users, `FallbackDmrId` and `RequireAuth`; `[SVXServer]` users (users can be changed at runtime on the admin page)
+- `[Files]`
 - Adding or removing modules
 - Enabling or disabling protocols, ports
 - IP address binding
