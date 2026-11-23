@@ -563,14 +563,12 @@ bool CController::Transcode(uint32_t to, CSoftCodec *from, bool decoded, float s
 	return true;
 }
 
-CController::CController() : keep_running(true), ambe_in_num(256), ambe_out_num(256), dmr_reencode_num(256), outgain_dstar_num(256), outgain_dmr_num(256), outgain_usrp_num(256), outgain_imbe_num(256), outgain_m17_num(256)
+CController::CController() : keep_running(true), ambe_in_num(256), ambe_out_num(256), outgain_dstar_num(256), outgain_dmr_num(256), outgain_usrp_num(256), outgain_imbe_num(256), outgain_m17_num(256)
 {
 }
 
 bool CController::Start()
 {
-	dmr_reencode_num = calcNumerator(g_Conf.GetGain(EGainType::dmrreencode));
-	dstar_reencode_num = calcNumerator(g_Conf.GetGain(EGainType::dstarreencode));
 	UpdateSplits();	// the live config is filled (Main), the devices open below
 	// the GainIn/Out the devices are opened with (tcd.ini, not changed while tcd runs)
 	dev_dstar = SDeviceGains{ float(g_Conf.GetGain(EGainType::dstarout)), calcNumerator(g_Conf.GetGain(EGainType::dstarin)) };
@@ -626,8 +624,6 @@ void CController::ReconfigureAGC()
 	ambe_out_num = calcNumerator(g_Stats.config.gain_dmr_out.load());
 	dstar_in_num = calcNumerator(g_Stats.config.gain_dstar_in.load());
 	dstar_out_num = calcNumerator(g_Stats.config.gain_dstar_out.load());
-	dmr_reencode_num = calcNumerator(g_Stats.config.gain_dmr_reencode.load());
-	dstar_reencode_num = calcNumerator(g_Stats.config.gain_dstar_reencode.load());
 	outgain_dstar_num = calcNumerator(g_Stats.config.outgain_dstar.load());
 	outgain_dmr_num = calcNumerator(g_Stats.config.outgain_dmr.load());
 	outgain_usrp_num = calcNumerator(g_Stats.config.outgain_usrp.load());
@@ -751,7 +747,7 @@ bool CController::InitVocoders()
 	}
 	// the software vocoders of the codec plugins: CodecDStar / CodecDMR in tcd.ini
 	// put the codec in software, else the devices come first and a plugin only
-	// does what no device does (and the DMR re-encode)
+	// does what no device does
 	const std::string &dstar_name = names[kChoiceDStar], &dmr_name = names[kChoiceDMR];
 	const bool dstar_named = !dstar_name.empty();
 	const bool dmr_named = !dmr_name.empty();
@@ -763,7 +759,6 @@ bool CController::InitVocoders()
 	const bool dmr_forced = dmr_named && !dstar_named;
 	CSoftCodec *dstar_plugin = g_Codecs.Get(TCD_CODEC_DSTAR, dstar_name);
 	dmr_sw = g_Codecs.Get(TCD_CODEC_DMR, dmr_name);
-	dstar_sw = dstar_plugin;
 	if ((dstar_named && !dstar_plugin) || (dmr_named && !dmr_sw))
 	{
 		std::cerr << "ERROR: CodecDStar/CodecDMR names no loaded codec plugin that does that codec" << std::endl;
@@ -1060,20 +1055,6 @@ bool CController::InitVocoders()
 			return true;
 		}
 	}
-	// DMR: a plugin re-encodes the streams a device decoded (dmr_sw) and its own
-	if (dmr_sw)
-		std::cout << "Codec plugin " << dmr_sw->GetName() << " can re-encode DMR (DmrGainMode = reencode)" << std::endl;
-	g_Stats.reencode_available.store(dmr_sw != nullptr, std::memory_order_relaxed);
-	// D-Star: a plugin re-encodes the streams a device decoded (dstar_sw) and its own
-	if (dstar_sw)
-		std::cout << "Codec plugin " << dstar_sw->GetName() << " can re-encode D-Star (DStarGainMode = reencode)" << std::endl;
-	g_Stats.reencode_dstar_available.store(dstar_sw != nullptr, std::memory_order_relaxed);
-	// reencode needs a codec plugin of the codec, else the bitstream gain
-	// (SameCodecGain works as ambe then; the setting stays, so a save keeps it)
-	if (!dmr_sw && g_Stats.config.dmr_gain_mode.load() == 2)
-		std::cerr << "Warning: DmrGainMode=reencode needs a codec plugin for DMR, working as ambe" << std::endl;
-	if (!dstar_sw && g_Stats.config.dstar_gain_mode.load() == 2)
-		std::cerr << "Warning: DStarGainMode=reencode needs a codec plugin for D-Star, working as ambe" << std::endl;
 	{
 		// the direct path needs one plugin with transcode for two of D-Star, DMR and P25
 		auto pair = [](uint32_t a, uint32_t b) {
@@ -1210,10 +1191,6 @@ void CController::ReadReflectorThread()
 						if (sw1600 && sw1600->GetPlugin() != sw->GetPlugin())
 							sw1600 = nullptr;
 						st.cached_streams.store(sw->Streams() + (sw1600 ? sw1600->Streams() : 0), std::memory_order_relaxed);
-						// re-encoding: re-encoded a frame since the last look
-						const uint32_t n = st.reencodes.load(std::memory_order_relaxed);
-						st.reencode_active.store(n != reencodes_seen[sw->stats], std::memory_order_relaxed);
-						reencodes_seen[sw->stats] = n;
 					}
 				PurgePinned();
 				// the states of streams quiet for 30 s, on modules where no new stream came
@@ -1825,9 +1802,9 @@ void CController::SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet)
 	const float source_db = agc_db + GainDb(out_num);
 	Transcode(TCD_CODEC_DSTAR, sw, decoded, source_db, packet, &direct);
 	Transcode(TCD_CODEC_P25, sw, decoded, source_db, packet, &direct);
-	// DMR -> DMR/YSF: re-encoded by the plugin that decoded it, or b2; after the
-	// direct path, which codes from the decoder's frame
-	SameCodecGain(packet, agc_db, sw, decoded, SameCodec(false, GainDb(out_num), ambe_in_num));
+	// DMR -> DMR/YSF: the AGC in b2 (DmrGainMode); after the direct path, which
+	// codes from the decoder's frame
+	AmbeSameMode(packet, agc_db, decoded, false, GainDb(out_num), ambe_in_num);
 	if (packet->IsLast())
 		sw->End(packet->GetStreamKey(), false);
 	if (decoded)	// a failed decode keeps the marks: no flicker
@@ -1924,8 +1901,8 @@ CController::SStreamPart *CController::StreamLogPart(SModuleState &ms, int k, co
 	auto &log = ms.stream_log[packet->GetStreamKey()];
 	if (log.parts.empty())
 	{
-		// a stream's last frame comes by again after its line went out (the DMR
-		// re-encode picks it a second time): no line of one frame for it
+		// should a stream's last frame come by again after its line went out:
+		// no line of one frame for it
 		if (packet->IsLast())
 		{
 			ms.stream_log.erase(packet->GetStreamKey());
@@ -2773,8 +2750,8 @@ void CController::AnalogToAudio(std::shared_ptr<CTranscoderPacket> packet, const
 	g_Stats.UpdateLevelsOut(packet->GetModule(), tmp, 160);
 	FrameLevels(packet, label);
 	// USRP and SVX out (they share the frame): this audio, not the input
-	// (USRPGainMode = agc); first, the packet goes once the other codecs are set
-	if (g_Stats.config.usrp_gain_mode.load(std::memory_order_relaxed) == 1)
+	// (USRPGainMode = on); first, the packet goes once the other codecs are set
+	if (g_Stats.config.same_mode[CConfigure::kSameUsrp].load(std::memory_order_relaxed))
 		AudiotoUSRP(packet);
 	// the AMBE codecs first: a device gets its frame before the software encodes
 	ToDStar(packet);
@@ -2834,13 +2811,10 @@ void CController::RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, CSof
 		}
 		if (decoded)	// a failed decode keeps the marks: no flicker
 			ModuleDirect(packet, direct);
-		// D-Star -> D-Star: the AGC in the frame itself, a plugin's stream re-encoded by
-		// its own plugin, a device's by the D-Star plugin; the GainOut the decoder
-		// used: a plugin's from the monitor, a device's from tcd.ini
-		SameCodecGain(packet, agc_db, from ? from : dstar_sw, decoded, from
-			? SameCodec(true, GainDb(dec_out_num), dstar_in_num)
-			: SameCodec(true, dev_dstar.out_db, dev_dstar.in_num));
-		// the decoder's state ends after the re-encode, as on the DMR path
+		// D-Star -> D-Star: the AGC in b2 (DStarGainMode), with the GainOut the
+		// decoder used: a plugin's from the monitor, a device's from tcd.ini
+		AmbeSameMode(packet, agc_db, decoded, true, from ? GainDb(dec_out_num) : dev_dstar.out_db, from ? dstar_in_num.load() : dev_dstar.in_num);
+		// the decoder's state ends with the stream, as on the DMR path
 		if (from && packet->IsLast())
 			from->End(packet->GetStreamKey(), false);
 		// Output gains applied in encode functions and DVSI FeedDevice
@@ -2881,93 +2855,27 @@ float CController::HeldAgc(const std::shared_ptr<CTranscoderPacket> &packet, boo
 	return (h.valid && h.streamid == packet->GetStreamId()) ? h.db : 0.0f;
 }
 
-// X -> X of D-Star or DMR/YSF (DStarGainMode, DmrGainMode): the level the frame
-// would have, coded from the AGC'd audio as every other source is (OutputGain,
-// then the encoder's GainIn); the decoder's GainOut is in the audio the AGC
-// measured. Mode 2 codes that audio again with `re` (a plugin keeps a state per
-// stream and direction; on its error the original frame stays), mode 1 puts
-// the same gain, plus the offset, into the frame's b2; a frame that did not
-// decode gets b2 with the held gain in both
-void CController::SameCodecGain(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, CSoftCodec *re, bool decoded, const SSameCodec &c)
+// X -> X of D-Star or DMR/YSF (DStarGainMode, DmrGainMode = on): the level
+// the frame would have, coded from the AGC'd audio as every other source is
+// (OutputGain, then the encoder's GainIn; the decoder's GainOut is in the audio
+// the AGC measured), put into the frame's b2. A frame that did not decode gets
+// the stream's last AGC gain (HeldAgc)
+void CController::AmbeSameMode(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, bool decoded, bool dstar, float dec_out_db, int32_t in_num)
 {
-	// reencode without a plugin of the codec works as ambe (InitVocoders said so);
-	// the setting itself stays, a save keeps it
-	SSameCodec eff = c;
-	if (eff.mode == CConfigure::EGainMode::reencode && !re)
-		eff.mode = CConfigure::EGainMode::ambe;
-	const bool encoded = ApplySameCodecGain(packet, agc_db, re, decoded, eff);
-	// the plugin's encoder state of a stream it re-encoded ends with the stream's
-	// last frame, also when that one was not coded by it (it did not decode, or the
-	// mode changed in between)
-	auto &r = reencoded[ModuleSlot(packet->GetModule())];
-	if (encoded)
+	if (!g_Stats.config.same_mode[dstar ? CConfigure::kSameDStar : CConfigure::kSameDmr].load(std::memory_order_relaxed))
 	{
-		// a stream before it whose last frame did not come here: ended now
-		if (r.valid && r.streamid != packet->GetStreamId())
-			r.codec->End(r.key, true);
-		r = SReencoded{ true, packet->GetStreamId(), packet->GetStreamKey(), re };
+		// DMR: the tracker follows the unchanged frames too (D-Star's b2 has no memory)
+		if (!dstar)
+			m_ambeGain.Follow(packet->GetDMRData(), packet->GetStreamKey());
+		return;
 	}
-	if (packet->IsLast() && r.valid && r.streamid == packet->GetStreamId())
-	{
-		if (!encoded)
-			r.codec->End(packet->GetStreamKey(), true);
-		r.valid = false;
-	}
-}
-
-// true: `re` coded the frame (its encoder has a state for the stream)
-bool CController::ApplySameCodecGain(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, CSoftCodec *re, bool decoded, const SSameCodec &c)
-{
-	if (c.mode == CConfigure::EGainMode::off)
-		return false;
-	bool encoded_failed = false;	// Encode failed: its state for the stream exists all the same
-	agc_db = HeldAgc(packet, decoded, agc_db);
-	const bool reencode = c.mode == CConfigure::EGainMode::reencode;
-	if (reencode)
-	{
-		if (!ReencodeNeeded(c))
-		{
-			// unchanged; CAmbeGain follows the frame all the same, for a later one
-			if (!c.dstar)
-				m_ambeGain.Follow(packet->GetDMRData(), packet->GetStreamKey());
-			return false;
-		}
-		if (decoded)
-		{
-			// the plugin's encoder, with its GainIn: the three gains as one, no
-			// clipping between them
-			int16_t tmp[160];
-			memcpy(tmp, packet->GetAudioSamples(), sizeof(tmp));
-			// (at most 65535, +48 dB: ApplyGain multiplies in 32 bits)
-			ApplyGain(tmp, 160, int32_t(std::min<int64_t>((int64_t(c.out_num) * c.reencode_num * c.sw_in_num) >> 16, 65535)));
-			uint8_t frame[9];
-			if (re->Encode(packet->GetStreamKey(), packet->GetSequence(), packet->IsLast(), tmp, frame))
-			{
-				SwStat(re, packet->GetModule(), &SwVocoderStats::reencodes);
-				if (c.dstar)
-					packet->SetDStarData(frame);
-				else
-				{
-					// CAmbeGain follows the re-encoded frames, for a frame that does not decode
-					m_ambeGain.Follow(packet->GetDMRData(), frame, packet->GetStreamKey());
-					packet->SetDMRData(frame);
-				}
-				return true;
-			}
-			// the plugin's error (its state exists all the same): the original frame with b2, below
-			encoded_failed = true;
-		}
-		// a frame that did not decode (or not re-encoded): b2 with the held gain, below
-	}
-	// b2 with the gains of the mode: ambe its GainIn and offset, reencode the
-	// plugin's GainIn and the re-encode gain
-	const float gain_db = agc_db + c.dec_out_db + GainDb(c.out_num)
-		+ (reencode ? GainDb(c.sw_in_num) + GainDb(c.reencode_num) : GainDb(c.in_num) + c.offset_db);
+	const float gain_db = HeldAgc(packet, decoded, agc_db) + dec_out_db + GainDb(in_num)
+		+ GainDb(dstar ? outgain_dstar_num.load() : outgain_dmr_num.load());
 	uint8_t frame[9];
-	if (c.dstar)
+	if (dstar)
 	{
 		if (fabsf(gain_db) <= 0.01f)
-			return encoded_failed;
+			return;
 		memcpy(frame, packet->GetDStarData(), 9);
 		DStarAmbe::Gain(frame, gain_db);
 		packet->SetDStarData(frame);
@@ -2979,35 +2887,11 @@ bool CController::ApplySameCodecGain(const std::shared_ptr<CTranscoderPacket> &p
 		m_ambeGain.Process(frame, packet->GetStreamKey(), gain_db);
 		packet->SetDMRData(frame);
 	}
-	return encoded_failed;
-}
-
-bool CController::ReencodeNeeded(const SSameCodec &c) const
-{
-	return m_agcDigital.IsEnabled() || c.out_num != 256 || c.reencode_num != 256 || c.sw_in_num != 256 || fabsf(c.dec_out_db) > 0.01f;
-}
-
-// the gains of D-Star -> D-Star (dstar) or DMR -> DMR/YSF; dec_out_db: the GainOut
-// the decoder used, in_num: the GainIn for b2 (a device's stream: the device's
-// from tcd.ini; a plugin's: the plugin's), the re-encode always takes the plugin's
-CController::SSameCodec CController::SameCodec(bool dstar, float dec_out_db, int32_t in_num) const
-{
-	auto &cfg = g_Stats.config;
-	SSameCodec c;
-	c.mode = CConfigure::EGainMode((dstar ? cfg.dstar_gain_mode : cfg.dmr_gain_mode).load(std::memory_order_relaxed));
-	c.out_num = dstar ? outgain_dstar_num.load() : outgain_dmr_num.load();
-	c.reencode_num = dstar ? dstar_reencode_num.load() : dmr_reencode_num.load();
-	c.in_num = in_num;
-	c.sw_in_num = dstar ? dstar_in_num.load() : ambe_in_num.load();
-	c.dec_out_db = dec_out_db;
-	c.offset_db = float((dstar ? cfg.dstar_ambe_gain_db : cfg.ambe_gain_db).load(std::memory_order_relaxed));
-	c.dstar = dstar;
-	return c;
 }
 
 void CController::P25SameCodecGain(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, bool decoded)
 {
-	if (g_Stats.config.p25_gain_mode.load(std::memory_order_relaxed) != 1)
+	if (!g_Stats.config.same_mode[CConfigure::kSameP25].load(std::memory_order_relaxed))
 		return;
 	const float gain_db = HeldAgc(packet, decoded, agc_db) + GainDb(outgain_imbe_num);
 	if (fabsf(gain_db) <= 0.01f)
@@ -3033,7 +2917,7 @@ static void M17GainHalf(uint8_t *m17, bool is1600, bool second, float gain_db)
 // second energy, the data half stays)
 void CController::M17SameCodecGain(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, bool decoded)
 {
-	if (g_Stats.config.m17_gain_mode.load(std::memory_order_relaxed) != 1)
+	if (!g_Stats.config.same_mode[CConfigure::kSameM17].load(std::memory_order_relaxed))
 		return;
 	const float gain_db = HeldAgc(packet, decoded, agc_db) + GainDb(outgain_m17_num);
 	const bool change = Codec2Gain::Steps(gain_db) != 0;
@@ -3088,8 +2972,8 @@ void CController::RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet, bool
 		}
 		g_Stats.UpdateLevelsOut(packet->GetModule(), packet->GetAudioSamples(), 160);
 		FrameLevels(packet, "dmr");
-		// DMR -> DMR/YSF: re-encoded by the DMR plugin, or b2
-		SameCodecGain(packet, agc_db, dmr_sw, decoded, SameCodec(false, dev_dmr.out_db, dev_dmr.in_num));
+		// DMR -> DMR/YSF: the AGC in b2 (DmrGainMode)
+		AmbeSameMode(packet, agc_db, decoded, false, dev_dmr.out_db, dev_dmr.in_num);
 		// D-Star first: a device gets its frame before the software encodes
 		ToDStar(packet);
 		AudiotoCodec2(packet);

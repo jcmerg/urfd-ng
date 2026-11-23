@@ -166,8 +166,9 @@ public:
 			AmbeWriteB2(ambe, f, best);
 	}
 
-	// a frame that went out as it came (DmrGainMode = reencode, nothing to change):
-	// both gammas follow it
+	// a frame that goes out unchanged (DmrGainMode = off): both gammas follow
+	// it, so that switching the mode on in a stream starts from what the
+	// receiver's decoder has
 	void Follow(const uint8_t *frame, uint32_t streamKey)
 	{
 		auto &shard = m_shards[ModuleSlotOfKey(streamKey)];
@@ -177,22 +178,6 @@ public:
 		if (f.uncorrectable || !AmbeIsVoiceOrSilence(f.b0))
 			return;
 		Unchanged(st, f.b2);
-	}
-
-	// a frame that went out coded otherwise (DmrGainMode = reencode): the gammas
-	// of the original frame and of the one that went out, so that Process on a
-	// later frame of the stream starts from what the receiver's decoder has
-	void Follow(const uint8_t *orig, const uint8_t *out, uint32_t streamKey)
-	{
-		auto &shard = m_shards[ModuleSlotOfKey(streamKey)];
-		std::lock_guard<std::mutex> lock(shard.mutex);
-		SState &st = State(shard, streamKey);
-		const SAmbeFields o = AmbeReadFields(orig), m = AmbeReadFields(out);
-		if (!o.uncorrectable && AmbeIsVoiceOrSilence(o.b0))
-			st.gammaOrig = AMBE_DG[o.b2] + 0.5f * st.gammaOrig;
-		if (!m.uncorrectable && AmbeIsVoiceOrSilence(m.b0))
-			st.gammaMod = AMBE_DG[m.b2] + 0.5f * st.gammaMod;
-		st.offset = st.gammaMod - st.gammaOrig;
 	}
 
 private:

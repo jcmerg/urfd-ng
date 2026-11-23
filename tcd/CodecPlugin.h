@@ -12,7 +12,7 @@
 // codec plugins too, built in (BuiltinCodecs.h) and loaded by name:
 // CodecPlugin = op25, CodecPlugin = codec2. A plugin brings a codec in software, for a codec tcd has no
 // device for: with one DVSI device for D-Star, a plugin with TCD_CODEC_DMR does
-// DMR/YSF (and DmrGainMode = reencode). Since tcd 0.14.0 a plugin with
+// DMR/YSF. Since tcd 0.14.0 a plugin with
 // TCD_CODEC_P25 can do P25 instead of tcd's own OP25 vocoder (CodecP25), since
 // tcd 0.16.0 a plugin with TCD_CODEC_M17 can do M17 instead of tcd's own
 // Codec2 (CodecM17); with TCD_CODEC_M17_1600 as well it also decodes M17

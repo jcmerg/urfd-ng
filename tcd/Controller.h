@@ -286,16 +286,12 @@ protected:
 	void EncodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *bits);
 	bool DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const uint8_t *bits, bool is1600, int16_t *pcm);
 	void PurgePinned(void);
-	// the DMR plugin for DmrGainMode = reencode, nullptr without one
+	// the DMR plugin CodecDMR names (or the first one), nullptr without one: how the devices are laid out
 	class CSoftCodec *dmr_sw = nullptr;
-	// the D-Star plugin for DStarGainMode = reencode of a stream a device decoded, nullptr without one
-	class CSoftCodec *dstar_sw = nullptr;
-	// the reencodes of each g_Stats.sw entry at the reflector thread's last look
-	uint32_t reencodes_seen[CTcdStats::MAX_SW] = {};
 	// the gains as numerators (256 = 0 dB): written by ReconfigureAGC (the monitor's
 	// changes, from the reflector thread) and read by every codec thread
 	std::atomic<int32_t> dstar_in_num{256}, dstar_out_num{256};	// DStarGainIn/Out for a D-Star plugin
-	std::atomic<int32_t> ambe_in_num{256}, ambe_out_num{256}, dmr_reencode_num{256}, dstar_reencode_num{256};
+	std::atomic<int32_t> ambe_in_num{256}, ambe_out_num{256};
 	std::atomic<int32_t> outgain_dstar_num{256}, outgain_dmr_num{256}, outgain_usrp_num{256}, outgain_imbe_num{256}, outgain_m17_num{256};
 	// P25 to M17: a 300 Hz high-pass in front of the Codec2 encoder, per module
 	struct SHighPass { float z[2][2]; uint16_t streamid; };
@@ -304,7 +300,7 @@ protected:
 	CAGC m_agcDigital;  // D-Star, DMR/YSF/NXDN, M17, P25
 	CAGC m_agcAnalog;   // SVX and USRP: FM audio, gate above its noise floor
 	CNoiseSuppress m_nsAnalog;  // SVX and USRP: FM noise removed before the AGC
-	CAmbeGain m_ambeGain;  // DmrGainMode = ambe: AGC and gains in the AMBE2+ bitstream
+	CAmbeGain m_ambeGain;  // DmrGainMode = on: AGC and gains in the AMBE2+ bitstream
 
 	int32_t calcNumerator(int32_t db) const;
 	static void ApplyGain(int16_t *samples, int count, int32_t num);
@@ -312,24 +308,11 @@ protected:
 	void UpdateSplits(void);
 	// [0] D-Star, [1] DMR: the PCM numerator (high 32 bits) and the b2 dB (low 32)
 	std::atomic<uint64_t> split[2] = { { 256ULL << 32 }, { 256ULL << 32 } };
-	// D-Star -> D-Star (DStarGainMode), DMR -> DMR/YSF (DmrGainMode): the AGC's
-	// gain for this frame (agc_db) in the packet's frame of the source codec,
-	// through b2 or a re-encode by `re` (decoded: the frame decoded)
-	struct SSameCodec
-	{
-		CConfigure::EGainMode mode = CConfigure::EGainMode::off;
-		int32_t out_num = 256, reencode_num = 256, in_num = 256;	// OutputGain, ReencodeGain, the encoder's GainIn (for b2)
-		int32_t sw_in_num = 256;	// the plugin's GainIn, for its re-encode
-		float dec_out_db = 0.0f;	// the GainOut the decoder used
-		float offset_db = 0.0f;		// AmbeGainDb / DStarAmbeGainDb
-		bool dstar = false;
-	};
-	void SameCodecGain(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, class CSoftCodec *re, bool decoded, const SSameCodec &c);
-	SSameCodec SameCodec(bool dstar, float dec_out_db, int32_t in_num) const;
-	bool ApplySameCodecGain(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, class CSoftCodec *re, bool decoded, const SSameCodec &c);
-	// the stream of each module whose frames a plugin re-encoded: its encoder state ends with the last frame
-	struct SReencoded { bool valid; uint16_t streamid; uint32_t key; class CSoftCodec *codec; };
-	SReencoded reencoded[kModuleSlots] = {};
+	// D-Star -> D-Star (DStarGainMode), DMR -> DMR/YSF (DmrGainMode): the AGC's gain
+	// for this frame (agc_db) in b2 of the packet's frame of the source codec;
+	// dec_out_db: the GainOut the decoder used, in_num: the GainIn an encoder would
+	// (a device's from tcd.ini, a plugin's live)
+	void AmbeSameMode(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, bool decoded, bool dstar, float dec_out_db, int32_t in_num);
 	// the AGC's gain of a frame that did not decode: the stream's last one that did
 	struct SHeldAgc { bool valid; uint16_t streamid; float db; };
 	SHeldAgc held_agc[kModuleSlots] = {};
@@ -340,7 +323,6 @@ protected:
 	// the b2 part of OutputGainDStar/DMR the devices were given with their PCM part
 	std::atomic<int> device_bs_dstar{0}, device_bs_dmr{0};
 	void SetDeviceGains(class CDVDevice &dev);
-	bool ReencodeNeeded(const SSameCodec &c) const;	// mode 2 codes the frame again
 	bool DiscoverFtdiDevices(std::list<std::pair<std::string, std::string>> &found);
 	bool IsAmbeDevice(const std::string &desc);
 	bool InitVocoders();
