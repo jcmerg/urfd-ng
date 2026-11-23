@@ -76,7 +76,7 @@ protected:
 	std::map<char, CUser>            m_ActiveStations;	// by module
 	std::map<char, std::chrono::steady_clock::time_point> m_StreamStart;	// of the active stations, for their duration
 	// the streams of a module waiting for tcd's report, oldest first: a report comes
-	// about 0.3 s after its stream, when the next one may have started (a quick
+	// about 1 s after its stream (tcd 0.23), when the next one may have started (a quick
 	// round), and one waits for its stream to stop, which brings the lost frames.
 	// A stream stopped more than 10 s ago gets none any more (not transcoded, or
 	// too short for tcd to report)

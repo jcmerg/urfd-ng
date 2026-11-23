@@ -22,12 +22,13 @@ inline bool OncePerSecond(std::atomic<int64_t> &stamp)
 }
 
 // tcd's time limits that depend on each other: a module worker drops a packet from
-// the reflector that waited longer than kWorkerMaxAgeMs for it (not a stream's last);
-// an answer an AMBE device owes for kLostAnswerMs is taken as lost (the reader looks
-// every 50 ms) and its frame goes on with silence; a stream's report to urfd waits
-// kReportDelayMs after its last frame, so its last frames are coded by then: a
-// device answers in some 20-100 ms, and a frame can pass two device channels
-// (decoded on one, encoded on the other), each of which can lose its answer
+// the reflector that waited longer than kWorkerMaxAgeMs for it (not a stream's first
+// or last frame, not a device's answer); an answer an AMBE device owes for
+// kLostAnswerMs (bytes of it dropped on the serial line, an FTDI receive overrun) is
+// taken as lost, the reader looks every 50 ms, and its frame goes on with silence;
+// a stream's report to urfd waits kReportDelayMs after its last activity, so its
+// last frames are coded by then. A device answers in some 20-100 ms; the decode
+// refreshes the report's activity, so one device pass (the encode) is left after it
 constexpr int kWorkerMaxAgeMs = 400;
 constexpr int kLostAnswerMs = 300;
-constexpr int kReportDelayMs = kWorkerMaxAgeMs + 2 * (kLostAnswerMs + 50) + 300;
+constexpr int kReportDelayMs = kWorkerMaxAgeMs + kLostAnswerMs + 50 + 300;

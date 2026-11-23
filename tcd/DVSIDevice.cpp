@@ -46,10 +46,6 @@
 // end the transmission for the pause (some after 1.5-2 s)
 #define DEVICE_SILENCE_MS 1000
 
-// a packet unanswered for this long lost its answer (bytes of it dropped on the
-// serial line, an FTDI receive overrun, and with them the channel it was for); a
-// channel answers in order, the busiest within some 60 ms
-
 // what goes on for a lost answer: the silence frames of the vocoders, silent audio
 static const uint8_t DSTAR_SILENCE[9] { 0x9EU, 0x8DU, 0x32U, 0x88U, 0x26U, 0x1AU, 0x3FU, 0x61U, 0xE8U };
 static const uint8_t DMR_SILENCE[9]   { 0xB9U, 0xE8U, 0x81U, 0x52U, 0x61U, 0x73U, 0x00U, 0x2AU, 0x6BU };
@@ -615,14 +611,13 @@ void CDVDevice::FeedDevice()
 			break;
 		const auto &packet = feed.packet;
 		{
-			{	// wait until there is room in chip FIFO: an answer, or one the reader
-				// takes as lost (Resync), makes it; the 50 ms only guard a missed wake-up,
-				// a frame never goes into a full FIFO (the chip would drop it)
+			{	// wait until there is room in chip FIFO, at most 50 ms: a frame then goes
+				// anyway, so a hung device keeps frames waiting and DEVICE_SILENCE_MS
+				// catches it (waiting for room without end hid a hung device)
 				const unsigned int max_depth = (Edvtype::dv3003 == devtype) ? 5 : 2;
 				std::unique_lock<std::mutex> lk(buffer_mutex);
-				while (!buffer_cv.wait_for(lk, std::chrono::milliseconds(50),
-					[&]{ return !keep_running || buffer_depth < max_depth; }))
-					;
+				buffer_cv.wait_for(lk, std::chrono::milliseconds(50),
+					[&]{ return !keep_running || buffer_depth < max_depth; });
 			}
 
 			if (keep_running)
