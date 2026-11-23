@@ -28,7 +28,7 @@ public:
 
 	// a frame from the reflector (the reader thread). fec_errors: the bits the FEC of
 	// an AMBE frame corrected, -1 for a codec without that check
-	void FrameIn(char module, uint16_t sid, ECodecType codec, bool last, int fec_errors, bool uncorrectable)
+	void FrameIn(char module, uint16_t sid, ECodecType codec, bool last, uint32_t sequence, int fec_errors, bool uncorrectable)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		auto &a = Stream(module, sid, codec);
@@ -36,6 +36,8 @@ public:
 		a.last_in = a.seen;
 		if (a.frames_in++ == 0)
 			a.first_in = a.seen;
+		if (last)
+			a.last_seq = sequence;
 		a.last = a.last || last;
 		if (fec_errors >= 0)
 		{
@@ -89,13 +91,13 @@ public:
 	}
 
 	// the stream's last frame went back to urfd (a module worker): its report is due
-	void LastSent(char module, uint16_t sid)
+	void LastSent(char module, uint16_t sid, uint32_t sequence)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		auto it = m_streams.find(module);
-		// a stream whose last frame came in: not a new transmission on the same id
-		// (DMR+) that started while the old one's last frame was still coded
-		if (it != m_streams.end() && it->second.sid == sid && it->second.last)
+		// this stream's last frame, by its count: not an older transmission's on the
+		// same id (DMR+) whose last frame was still coded when this one came
+		if (it != m_streams.end() && it->second.sid == sid && it->second.last && it->second.last_seq == sequence)
 			it->second.sent = true;
 	}
 
@@ -149,6 +151,7 @@ private:
 		Clock::time_point first_in, last_in, seen;
 		bool last = false, agc = false, decoded = false;
 		bool sent = false;	// its last frame went back to urfd (LastSent)
+		uint32_t last_seq = 0;	// the count of its last frame (FrameIn)
 		uint32_t frames_in = 0, frames = 0, voice = 0, clipped = 0, gain_frames = 0;
 		float peak = -100.0f, peak_all = -100.0f, gain_min = 1000.0f, gain_max = -1000.0f;
 		double power_in = 0.0, power_out = 0.0, gain_sum = 0.0;

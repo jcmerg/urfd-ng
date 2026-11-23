@@ -1254,7 +1254,7 @@ void CController::ReadReflectorThread()
 					fec = r.errors;
 					unc = r.uncorrectable;
 				}
-				g_Reports.FrameIn(packet->GetModule(), packet->GetStreamId(), packet->GetCodecIn(), packet->IsLast(), fec, unc);
+				g_Reports.FrameIn(packet->GetModule(), packet->GetStreamId(), packet->GetCodecIn(), packet->IsLast(), packet->GetSequence(), fec, unc);
 			}
 			g_Stats.reflector.packets_rx.fetch_add(1, std::memory_order_relaxed);
 			// Idle reset is handled by 2s timeout in reconf loop
@@ -1327,6 +1327,8 @@ static int UsableCores(void)
 				continue;
 			for (const std::string &dir : { std::string(mount) + (v1 == "/" ? std::string() : v1), std::string(mount) })
 			{
+				if (v1 == "/" && dir != mount)
+					continue;	// its own cgroup is the top: read once
 				std::ifstream fq(dir + "/cpu.cfs_quota_us"), fp(dir + "/cpu.cfs_period_us");
 				long q = 0, p = 0;
 				if (fq >> q && fp >> p && q > 0 && p > 0)
@@ -2785,10 +2787,12 @@ void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
 void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
 {
 	packet->Sent();
+	const bool sent = !tcClient.Send(packet->GetTCPacket());
 	// the stream's report goes once its last frame is through: after the send, so the
 	// report never comes before the frame (sent or not)
-	struct SLast { const std::shared_ptr<CTranscoderPacket> &p; ~SLast() { if (p->IsLast()) g_Reports.LastSent(p->GetModule(), p->GetStreamId()); } } last_through{ packet };
-	if (!tcClient.Send(packet->GetTCPacket()))
+	if (packet->IsLast())
+		g_Reports.LastSent(packet->GetModule(), packet->GetStreamId(), packet->GetSequence());
+	if (sent)
 	{
 		g_Stats.PacketOut(packet->GetModule());
 		g_Stats.reflector.packets_tx.fetch_add(1, std::memory_order_relaxed);

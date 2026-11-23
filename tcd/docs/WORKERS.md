@@ -40,7 +40,7 @@ The devices keep their own threads for the serial line: a feeder that sends the 
 - **Too late for the device**: a frame that waited a second to go to its device goes on with silence, so a device that is slower than the frames come (but still answers) does not queue them without end.
 - **Lost answers**: an answer the device owes for 300 ms is taken as lost (see [Lost answers](../README.md#lost-answers-devicecompand)); its frame goes on with silence.
 - **A hung or lost device**: a device that answers nothing for 1 s while frames wait, or that is unplugged, is taken out (see [A device lost while tcd runs](../README.md#a-device-lost-while-tcd-runs)). The frames it was sent and the ones still waiting go on with silence at once, as do frames handed to it while it is closed (phased out, reopened for another `DeviceCompand`).
-- **Order**: the silence of a lost or closed device goes out in order, the frames it was sent first, then those not sent yet. urfd takes the frames of a stream by their count and drops one that comes after a newer one.
+- **Order**: the silence of a lost or closed device goes out the frames it was sent first, then those not sent yet. urfd takes the frames of a stream by their count and drops one that comes after a newer one; where a silent frame still overtakes an older answer (a frame too late for a device that lags), that older frame is dropped instead, the same 20 ms gap.
 - **Channel pool**: a stream's AMBE channel is freed only after its last frame is queued to the device, so another module's first frame cannot come before it.
 
 ## Codec plugins
