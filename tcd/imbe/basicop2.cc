@@ -36,6 +36,7 @@
 #include <cstdlib>
 #include "typedef.h"
 #include "basic_op.h"
+#include "wrap32.h"
 
 #if (WMOPS)
 #include "count.h"
@@ -948,7 +949,7 @@ Word32 L_add (Word32 L_var1, Word32 L_var2)
 {
     Word32 L_var_out;
 
-    L_var_out = L_var1 + L_var2;
+    L_var_out = wadd32 (L_var1, L_var2);
 
     if (((L_var1 ^ L_var2) & MIN_32) == 0)
     {
@@ -1000,7 +1001,7 @@ Word32 L_sub (Word32 L_var1, Word32 L_var2)
 {
     Word32 L_var_out;
 
-    L_var_out = L_var1 - L_var2;
+    L_var_out = wsub32 (L_var1, L_var2);
 
     if (((L_var1 ^ L_var2) & MIN_32) != 0)
     {
@@ -1059,9 +1060,9 @@ Word32 L_add_c (Word32 L_var1, Word32 L_var2)
     Word32 L_test;
     Flag carry_int = 0;
 
-    L_var_out = L_var1 + L_var2 + Carry;
+    L_var_out = wadd32 (wadd32 (L_var1, L_var2), Carry);
 
-    L_test = L_var1 + L_var2;
+    L_test = wadd32 (L_var1, L_var2);
 
     if ((L_var1 > 0) && (L_var2 > 0) && (L_test < 0))
     {
@@ -1184,7 +1185,7 @@ Word32 L_sub_c (Word32 L_var1, Word32 L_var2)
         }
         else
         {
-            L_var_out = L_var1 - L_var2;
+            L_var_out = wsub32 (L_var1, L_var2);
             if (L_var1 > 0L)
             {
                 Overflow = 1;
@@ -1194,8 +1195,8 @@ Word32 L_sub_c (Word32 L_var1, Word32 L_var2)
     }
     else
     {
-        L_var_out = L_var1 - L_var2 - (Word32) 0X00000001L;
-        L_test = L_var1 - L_var2;
+        L_var_out = wsub32 (wsub32 (L_var1, L_var2), (Word32) 0X00000001L);
+        L_test = wsub32 (L_var1, L_var2);
 
         if ((L_test < 0) && (L_var1 > 0) && (L_var2 < 0))
         {
@@ -1692,7 +1693,7 @@ Word32 L_deposit_h (Word16 var1)
 {
     Word32 L_var_out;
 
-    L_var_out = (Word32) var1 << 16;
+    L_var_out = wshl32 ((Word32) var1, 16);
 #if (WMOPS)
     multiCounter[currCounter].L_deposit_h++;
 #endif

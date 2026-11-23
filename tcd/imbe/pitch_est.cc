@@ -31,6 +31,7 @@
 #include "encode.h"
 #include "dsp_sub.h"
 #include "imbe_vocoder_impl.h"
+#include "wrap32.h"
 
 
 
@@ -175,7 +176,7 @@ void imbe_vocoder_impl::e_p(Word16 *sigin, Word16 *res_buf)
 		
 		L_tmp = L_shr(L_tmp, 6);       // compensate wi scaling 
 		L_tmp = L_add(L_tmp, L_e0);    // For n = 0 
-		L_tmp = L_tmp * index_step;
+		L_tmp = wmul32(L_tmp, index_step);
 		L_num = L_sub(L_sum, L_tmp);
 
 		index_beg++;
