@@ -40,12 +40,12 @@ Es gibt drei Build-Scripts, eins je Betriebsart:
 | `reflector/build.sh` | urfd, `inicheck`, `dbutil` | systemd-Unit `urfd` | `/usr/local/etc/urfd/` |
 | `tcd/build.sh` | tcd, `tcdmon`, die Codec-Plugins | systemd-Unit `tcd` | `/usr/local/etc/tcd.ini` |
 
-`docker/build.sh` hat keine Schalter: Es baut, wofür diese Maschine eine Konfiguration hat.
+`docker/build.sh` baut, wofür diese Maschine eine Konfiguration hat; `docker/build.sh urfd` oder `docker/build.sh tcd` baut nur dieses und startet es neu, wenn es läuft (mit `start` startet es), das andere läuft weiter.
 
 | In `$URFD_DATA` | `docker/build.sh` baut und startet |
 |---|---|
 | `config/urfd.ini` | urfd |
-| `tcd/tcd.ini` | tcd; mit `DeviceSerial` oder ohne Codec-Plugin (eine `CodecPlugin`-Zeile außer den eigenen `op25` und `codec2` von tcd) nimmt es `docker-compose.tcd-sticks.yml` dazu, damit der Container die AMBE-Sticks bekommt |
+| `tcd/tcd.ini` | tcd; mit `DeviceSerial` (außer `none`) oder ohne Codec-Plugin (eine `CodecPlugin`-Zeile außer den eigenen `op25` und `codec2` von tcd) nimmt es `docker-compose.tcd-sticks.yml` dazu, damit der Container die AMBE-Sticks bekommt |
 | beides | beides |
 
 Eine Reflektor-Maschine bekommt also `config/urfd.ini` ([Reflektor in Docker](#reflektor-in-docker)), eine Transcoder-Maschine nur `tcd/tcd.ini` ([tcd in Docker](../tcd/README.de.md#tcd-in-docker)), und `docker/build.sh start` baut auf jeder das Richtige. Anderes Datenverzeichnis: `URFD_DATA=/srv/urfd docker/build.sh start`.
@@ -106,7 +106,7 @@ sudo bash reflector/build.sh --no-dht   # wo es libopendht-dev nicht gibt
 
 `build.sh` installiert die Pakete zum Bauen (`build-essential`, `nlohmann-json3-dev`, `libcurl4-gnutls-dev`, `libopus-dev`, `libssl-dev`, `libwebsockets-dev`, `libopendht-dev`, dazu `pkg-config`, `libsqlite3-dev`, `libmariadb-dev`, `libpq-dev` für die Zugangsdaten-Datenbank), baut als Besitzer des Checkouts und installiert `urfd`, `inicheck` und `dbutil` nach `/usr/local/bin` sowie die systemd-Unit `urfd` mit Echtzeit-Scheduling. Der erste Lauf legt die Vorlagen in `/usr/local/etc/urfd/` ab, mit Pfaden dorthin und `urfd.ini` nur für root lesbar; spätere Läufe behalten die Konfiguration.
 
-Die Build-Optionen stehen in `reflector/urfd.mk`, beim ersten Bauen aus [`config/urfd.mk`](../config/urfd.mk) kopiert und danach behalten: `BINDIR`, `debug`, `DHT`. Mit `DHT = false` wird urfd ohne OpenDHT gebaut; es meldet dann beim Start `DHT: not built in`, und Interlinks brauchen eine IP in der Interlink-Datei. Das Docker-Image nimmt es aus `URFD_DHT=false` (`URFD_DHT=false docker/build.sh start`).
+Die Build-Optionen stehen in `reflector/urfd.mk`, beim ersten Bauen aus [`config/urfd.mk`](../config/urfd.mk) kopiert und danach behalten: `BINDIR`, `debug`, `DHT` und die Datenbank-Backends `CRED_*`. `build.sh` installiert nach `/usr/local/bin` und setzt `DHT` selbst (`--no-dht`), `BINDIR` und `DHT = false` dort gelten also für ein einfaches `make` / `make install`. Ohne DHT wird urfd ohne OpenDHT gebaut; es meldet dann beim Start `DHT: not built in`, und Interlinks brauchen eine IP in der Interlink-Datei. Das Docker-Image nimmt es aus `URFD_DHT=false` (`URFD_DHT=false docker/build.sh start`).
 
 ```bash
 sudo nano /usr/local/etc/urfd/urfd.ini

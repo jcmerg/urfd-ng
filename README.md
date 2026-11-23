@@ -71,7 +71,7 @@ sudo ./setup.sh
 | [docker/README.md](docker/README.md) | The Docker image and its containers |
 | [tcd/README.md](tcd/README.md) | The transcoder: hardware, codec plugins, levels, monitoring |
 
-By hand, with the configuration in `/opt/urfd`:
+By hand (Docker takes its configuration from `/opt/urfd`, `reflector/build.sh` from `/usr/local/etc/urfd/`, `tcd/build.sh` from `/usr/local/etc/tcd.ini`):
 
 ```bash
 cd docker && docker compose build && docker compose up -d   # reflector in Docker
@@ -83,7 +83,7 @@ The urfd container runs **urfd** and **nginx** (the dashboard on port 8363, urfd
 
 ## Configuration
 
-All configuration is in `/opt/urfd/config/` (mounted into the container):
+The reflector's configuration is in `/opt/urfd/config/` (Docker, mounted into the container) or `/usr/local/etc/urfd/` (native):
 
 | File | Purpose |
 |------|---------|
@@ -91,9 +91,9 @@ All configuration is in `/opt/urfd/config/` (mounted into the container):
 | `urfd.interlink` | Peer reflectors (URF, XLX, DCS, M17) |
 | `urfd.blacklist` / `urfd.whitelist` | Access control (reloaded on SIGHUP) |
 | `urfd.terminal` | G3 (Icom Terminal / Access Point mode), reloaded when the file changes |
-| `tcd.ini` | The transcoder, see [tcd/README.md](tcd/README.md) |
+| `tcd.ini` | The transcoder, in `/opt/urfd/tcd/` (Docker) or `/usr/local/etc/` (native), see [tcd/README.md](tcd/README.md) |
 
-The templates in [`config/`](config/) explain every key. **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** describes each feature with examples:
+The templates in [`config/`](config/) list every key with a short note. **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** describes each feature with examples:
 
 - [Basics](docs/CONFIGURATION.md#basics): names, modules and their talkgroups, transcoder, enabled protocols, external address, ID databases, module access by protocol
 - [XLX directory registration](docs/CONFIGURATION.md#xlx-directory-registration-callinghome)
@@ -120,7 +120,7 @@ sudo ./setup.sh check               # check urfd.ini with inicheck
 sudo ./setup.sh update              # pull, rebuild, restart
 ```
 
-Without `urfd` or `tcd`, the commands act on everything installed. `reload` sends SIGHUP to urfd itself, not to the container: its PID 1 is supervisord, which restarts all programs on SIGHUP.
+Without `urfd` or `tcd`, `status`, `start`, `stop` and `restart` act on everything installed, `logs` shows the reflector's log; `reload` and `check` are for urfd. `reload` sends SIGHUP to urfd itself, not to the container: its PID 1 is supervisord, which restarts all programs on SIGHUP.
 
 ### inicheck
 

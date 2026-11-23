@@ -40,12 +40,12 @@ There are three build scripts, one per way of running things:
 | `reflector/build.sh` | urfd, `inicheck`, `dbutil` | systemd unit `urfd` | `/usr/local/etc/urfd/` |
 | `tcd/build.sh` | tcd, `tcdmon`, the codec plugins | systemd unit `tcd` | `/usr/local/etc/tcd.ini` |
 
-`docker/build.sh` builds what this machine has a configuration for; `docker/build.sh urfd` or `docker/build.sh tcd` builds and restarts only that one (`start` can come with it), the other keeps running.
+`docker/build.sh` builds what this machine has a configuration for; `docker/build.sh urfd` or `docker/build.sh tcd` builds only that one and restarts it if it runs (with `start`, starts it), the other keeps running.
 
 | In `$URFD_DATA` | `docker/build.sh` builds and starts |
 |---|---|
 | `config/urfd.ini` | urfd |
-| `tcd/tcd.ini` | tcd; with a `DeviceSerial` or without a codec plugin (a `CodecPlugin` line other than tcd's own `op25` and `codec2`) it adds `docker-compose.tcd-sticks.yml`, so the container gets the AMBE sticks |
+| `tcd/tcd.ini` | tcd; with a `DeviceSerial` (other than `none`) or without a codec plugin (a `CodecPlugin` line other than tcd's own `op25` and `codec2`) it adds `docker-compose.tcd-sticks.yml`, so the container gets the AMBE sticks |
 | both | both |
 
 So a reflector machine gets `config/urfd.ini` ([Reflector in Docker](#reflector-in-docker)), a transcoder machine only `tcd/tcd.ini` ([tcd in Docker](../tcd/README.md#tcd-in-docker)), and `docker/build.sh start` builds the right thing on each. Another data directory: `URFD_DATA=/srv/urfd docker/build.sh start`.
@@ -106,7 +106,7 @@ sudo bash reflector/build.sh --no-dht   # where libopendht-dev is not available
 
 `build.sh` installs the build packages (`build-essential`, `nlohmann-json3-dev`, `libcurl4-gnutls-dev`, `libopus-dev`, `libssl-dev`, `libwebsockets-dev`, `libopendht-dev`, and `pkg-config`, `libsqlite3-dev`, `libmariadb-dev`, `libpq-dev` for the credential database), builds as the owner of the checkout and installs `urfd`, `inicheck` and `dbutil` to `/usr/local/bin` and the systemd unit `urfd`, with realtime scheduling. The first run puts the templates into `/usr/local/etc/urfd/` with the paths pointing there and `urfd.ini` readable by root only; later runs keep the configuration.
 
-The build options are in `reflector/urfd.mk`, copied from [`config/urfd.mk`](../config/urfd.mk) at the first build and kept afterwards: `BINDIR`, `debug`, `DHT`. With `DHT = false` urfd is built without OpenDHT; it then logs `DHT: not built in` at the start, and interlinks need an IP in the interlink file. The Docker image takes it from `URFD_DHT=false` (`URFD_DHT=false docker/build.sh start`).
+The build options are in `reflector/urfd.mk`, copied from [`config/urfd.mk`](../config/urfd.mk) at the first build and kept afterwards: `BINDIR`, `debug`, `DHT` and the `CRED_*` database backends. `build.sh` installs to `/usr/local/bin` and sets `DHT` itself (`--no-dht`), so `BINDIR` and `DHT = false` there apply to a plain `make` / `make install`. Without DHT urfd is built without OpenDHT; it then logs `DHT: not built in` at the start, and interlinks need an IP in the interlink file. The Docker image takes it from `URFD_DHT=false` (`URFD_DHT=false docker/build.sh start`).
 
 ```bash
 sudo nano /usr/local/etc/urfd/urfd.ini

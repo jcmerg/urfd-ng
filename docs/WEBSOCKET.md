@@ -84,6 +84,7 @@ Notes:
 - `event_type` identifies the event category.
 - `timestamp` is the Unix time when the server emitted the event.
 - `payload` is always a JSON object, even when the event is just a minimal status update.
+- `reflector_name` is the reflector's callsign (e.g. `URF123`), in every event.
 
 ## Server-to-client events
 
@@ -203,7 +204,7 @@ Example payload:
 
 ### `station_stopped`
 
-Sent when that stream closes, with the payload of its `station_started`. There is one stream per module, so at most one station per module is active.
+Sent when that stream closes, with the payload of its `station_started`. There is one stream per module, so at most one station per module is active. When the talker is renamed during the stream (its callsign arrives later), `station_stopped` is followed by a `station_started` with `replaces`, the callsign shown so far.
 
 ### `user_heard`
 
@@ -276,7 +277,7 @@ The bridges of every module, sent when one changed: a TG mapping added, removed 
 }
 ```
 
-- `protocol`: `YSF`, `NXDN`, `P25` (`type` `AutoLink`), `USRP` (`Bridge`), `MMDVM`, `MMDVMClient`, `OpenBridge`, `SvxReflector`, `SVX` (`TG`), `DCSClient`, `DExtraClient`, `DPlusClient` (`Module`), `YSFClient` (`DG-ID`); only enabled protocols
+- `protocol`: `YSF`, `NXDN`, `P25` (`type` `AutoLink`), `USRP` (`Bridge`), `MMDVM`, `MMDVMClient` or the connection's name (`MMDVMClient2`, `MMDVMClient.TGIF`), `OpenBridge`, `SvxReflector`, `SVX` (`TG`), `DCSClient`, `DExtraClient`, `DPlusClient` (`Module`), `YSFClient` (`DG-ID`); only enabled protocols
 - `id`: the TG, the reflector ID, the remote module letter or the DG-ID, when there is one
 - `timeslot`: DMR timeslot, for `MMDVM` and `MMDVMClient`
 - `expires`: Unix time a dynamic TG ends unless it is used again; static ones have none

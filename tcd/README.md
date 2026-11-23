@@ -2,13 +2,13 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.22.13** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd). What changed from version to version is in the [release notes](https://github.com/jcmerg/urfd-ng/releases).
+**Version 0.23.4** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd). What changed from version to version is in the [release notes](https://github.com/jcmerg/urfd-ng/releases).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 
 - **D-Star** (AMBE) and **DMR/YSF/NXDN** (AMBE2+) on DVSI AMBE hardware (DV3000, DV3003 and their relatives), or in software with a [codec plugin](#codec-plugins)
 - **P25** (IMBE, also YSF VW) with tcd's own OP25 vocoder, **M17** with tcd's own Codec2; a codec plugin can take these too
-- an **AGC** that brings every call to the same level, whatever radio or vocoder it came from, also DMR → DMR/YSF without re-encoding
+- an **AGC** that brings every call to the same level, whatever radio or vocoder it came from, also a mode passed on in itself (DMR → DMR/YSF, D-Star, P25, M17) without re-encoding
 - noise suppression for **analog sources** (SvxLink, AllStar)
 - a **web dashboard** and the terminal monitor **tcdmon**, with live level meters and settings
 
@@ -148,7 +148,7 @@ By default the AMBE channels belong to the first modules of `Modules`. With `Dev
 
 ### A device lost while tcd runs
 
-A device that is unplugged, or that leaves a packet unanswered for 1 s (a hung chip), is taken out: the frames on it go on with silence, its streams, also the ones on the air, go to a codec plugin, and tcd opens the device again as soon as it is back (looked for every 5 s by its `/dev/serial/by-id` name, so a replug may give it another node). New streams use it again from then on. Without a plugin for one of the device's codecs tcd stops instead; systemd (or Docker) restarts it, or a [standby tcd](#standby-a-second-tcd-for-the-same-modules) takes the modules. A device missing at the start is only used after the next start of tcd.
+A device that is unplugged, or that leaves a packet unanswered for 1 s (a hung chip), is taken out: the frames on it go on with silence, its streams, also the ones on the air, go to a codec plugin, and tcd opens the device again as soon as it is back (looked for after 2 s, then every 5 s, by its `/dev/serial/by-id` name, so a replug may give it another node). New streams use it again from then on. Without a plugin for one of the device's codecs tcd stops instead; systemd (or Docker) restarts it, or a [standby tcd](#standby-a-second-tcd-for-the-same-modules) takes the modules. A device missing at the start is only used after the next start of tcd.
 
 ### Lost answers (`DeviceCompand`)
 
@@ -305,8 +305,8 @@ All gains are in dB, -40 to +40 (the web dashboard's sliders: output gains -24 t
 | `OutputGainM17` | `0` | M17/Codec2 output, after the AGC |
 | `OutputGainIMBE` | `0` | P25 output, after the AGC |
 | `OutputGainUSRP` | `0` | USRP and SVX output, after the AGC (both get the same PCM from tcd), USRP/SVX → USRP/SVX included |
-| `DStarGainIn` / `DStarGainOut` | `0` | inside the DVSI chip, D-Star decode / encode; for a codec plugin tcd applies them in software |
-| `DmrGainIn` / `DmrGainOut` | `0` | inside the DVSI chip, DMR decode / encode; for a codec plugin tcd applies them in software |
+| `DStarGainIn` / `DStarGainOut` | `0` | D-Star: GainIn before the encoder, GainOut after the decoder; in the DVSI chip (from `tcd.ini` when the device opens), for a codec plugin tcd applies them in software (the monitor changes them at once) |
+| `DmrGainIn` / `DmrGainOut` | `0` | DMR/YSF: GainIn before the encoder, GainOut after the decoder; in the DVSI chip (from `tcd.ini` when the device opens), for a codec plugin tcd applies them in software (the monitor changes them at once) |
 
 SVX and USRP gains per connection are set in the reflector's `urfd.ini` (`RxGain`/`TxGain` in `[SvxReflector]`, `[SVXServer]` and `[USRP]`).
 
@@ -366,26 +366,31 @@ Analog sources (SVX, USRP) have their own gate and limits for the FM noise in th
 
 ## Audio levels
 
-Every conversion goes through PCM, except the direct path between the MBE codecs of one codec plugin:
+Every conversion goes through PCM, except the same mode and the direct path between the MBE codecs of one codec plugin. `GainOut` works on the decoder's output, `GainIn` on the encoder's input, in the DVSI chip or, for a codec plugin, in software:
 
 ```
-D-Star/DMR (DVSI hardware):
-  AMBE --[DVSI GainIn]--> PCM --[AGC]--> PCM --[OutputGain]--> [DVSI GainOut] --> target AMBE
+source -> PCM:
+  D-Star, DMR/YSF   AMBE  --[decode, DStarGainOut / DmrGainOut]--> PCM
+  P25, M17          frame --[decode]--> PCM
+  USRP, SVX         PCM (urfd RxGain) --[noise suppression]--> PCM
 
-M17/P25 (software vocoder):
-  codec --[decode]--> PCM --[AGC]--> PCM --[OutputGain]--> target codec
+PCM -> target:
+  PCM --[AGC: digital or analog profile]--> PCM --[OutputGain of the target]--> encoder
+  D-Star, DMR/YSF   PCM --[DStarGainIn / DmrGainIn, encode]--> AMBE --[OutputGain*Bitstream part in b2]--> target
+  P25, M17          PCM --[encode]--> frame
+  USRP, SVX         PCM (urfd TxGain)
 
-USRP/SVX (PCM):
-  PCM --[noise suppression]--> PCM --[analog AGC]--> PCM --[OutputGain]--> target codec   (RxGain/TxGain per connection in urfd.ini)
-
-Same mode with DmrGainMode, DStarGainMode, P25GainMode, M17GainMode = on:
+same mode (*GainMode = on):
   frame --[decode]--> PCM --[AGC] (gain only)
-  frame --[b2 / Codec2 energy: AGC gain + OutputGain of the target]--> frame
+  frame --[b2 / Codec2 energy: AGC gain + OutputGain (D-Star, DMR: + GainOut and GainIn)]--> frame
+  USRP/SVX -> USRP/SVX: the processed PCM, as every other target
 
-D-Star, DMR/YSF, P25 -> another of the three, both on one plugin with transcode (Transcode = direct):
-  frame --[decode]--> PCM --[AGC] (gain only)                       (M17, USRP, SVX get this PCM)
-  frame --[plugin: AGC gain + OutputGain + DVSI-style GainIn/Out in the parameters]--> target frame
+direct (Transcode = direct, D-Star, DMR/YSF, P25 to another of the three on one plugin):
+  frame --[decode]--> PCM --[AGC] (gain only)                  (M17, USRP, SVX get this PCM)
+  frame --[plugin: AGC gain + OutputGain + GainOut/GainIn in the parameters]--> target frame
 ```
+
+`OutputGainDMRBitstream` and `OutputGainDStarBitstream` move that part of a negative output gain from the PCM into b2 after the encoder, for sources of other modes; the direct path puts the whole output gain into the parameters.
 
 **With the AGC**, the static gains can usually all stay at 0, except `OutputGainDMR = -14` for the level DMR radios expect: it evens out different microphones, radios and codecs per transmission. Without it, every route needs its own static gain. The same mode follows the [*GainMode keys](#same-mode-dmrgainmode--usrpgainmode); USRP/SVX → USRP/SVX gets the processed audio like every other target.
 
@@ -403,7 +408,7 @@ After every transmission tcd tells urfd how it sounded: the level and peak befor
 
 - an LCD card per module with the input codec, the targets, level meters before and after the AGC (with peak hold and the AGC target) and the signal path with the level at each stage; targets coded directly are marked "direct"
 - a compact view for many modules (from five on, or with "Compact"): a key per module, full cards only for the modules on the air and the ones pinned
-- AGC and gain controls that apply immediately, and Save to write them to `tcd.ini`
+- AGC and gain controls that apply immediately (the DVSI gains: on codec plugins; an AMBE device takes them from `tcd.ini` when it opens), and Save to write them to `tcd.ini`
 - the vocoders: the AMBE channels in use (fixed or pool), each device with its serial, type, channels and modules, each codec plugin and tcd's own vocoders, with their frames and errors (`fec` corrected, `unc` uncorrectable, `bad` encoded frames failing their FEC, `rep`/`mute` repeated/muted by a plugin, `lost` answers lost on the serial line)
 - "Phase out" takes a device out of service (the streams on it run to their end, then it can be unplugged), "Take back" opens it again; only for a device whose codecs a codec plugin covers
 - the vocoder for new D-Star, DMR, P25 and M17 streams, "AMBE channels" (fixed or pool), "AMBE speech" (`DeviceCompand`) and direct transcoding, switchable at run time
@@ -482,7 +487,7 @@ What tcd does beyond [n7tae/tcd](https://github.com/n7tae/tcd); the details of e
 - **Devices**: serial access through the kernel's `ftdi_sio` driver instead of libftd2xx (POSIX backend by Jason Kendall), device type from the chip, exact device selection, macOS support, mixed mode (DV3000 + DV3003, or a lone DV3003), three devices and more, channel pool, lost devices handed to the codec plugins and reopened, recovery from lost serial answers, `DeviceCompand`
 - **Vocoders**: codec plugins with a plain C interface, switchable at run time, direct transcoding between the MBE codecs; OP25 and Codec2 as built-in plugins; no MD380 firmware in tcd
 - **Threads**: module workers that code the modules in parallel, instead of one thread per codec for all modules
-- **Audio**: a speech-driven AGC with separate profiles for digital and analog sources, noise suppression for FM sources, output gains per codec, the AGC's gain in the AMBE2+ bitstream for DMR → DMR/YSF, a 300 Hz high-pass for P25 → M17
+- **Audio**: a speech-driven AGC with separate profiles for digital and analog sources, noise suppression for FM sources, output gains per codec, the AGC's gain in the frame for a mode passed on in itself (AMBE and IMBE b2, the Codec2 energy), a 300 Hz high-pass for P25 → M17
 - **Monitoring**: web dashboard in the urfd dashboard's look and `tcdmon`, a report of each transmission to urfd, stream log with FEC check, stats CSV with `agc-analyze`
 - **Operation**: built from the urfd repository with `build.sh` or in Docker, standby modules for a second tcd, a password for the reflector connection, host names as `ServerAddress`, reconnect with backoff, pings and timeouts on the reflector connection, `TCP_NODELAY`, monitor on loopback by default with an optional password, web server on libwebsockets (GPL compatible)
 

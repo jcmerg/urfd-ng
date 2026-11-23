@@ -61,6 +61,8 @@ Das Script stellt seine Fragen nacheinander (auf Englisch). Ein Wert in `[eckige
 | Admin page | Damit verwaltest du Talkgroups und siehst das Live-Log im Dashboard. Das Script erzeugt ein Passwort. Über reines `http://` geht das Passwort unverschlüsselt übers Netz: für den Zugriff von außen einen TLS-Proxy (Caddy, nginx) vor Port 8363 setzen |
 | Register in the XLX directory | Trägt den Reflektor in Pi-Star, WPSD und andere Hotspot-Software ein. Antworte erst mal **no** und trage ihn später ein, wenn er läuft und aus dem Internet erreichbar ist |
 | Install Docker | Ja, wenn das Script es anbietet |
+| Run the transcoder | 1 in Docker (der Vorschlag), 2 nativ mit systemd |
+| IP address or host name of the reflector, Transcoded modules, Transcoder password | Nur bei 3 (nur Transcoder): IP oder Hostname des Reflektors, die zu transcodierenden Module und sein `[Transcoder] Password` |
 | AMBE hardware | 1 für ein einzelnes Gerät (DV3000 oder DV3003), 2 für zwei Geräte, 3 für keines (ein Codec-Plugin macht alles in Software) |
 | Fetch tcd-mbelib-neo-plugin | Kommt, wenn ein Codec-Plugin nötig ist: ohne Sticks, mit einem einzelnen Gerät oder für mehr Module, als die Geräte abdecken. **yes** holt es nach `tcd/plugins/mbelib-neo`, es wird mit tcd gebaut und in `tcd.ini` eingetragen (`CodecPlugin`). Lies vorher den Patenthinweis. Mit **no** startet tcd für diese Module nicht, bis du ein Plugin ergänzt. Ein Plugin, das schon in `tcd/plugins/<name>/` liegt, wird ohne Frage genommen |
 | Serial numbers | Nur mit Sticks. Das Script listet die angeschlossenen seriellen USB-Geräte. Gib die Seriennummern deiner AMBE-Sticks ein, oder drück Enter, dann nimmt tcd die AMBE-Sticks, die er erkennt. In Docker neben einem Codec-Plugin braucht es mindestens eine, erst dann bekommt der Container die Sticks |
@@ -161,6 +163,6 @@ cd ~/urfd/docker && sudo docker compose --profile tcd down --rmi all -v
 sudo rm -rf /opt/urfd
 # ein nativer Transcoder:
 sudo systemctl disable --now tcd
-sudo rm -f /etc/systemd/system/tcd.service /usr/local/bin/tcd /usr/local/bin/tcdmon /usr/local/bin/agc-analyze /usr/local/etc/tcd.ini /usr/local/etc/tcd-build.conf
-sudo rm -rf /usr/local/lib/tcd /usr/local/share/doc/tcd-plugins
+sudo rm -f /etc/systemd/system/tcd.service /usr/local/bin/tcd /usr/local/bin/tcdmon /usr/local/bin/agc-analyze /usr/local/etc/tcd.ini
+sudo rm -rf /usr/local/lib/tcd
 ```
