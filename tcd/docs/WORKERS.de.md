@@ -40,7 +40,7 @@ Die Geräte behalten ihre eigenen Threads für die serielle Leitung: einen Feede
 - **Zu spät für das Gerät**: Ein Frame, der eine Sekunde auf sein Gerät gewartet hat, geht mit Stille weiter, so staut ein Gerät, das langsamer ist als die Frames kommen (aber noch antwortet), sie nicht ohne Ende auf.
 - **Verlorene Antworten**: Eine Antwort, die das Gerät 300 ms schuldig bleibt, gilt als verloren (siehe [Verlorene Antworten](../README.de.md#verlorene-antworten-devicecompand)); ihr Frame geht mit Stille weiter.
 - **Ein hängendes oder verlorenes Gerät**: Ein Gerät, das 1 s lang gar nicht antwortet, obwohl Frames warten, oder das abgezogen wird, wird herausgenommen (siehe [Ein Gerät fällt im Betrieb aus](../README.de.md#ein-gerät-fällt-im-betrieb-aus)). Die Frames, die es bekommen hat, und die noch wartenden gehen sofort mit Stille weiter, ebenso Frames, die ihm übergeben werden, während es geschlossen ist (ausgephast, für ein anderes `DeviceCompand` neu geöffnet).
-- **Reihenfolge**: Eine Antwort kann nach neueren Frames ihres Streams zurückkommen (Stille für einen Frame, den das Gerät nicht codiert hat, ein Frame, der auf einem verlorenen Gerät lag). urfd nimmt die Frames eines Streams nach ihrer Nummer: Ein älterer, der zu spät kommt, wird dort verworfen.
+- **Reihenfolge**: Die Stille eines verlorenen oder geschlossenen Geräts geht in der Reihenfolge hinaus, zuerst die Frames, die es bekommen hat, dann die noch nicht gesendeten. urfd nimmt die Frames eines Streams nach ihrer Nummer und verwirft einen, der nach einem neueren kommt.
 - **Kanal-Pool**: Der AMBE-Kanal eines Streams wird erst frei, wenn sein letzter Frame beim Gerät eingereiht ist, so kann der erste Frame eines anderen Moduls nicht vor ihm landen.
 
 ## Codec-Plugins
@@ -49,4 +49,4 @@ Die eigenen Vocoder von tcd (OP25, Codec2) werden parallel aufgerufen. Ein Codec
 
 ## Der Bericht an urfd
 
-Nach einem Durchgang schickt tcd urfd einen Bericht über dessen Audio (Pegel, AGC-Gain, FEC). Er geht hinaus, sobald der letzte Frame des Streams codiert und zurückgeschickt ist, gleich worauf er gewartet hat (einen Worker, ein Gerät, eine verlorene Antwort), so steckt jeder Frame des Streams darin. Ein Stream, dessen letzter Frame verloren ging, wird 2 s nach seiner letzten Aktivität berichtet.
+Nach einem Durchgang schickt tcd urfd einen Bericht über dessen Audio (Pegel, AGC-Gain, FEC). Er geht hinaus, sobald der letzte Frame des Streams codiert und zurückgeschickt ist, gleich worauf er gewartet hat (einen Worker, ein Gerät, eine verlorene Antwort), so stecken die Frames davor darin. Ein Stream, dessen letzter Frame verloren ging, wird 2 s nach seiner letzten Aktivität berichtet.

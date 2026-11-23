@@ -1296,28 +1296,26 @@ static int UsableCores(void)
 				v1 = path;
 		}
 	}
-	// its cgroup and those above it: the smallest quota counts, rounded up to whole cores
-	auto quota = [&](const std::string &mount, std::string path, auto &&read) {
-		for (;;)
-		{
-			long q = 0, p = 0;
-			if (read(mount + (path == "/" ? std::string() : path), q, p) && q > 0 && p > 0)
-				cores = std::min<long>(cores, (q + p - 1) / p);
-			if (path.empty() || path == "/")
-				break;
-			const auto slash = path.find_last_of('/');
-			path = slash == 0 || slash == std::string::npos ? std::string("/") : path.substr(0, slash);
-		}
-	};
-	if (!v2.empty())	// cpu.max: "<quota> <period>" or "max <period>"
-		quota("/sys/fs/cgroup", v2, [](const std::string &dir, long &q, long &p) {
-			std::ifstream f(dir + "/cpu.max");
-			std::string s;
-			if (!(f >> s >> p) || s == "max")
-				return false;
-			q = atol(s.c_str());
-			return true;
-		});
+	// without a line for them: the hierarchy's top (a container sees its own there)
+	if (v2.empty() && v1.empty())
+	{
+		v2 = "/";
+		v1 = "/";
+	}
+	// v2: cpu.max ("<quota> <period>" or "max <period>") of its cgroup and those above
+	// it (v2 has cgroup namespaces): the smallest counts, rounded up to whole cores
+	for (std::string path = v2; !path.empty(); )
+	{
+		std::ifstream f("/sys/fs/cgroup" + (path == "/" ? std::string() : path) + "/cpu.max");
+		std::string q;
+		long p = 0;
+		if (f >> q >> p && q != "max" && p > 0 && atol(q.c_str()) > 0)
+			cores = std::min<long>(cores, (atol(q.c_str()) + p - 1) / p);
+		if (path == "/")
+			break;
+		const auto slash = path.find_last_of('/');
+		path = slash == 0 || slash == std::string::npos ? std::string("/") : path.substr(0, slash);
+	}
 	// cgroup v1: cpu.cfs_quota_us (-1: none) and cpu.cfs_period_us of tcd's own cgroup
 	// and of the mount's top (a container sees its own there), at the first mount
 	// there is; not the levels between (in a container a host path's levels can be
@@ -1377,6 +1375,8 @@ void CController::StopWorkers(void)
 	for (auto &w : workers)
 		if (w->thread.joinable())
 			w->thread.join();
+	for (auto &w : workers)
+		w->queue.TakeAll();	// the jobs left: dropped now (pop leaves them for TakeAll)
 }
 
 void CController::WorkerThread(int i)
@@ -2785,9 +2785,9 @@ void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
 void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
 {
 	packet->Sent();
-	// the stream's report goes once its last frame is through (sent or not)
-	if (packet->IsLast())
-		g_Reports.LastSent(packet->GetModule(), packet->GetStreamId());
+	// the stream's report goes once its last frame is through: after the send, so the
+	// report never comes before the frame (sent or not)
+	struct SLast { const std::shared_ptr<CTranscoderPacket> &p; ~SLast() { if (p->IsLast()) g_Reports.LastSent(p->GetModule(), p->GetStreamId()); } } last_through{ packet };
 	if (!tcClient.Send(packet->GetTCPacket()))
 	{
 		g_Stats.PacketOut(packet->GetModule());

@@ -67,7 +67,13 @@ void CDVDevice::AddPacketToChannel(const std::shared_ptr<CTranscoderPacket> pack
 	const auto size = input_queue.push(std::move(feed));
 	if (0 == size)
 	{
-		AnswerSilence(feed);	// closed meanwhile (push leaves a refused feed as it was)
+		// closed meanwhile (push leaves a refused feed as it was): silence, after the
+		// frames that were left on the device (CloseDevice answers those first)
+		std::lock_guard<std::mutex> lock(m_silenceMx);
+		if (m_leftAnswered)
+			g_Cont.DeviceAnswer(feed.packet, SilenceAnswer(feed.channel, feed.decode));
+		else
+			m_refused.push_back(feed);
 		return;
 	}
 	if (size > 200 && OncePerSecond(m_toldQueue))
@@ -81,10 +87,11 @@ void CDVDevice::Lost(void)
 	// from the reader, which ends after this: what was sent gets silence now, what
 	// comes from now on too (the feeder), so the streams go on at once
 	{
-		std::lock_guard<std::mutex> lock(waiting_mx);	// against PushWaiting
-		m_dead = true;
+		// the frames it was sent first, then the ones the feeder answers from now on
+		// (it waits for this lock), so a stream's answers stay in order
+		std::lock_guard<std::mutex> lock(m_silenceMx);
+		AnswerWaitingLocked(true);
 	}
-	AnswerWaiting();
 	if (m_onLost)
 		m_onLost();
 	else
@@ -116,9 +123,15 @@ void CDVDevice::CloseDevice()
 		readFuture.get();
 	if (device)
 		device->Close();
-	// what is left: sent but not answered, and not sent yet
-	AnswerWaiting();
-	AnswerQueued();
+	// what is left, in order: sent but not answered, not sent yet, refused meanwhile
+	std::lock_guard<std::mutex> lock(m_silenceMx);
+	AnswerWaitingLocked(false);
+	for (const auto &f : input_queue.TakeAll())
+		g_Cont.DeviceAnswer(f.packet, SilenceAnswer(f.channel, f.decode));
+	for (const auto &f : m_refused)
+		g_Cont.DeviceAnswer(f.packet, SilenceAnswer(f.channel, f.decode));
+	m_refused.clear();
+	m_leftAnswered = true;
 }
 
 void CDVDevice::FTDI_Error(const char *where, int err) const
@@ -650,9 +663,9 @@ void CDVDevice::FeedDevice()
 					;
 			}
 
-			if (!keep_running || m_dead)
+			if (!keep_running || m_dead || SteadyMs() - feed.queued_ms > kDeviceMaxWaitMs)
 			{
-				AnswerSilence(feed);	// closed or lost while it waited
+				AnswerSilence(feed);	// closed or lost while it waited, or too late now
 				continue;
 			}
 			{
@@ -847,14 +860,17 @@ SDeviceAnswer CDVDevice::SilenceAnswer(uint8_t channel, bool decode) const
 
 void CDVDevice::AnswerSilence(const SFeed &feed)
 {
+	std::lock_guard<std::mutex> lock(m_silenceMx);
 	g_Cont.DeviceAnswer(feed.packet, SilenceAnswer(feed.channel, feed.decode));
 }
 
-void CDVDevice::AnswerWaiting(void)
+void CDVDevice::AnswerWaitingLocked(bool dead)
 {
 	std::vector<std::pair<uint8_t, SWaiting>> left;
 	{
-		std::lock_guard<std::mutex> lock(waiting_mx);
+		std::lock_guard<std::mutex> lock(waiting_mx);	// against PushWaiting
+		if (dead)
+			m_dead = true;
 		for (uint8_t ch = 0; ch < 3; ch++)
 		{
 			for (const auto &w : waiting[ch])
@@ -869,12 +885,6 @@ void CDVDevice::AnswerWaiting(void)
 		std::lock_guard<std::mutex> lk(buffer_mutex);
 	}
 	buffer_cv.notify_all();
-}
-
-void CDVDevice::AnswerQueued(void)
-{
-	for (const auto &f : input_queue.TakeAll())
-		AnswerSilence(f);
 }
 
 void CDVDevice::Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer)

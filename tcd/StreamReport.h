@@ -93,7 +93,9 @@ public:
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		auto it = m_streams.find(module);
-		if (it != m_streams.end() && it->second.sid == sid)
+		// a stream whose last frame came in: not a new transmission on the same id
+		// (DMR+) that started while the old one's last frame was still coded
+		if (it != m_streams.end() && it->second.sid == sid && it->second.last)
 			it->second.sent = true;
 	}
 

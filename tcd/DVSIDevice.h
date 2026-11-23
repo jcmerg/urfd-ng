@@ -142,13 +142,16 @@ protected:
 	void Deliver(const std::shared_ptr<CTranscoderPacket> &packet, Encoding ch_enc, SDeviceAnswer &answer);
 	SDeviceAnswer SilenceAnswer(uint8_t channel, bool decode) const;
 	// a packet the device does not code (too late for it, the device lost or closed):
-	// silence to its module's worker. It may come after newer frames of its stream;
-	// the controller does not send a frame older than one it sent (SendToReflector)
+	// silence to its module's worker. All silence of a lost or closed device goes out
+	// under m_silenceMx, the frames it was sent first, so a stream's answers stay in
+	// order (urfd drops a frame that comes after a newer one of its stream)
 	void AnswerSilence(const SFeed &feed);
-	// all packets left on a lost or closed device answered with silence: those it was
-	// sent (the reader's, or after the reader ended) and those not sent yet
-	void AnswerWaiting(void);
-	void AnswerQueued(void);
+	// with m_silenceMx: the frames sent to it answered with silence; dead: from now on
+	// it takes none (Lost)
+	void AnswerWaitingLocked(bool dead);
+	std::mutex m_silenceMx;
+	std::vector<SFeed> m_refused;	// pushed while it closed: answered after the frames left on it
+	bool m_leftAnswered = false;	// CloseDevice answered what was left (with m_silenceMx)
 	// the device was lost: the feeder answers what comes with silence, sends nothing
 	std::atomic<bool> m_dead{false};
 

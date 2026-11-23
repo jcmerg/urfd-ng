@@ -40,7 +40,7 @@ The devices keep their own threads for the serial line: a feeder that sends the 
 - **Too late for the device**: a frame that waited a second to go to its device goes on with silence, so a device that is slower than the frames come (but still answers) does not queue them without end.
 - **Lost answers**: an answer the device owes for 300 ms is taken as lost (see [Lost answers](../README.md#lost-answers-devicecompand)); its frame goes on with silence.
 - **A hung or lost device**: a device that answers nothing for 1 s while frames wait, or that is unplugged, is taken out (see [A device lost while tcd runs](../README.md#a-device-lost-while-tcd-runs)). The frames it was sent and the ones still waiting go on with silence at once, as do frames handed to it while it is closed (phased out, reopened for another `DeviceCompand`).
-- **Order**: an answer can come back after newer frames of its stream (silence for a frame the device did not code, a frame left on a lost device). urfd takes the frames of a stream by their count: an older one that comes late is dropped there.
+- **Order**: the silence of a lost or closed device goes out in order, the frames it was sent first, then those not sent yet. urfd takes the frames of a stream by their count and drops one that comes after a newer one.
 - **Channel pool**: a stream's AMBE channel is freed only after its last frame is queued to the device, so another module's first frame cannot come before it.
 
 ## Codec plugins
@@ -49,4 +49,4 @@ tcd's own vocoders (OP25, Codec2) are called in parallel. A codec plugin is when
 
 ## The report to urfd
 
-After a transmission tcd sends urfd a report of its audio (levels, AGC gain, FEC). It goes out as soon as the stream's last frame is coded and sent back, whatever it waited for (a worker, a device, a lost answer), so every frame of the stream is in it. A stream whose last frame got lost is reported 2 s after its last activity.
+After a transmission tcd sends urfd a report of its audio (levels, AGC gain, FEC). It goes out as soon as the stream's last frame is coded and sent back, whatever it waited for (a worker, a device, a lost answer), so the frames before it are in it. A stream whose last frame got lost is reported 2 s after its last activity.
