@@ -7,6 +7,7 @@
 #include "Notifier.h"
 #include "DMRMMDVMClient.h"
 #include "websocket_lws_notifier.h"
+#include "ThreadName.h"
 
 // an IP shown as far as the mode allows, empty when it is hidden: the last
 // 1, 2 or 3 bytes of an IPv4 address, the last 1, 2 or 3 groups of an IPv6 one
@@ -221,6 +222,7 @@ void CNotifierManager::Defer(const std::string &type, std::function<nlohmann::js
 
 void CNotifierManager::DeferLoop(void)
 {
+	SetThreadName("urfd-notify");
 	while (true)
 	{
 		std::pair<std::string, std::function<nlohmann::json()>> next;

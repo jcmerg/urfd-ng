@@ -20,6 +20,7 @@
 #include "Timer.h"
 #include "Global.h"
 #include "Plugins.h"
+#include "ThreadName.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructor
@@ -197,6 +198,7 @@ bool CGateKeeper::MayTransmit(const CCallsign &callsign, const CIp &ip, const EP
 
 void CGateKeeper::Thread()
 {
+	SetThreadName("urfd-gatekeeper");
 	while (keep_running)
 	{
 		// Wait 30 seconds

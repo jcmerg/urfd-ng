@@ -32,6 +32,7 @@
 #include "SvxReflectorProtocol.h"
 #include "NXDNProtocol.h"
 #include "YSFClientPeer.h"
+#include "ThreadName.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructor
@@ -383,6 +384,7 @@ bool CCodecStream::InitCodecStream()
 
 void CCodecStream::Thread()
 {
+	SetThreadName(std::string("urfd-codec-") + m_CSModule);
 	while (keep_running)
 	{
 		Task();

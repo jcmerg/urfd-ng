@@ -44,7 +44,7 @@ public:
 	// constructor
 	CLookup() : keep_running(true), m_LastLoadTime(0) {}
 
-	void LookupInit();
+	void LookupInit(const char *threadname);
 	void LookupClose();
 
 	// locks
@@ -79,6 +79,7 @@ protected:
 
 	std::atomic<bool> keep_running;
 	std::future<void> m_Future;
+	std::string m_ThreadName;
 	// LookupClose() wakes the thread from its pause between checks
 	std::mutex m_WakeMutex;
 	std::condition_variable m_Wake;

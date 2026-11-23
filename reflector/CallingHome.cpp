@@ -17,6 +17,7 @@
 #include "CurlGet.h"
 #include "Global.h"
 #include "Utils.h"
+#include "ThreadName.h"
 
 #define CALLINGHOME_SERVER   "http://xlxapi.rlx.lu/api.php"
 
@@ -226,6 +227,7 @@ bool CCallingHome::Push(void)
 
 void CCallingHome::Thread(void)
 {
+	SetThreadName("urfd-callhome");
 	while (m_Run)
 	{
 		const bool reached = Push();

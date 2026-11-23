@@ -38,6 +38,7 @@
 #include "Notifier.h"
 #include "Plugins.h"
 #include "ProtocolNames.h"
+#include "ThreadName.h"
 
 CReflector::CReflector()
 {
@@ -108,13 +109,13 @@ bool CReflector::Start(void)
 	g_GateKeeper.Init();
 
 	// init dmrid directory. No need to check the return value.
-	g_LDid.LookupInit();
+	g_LDid.LookupInit("urfd-dmrid");
 
 	// init dmrid directory. No need to check the return value.
-	g_LNid.LookupInit();
+	g_LNid.LookupInit("urfd-nxdnid");
 
 	// init wiresx node directory. Likewise with the return vale.
-	g_LYtr.LookupInit();
+	g_LYtr.LookupInit("urfd-ysfnodes");
 
 	// the logins from a database, before the protocols that look them up
 	{
@@ -775,6 +776,7 @@ static bool CarriesCodec(EProtocol p, ECodecType c)
 
 void CReflector::RouterThread(const char ThisModule)
 {
+	SetThreadName(std::string("urfd-router-") + ThisModule);
 	auto pitem = m_Stream.find(ThisModule);
 	if (m_Stream.end() == pitem)
 	{
@@ -928,6 +930,7 @@ void CReflector::RouterThread(const char ThisModule)
 
 void CReflector::MaintenanceThread()
 {
+	SetThreadName("urfd-maint");
 	auto tcport = g_Configure.GetUnsigned(g_Keys.tc.port);
 
 	while (keep_running)
@@ -1192,6 +1195,7 @@ nlohmann::json CReflector::GetModuleMappings(char m)
 
 void CReflector::EchoThread(void)
 {
+	SetThreadName("urfd-echo");
 	while (keep_running)
 	{
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -1304,6 +1308,7 @@ std::string CReflector::GetExternalIPv6(void) const
 // answer counts at once.
 void CReflector::ExternalIpThread(void)
 {
+	SetThreadName("urfd-extip");
 	const auto urls = ExternalIpUrls(g_Configure.GetString(g_Keys.ip.checkurl));
 	const auto interval = std::chrono::seconds(g_Configure.GetUnsigned(g_Keys.ip.checkinterval));
 	const bool v4 = !g_Configure.GetBoolean(g_Keys.ip.ipv4fixed);

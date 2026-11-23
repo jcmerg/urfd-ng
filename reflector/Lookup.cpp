@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include "CurlGet.h"
 #include "Lookup.h"
+#include "ThreadName.h"
 
 char LookupDelimiter(const std::string &line)
 {
@@ -74,8 +75,9 @@ std::time_t CLookup::GetLastModTime()
 	return 0;
 }
 
-void CLookup::LookupInit()
+void CLookup::LookupInit(const char *threadname)
 {
+	m_ThreadName = threadname;
 	LoadParameters();
 	m_LastLoadTime = 0;
 	m_ContentLoaded = false;
@@ -107,6 +109,7 @@ static bool LooksLikeData(std::stringstream &ss, const std::string &source)
 
 void CLookup::Thread()
 {
+	SetThreadName(m_ThreadName);
 	const unsigned long wait_cycles = (m_Refresh > 0) ? m_Refresh * 6u : 1u;
 	unsigned long count = 0;
 

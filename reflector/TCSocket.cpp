@@ -35,6 +35,7 @@
 #include "TCSocket.h"
 #include "RejectLog.h"
 #include "SHA256.h"
+#include "ThreadName.h"
 
 // what a poll() says about a connection, the one place that decides it
 enum class EPeer { alive, lost, closed, invalid };
@@ -1146,6 +1147,7 @@ void CTCClient::ReConnect() // and sometimes ping
 				ask += m;
 		if (!ask.empty())
 			m_StandbyWorker = std::async(std::launch::async, [this, ask] {
+				SetThreadName("urfd-tc-standby");
 				for (char m : ask)
 				{
 					int fd = -1;
