@@ -113,7 +113,7 @@ Each transcoded module needs a D-Star channel and a DMR/YSF channel. A DV3000 (T
 | 2× DV3003 | — | up to 3 | one for D-Star, one for DMR/YSF |
 | 3 devices and more (e.g. USB-3012) | for the modules beyond the channels | half the channels | see [below](#three-devices-and-more) |
 
-A single device needs a codec plugin for the other codec; tcd refuses to start without one. With two devices no plugin is needed: [`DmrGainMode = ambe`](#dmrysf--dmrysf-level-dmrgainmode) gives DMR → DMR/YSF the AGC without re-encoding. tcd detects the devices and picks the mode itself. With more modules than channels, the devices take the first modules of `Modules` and the rest goes to a codec plugin (or use the [channel pool](#channel-pool-devicechannels--pool)).
+A single device needs a codec plugin for the other codec; tcd refuses to start without one. With two devices no plugin is needed: [`DmrGainMode = on`](#same-mode-dmrgainmode--usrpgainmode) gives DMR → DMR/YSF the AGC without re-encoding. tcd detects the devices and picks the mode itself. With more modules than channels, the devices take the first modules of `Modules` and the rest goes to a codec plugin (or use the [channel pool](#channel-pool-devicechannels--pool)).
 
 ### Mixed mode: DV3000 + DV3003
 
@@ -160,7 +160,7 @@ tcd resynchronises on the next answer, so a dropped byte costs at most one frame
 
 ### Single device with a codec plugin
 
-One module, D-Star on the DV3000 or DV3003 and DMR/YSF through a codec plugin. DMR/YSF → DMR/YSF audio is then **not re-encoded** after the AGC; its level follows the AGC through the bitstream gain (`DmrGainMode = ambe`). All paths between different modes get the full AGC. With `DmrGainMode = reencode` the codec plugin re-encodes it instead.
+One module, D-Star on the DV3000 or DV3003 and DMR/YSF through a codec plugin. DMR/YSF → DMR/YSF audio is then **not re-encoded** after the AGC; its level follows the AGC through the bitstream gain (`DmrGainMode = on`). All paths between different modes get the full AGC.
 
 ### Three devices and more
 
@@ -305,7 +305,6 @@ All gains are in dB, -40 to +40 (the web dashboard's sliders: output gains -24 t
 | `OutputGainM17` | `0` | M17/Codec2 output, after the AGC |
 | `OutputGainIMBE` | `0` | P25 output, after the AGC |
 | `OutputGainUSRP` | `0` | USRP and SVX output, after the AGC (both get the same PCM from tcd), USRP/SVX → USRP/SVX included |
-| `USRPGainMode` | `agc` | USRP/SVX → USRP/SVX: `agc` gives it the audio after noise suppression, AGC and `OutputGainUSRP`, `off` passes the input through unchanged |
 | `DStarGainIn` / `DStarGainOut` | `0` | inside the DVSI chip, D-Star decode / encode; for a codec plugin tcd applies them in software |
 | `DmrGainIn` / `DmrGainOut` | `0` | inside the DVSI chip, DMR decode / encode; for a codec plugin tcd applies them in software |
 
@@ -313,59 +312,28 @@ SVX and USRP gains per connection are set in the reflector's `urfd.ini` (`RxGain
 
 DMR radios expect a lower level than the AGC target (-16 dBFS): `OutputGainDMR = -14` brings every path to DMR/YSF down to about -30 dBFS, the level of speech on BrandMeister. With all of that as PCM gain, the AMBE2+ encoder would get the other codecs' audio far below the level it is made for. `OutputGainDMRBitstream` moves part of it behind the encoder into the frame's gain parameter. Keep it small: b2 moves quiet frames only in coarse steps, so large values bring artifacts on quiet syllables; -4 to -6 sound clean, -6 is the default ([measurements](docs/MEASUREMENTS.md#outputgaindmrbitstream)).
 
-### DMR/YSF → DMR/YSF level (`DmrGainMode`)
+### Same mode (`DmrGainMode` … `USRPGainMode`)
 
-DMR to DMR/YSF audio normally passes through as AMBE2+ without being decoded, so the AGC cannot touch it. `DmrGainMode` decides how its level is adjusted:
+A source's frames passed on in its own mode are not decoded for the target: DMR → DMR/YSF as AMBE2+, D-Star → D-Star as AMBE, P25 → P25 as IMBE, M17 → M17 as Codec2. The AGC still measures them, and `on` (the default) puts its gain and the target's output gain into the frame's gain parameter. No re-encode, no quality loss; the frame keeps its bit errors, so the receiver still counts them, and a frame the FEC cannot correct stays as it is. `off` passes them through unchanged, the frames bit for bit.
 
-| Mode | Needs | What it does |
-|---|---|---|
-| `off` | — | no adjustment |
-| `ambe` | — | the default: applies the AGC's gain plus `AmbeGainDb` (-30 to +10 dB) and `OutputGainDMR` through the b2 (delta-gamma) gain parameter in the AMBE2+ frame. No re-encode, no quality loss; the frame keeps its bit errors, so the receiver still counts them, and a frame the FEC cannot correct stays as it is |
-| `reencode` | a DMR codec plugin | full decode and re-encode through the codec plugin (a stream a plugin decodes: through that plugin), with AGC and `DmrReencodeGain`; same level as `ambe` with the same value. Falls back to `ambe` without a DMR codec plugin |
+| Key | Default | Path | With `on` |
+|---|---|---|---|
+| `DmrGainMode` | `on` | DMR → DMR/YSF | AGC + `OutputGainDMR`, b2 (delta-gamma) |
+| `DStarGainMode` | `on` | D-Star → D-Star | AGC + `OutputGainDStar`, b2 |
+| `P25GainMode` | `on` | P25 → P25 | AGC + `OutputGainIMBE`, b2 (G1) |
+| `M17GainMode` | `on` | M17 → M17 | AGC + `OutputGainM17`, the Codec2 energy |
+| `USRPGainMode` | `on` | USRP/SVX → USRP/SVX | the audio after noise suppression, AGC and `OutputGainUSRP` |
 
-| Key | Template | Code default |
-|---|---|---|
-| `DmrGainMode` | `ambe` | `ambe` |
-| `AmbeGainDb` | `0` | `0` |
-| `DmrReencodeGain` | `0` | `0` |
+Each brings its path to the level every other source gets: for DMR and D-Star the decoder's `DmrGainOut` / `DStarGainOut` (in the audio the AGC measured) and the encoder's `DmrGainIn` / `DStarGainIn` count as on the other paths. It is the same with every decoder and with or without a codec plugin: the frames are not coded again. With two AMBE devices, one per codec, nothing else is needed.
 
-`AmbeGainDb` and `DmrReencodeGain` only move DMR → DMR/YSF against the other paths and normally stay 0. Both modes bring DMR → DMR/YSF to the level every other source gets: the decoder's `DmrGainOut` (in the audio the AGC measured) and the encoder's `DmrGainIn` count as on the other paths.
+How the gain gets into the frame:
 
-How `ambe` works: the decoder computes γ = Δγ[b2] + 0.5·γ<sub>prev</sub>, and a frame's mean log2 amplitude is γ, so one unit of γ is 6 dB. The Δγ table is coarse for low b2 and fine for high b2. tcd tracks γ for the original and the modified stream and chooses, frame by frame, the b2 that comes closest to the wanted gain; the rounding error is made up in the next frame. So the gain does not depend on the level: gains of -12 to +6 dB arrive within 0.8 dB on input at -40 to -16 dBFS. Very quiet sources cannot be raised beyond what b2 = 31 allows.
-
-### D-Star → D-Star level (`DStarGainMode`)
-
-The same for D-Star: D-Star to D-Star passes through as AMBE without being decoded. `DStarGainMode` decides how its level is adjusted:
-
-| Mode | Needs | What it does |
-|---|---|---|
-| `off` | — | no adjustment, the frames pass through bit for bit |
-| `ambe` | — | the default: applies the AGC's gain plus `DStarAmbeGainDb` (-30 to +10 dB) and `OutputGainDStar` through the b2 gain parameter in the D-Star frame. No re-encode, no quality loss; the frame keeps its bit errors, so the receiver still counts them, and a frame the FEC cannot correct stays as it is |
-| `reencode` | a D-Star codec plugin | full decode and re-encode, with AGC, `OutputGainDStar` and `DStarReencodeGain`: a stream a plugin decodes through that plugin, one a device decodes through the D-Star plugin. Falls back to `ambe` without a D-Star codec plugin |
-
-| Key | Template | Code default |
-|---|---|---|
-| `DStarGainMode` | `ambe` | `ambe` |
-| `DStarAmbeGainDb` | `0` | `0` |
-| `DStarReencodeGain` | `0` | `0` |
-
-Both modes bring D-Star → D-Star to the level every other source gets, with `DStarGainOut` and `DStarGainIn` as on the other paths; `DStarAmbeGainDb` and `DStarReencodeGain` normally stay 0.
-
-How `ambe` works on D-Star: its b2 has 6 bits, and the decoder takes γ = 2·Δγ[b2] − 0.09 without the frame before, so each frame gets the b2 closest to its own γ plus the wanted gain. The steps are 0.7 to 1.8 dB, the same across the range: -12 to +3 dB arrive within 0.15 dB (0.2 to 0.5 dB from frame to frame), +6 dB and more fall short on loud speech, where b2 reaches its top.
-
-### P25 → P25 and M17 → M17 level (`P25GainMode`, `M17GainMode`)
-
-These two pass through as frames too. `bitstream` (the default) puts the AGC's gain and `OutputGainIMBE` / `OutputGainM17` into the frame, `off` leaves them unchanged:
-
+- **DMR (AMBE2+)**: the decoder computes γ = Δγ[b2] + 0.5·γ<sub>prev</sub>, and a frame's mean log2 amplitude is γ, so one unit of γ is 6 dB. The Δγ table is coarse for low b2 and fine for high b2. tcd tracks γ for the original and the modified stream and chooses, frame by frame, the b2 that comes closest to the wanted gain; the rounding error is made up in the next frame. So the gain does not depend on the level: gains of -12 to +6 dB arrive within 0.8 dB on input at -40 to -16 dBFS. Very quiet sources cannot be raised beyond what b2 = 31 allows.
+- **D-Star (AMBE)**: b2 has 6 bits, and the decoder takes γ = 2·Δγ[b2] − 0.09 without the frame before, so each frame gets the b2 closest to its own γ plus the wanted gain. The steps are 0.7 to 1.8 dB, the same across the range: -12 to +3 dB arrive within 0.15 dB (0.2 to 0.5 dB from frame to frame), +6 dB and more fall short on loud speech, where b2 reaches its top.
 - **P25 (IMBE)**: b2 sets G1, the mean of the log2 amplitudes; the decoder's prediction has its mean removed, so the level follows b2 with no memory. 64 steps of 1 to 1.5 dB; -12 to +6 dB arrive within 0.2 dB.
 - **M17 (Codec2 3200 and 1600)**: the 5-bit frame energy, 1.56 dB per step (1600: both energies of the 40 ms frame; the data half stays). -12 dB arrives as -12.5 at most, as the steps fall.
 
-Both are the same with every decoder: measured with OP25 and mbelib-neo for IMBE, tcd's Codec2 for M17, against frames of either encoder.
-
-| Key | Template | Code default |
-|---|---|---|
-| `P25GainMode` | `bitstream` | `bitstream` |
-| `M17GainMode` | `bitstream` | `bitstream` |
+P25 and M17 are the same with every decoder: measured with OP25 and mbelib-neo for IMBE, tcd's Codec2 for M17, against frames of either encoder.
 
 ### AGC
 
@@ -419,30 +387,16 @@ M17/P25 (software vocoder):
 USRP/SVX (PCM):
   PCM --[noise suppression]--> PCM --[analog AGC]--> PCM --[OutputGain]--> target codec   (RxGain/TxGain per connection in urfd.ini)
 
-DMR -> DMR/YSF with DmrGainMode = reencode:
-  AMBE2+ --[decode]--> PCM --[AGC]--> PCM --[OutputGainDMR]--> [DmrReencodeGain] --> codec plugin --> AMBE2+
-
-DMR -> DMR/YSF with DmrGainMode = ambe:
-  AMBE2+ --[decode]--> PCM --[AGC] (gain only)
-  AMBE2+ --[b2: AGC gain + AmbeGainDb + OutputGainDMR]--> AMBE2+
-
-D-Star -> D-Star with DStarGainMode = reencode:
-  AMBE --[decode]--> PCM --[AGC]--> PCM --[OutputGainDStar]--> [DStarReencodeGain] --> codec plugin --> AMBE
-
-D-Star -> D-Star with DStarGainMode = ambe:
-  AMBE --[decode]--> PCM --[AGC] (gain only)
-  AMBE --[b2: AGC gain + DStarAmbeGainDb + OutputGainDStar]--> AMBE
-
-P25 -> P25 and M17 -> M17 with P25GainMode / M17GainMode = bitstream:
+Same mode with DmrGainMode, DStarGainMode, P25GainMode, M17GainMode = on:
   frame --[decode]--> PCM --[AGC] (gain only)
-  frame --[b2 / Codec2 energy: AGC gain + OutputGainIMBE / OutputGainM17]--> frame
+  frame --[b2 / Codec2 energy: AGC gain + OutputGain of the target]--> frame
 
 D-Star, DMR/YSF, P25 -> another of the three, both on one plugin with transcode (Transcode = direct):
   frame --[decode]--> PCM --[AGC] (gain only)                       (M17, USRP, SVX get this PCM)
   frame --[plugin: AGC gain + OutputGain + DVSI-style GainIn/Out in the parameters]--> target frame
 ```
 
-**With the AGC**, the static gains can usually all stay at 0, except `OutputGainDMR = -14` for the level DMR radios expect: it evens out different microphones, radios and codecs per transmission. Without it, every route needs its own static gain. D-Star → D-Star, P25 → P25 and M17 → M17 follow `DStarGainMode`, `P25GainMode` and `M17GainMode`; USRP/SVX → USRP/SVX gets the processed audio like every other target (`USRPGainMode`).
+**With the AGC**, the static gains can usually all stay at 0, except `OutputGainDMR = -14` for the level DMR radios expect: it evens out different microphones, radios and codecs per transmission. Without it, every route needs its own static gain. The same mode follows the [*GainMode keys](#same-mode-dmrgainmode--usrpgainmode); USRP/SVX → USRP/SVX gets the processed audio like every other target.
 
 The AGC works per stream (per transmission):
 - a 75 Hz high-pass on the audio, so DC and hum neither drive the level nor reach the encoder

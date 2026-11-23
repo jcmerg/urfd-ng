@@ -8,7 +8,7 @@ The measurements and listening tests behind tcd's defaults, for anyone who wants
 
 - [DMR level](#dmr-level)
 - [OutputGainDMRBitstream](#outputgaindmrbitstream)
-- [b2 gain accuracy (`DmrGainMode = ambe`)](#b2-gain-accuracy-dmrgainmode--ambe)
+- [b2 gain accuracy (`DmrGainMode = on`)](#b2-gain-accuracy-dmrgainmode--on)
 - [AGC on analog sources](#agc-on-analog-sources)
 - [Noise suppression](#noise-suppression)
 - [Speech-driven AGC](#speech-driven-agc)
@@ -19,7 +19,7 @@ The measurements and listening tests behind tcd's defaults, for anyone who wants
 
 ## DMR level
 
-DMR radios expect a lower level than the AGC target of -16 dBFS. Speech on BrandMeister, measured on TG91: median -29 dBFS, -39 to -23 dBFS between the talkers. `OutputGainDMR = -14` brings every path to DMR/YSF to about -30 dBFS, in line with it; -18 left DMR/YSF about 4 dB below it. The offset belongs in `OutputGainDMR`, not in `AmbeGainDb`/`DmrReencodeGain`: those only act on DMR → DMR/YSF, so putting -18 there left D-Star → DMR 18 dB too loud.
+DMR radios expect a lower level than the AGC target of -16 dBFS. Speech on BrandMeister, measured on TG91: median -29 dBFS, -39 to -23 dBFS between the talkers. `OutputGainDMR = -14` brings every path to DMR/YSF to about -30 dBFS, in line with it; -18 left DMR/YSF about 4 dB below it. The offset belongs in `OutputGainDMR`, which acts on every path to DMR/YSF: in a gain of DMR → DMR/YSF alone (the former `AmbeGainDb`), -18 left D-Star → DMR 18 dB too loud.
 
 ## OutputGainDMRBitstream
 
@@ -29,7 +29,7 @@ With `OutputGainDMR = -14` as PCM gain, the AMBE2+ encoder gets the audio of the
 - **Crackling at -6**: between two coarse b2 steps the tracker made up the rounding error in the next frame, so the gain of quiet frames alternated by 3-6 dB every 20 ms. The gain of this path now moves by at most 1.2 dB per frame; in a simulation with speech-like b2 sequences at -4 dB no jump above 3 dB is left (68 before) and loud frames still meet the target. With that, -4 and -6 sounded the same and clean over SvxLink to DMR (2026-10-15); -6 became the default. DMR → DMR keeps the unlimited tracker, it was clean in tests.
 - **b2 choice with look-ahead**, simulated and left out (2026-10-15): a beam search over the next frames with a quadratic cost on gain changes removes the jumps above 3 dB at -6 (61 → 0) only with 6 frames of look-ahead, about 100 ms, and reaches about -8 dB with as many jumps as the plain limit at -6; without look-ahead it misses the target by about 3 dB. 2 dB more level for the encoder are not worth 60-100 ms more delay on every frame (tcd sends a packet once all codecs are done), while -4 and -6 already sound clean: most counted jumps sit at syllable boundaries and are masked. The b2 table itself is part of AMBE2+ and fixed in every decoder.
 
-## b2 gain accuracy (`DmrGainMode = ambe`)
+## b2 gain accuracy (`DmrGainMode = on`)
 
 Moving b2 by a fixed number of steps changed quiet audio by 3-16 dB per step and loud audio by about 1.2 dB, so the gain depended on the level. tcd now tracks γ for the original and the modified stream and chooses the b2 that comes closest to the wanted gain. Measured with an AMBE2+ software decoder on input at -40, -30 and -16 dBFS: gains of -12 to +6 dB arrive within 0.8 dB.
 

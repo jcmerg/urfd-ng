@@ -6,7 +6,7 @@ What urfd and tcd do to the voice that passes through the reflector, how the das
 
 ## Even levels across all modes
 
-tcd's AGC brings every call on a transcoded module to the same level, whatever radio or vocoder it came from. It also covers DMR → DMR/YSF, where the AMBE+2 frames pass through without a vocoder: the AGC's gain goes into the frame's gain parameter (b2) instead of a decode and re-encode, so the audio stays as clean as the original.
+tcd's AGC brings every call on a transcoded module to the same level, whatever radio or vocoder it came from. It also covers a mode passed on in itself (DMR → DMR/YSF, D-Star → D-Star, P25 → P25, M17 → M17), where the frames pass through without a vocoder: the AGC's gain goes into the frame's gain parameter (AMBE and IMBE b2, the Codec2 energy) instead of a decode and re-encode, so the audio stays as clean as the original.
 
 The AGC follows the upper envelope of the speech and only rises on clearly voiced speech well above a noise floor it measures per stream, so the gain does not pump on breath, hiss or pauses. On FM-Funknetz traffic this made the gain move a third as much as a plain level AGC and left the speech 2.5 dB further above the noise, at the same level and spread between stations.
 

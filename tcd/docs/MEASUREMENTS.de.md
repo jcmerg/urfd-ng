@@ -8,7 +8,7 @@ Die Messungen und Hörtests hinter den Voreinstellungen von tcd, für alle, die 
 
 - [DMR-Pegel](#dmr-pegel)
 - [OutputGainDMRBitstream](#outputgaindmrbitstream)
-- [Genauigkeit des b2-Gains (`DmrGainMode = ambe`)](#genauigkeit-des-b2-gains-dmrgainmode--ambe)
+- [Genauigkeit des b2-Gains (`DmrGainMode = on`)](#genauigkeit-des-b2-gains-dmrgainmode--on)
 - [AGC bei analogen Quellen](#agc-bei-analogen-quellen)
 - [Rauschunterdrückung](#rauschunterdrückung)
 - [Sprachgesteuerte AGC](#sprachgesteuerte-agc)
@@ -19,7 +19,7 @@ Die Messungen und Hörtests hinter den Voreinstellungen von tcd, für alle, die 
 
 ## DMR-Pegel
 
-DMR-Funkgeräte erwarten einen niedrigeren Pegel als das AGC-Ziel von -16 dBFS. Sprache auf BrandMeister, gemessen auf TG91: Median -29 dBFS, -39 bis -23 dBFS zwischen den Sprechern. `OutputGainDMR = -14` bringt jeden Weg nach DMR/YSF auf etwa -30 dBFS, passend dazu; -18 ließ DMR/YSF etwa 4 dB darunter. Der Versatz gehört in `OutputGainDMR`, nicht in `AmbeGainDb`/`DmrReencodeGain`: Die wirken nur auf DMR → DMR/YSF, mit -18 dort war D-Star → DMR 18 dB zu laut.
+DMR-Funkgeräte erwarten einen niedrigeren Pegel als das AGC-Ziel von -16 dBFS. Sprache auf BrandMeister, gemessen auf TG91: Median -29 dBFS, -39 bis -23 dBFS zwischen den Sprechern. `OutputGainDMR = -14` bringt jeden Weg nach DMR/YSF auf etwa -30 dBFS, passend dazu; -18 ließ DMR/YSF etwa 4 dB darunter. Der Versatz gehört in `OutputGainDMR`, das auf jeden Weg nach DMR/YSF wirkt: In einem Gain nur für DMR → DMR/YSF (dem früheren `AmbeGainDb`) ließ -18 D-Star → DMR 18 dB zu laut.
 
 ## OutputGainDMRBitstream
 
@@ -29,7 +29,7 @@ Mit `OutputGainDMR = -14` als PCM-Verstärkung bekommt der AMBE2+-Encoder das Au
 - **Knistern bei -6**: Zwischen zwei groben b2-Stufen glich der Nachführer den Rundungsfehler im nächsten Frame aus, so sprang der Gain leiser Frames alle 20 ms um 3-6 dB hin und her. Der Gain dieses Wegs bewegt sich jetzt um höchstens 1,2 dB je Frame; in einer Simulation mit sprachähnlichen b2-Folgen bei -4 dB bleibt kein Sprung über 3 dB (vorher 68), und laute Frames treffen das Ziel weiterhin. Damit klangen -4 und -6 über SvxLink nach DMR gleich und sauber (2026-10-15); -6 wurde der Standard. DMR → DMR behält den unbegrenzten Nachführer, er war in Tests sauber.
 - **b2-Wahl mit Vorausschau**, simuliert und verworfen (2026-10-15): Eine Strahlsuche über die nächsten Frames mit quadratischen Kosten auf Gain-Änderungen beseitigt die Sprünge über 3 dB bei -6 (61 → 0) erst mit 6 Frames Vorausschau, etwa 100 ms, und erreicht etwa -8 dB mit so vielen Sprüngen wie die einfache Grenze bei -6; ohne Vorausschau verfehlt sie das Ziel um etwa 3 dB. 2 dB mehr Pegel für den Encoder sind 60-100 ms mehr Verzögerung auf jedem Frame nicht wert (tcd sendet ein Paket, wenn alle Codecs fertig sind), zumal -4 und -6 schon sauber klingen: Die meisten gezählten Sprünge liegen an Silbengrenzen und werden verdeckt. Die b2-Tabelle selbst ist Teil von AMBE2+ und in jedem Decoder fest.
 
-## Genauigkeit des b2-Gains (`DmrGainMode = ambe`)
+## Genauigkeit des b2-Gains (`DmrGainMode = on`)
 
 b2 um eine feste Zahl Stufen zu verschieben änderte leises Audio um 3-16 dB je Stufe und lautes um etwa 1,2 dB, der Gain hing also vom Pegel ab. tcd verfolgt jetzt γ für den ursprünglichen und den veränderten Stream und wählt das b2, das dem gewünschten Gain am nächsten kommt. Gemessen mit einem AMBE2+-Software-Decoder bei Eingang mit -40, -30 und -16 dBFS: Gains von -12 bis +6 dB kommen auf 0,8 dB genau an.
 

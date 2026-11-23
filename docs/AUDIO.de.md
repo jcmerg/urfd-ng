@@ -6,7 +6,7 @@ Was urfd und tcd mit der Sprache machen, die durch den Reflektor geht, wie das D
 
 ## Gleicher Pegel in allen Betriebsarten
 
-Die AGC von tcd bringt jeden Ruf auf einem transcodierten Modul auf denselben Pegel, egal von welchem Funkgerät oder Vocoder er kommt. Das gilt auch für DMR → DMR/YSF, wo die AMBE+2-Frames ohne Vocoder durchgehen: Die Verstärkung der AGC geht in den Verstärkungsparameter des Frames (b2) statt in ein Dekodieren und Neukodieren, der Klang bleibt also so sauber wie das Original.
+Die AGC von tcd bringt jeden Ruf auf einem transcodierten Modul auf denselben Pegel, egal von welchem Funkgerät oder Vocoder er kommt. Das gilt auch für eine Betriebsart, die in sich selbst weitergeht (DMR → DMR/YSF, D-Star → D-Star, P25 → P25, M17 → M17), wo die Frames ohne Vocoder durchgehen: Die Verstärkung der AGC geht in den Verstärkungsparameter des Frames (AMBE- und IMBE-b2, die Codec2-Energie) statt in ein Dekodieren und Neukodieren, der Klang bleibt also so sauber wie das Original.
 
 Die AGC folgt der oberen Hüllkurve der Sprache und hebt nur bei deutlich stimmhafter Sprache weit über einem Rauschboden an, den sie je Stream misst, so pumpt die Verstärkung nicht bei Atmen, Rauschen oder Pausen. Bei Verkehr aus dem FM-Funknetz bewegte sich die Verstärkung damit nur ein Drittel so stark wie bei einer reinen Pegel-AGC, und die Sprache stand 2,5 dB weiter über dem Rauschen, bei gleichem Pegel und gleicher Streuung zwischen den Stationen.
 
