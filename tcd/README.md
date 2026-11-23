@@ -288,7 +288,7 @@ A device that cannot be opened or does not answer is left out with a warning, an
 | `CodecPlugin` | `op25`, `codec2` | codec plugin to load, one line each: the path of a shared object, or `op25` / `codec2` for tcd's own (see [Codec plugins](#codec-plugins)) |
 | `CodecDStar` / `CodecDMR` / `CodecP25` / `CodecM17` | — | the vocoder new streams get: `dvsi`, `op25`, `codec2` or a plugin's name; written by Save |
 | `Transcode` | `direct` | `direct`: D-Star, DMR/YSF and P25 coded into each other from the vocoder parameters where a plugin can; `audio`: every codec from the decoded audio (see [Codec plugins](#codec-plugins)) |
-| `Workers` | `auto` | the threads that code the modules, each module on one of them; `auto`: one per CPU core, at most one per module; or 1 to 26 (see [Module workers](#module-workers)) |
+| `Workers` | `auto` | the threads that code the modules, each module on one of them; `auto`: one per CPU core tcd may use (in Docker within `--cpus` / `--cpuset-cpus`), at most one per module; or 1 to 26 (see [Module workers](#module-workers)) |
 | `DeviceChannels` | — (default `fixed`) | `fixed`: the AMBE channels belong to the first modules; `pool`: a stream takes any free channel (see [Channel pool](#channel-pool-devicechannels--pool)) |
 | `DeviceCompand` | — (default `linear`) | audio to and from the AMBE devices: `linear` (16 bits), `ulaw` or `alaw` (8-bit G.711, see [Lost answers](#lost-answers-devicecompand)); written by Save |
 
@@ -425,6 +425,7 @@ After every transmission tcd tells urfd how it sounded: the level and peak befor
 - "Phase out" takes a device out of service (the streams on it run to their end, then it can be unplugged), "Take back" opens it again; only for a device whose codecs a codec plugin covers
 - the vocoder for new D-Star, DMR, P25 and M17 streams, "AMBE channels" (fixed or pool), "AMBE speech" (`DeviceCompand`) and direct transcoding, switchable at run time
 - the reflector connection with its packet counters; a standby module shows "standby" or "taken over"
+- the [module workers](#module-workers): each one's modules, the share of a CPU core it worked in the last second and the longest a frame waited for it (red from 70 % or 20 ms)
 - light and dark theme; the page loads nothing from outside
 
 <details>
@@ -453,7 +454,7 @@ tcdmon                      # this machine, the MonitorStatsPort of its tcd.ini 
 tcdmon 192.0.2.20 8081      # another machine
 ```
 
-Without a port tcdmon takes `MonitorStatsPort` from this machine's `tcd.ini` (`$TCD_INI`, `/usr/local/etc/tcd/tcd.ini` in the Docker image, or `/usr/local/etc/tcd.ini`), else 8081. It shows a card with level bars and signal flow for each module on the air and the others in one line, the AGC state, the AMBE devices and the codec plugins, and the output gains. `q` quits.
+Without a port tcdmon takes `MonitorStatsPort` from this machine's `tcd.ini` (`$TCD_INI`, `/usr/local/etc/tcd/tcd.ini` in the Docker image, or `/usr/local/etc/tcd.ini`), else 8081. It shows a card with level bars and signal flow for each module on the air and the others in one line, the AGC state, the AMBE devices and the codec plugins, the module workers with their load and longest wait, and the output gains. `q` quits.
 
 ### Stats CSV and agc-analyze
 
