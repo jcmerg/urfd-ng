@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "TCPacketDef.h"
-#include "SteadyClock.h"
 
 class CStreamReports
 {
@@ -89,6 +88,15 @@ public:
 			it->second.seen = Clock::now();
 	}
 
+	// the stream's last frame went back to urfd (a module worker): its report is due
+	void LastSent(char module, uint16_t sid)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		auto it = m_streams.find(module);
+		if (it != m_streams.end() && it->second.sid == sid)
+			it->second.sent = true;
+	}
+
 	// how a codec plugin decoded a frame of the stream (TCD_FRAME_REPEAT, TCD_FRAME_MUTE);
 	// a DVSI device does not say, its frames count only by their FEC
 	void Decoded(char module, uint16_t sid, bool repeat, bool mute)
@@ -104,9 +112,9 @@ public:
 			it->second.mutes++;
 	}
 
-	// the reports that are due go to send: kReportDelayMs after the last frame of a
-	// stream (its audio is through by then, SteadyClock.h),
-	// 2 s after anything of one whose last frame got lost
+	// the reports that are due go to send: a stream's once its last frame went back to
+	// urfd (its audio is through then, every frame before it is), one whose last frame
+	// got lost 2 s after anything of it
 	void Flush(const std::function<void(const STCPacket &)> &send)
 	{
 		std::vector<STCPacket> due;
@@ -117,7 +125,7 @@ public:
 			for (auto it = m_streams.begin(); it != m_streams.end();)
 			{
 				const auto quiet = now - it->second.seen;
-				if ((it->second.last && quiet >= std::chrono::milliseconds(kReportDelayMs)) || quiet >= std::chrono::seconds(2))
+				if (it->second.sent || quiet >= std::chrono::seconds(2))
 				{
 					Report(it->first, it->second, due);
 					it = m_streams.erase(it);
@@ -138,6 +146,7 @@ private:
 		ECodecType codec = ECodecType::none;
 		Clock::time_point first_in, last_in, seen;
 		bool last = false, agc = false, decoded = false;
+		bool sent = false;	// its last frame went back to urfd (LastSent)
 		uint32_t frames_in = 0, frames = 0, voice = 0, clipped = 0, gain_frames = 0;
 		float peak = -100.0f, peak_all = -100.0f, gain_min = 1000.0f, gain_max = -1000.0f;
 		double power_in = 0.0, power_out = 0.0, gain_sum = 0.0;

@@ -32,7 +32,7 @@ tcd wandelt Sprache zwischen den digitalen Betriebsarten eines URF-Reflektors um
 - [Betrieb und Fehlersuche](#betrieb-und-fehlersuche)
 - [Änderungen gegenüber dem Original](#änderungen-gegenüber-dem-original)
 
-Die Messungen und Hörtests hinter den Voreinstellungen stehen in [docs/MEASUREMENTS.de.md](docs/MEASUREMENTS.de.md).
+Die Messungen und Hörtests hinter den Voreinstellungen stehen in [docs/MEASUREMENTS.de.md](docs/MEASUREMENTS.de.md), die Modul-Worker im Einzelnen in [docs/WORKERS.de.md](docs/WORKERS.de.md).
 
 ## Installation
 
@@ -148,7 +148,7 @@ Normalerweise gehören die AMBE-Kanäle den ersten Modulen aus `Modules`. Mit `D
 
 ### Ein Gerät fällt im Betrieb aus
 
-Ein Gerät, das abgezogen wird oder ein Paket 1 s lang unbeantwortet lässt (ein hängender Chip), wird herausgenommen: Seine Streams, auch die laufenden, gehen an ein Codec-Plugin, und tcd öffnet das Gerät wieder, sobald es zurück ist (alle 5 s über seinen Namen in `/dev/serial/by-id` gesucht, ein Umstecken kann ihm also einen anderen Knoten geben). Neue Streams nutzen es ab dann wieder. Ohne Plugin für einen der Codecs des Geräts beendet sich tcd stattdessen; systemd (oder Docker) startet ihn neu, oder ein [Standby-tcd](#standby-ein-zweiter-tcd-für-dieselben-module) übernimmt die Module. Ein Gerät, das beim Start fehlt, wird erst nach dem nächsten Start von tcd genutzt.
+Ein Gerät, das abgezogen wird oder ein Paket 1 s lang unbeantwortet lässt (ein hängender Chip), wird herausgenommen: Die Frames darauf gehen mit Stille weiter, seine Streams, auch die laufenden, gehen an ein Codec-Plugin, und tcd öffnet das Gerät wieder, sobald es zurück ist (alle 5 s über seinen Namen in `/dev/serial/by-id` gesucht, ein Umstecken kann ihm also einen anderen Knoten geben). Neue Streams nutzen es ab dann wieder. Ohne Plugin für einen der Codecs des Geräts beendet sich tcd stattdessen; systemd (oder Docker) startet ihn neu, oder ein [Standby-tcd](#standby-ein-zweiter-tcd-für-dieselben-module) übernimmt die Module. Ein Gerät, das beim Start fehlt, wird erst nach dem nächsten Start von tcd genutzt.
 
 ### Verlorene Antworten (`DeviceCompand`)
 
@@ -213,9 +213,9 @@ Frame-Formate: D-Star als die 9 Datenbytes eines DV-Frames, DMR/YSF als die 72 B
 
 ### Modul-Worker
 
-Jedes Modul gehört zu einem der Worker von tcd (`Workers` in der tcd.ini, `auto`: einer je CPU-Kern, den tcd nutzen darf, in Docker innerhalb von `--cpus` / `--cpuset-cpus`). Der Worker erledigt alles für die Frames seines Moduls, einen Codec nach dem anderen: Decodieren, AGC, Codieren in die anderen Codecs in Software, die Antworten der AMBE-Geräte und das Zurücksenden an urfd. Die Worker laufen gleichzeitig, so teilen sich die Module die CPU-Kerne, und ein Modul, das lange braucht, hält die Module anderer Worker nicht auf. Ein Worker, der nicht hinterherkommt (ein Codec-Plugin, das hängt, ein Reflektor, der nicht mehr liest), verwirft die Frames, die länger als 400 ms auf ihn gewartet haben, außer dem ersten und letzten eines Streams und den Antworten der AMBE-Geräte, und sagt es im Log; der Monitor zeigt Auslastung und längste Wartezeit jedes Workers. Die Module werden der Reihe nach in der Reihenfolge von `Modules` und `StandbyModules` verteilt; das Log nennt die Aufteilung beim Start (`4 module workers: AE BF CG DH`).
+Jedes Modul gehört zu einem der Worker von tcd (`Workers` in der tcd.ini, `auto`: einer je CPU-Kern, den tcd nutzen darf, in Docker innerhalb von `--cpus` / `--cpuset-cpus`), der alles für seine Frames erledigt. Die Worker laufen gleichzeitig, so teilen sich die Module die CPU-Kerne, und ein Modul, das lange braucht, hält die Module anderer Worker nicht auf. Die Module werden der Reihe nach in der Reihenfolge von `Modules` und `StandbyModules` verteilt; das Log nennt die Aufteilung beim Start (`4 module workers: AE BF CG DH`), und das [Web-Dashboard](#web-dashboard) und `tcdmon` zeigen Auslastung und längste Wartezeit jedes Workers. Ein Worker, der nicht hinterherkommt, verwirft Frames, die länger als 400 ms auf ihn gewartet haben, und sagt es im Log.
 
-Die AMBE-Geräte behalten ihre eigenen Threads für die serielle Leitung; ein Worker übergibt ihnen einen Frame und macht derweil mit anderen Frames weiter. Ein Gerät bekommt nie einen Frame in einen vollen FIFO; ein Frame, der eine Sekunde auf sein Gerät gewartet hat, und die Frames auf einem Gerät, das verloren geht oder geschlossen wird, gehen mit Stille weiter, und ein Frame, der zurückkommt, nachdem schon ein neuerer seines Streams gesendet wurde, wird gar nicht gesendet. Die eigenen Vocoder von tcd (OP25, Codec2) laufen parallel; ein Codec-Plugin dann, wenn es `TCD_PLUGIN_CONCURRENT` setzt (API 5), sonst nutzt es immer nur ein Worker zur Zeit, und das Log sagt das beim Start. Gemessen auf einem Raspberry Pi 5: 26 Module, die gleichzeitig in allen Protokollen transcodiert werden, brauchen weniger als einen halben Kern ([Messungen](docs/MEASUREMENTS.de.md#cpu-last-und-latenz)).
+Die eigenen Vocoder von tcd (OP25, Codec2) laufen parallel; ein Codec-Plugin dann, wenn es `TCD_PLUGIN_CONCURRENT` setzt (API 5), sonst nutzt es immer nur ein Worker zur Zeit, und das Log sagt das beim Start. Gemessen auf einem Raspberry Pi 5: 26 Module, die gleichzeitig in allen Protokollen transcodiert werden, brauchen weniger als einen halben Kern ([Messungen](docs/MEASUREMENTS.de.md#cpu-last-und-latenz)). Wie Worker, AMBE-Geräte und der Bericht an urfd im Einzelnen arbeiten: [docs/WORKERS.de.md](docs/WORKERS.de.md).
 
 ## tcd in Docker
 

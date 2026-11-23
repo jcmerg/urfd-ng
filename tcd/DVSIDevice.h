@@ -125,7 +125,8 @@ protected:
 	};
 	std::deque<SWaiting> waiting[3];
 	std::mutex waiting_mx;
-	void PushWaiting(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, bool decode);
+	// false once the device is lost (the frame then goes on with silence)
+	bool PushWaiting(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, bool decode);
 	// the packet the next answer of the channel is for (nullptr when none waits);
 	// decode tells what it was sent for
 	std::shared_ptr<CTranscoderPacket> PopWaiting(uint8_t channel, bool *decode = nullptr);

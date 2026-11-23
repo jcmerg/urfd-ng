@@ -21,19 +21,12 @@ inline bool OncePerSecond(std::atomic<int64_t> &stamp)
 	return now - last >= 1000 && stamp.compare_exchange_strong(last, now);
 }
 
-// tcd's time limits that depend on each other: a module worker drops a packet from
-// the reflector that waited longer than kWorkerMaxAgeMs for it (not a stream's first
-// or last frame, not a device's answer); an answer an AMBE device owes for
-// kLostAnswerMs (bytes of it dropped on the serial line, an FTDI receive overrun) is
-// taken as lost, the reader looks every 50 ms, and its frame goes on with silence;
-// a stream's report to urfd waits kReportDelayMs after its last activity (the last
-// frame in from urfd, a decode's levels), so its last frames are coded by then: the
-// last frame may wait up to kWorkerMaxAgeMs for its worker (it is never dropped, and
-// nothing refreshes the activity meanwhile), then its encode on a device may lose its
-// answer (kLostAnswerMs and up to 50 ms until the reader looks), and some 300 ms for
-// the queues and a device's 20-100 ms
+// tcd's time limits: a module worker drops a packet from the reflector that waited
+// longer than kWorkerMaxAgeMs for it (not a stream's first or last frame, not a
+// device's answer); an answer an AMBE device owes for kLostAnswerMs (bytes of it
+// dropped on the serial line, an FTDI receive overrun) is taken as lost and its
+// frame goes on with silence; a frame that waited kDeviceMaxWaitMs to go to its AMBE
+// device goes back with silence
 constexpr int kWorkerMaxAgeMs = 400;
 constexpr int kLostAnswerMs = 300;
-// a frame that waited this long to go to its AMBE device goes back with silence
 constexpr int kDeviceMaxWaitMs = 1000;
-constexpr int kReportDelayMs = kWorkerMaxAgeMs + kLostAnswerMs + 50 + 300;

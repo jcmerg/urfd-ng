@@ -80,7 +80,10 @@ void CDVDevice::Lost(void)
 {
 	// from the reader, which ends after this: what was sent gets silence now, what
 	// comes from now on too (the feeder), so the streams go on at once
-	m_dead = true;
+	{
+		std::lock_guard<std::mutex> lock(waiting_mx);	// against PushWaiting
+		m_dead = true;
+	}
 	AnswerWaiting();
 	if (m_onLost)
 		m_onLost();
@@ -658,7 +661,11 @@ void CDVDevice::FeedDevice()
 				{
 					Encoding ch_enc = GetChannelEncoding(index);
 					const bool needs_audio = feed.decode;	// decodes the frame: its answer is audio
-					PushWaiting(index, packet, needs_audio);
+					if (!PushWaiting(index, packet, needs_audio))
+					{
+						AnswerSilence(feed);	// lost meanwhile: nothing goes to it
+						continue;
+					}
 
 					// Track channel activity in stats
 					if (m_statsIndex >= 0 && m_statsIndex < CTcdStats::MAX_DEVICES
@@ -726,7 +733,9 @@ void CDVDevice::ReadDevice()
 		// wait for the next answer
 		while (rx.empty() && keep_running)
 		{
-			const int ready = device->WaitReadable((buffer_depth > 0) ? 50 : 500);
+			// short while frames are on the device or wait to go to it: a lost answer is
+			// found in time (Resync after each wait)
+			const int ready = device->WaitReadable((buffer_depth > 0 || input_queue.Size() > 0) ? 50 : 500);
 			if (ready < 0)
 			{
 				// unplugged or reset: a codec plugin takes over until it is back, or tcd
@@ -793,11 +802,14 @@ size_t CDVDevice::SpeechOut(const int16_t *audio, void *samples) const
 	return 160;
 }
 
-void CDVDevice::PushWaiting(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, bool decode)
+bool CDVDevice::PushWaiting(uint8_t channel, const std::shared_ptr<CTranscoderPacket> &packet, bool decode)
 {
 	std::lock_guard<std::mutex> lock(waiting_mx);
+	if (m_dead)
+		return false;	// Lost() answered the waiting ones already, under this lock
 	waiting[channel].push_back(SWaiting{ packet, SteadyMs(), decode });
 	buffer_depth++;
+	return true;
 }
 
 std::shared_ptr<CTranscoderPacket> CDVDevice::PopWaiting(uint8_t channel, bool *decode)

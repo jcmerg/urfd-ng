@@ -1318,15 +1318,22 @@ static int UsableCores(void)
 			q = atol(s.c_str());
 			return true;
 		});
-	if (!v1.empty())	// cpu.cfs_quota_us (-1: none) and cpu.cfs_period_us, at the first mount there is
+	// cgroup v1: cpu.cfs_quota_us (-1: none) and cpu.cfs_period_us of tcd's own cgroup
+	// and of the mount's top (a container sees its own there), at the first mount
+	// there is; not the levels between (in a container a host path's levels can be
+	// other cgroups of the container's)
+	if (!v1.empty())
 		for (const char *mount : { "/sys/fs/cgroup/cpu", "/sys/fs/cgroup/cpu,cpuacct" })
 		{
 			if (0 != access(mount, F_OK))
 				continue;
-			quota(mount, v1, [](const std::string &dir, long &q, long &p) {
+			for (const std::string &dir : { std::string(mount) + (v1 == "/" ? std::string() : v1), std::string(mount) })
+			{
 				std::ifstream fq(dir + "/cpu.cfs_quota_us"), fp(dir + "/cpu.cfs_period_us");
-				return bool(fq >> q && fp >> p);
-			});
+				long q = 0, p = 0;
+				if (fq >> q && fp >> p && q > 0 && p > 0)
+					cores = std::min<long>(cores, (q + p - 1) / p);
+			}
 			break;
 		}
 #endif
@@ -2778,28 +2785,9 @@ void CController::SvxToAudio(std::shared_ptr<CTranscoderPacket> packet)
 void CController::SendToReflector(std::shared_ptr<CTranscoderPacket> packet)
 {
 	packet->Sent();
-	// never a frame older than one this module sent of the same stream: a late
-	// answer (a device's silence for a frame it did not code, the frames left on a
-	// lost device) is of no use to urfd after the newer ones. A lower count is a new
-	// transmission on the same stream id instead when it is frame 0, far below the
-	// last one (5 s of frames), or after 2 s without a frame sent (as urfd tells
-	// transmissions apart, CSoftCodec::NewTransmission)
-	{
-		auto &last = sent_last[ModuleSlot(packet->GetModule())];
-		const uint16_t sid = packet->GetStreamId();
-		const uint32_t seq = packet->GetSequence();
-		const auto now = std::chrono::steady_clock::now();
-		if (last.valid && last.streamid == sid && seq != 0 && seq <= last.sequence
-			&& last.sequence - seq < 250 && now - last.when < std::chrono::seconds(2))
-		{
-			static std::atomic<int64_t> told[kModuleSlots] = {};
-			if (OncePerSecond(told[ModuleSlot(packet->GetModule())]))
-				std::cerr << "Module " << packet->GetModule() << ": frame " << seq << " of stream 0x" << std::hex << sid << std::dec
-				          << " came after frame " << last.sequence << ", not sent" << std::endl;
-			return;
-		}
-		last = SSentLast{ true, sid, seq, now };
-	}
+	// the stream's report goes once its last frame is through (sent or not)
+	if (packet->IsLast())
+		g_Reports.LastSent(packet->GetModule(), packet->GetStreamId());
 	if (!tcClient.Send(packet->GetTCPacket()))
 	{
 		g_Stats.PacketOut(packet->GetModule());
