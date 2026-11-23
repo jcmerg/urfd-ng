@@ -31,6 +31,7 @@
 #include "tbls.h"
 #include "encode.h"
 #include "imbe_vocoder_impl.h"
+#include "wrap32.h"
 
 
 
@@ -78,13 +79,13 @@ void imbe_vocoder_impl::v_synt(IMBE_PARAM *imbe_param, Word16 *snd)
 		L_snd[i] = 0;
 	
 	// Update phases (calculated phase value correspond to bound of frame)
-	L_tmp = (((fund_freq_prev + fund_freq) >> 7) * FRAME/2) << 7;  // It is performed integer multiplication by mod 1
+	L_tmp = wshl32(wmul32(wadd32(fund_freq_prev, fund_freq) >> 7, FRAME) / 2, 7);  // It is performed integer multiplication by mod 1
 
 	L_ph_acc = 0;
 	for(i = 0; i < NUM_HARMS_MAX; i++)
 	{
 		ph_mem_prev[i] = ph_mem[i];
-		L_ph_acc  += L_tmp;
+		L_ph_acc  = wadd32(L_ph_acc, L_tmp);
 		ph_mem[i] += L_ph_acc;
 		dph[i] = 0;
 	}
@@ -100,8 +101,8 @@ void imbe_vocoder_impl::v_synt(IMBE_PARAM *imbe_param, Word16 *snd)
 	L_ph_step = L_ph_step_prev = 0;
 	for(i = 0; i < num_harms_max; i++)
 	{
-		L_ph_step      += fund_freq;
-		L_ph_step_prev += fund_freq_prev;
+		L_ph_step      = wadd32(L_ph_step, fund_freq);
+		L_ph_step_prev = wadd32(L_ph_step_prev, fund_freq_prev);
 
 
 		if(i > num_harms_max_4)
@@ -124,14 +125,14 @@ void imbe_vocoder_impl::v_synt(IMBE_PARAM *imbe_param, Word16 *snd)
 		if(vu_dsn[i] == 1 && vu_dsn_prev[i] == 0)  // unvoiced => voiced
 		{
 			s_ptr = (Word16 *)ws;
-			L_ph_acc = ph_mem[i] - (((L_ph_step >> 7) * 104) << 7);
+			L_ph_acc = ph_mem[i] - (UWord32)wshl32((L_ph_step >> 7) * 104, 7);
 			for(j = 56; j <= 104; j++)
 			{
 				L_tmp = L_mult(*s_ptr++, sa[i]);
 				L_tmp = L_mpy_ls(L_tmp, cos_fxp(extract_h(L_ph_acc)));
 				L_tmp = L_shr(L_tmp, 1);
 				L_snd[j] = L_add(L_snd[j], L_tmp);
-				L_ph_acc += L_ph_step;
+				L_ph_acc = wadd32(L_ph_acc, L_ph_step);
 			}
 
 			for(j = 105; j <= 159; j++)
@@ -139,7 +140,7 @@ void imbe_vocoder_impl::v_synt(IMBE_PARAM *imbe_param, Word16 *snd)
 				L_tmp = L_mult(sa[i], cos_fxp(extract_h(L_ph_acc)));
 				L_tmp = L_shr(L_tmp, 1);
 				L_snd[j] = L_add(L_snd[j], L_tmp);
-				L_ph_acc += L_ph_step;
+				L_ph_acc = wadd32(L_ph_acc, L_ph_step);
 			}
 			continue;
 		}
@@ -155,7 +156,7 @@ void imbe_vocoder_impl::v_synt(IMBE_PARAM *imbe_param, Word16 *snd)
 				L_tmp = L_mult(sa_prev3[i], cos_fxp(extract_h(L_ph_acc)));
 				L_tmp = L_shr(L_tmp, 1);
 				L_snd[j] = L_add(L_snd[j], L_tmp);
-				L_ph_acc += L_ph_step_prev;
+				L_ph_acc = wadd32(L_ph_acc, L_ph_step_prev);
 			}
 
 			for(j = 56; j <= 104; j++)
@@ -164,7 +165,7 @@ void imbe_vocoder_impl::v_synt(IMBE_PARAM *imbe_param, Word16 *snd)
 				L_tmp = L_mpy_ls(L_tmp, cos_fxp(extract_h(L_ph_acc)));
 				L_tmp = L_shr(L_tmp, 1);
 				L_snd[j] = L_add(L_snd[j], L_tmp);
-				L_ph_acc += L_ph_step_prev;
+				L_ph_acc = wadd32(L_ph_acc, L_ph_step_prev);
 			}
 			continue;
 		}
@@ -175,14 +176,14 @@ void imbe_vocoder_impl::v_synt(IMBE_PARAM *imbe_param, Word16 *snd)
 			L_ph_acc_aux  = ph_mem_prev[i];
 
 			s_ptr    = (Word16 *)ws;
-			L_ph_acc = ph_mem[i] - (((L_ph_step >> 7) * 104) << 7);
+			L_ph_acc = ph_mem[i] - (UWord32)wshl32((L_ph_step >> 7) * 104, 7);
 
 			for(j = 0; j <= 55; j++)
 			{
 				L_tmp = L_mult(sa_prev3[i], cos_fxp(extract_h(L_ph_acc_aux)));
 				L_tmp = L_shr(L_tmp, 1);
 				L_snd[j] = L_add(L_snd[j], L_tmp);
-				L_ph_acc_aux += L_ph_step_prev;
+				L_ph_acc_aux = wadd32(L_ph_acc_aux, L_ph_step_prev);
 			}
 
 			for(j = 56; j <= 104; j++)
@@ -197,8 +198,8 @@ void imbe_vocoder_impl::v_synt(IMBE_PARAM *imbe_param, Word16 *snd)
 				L_tmp = L_shr(L_tmp, 1);
 				L_snd[j] = L_add(L_snd[j], L_tmp);
 
-				L_ph_acc_aux += L_ph_step_prev;
-				L_ph_acc += L_ph_step;
+				L_ph_acc_aux = wadd32(L_ph_acc_aux, L_ph_step_prev);
+				L_ph_acc = wadd32(L_ph_acc, L_ph_step);
 			}
 
 			for(j = 105; j <= 159; j++)
@@ -206,7 +207,7 @@ void imbe_vocoder_impl::v_synt(IMBE_PARAM *imbe_param, Word16 *snd)
 				L_tmp = L_mult(sa[i], cos_fxp(extract_h(L_ph_acc)));
 				L_tmp = L_shr(L_tmp, 1);
 				L_snd[j] = L_add(L_snd[j], L_tmp);
-				L_ph_acc += L_ph_step;
+				L_ph_acc = wadd32(L_ph_acc, L_ph_step);
 			}
 			continue;
 		}
@@ -216,7 +217,7 @@ void imbe_vocoder_impl::v_synt(IMBE_PARAM *imbe_param, Word16 *snd)
 
 		
 		L_ph_step_aux = L_mpy_ls(L_shr(fund_freq - fund_freq_prev, 4 + 1), CNST_0_1_Q1_15);       // (fund_freq - fund_freq_prev)/(2*160)
-		L_ph_step_aux = ((L_ph_step_aux >> 7) * (i + 1)) << 7;
+		L_ph_step_aux = wshl32(wmul32(L_ph_step_aux >> 7, i + 1), 7);
 
 		L_ph_acc = ph_mem_prev[i];
 
@@ -224,15 +225,15 @@ void imbe_vocoder_impl::v_synt(IMBE_PARAM *imbe_param, Word16 *snd)
 					
 		for(j = 0; j < 160; j++)
 		{
-			L_ph_acc_aux = ((L_ph_step_aux >> 9) * j) << 9; 
-			L_ph_acc_aux = ((L_ph_acc_aux >> 9) * j) << 9; 
+			L_ph_acc_aux = wshl32(wmul32(L_ph_step_aux >> 9, j), 9);
+			L_ph_acc_aux = wshl32(wmul32(L_ph_acc_aux >> 9, j), 9);
 
-			L_tmp = L_mpy_ls(L_amp_acc, cos_fxp(extract_h(L_ph_acc + L_ph_acc_aux)));			
+			L_tmp = L_mpy_ls(L_amp_acc, cos_fxp(extract_h(wadd32(L_ph_acc, L_ph_acc_aux))));
 			L_snd[j] = L_add(L_snd[j], L_tmp);
 
 			L_amp_acc = L_add(L_amp_acc, L_amp_step);
-			L_ph_acc += L_ph_step_prev;
-			L_ph_acc += L_tmp1;
+			L_ph_acc = wadd32(L_ph_acc, L_ph_step_prev);
+			L_ph_acc = wadd32(L_ph_acc, L_tmp1);
 		}
 	}
 

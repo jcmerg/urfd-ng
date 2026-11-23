@@ -39,6 +39,14 @@ namespace AmbeFrameCheck
 
 	static inline int Popcount(unsigned int v) { return __builtin_popcount(v); }
 
+	// the D-Star silence frame (the AMBE2+ one: AMBE72_SILENCE, YSFDefines.h)
+	static const uint8_t DSTAR_SILENCE[9] = { 0x9EU, 0x8DU, 0x32U, 0x88U, 0x26U, 0x1AU, 0x3FU, 0x61U, 0xE8U };
+
+	// the bits the Golay(24,12) decode of `a` to u0 corrected; more than kCorrectable24: uncorrectable
+	constexpr int kCorrectable24 = 3;
+	static inline int Errors24(unsigned int a, unsigned int u0) { return Popcount((a ^ CGolay24128::encode24128(u0)) & 0xFFFFFFU); }
+	static inline bool Uncorrectable24(unsigned int a, unsigned int u0) { return Errors24(a, u0) > kCorrectable24; }
+
 	// a: the 24 bits of the first partition, the parity bit last; b: the 23
 	// bits of the second, still scrambled
 	static inline SAmbeFec Check(unsigned int a, unsigned int b)
@@ -48,8 +56,8 @@ namespace AmbeFrameCheck
 		// parity in bit 0; decode23127() takes the 23-bit word in bits 22..0
 		SAmbeFec r{0, false};
 		const unsigned int u0 = CGolay24128::decode24128(a);
-		r.errors = Popcount((a ^ CGolay24128::encode24128(u0)) & 0xFFFFFFU);
-		r.uncorrectable = r.errors > 3;
+		r.errors = Errors24(a, u0);
+		r.uncorrectable = r.errors > kCorrectable24;
 		const unsigned int bs = b ^ (PRNG_TABLE[u0] >> 1);
 		const unsigned int u1 = CGolay24128::decode23127(bs);
 		r.errors += Popcount((bs ^ (CGolay24128::encode23127(u1) >> 1)) & 0x7FFFFFU);
@@ -66,9 +74,10 @@ namespace AmbeFrameCheck
 		return Check(a, b);
 	}
 
-	static inline SAmbeFec DStar(const uint8_t *frame)
+	// the first and the second partition of a D-Star frame, each bit at its place in the word
+	static inline void DStarWords(const uint8_t *frame, unsigned int &a, unsigned int &b)
 	{
-		unsigned int a = 0, b = 0;
+		a = b = 0;
 		for (int i = 0; i < 72; i++)
 		{
 			const unsigned int bit = (frame[i >> 3] >> (i & 7)) & 1U;
@@ -77,6 +86,12 @@ namespace AmbeFrameCheck
 			else if (DSTAR_W[i] == 1)
 				b |= bit << DSTAR_X[i];
 		}
+	}
+
+	static inline SAmbeFec DStar(const uint8_t *frame)
+	{
+		unsigned int a, b;
+		DStarWords(frame, a, b);
 		return Check(a, b);
 	}
 }

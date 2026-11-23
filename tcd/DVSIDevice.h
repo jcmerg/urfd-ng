@@ -38,7 +38,8 @@
 // a device's answer to a packet, put into the packet by its module's worker
 // (CController::DeviceAnswer): enc, the channel's codec; audio, decoded speech
 // in pcm, else the frame of enc in ambe
-struct SDeviceAnswer { Encoding enc; bool audio; uint8_t ambe[9]; int16_t pcm[160]; };
+// lost: the device did not answer, the frame is silence in its place (SilenceAnswer)
+struct SDeviceAnswer { Encoding enc; bool audio; uint8_t ambe[9]; int16_t pcm[160]; bool lost; };
 
 class CDVDevice
 {

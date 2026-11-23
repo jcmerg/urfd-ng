@@ -278,12 +278,21 @@ uint16_t CProtocol::NewStreamId(const CIp &ip)
 {
 	// from the peer's address and port and the seed: a talker refused gets the
 	// same one with every packet until a stream of this protocol closes. Only
-	// the taken ones are in the way, so it ends after a few tries
-	const uint32_t base = (ip.GetAddr() ^ (uint32_t(ip.GetPort()) * 0x10001u)) + uint32_t(m_StreamIdSeed) * 0x9E3779B1u;
+	// the taken ones are in the way, so it ends after a few tries. Each input
+	// with a constant of its own and the whole mixed (the finalizer of
+	// MurmurHash3), the id its low 16 bits: the port in both halves of the old
+	// sum (port * 0x10001) cancelled out when it was folded to 16 bits, so the
+	// first stream of every protocol from one host got the same id
+	const uint32_t base = ip.GetAddr() * 0x9E3779B1u ^ uint32_t(ip.GetPort()) * 0x85EBCA6Bu ^ uint32_t(m_StreamIdSeed) * 0xC2B2AE35u;
 	for (uint32_t k = 0; ; k++)
 	{
-		const uint32_t h = base + k * 0x85EBCA6Bu;
-		const uint16_t id = uint16_t(h ^ (h >> 16));
+		uint32_t h = base + k * 0x27D4EB2Fu;
+		h ^= h >> 16;
+		h *= 0x85EBCA6Bu;
+		h ^= h >> 13;
+		h *= 0xC2B2AE35u;
+		h ^= h >> 16;
+		const uint16_t id = uint16_t(h);
 		if (!StreamIdTaken(id))
 			return id;
 	}

@@ -76,11 +76,9 @@ int main(int argc, char *argv[])
 	                  { { TCD_CODEC_P25, g_Conf.GetCodecChoice(kChoiceP25) }, { TCD_CODEC_M17, g_Conf.GetCodecChoice(kChoiceM17) } }))
 		return EXIT_FAILURE;
 
-	if (g_Cont.Start())
-		return EXIT_FAILURE;
-
 	// The live config: the controller reapplies it every second, edited by the
-	// monitor if it runs, so it is filled from the ini in any case
+	// monitor if it runs, so it is filled from the ini in any case; before the
+	// controller starts, which gives the devices their output gains from it
 	g_Stats.config.agc_enabled.store(g_Conf.GetAGCEnabled());
 	g_Stats.config.agc_target.store(g_Conf.GetAGCTarget());
 	g_Stats.config.agc_attack.store(g_Conf.GetAGCAttack());
@@ -98,24 +96,26 @@ int main(int argc, char *argv[])
 	g_Stats.config.gain_dmr_in.store(g_Conf.GetGain(EGainType::dmrin));
 	g_Stats.config.gain_dmr_out.store(g_Conf.GetGain(EGainType::dmrout));
 	g_Stats.config.gain_dmr_reencode.store(g_Conf.GetGain(EGainType::dmrreencode));
+	g_Stats.config.gain_dstar_reencode.store(g_Conf.GetGain(EGainType::dstarreencode));
 	g_Stats.config.outgain_dstar.store(g_Conf.GetGain(EGainType::outgain_dstar));
 	g_Stats.config.outgain_dmr.store(g_Conf.GetGain(EGainType::outgain_dmr));
 	g_Stats.config.outgain_dmr_bitstream.store(g_Conf.GetOutputGainDMRBitstream());
+	g_Stats.config.outgain_dstar_bitstream.store(g_Conf.GetOutputGainDStarBitstream());
 	g_Stats.config.outgain_usrp.store(g_Conf.GetGain(EGainType::outgain_usrp));
 	g_Stats.config.outgain_imbe.store(g_Conf.GetGain(EGainType::outgain_imbe));
 	g_Stats.config.outgain_m17.store(g_Conf.GetGain(EGainType::outgain_m17));
-	{
-		auto mode = g_Conf.GetDmrGainMode();
-		// Downgrade reencode to ambe without a codec plugin for DMR
-		if (mode == CConfigure::EDmrGainMode::reencode && !g_Stats.reencode_available.load(std::memory_order_relaxed))
-		{
-			std::cerr << "Warning: DmrGainMode=reencode needs a codec plugin for DMR, falling back to ambe" << std::endl;
-			mode = CConfigure::EDmrGainMode::ambe;
-		}
-		g_Stats.config.dmr_gain_mode.store((int)mode);
-	}
+	g_Stats.config.dmr_gain_mode.store((int)g_Conf.GetDmrGainMode());
 	g_Stats.config.ambe_gain_db.store(g_Conf.GetAmbeGainDb());
+	g_Stats.config.dstar_gain_mode.store((int)g_Conf.GetDStarGainMode());
+	g_Stats.config.dstar_ambe_gain_db.store(g_Conf.GetDStarAmbeGainDb());
+	g_Stats.config.p25_gain_mode.store(g_Conf.GetP25GainBitstream() ? 1 : 0);
+	g_Stats.config.m17_gain_mode.store(g_Conf.GetM17GainBitstream() ? 1 : 0);
+	g_Stats.config.usrp_gain_mode.store(g_Conf.GetUSRPGainAgc() ? 1 : 0);
 	g_Stats.config.transcode_direct.store(g_Conf.GetTranscodeDirect());
+
+	if (g_Cont.Start())
+		return EXIT_FAILURE;
+
 	g_Stats.config.monitor_view.store(g_Conf.GetMonitorView());
 
 	// Start monitor server (web dashboard + stats socket)

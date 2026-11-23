@@ -23,10 +23,11 @@
 #include <vector>
 #include <regex>
 #include <utility>
+#include <algorithm>
 
 #include "CodecChoice.h"
 
-enum class EGainType { dmrin, dmrout, dstarin, dstarout, dmrreencode, outgain_dstar, outgain_dmr, outgain_usrp, outgain_imbe, outgain_m17 };
+enum class EGainType { dmrin, dmrout, dstarin, dstarout, dmrreencode, dstarreencode, outgain_dstar, outgain_dmr, outgain_usrp, outgain_imbe, outgain_m17 };
 
 // the bounds of a float setting, for the ini file and the monitor's REST API alike
 struct SRange { float lo, hi; };
@@ -62,9 +63,20 @@ public:
 	// µ-law (1) or A-law (3), the values of PKT_COMPAND (G711.h)
 	int GetDeviceCompand(void) const { return device_compand; }
 
-	// DMR/YSF gain mode: off, ambe (bitstream b2), reencode (PCM through a codec plugin)
-	enum class EDmrGainMode { off, ambe, reencode };
-	EDmrGainMode GetDmrGainMode(void) const { return dmr_gain_mode; }
+	// DmrGainMode, DStarGainMode: off, ambe (b2 in the frame), reencode (PCM through a codec plugin)
+	enum class EGainMode { off, ambe, reencode };
+	// the part of an output gain `total` that goes through b2 after the encoder
+	// (OutputGain*Bitstream = bs): never more than the gain itself, only an attenuation
+	static int BitstreamPart(int total, int bs) { return (total >= 0) ? 0 : std::max(bs, total); }
+	static const char *GainModeName(EGainMode m) { return m == EGainMode::reencode ? "reencode" : m == EGainMode::ambe ? "ambe" : "off"; }
+	EGainMode GetDmrGainMode(void) const { return dmr_gain_mode; }
+	// D-Star -> D-Star the same way: off, ambe (b2 in the AMBE frame), reencode (a codec plugin)
+	EGainMode GetDStarGainMode(void) const { return dstar_gain_mode; }
+	// P25 -> P25 and M17 -> M17: the AGC in the frames (bitstream, true) or none (off)
+	bool GetP25GainBitstream(void) const { return p25_gain_bitstream; }
+	bool GetM17GainBitstream(void) const { return m17_gain_bitstream; }
+	// USRP/SVX -> USRP/SVX: the processed audio (agc, true) or the input (off)
+	bool GetUSRPGainAgc(void) const { return usrp_gain_agc; }
 	// Transcode = direct (the default): a codec plugin that can codes D-Star,
 	// DMR/YSF and P25 from each other's frames, skipping the decoded audio;
 	// audio: every codec is encoded from the audio, as before
@@ -73,6 +85,7 @@ public:
 	// (one per CPU core, at most one per module)
 	int GetWorkers(void) const { return workers; }
 	int  GetAmbeGainDb(void) const          { return ambe_gain_db; }
+	int  GetDStarAmbeGainDb(void) const     { return dstar_ambe_gain_db; }
 
 	// AGC
 	bool  GetAGCEnabled(void) const    { return agc_enabled; }
@@ -102,6 +115,8 @@ public:
 	const std::string &GetIniPath(void) const { return ini_path; }
 	// the part of OutputGainDMR (dB) that non-DMR sources get through b2 in the AMBE2+ frame after the encoder
 	int GetOutputGainDMRBitstream(void) const { return outgain_dmr_bitstream; }
+	// the part of OutputGainDStar (dB) that non-D-Star sources get through b2 in the D-Star frame after the encoder
+	int GetOutputGainDStarBitstream(void) const { return outgain_dstar_bitstream; }
 
 	// one log line per stream at its end: the vocoder of every codec, and the FEC counts of an AMBE device's frames
 	bool               GetStreamLog(void) const        { return streamlog; }
@@ -129,13 +144,17 @@ private:
 	std::string codec_choice[kNumChoices];
 	std::vector<std::pair<std::string, std::string>> unknown_lines;
 	uint16_t port;
-	int dstar_in = 0, dstar_out = 0, dmr_in = 0, dmr_out = 0, dmr_reencode = 0;
+	int dstar_in = 0, dstar_out = 0, dmr_in = 0, dmr_out = 0, dmr_reencode = 0, dstar_reencode = 0;
 	int outgain_dstar = 0, outgain_dmr = 0, outgain_usrp = 0, outgain_imbe = 0, outgain_m17 = 0;
 	int outgain_dmr_bitstream = -6;  // clean at -4 and -6 since 0.7.1, more crackles
-	EDmrGainMode dmr_gain_mode = EDmrGainMode::ambe;
+	int outgain_dstar_bitstream = 0;  // D-Star's b2 steps are fine (0.7-1.8 dB), but 0 keeps the encoder's path as before
+	EGainMode dmr_gain_mode = EGainMode::ambe;
+	EGainMode dstar_gain_mode = EGainMode::ambe;
+	bool p25_gain_bitstream = true, m17_gain_bitstream = true, usrp_gain_agc = true;
 	bool transcode_direct = true;
 	int workers = 0;
 	int  ambe_gain_db = 0;
+	int  dstar_ambe_gain_db = 0;
 	bool  agc_enabled = false;
 	float agc_target  = -16.0f;
 	float agc_attack  = 50.0f;

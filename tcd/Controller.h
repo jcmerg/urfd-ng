@@ -38,6 +38,7 @@
 #include "AmbeGain.h"
 #include "CodecPlugin.h"
 #include "CodecChoice.h"
+#include "Configure.h"
 #include "TcdStats.h"
 #include "ModuleIndex.h"
 #include "SteadyClock.h"
@@ -52,8 +53,10 @@ public:
 	void ListDevices();
 	// from: the plugin codec that decoded a D-Star packet, for Transcode (nullptr: a device did)
 	// decoded: from's decode succeeded (a failed one gets no transcode, only its End)
-	void RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, class CSoftCodec *from = nullptr, bool decoded = true);
-	void RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet);
+	// dec_out_num: the DStarGainOut a plugin decoded `from` with (one value for the frame)
+	void RouteDstPacket(std::shared_ptr<CTranscoderPacket> packet, class CSoftCodec *from = nullptr, bool decoded = true, int32_t dec_out_num = 256);
+	// decoded: false for a device's lost answer (silence in its place)
+	void RouteDmrPacket(std::shared_ptr<CTranscoderPacket> packet, bool decoded = true);
 	// an AMBE device's answer to a packet (DVSIDevice: its reader, or a lost
 	// answer's silence): the packet's module worker puts it into the packet and
 	// routes it on (RouteDstPacket, RouteDmrPacket)
@@ -67,6 +70,7 @@ protected:
 	// per module (ModuleSlot): M17 1600 audio of the payload's second half, and the
 	// first half of an M17 3200 payload being coded
 	int16_t audio_store[kModuleSlots][160] = {};
+	bool audio_decoded[kModuleSlots] = {};	// audio_store came from a frame that decoded
 	uint8_t data_store[kModuleSlots][8] = {};
 	// which first packet a store holds: a second packet uses it only when it is its
 	// pair's (the same stream, the sequence before), wherever the first was coded
@@ -79,6 +83,14 @@ protected:
 		bool Of(const std::shared_ptr<CTranscoderPacket> &p) const { return valid && streamid == p->GetStreamId() && sequence + 1 == p->GetSequence(); }
 	};
 	SStoreTag audio_tag[kModuleSlots], data_tag[kModuleSlots];
+	// M17 -> M17 (M17GainMode): the first 8 bytes of a pair's payload with its
+	// first packet's gain, for the second packet, which goes out with both
+	uint8_t m17gain_store[kModuleSlots][8] = {};
+	SStoreTag m17gain_tag[kModuleSlots];
+	// P25 -> P25 and M17 -> M17: the AGC's gain and the output gain in the frame
+	void P25SameCodecGain(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, bool decoded);
+	void M17SameCodecGain(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, bool decoded);
+	void M17Half(const std::shared_ptr<CTranscoderPacket> &packet, int16_t *tmp, bool decoded);
 
 	// The modules' workers: every module belongs to one of them (worker_of), which
 	// does all the work on its packets: decoding, AGC, coding to the other codecs
@@ -272,14 +284,18 @@ protected:
 	// 160 samples into 8 bytes; decode: 8 bytes into 160 samples (3200) or 320
 	// (1600). An error gives Codec2 silence or silent samples
 	void EncodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const int16_t *gained, uint8_t *bits);
-	void DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const uint8_t *bits, bool is1600, int16_t *pcm);
+	bool DecodeM17(const std::shared_ptr<CTranscoderPacket> &packet, const uint8_t *bits, bool is1600, int16_t *pcm);
 	void PurgePinned(void);
 	// the DMR plugin for DmrGainMode = reencode, nullptr without one
 	class CSoftCodec *dmr_sw = nullptr;
+	// the D-Star plugin for DStarGainMode = reencode of a stream a device decoded, nullptr without one
+	class CSoftCodec *dstar_sw = nullptr;
+	// the reencodes of each g_Stats.sw entry at the reflector thread's last look
+	uint32_t reencodes_seen[CTcdStats::MAX_SW] = {};
 	// the gains as numerators (256 = 0 dB): written by ReconfigureAGC (the monitor's
 	// changes, from the reflector thread) and read by every codec thread
 	std::atomic<int32_t> dstar_in_num{256}, dstar_out_num{256};	// DStarGainIn/Out for a D-Star plugin
-	std::atomic<int32_t> ambe_in_num{256}, ambe_out_num{256}, dmr_reencode_num{256};
+	std::atomic<int32_t> ambe_in_num{256}, ambe_out_num{256}, dmr_reencode_num{256}, dstar_reencode_num{256};
 	std::atomic<int32_t> outgain_dstar_num{256}, outgain_dmr_num{256}, outgain_usrp_num{256}, outgain_imbe_num{256}, outgain_m17_num{256};
 	// P25 to M17: a 300 Hz high-pass in front of the Codec2 encoder, per module
 	struct SHighPass { float z[2][2]; uint16_t streamid; };
@@ -292,9 +308,39 @@ protected:
 
 	int32_t calcNumerator(int32_t db) const;
 	static void ApplyGain(int16_t *samples, int count, int32_t num);
-	int BitstreamDmrDb(void) const;
-	int32_t PcmDmrGainNum(void) const;
-	void BitstreamDmrGain(uint8_t *ambe2, uint32_t streamKey);
+	void OutputSplit(bool dstar, int32_t &pcm_num, int &bs) const;
+	void UpdateSplits(void);
+	// [0] D-Star, [1] DMR: the PCM numerator (high 32 bits) and the b2 dB (low 32)
+	std::atomic<uint64_t> split[2] = { { 256ULL << 32 }, { 256ULL << 32 } };
+	// D-Star -> D-Star (DStarGainMode), DMR -> DMR/YSF (DmrGainMode): the AGC's
+	// gain for this frame (agc_db) in the packet's frame of the source codec,
+	// through b2 or a re-encode by `re` (decoded: the frame decoded)
+	struct SSameCodec
+	{
+		CConfigure::EGainMode mode = CConfigure::EGainMode::off;
+		int32_t out_num = 256, reencode_num = 256, in_num = 256;	// OutputGain, ReencodeGain, the encoder's GainIn (for b2)
+		int32_t sw_in_num = 256;	// the plugin's GainIn, for its re-encode
+		float dec_out_db = 0.0f;	// the GainOut the decoder used
+		float offset_db = 0.0f;		// AmbeGainDb / DStarAmbeGainDb
+		bool dstar = false;
+	};
+	void SameCodecGain(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, class CSoftCodec *re, bool decoded, const SSameCodec &c);
+	SSameCodec SameCodec(bool dstar, float dec_out_db, int32_t in_num) const;
+	bool ApplySameCodecGain(const std::shared_ptr<CTranscoderPacket> &packet, float agc_db, class CSoftCodec *re, bool decoded, const SSameCodec &c);
+	// the stream of each module whose frames a plugin re-encoded: its encoder state ends with the last frame
+	struct SReencoded { bool valid; uint16_t streamid; uint32_t key; class CSoftCodec *codec; };
+	SReencoded reencoded[kModuleSlots] = {};
+	// the AGC's gain of a frame that did not decode: the stream's last one that did
+	struct SHeldAgc { bool valid; uint16_t streamid; float db; };
+	SHeldAgc held_agc[kModuleSlots] = {};
+	float HeldAgc(const std::shared_ptr<CTranscoderPacket> &packet, bool decoded, float agc_db);
+	// the GainOut (dB) and GainIn (numerator) an AMBE device uses, from tcd.ini (Start)
+	struct SDeviceGains { float out_db; int32_t in_num; };
+	SDeviceGains dev_dstar{ 0.0f, 256 }, dev_dmr{ 0.0f, 256 };
+	// the b2 part of OutputGainDStar/DMR the devices were given with their PCM part
+	std::atomic<int> device_bs_dstar{0}, device_bs_dmr{0};
+	void SetDeviceGains(class CDVDevice &dev);
+	bool ReencodeNeeded(const SSameCodec &c) const;	// mode 2 codes the frame again
 	bool DiscoverFtdiDevices(std::list<std::pair<std::string, std::string>> &found);
 	bool IsAmbeDevice(const std::string &desc);
 	bool InitVocoders();
@@ -307,9 +353,8 @@ protected:
 	void AudiotoCodec2(std::shared_ptr<CTranscoderPacket> packet);
 	void IMBEtoAudio(std::shared_ptr<CTranscoderPacket> packet);
 	void AudiotoIMBE(std::shared_ptr<CTranscoderPacket> packet);
-	void USRPtoAudio(std::shared_ptr<CTranscoderPacket> packet);
 	void AudiotoUSRP(std::shared_ptr<CTranscoderPacket> packet);
-	void SvxToAudio(std::shared_ptr<CTranscoderPacket> packet);
+	void AnalogToAudio(std::shared_ptr<CTranscoderPacket> packet, const char *label);
 	void SendToReflector(std::shared_ptr<CTranscoderPacket> packet);
 	void SWAMBE2toAudio(std::shared_ptr<CTranscoderPacket> packet);
 	void AudiotoSWAMBE2(std::shared_ptr<CTranscoderPacket> packet);
