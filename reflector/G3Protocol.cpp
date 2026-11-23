@@ -31,9 +31,13 @@
 ////////////////////////////////////////////////////////////////////////////////////////
 // operation
 
-bool CG3Protocol::Initialize(const char */*type*/, const EProtocol /*type*/, const uint16_t /*port*/, const bool /*has_ipv4*/, const bool /*has_ipv6*/)
+bool CG3Protocol::Initialize(const char */*type*/, const EProtocol ptype, const uint16_t /*port*/, const bool /*has_ipv4*/, const bool /*has_ipv6*/)
 // everything is hard coded until ICOM gets their act together and start supporting IPv6
 {
+	// CProtocol::Initialize is not called here: without it G3 was EProtocol::none
+	// for the admin's protocol list and blocks, the router and its thread's name
+	m_ProtocolType = ptype;
+
 	//config data
 	m_TerminalPath.assign(g_Configure.GetString(g_Keys.files.terminal));
 	const std::string ipv4address(g_Configure.GetString(g_Keys.ip.ipv4bind));
