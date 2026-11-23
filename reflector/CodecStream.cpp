@@ -33,6 +33,7 @@
 #include "NXDNProtocol.h"
 #include "YSFClientPeer.h"
 #include "ThreadName.h"
+#include <cctype>
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // constructor
@@ -384,7 +385,7 @@ bool CCodecStream::InitCodecStream()
 
 void CCodecStream::Thread()
 {
-	SetThreadName(std::string("urfd-codec-") + m_CSModule);
+	SetThreadName(std::string("urfd-codec-") + char(std::tolower((unsigned char)m_CSModule)));
 	while (keep_running)
 	{
 		Task();
