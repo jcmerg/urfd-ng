@@ -1236,6 +1236,10 @@ void CController::ReadReflectorThread()
 			auto packet = std::make_shared<CTranscoderPacket>(*queue.front());
 			queue.pop();
 			g_Stats.PacketIn(packet->GetModule(), packet->GetStreamId(), packet->GetCodecIn());
+			// a D-Star end frame whose voice bytes are the end pattern carries no
+			// voice: it is transcoded as the silence frame, not decoded as it is
+			if (ECodecType::dstar == packet->GetCodecIn() && AmbeFrameCheck::DStarEndPattern(packet->GetDStarData()))
+				packet->SetDStarData(AmbeFrameCheck::DSTAR_SILENCE);
 			{
 				// the FEC of an AMBE frame as it came, for the stream's report
 				int fec = -1;

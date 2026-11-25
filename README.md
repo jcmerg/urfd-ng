@@ -4,7 +4,7 @@
 
 Based on [urfd](https://github.com/n7tae/urfd) by Thomas Early N7TAE, with extended features, the hybrid transcoder [tcd](tcd/) and a setup script that installs both.
 
-**urfd 4.42.3** | tcd 0.23.5 | Dashboard v3.2.1
+**urfd 4.42.3** | tcd 0.23.6 | Dashboard v3.2.1
 
 **New to this? Install with the setup script, see [docs/INSTALL.md](docs/INSTALL.md):**
 
