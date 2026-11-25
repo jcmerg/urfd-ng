@@ -2,7 +2,7 @@
 
 **English** | [Deutsch](README.de.md)
 
-**Version 0.23.5** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd). What changed from version to version is in the [release notes](https://github.com/jcmerg/urfd-ng/releases).
+**Version 0.23.6** — the transcoder of [urfd-ng](../README.md), in the `tcd/` folder of the same repository. Based on [n7tae/tcd](https://github.com/n7tae/tcd). What changed from version to version is in the [release notes](https://github.com/jcmerg/urfd-ng/releases).
 
 tcd converts voice between the digital modes on a URF reflector, so a D-Star user hears a DMR user and the other way round. The reflector hands the audio of its transcoded modules to tcd over TCP and gets every other mode back.
 

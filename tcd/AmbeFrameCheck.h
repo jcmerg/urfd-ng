@@ -11,6 +11,7 @@
 // D-Star (the 9 voice bytes of a DV frame, bit 0 of byte 0 first) from the
 // D-Star specification.
 #include <cstdint>
+#include <cstring>
 #include "Golay24128.h"
 #include "YSFDefines.h"	// DMR_A_TABLE, DMR_B_TABLE, PRNG_TABLE, READ_BIT
 
@@ -41,6 +42,19 @@ namespace AmbeFrameCheck
 
 	// the D-Star silence frame (the AMBE2+ one: AMBE72_SILENCE, YSFDefines.h)
 	static const uint8_t DSTAR_SILENCE[9] = { 0x9EU, 0x8DU, 0x32U, 0x88U, 0x26U, 0x1AU, 0x3FU, 0x61U, 0xE8U };
+
+	// the end pattern of a D-Star transmission where it stands in the voice
+	// bytes of the last frame: 55 55 55 55 C8 7A and zeros (ircDDBGateway, as
+	// it takes the end frame from a repeater and hands it on over DCS), or
+	// nine times 55 with the 55 C8 7A in the slow data (MMDVMHost). No voice:
+	// a decoder that takes it for a frame plays a short noise. Other gateways
+	// send the silence frame there.
+	static inline bool DStarEndPattern(const uint8_t *frame)
+	{
+		static const uint8_t start[6] = { 0x55U, 0x55U, 0x55U, 0x55U, 0xC8U, 0x7AU };
+		static const uint8_t sync[9] = { 0x55U, 0x55U, 0x55U, 0x55U, 0x55U, 0x55U, 0x55U, 0x55U, 0x55U };
+		return 0 == memcmp(frame, start, sizeof(start)) || 0 == memcmp(frame, sync, sizeof(sync));
+	}
 
 	// the bits the Golay(24,12) decode of `a` to u0 corrected; more than kCorrectable24: uncorrectable
 	constexpr int kCorrectable24 = 3;
