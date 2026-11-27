@@ -22,10 +22,12 @@ inline unsigned LinkRetrySeconds(unsigned tries)
 // A client protocol looks its reflector's host up again before every try. When that
 // fails (DNS down) the last address is kept and tried, and one line says so until
 // the host resolves again. False while there is no address at all: nothing to send.
-inline bool ResolveLink(CIp &ip, const std::string &host, uint16_t port, bool &unresolved, const char *name)
+// IPv4 when the host has an IPv4 address, IPv6 else when the protocol has an
+// IPv6 socket (allow6).
+inline bool ResolveLink(CIp &ip, const std::string &host, uint16_t port, bool &unresolved, const char *name, bool allow6)
 {
 	// (a CIp built from a host name never reports IsSet(), so look at the address)
-	CIp now(host.c_str(), AF_INET, SOCK_DGRAM, port);
+	CIp now(CIp::Resolve(host, port, allow6));
 	if (now.AddressIsZero())
 	{
 		if (!unresolved)

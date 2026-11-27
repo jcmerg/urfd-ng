@@ -72,6 +72,21 @@ IPv4Binding = 0.0.0.0
 IPCheckInterval = 60              # check every minute
 ```
 
+### IPv6
+
+Mit `IPv6Binding` lauscht urfd auch auf IPv6: D-Star (DExtra, DPlus, DCS), DMR (MMDVM, DMRPlus, XLXPeer), YSF, NXDN, P25, M17, URF, USRP und SVXServer (TCP und UDP). G3 bleibt bei IPv4, das Protokoll eines Plugins sagt selbst, was es nimmt. Die Anbindungen an andere Systeme (die DCS-, DExtra-, DPlus- und YSF-Clients, MMDVMClient, OpenBridge, SvxReflector und die Interlinks) nehmen die IPv4-Adresse eines Ziels, wenn es eine hat, und IPv6, wenn es nur eine IPv6-Adresse hat oder als solche angegeben ist; ein Interlink-Partner mit beiden darf über jede rufen.
+
+`IPv6Binding = ::` nimmt alle Adressen des Hosts, und urfd antwortet jeder Station von der Adresse, die sie gerufen hat, auch auf einem Host mit SLAAC- oder Privacy-Adressen neben der, auf die der Name des Reflektors zeigt (ebenso bei mehreren IPv4-Adressen mit `IPv4Binding = 0.0.0.0`). Verbindungen, die urfd selbst aufbaut, gehen von `IPv6External` aus, wenn es gesetzt ist. Eine einzelne Adresse in `IPv6Binding` nimmt nur diese.
+
+```ini
+[IP Addresses]
+IPv4Binding = 0.0.0.0
+IPv6Binding = ::
+IPv6External = 2001:db8::10       # der AAAA-Eintrag des Reflektor-Namens
+```
+
+Der Port des Transcoders folgt allein `[Transcoder] BindingAddress`: `0.0.0.0` hält ihn auf IPv4, `::` nimmt tcd über IPv4 und IPv6.
+
 ### ID-Datenbanken
 
 Die DMR-ID-, NXDN-ID- und YSF-TX/RX-Datenbanken liefern Rufzeichen, Namen und Frequenzen.
@@ -791,7 +806,7 @@ Alles, was das Dashboard zeigt, kommt von hier: Clients, Peers und sprechende St
 # Links = 100                  # rows on the Links page
 # Peers = 100                  # rows on the Peers page
 # LinksIP = HideIP             # (default) or ShowLast1ByteOfIP ... ShowLast3ByteOfIP, ShowFullIP
-# PeersIP = HideIP             # IPv6: the last 1, 2 or 3 groups
+# PeersIP = HideIP             # IPv6: the last 1, 2 or 3 groups of the /64 prefix
 # IPMask = *                   # the character for a hidden byte
 # Admin = false                # the admin page, with [Admin] Enable
 ```

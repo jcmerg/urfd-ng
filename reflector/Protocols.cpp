@@ -75,91 +75,91 @@ bool CProtocols::initLocked(void)
 		if (IS_PROTO_ENABLED(g_Keys.dextra.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CDextraProtocol>(new CDextraProtocol));
-			if (! m_Protocols.back()->Initialize("XRF", EProtocol::dextra, uint16_t(g_Configure.GetUnsigned(g_Keys.dextra.port)), DSTAR_IPV4, DSTAR_IPV6))
+			if (! m_Protocols.back()->Initialize("XRF", EProtocol::dextra, uint16_t(g_Configure.GetUnsigned(g_Keys.dextra.port)), true, true))
 				return false;
 		}
 
 		if (IS_PROTO_ENABLED(g_Keys.dplus.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CDplusProtocol>(new CDplusProtocol));
-			if (! m_Protocols.back()->Initialize("REF", EProtocol::dplus, uint16_t(g_Configure.GetUnsigned(g_Keys.dplus.port)), DSTAR_IPV4, DSTAR_IPV6))
+			if (! m_Protocols.back()->Initialize("REF", EProtocol::dplus, uint16_t(g_Configure.GetUnsigned(g_Keys.dplus.port)), true, true))
 				return false;
 		}
 
 		if (IS_PROTO_ENABLED(g_Keys.dcs.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CDcsProtocol>(new CDcsProtocol));
-			if (! m_Protocols.back()->Initialize("DCS", EProtocol::dcs, uint16_t(g_Configure.GetUnsigned(g_Keys.dcs.port)), DSTAR_IPV4, DSTAR_IPV6))
+			if (! m_Protocols.back()->Initialize("DCS", EProtocol::dcs, uint16_t(g_Configure.GetUnsigned(g_Keys.dcs.port)), true, true))
 				return false;
 		}
 
 		if (IS_PROTO_ENABLED(g_Keys.mmdvm.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CDmrmmdvmProtocol>(new CDmrmmdvmProtocol));
-			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::dmrmmdvm, uint16_t(g_Configure.GetUnsigned(g_Keys.mmdvm.port)), DMR_IPV4, DMR_IPV6))
+			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::dmrmmdvm, uint16_t(g_Configure.GetUnsigned(g_Keys.mmdvm.port)), true, true))
 				return false;
 		}
 
 		if (g_Configure.Contains(g_Keys.xlxpeer.enable) && g_Configure.GetBoolean(g_Keys.xlxpeer.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CXlxPeerProtocol>(new CXlxPeerProtocol));
-			if (! m_Protocols.back()->Initialize("XLX", EProtocol::xlxpeer, uint16_t(g_Configure.GetUnsigned(g_Keys.xlxpeer.port)), DMR_IPV4, DMR_IPV6))
+			if (! m_Protocols.back()->Initialize("XLX", EProtocol::xlxpeer, uint16_t(g_Configure.GetUnsigned(g_Keys.xlxpeer.port)), true, true))
 				return false;
 		}
 
 		if (IS_PROTO_ENABLED(g_Keys.dmrplus.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CDmrplusProtocol>(new CDmrplusProtocol));
-			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::dmrplus, uint16_t(g_Configure.GetUnsigned(g_Keys.dmrplus.port)), DMR_IPV4, DMR_IPV6))
+			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::dmrplus, uint16_t(g_Configure.GetUnsigned(g_Keys.dmrplus.port)), true, true))
 				return false;
 		}
 
 		if (IS_PROTO_ENABLED(g_Keys.ysf.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CYsfProtocol>(new CYsfProtocol));
-			if (! m_Protocols.back()->Initialize("YSF", EProtocol::ysf, uint16_t(g_Configure.GetUnsigned(g_Keys.ysf.port)), YSF_IPV4, YSF_IPV6))
+			if (! m_Protocols.back()->Initialize("YSF", EProtocol::ysf, uint16_t(g_Configure.GetUnsigned(g_Keys.ysf.port)), true, true))
 				return false;
 		}
 
 		if (IS_PROTO_ENABLED(g_Keys.m17.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CM17Protocol>(new CM17Protocol));
-			if (! m_Protocols.back()->Initialize("URF", EProtocol::m17, uint16_t(g_Configure.GetUnsigned(g_Keys.m17.port)), M17_IPV4, M17_IPV6))
+			if (! m_Protocols.back()->Initialize("URF", EProtocol::m17, uint16_t(g_Configure.GetUnsigned(g_Keys.m17.port)), true, true))
 				return false;
 		}
 
 		if (IS_PROTO_ENABLED(g_Keys.p25.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CP25Protocol>(new CP25Protocol));
-			if (! m_Protocols.back()->Initialize("P25", EProtocol::p25, uint16_t(g_Configure.GetUnsigned(g_Keys.p25.port)), P25_IPV4, P25_IPV6))
+			if (! m_Protocols.back()->Initialize("P25", EProtocol::p25, uint16_t(g_Configure.GetUnsigned(g_Keys.p25.port)), true, true))
 				return false;
 		}
 
 		if (IS_PROTO_ENABLED(g_Keys.nxdn.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CNXDNProtocol>(new CNXDNProtocol));
-			if (! m_Protocols.back()->Initialize("NXDN", EProtocol::nxdn, uint16_t(g_Configure.GetUnsigned(g_Keys.nxdn.port)), NXDN_IPV4, NXDN_IPV6))
+			if (! m_Protocols.back()->Initialize("NXDN", EProtocol::nxdn, uint16_t(g_Configure.GetUnsigned(g_Keys.nxdn.port)), true, true))
 				return false;
 		}
 
 		if (g_Configure.Contains(g_Keys.usrp.enable) && g_Configure.GetBoolean(g_Keys.usrp.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CUSRPProtocol>(new CUSRPProtocol));
-			if (! m_Protocols.back()->Initialize("USRP", EProtocol::usrp, uint16_t(g_Configure.GetUnsigned(g_Keys.usrp.rxport)), USRP_IPV4, USRP_IPV6))
+			if (! m_Protocols.back()->Initialize("USRP", EProtocol::usrp, uint16_t(g_Configure.GetUnsigned(g_Keys.usrp.rxport)), true, true))
 				return false;
 		}
 
 		if (g_Configure.Contains(g_Keys.svx.enable) && g_Configure.GetBoolean(g_Keys.svx.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CSvxReflectorProtocol>(new CSvxReflectorProtocol));
-			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::svxreflector, uint16_t(0), SVX_IPV4, SVX_IPV6))
+			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::svxreflector, uint16_t(0), true, true))
 				return false;
 		}
 
 		if (g_Configure.Contains(g_Keys.svxs.enable) && g_Configure.GetBoolean(g_Keys.svxs.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CSvxProtocol>(new CSvxProtocol));
-			if (! m_Protocols.back()->Initialize("SVX", EProtocol::svx, uint16_t(g_Configure.GetUnsigned(g_Keys.svxs.port)), SVX_IPV4, SVX_IPV6))
+			if (! m_Protocols.back()->Initialize("SVX", EProtocol::svx, uint16_t(g_Configure.GetUnsigned(g_Keys.svxs.port)), true, true))
 				return false;
 		}
 
@@ -182,14 +182,14 @@ bool CProtocols::initLocked(void)
 		if (IS_PROTO_ENABLED(g_Keys.urf.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CURFProtocol>(new CURFProtocol));
-			if (! m_Protocols.back()->Initialize("URF", EProtocol::urf, uint16_t(g_Configure.GetUnsigned(g_Keys.urf.port)), URF_IPV4, URF_IPV6))
+			if (! m_Protocols.back()->Initialize("URF", EProtocol::urf, uint16_t(g_Configure.GetUnsigned(g_Keys.urf.port)), true, true))
 				return false;
 		}
 
 		if (g_Configure.Contains(g_Keys.g3.enable) && g_Configure.GetBoolean(g_Keys.g3.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CG3Protocol>(new CG3Protocol));
-			if (! m_Protocols.back()->Initialize("XLX", EProtocol::g3, G3_DV_PORT, DMR_IPV4, DMR_IPV6))
+			if (! m_Protocols.back()->Initialize("XLX", EProtocol::g3, G3_DV_PORT, true, false))	// Icom: IPv4 only
 			return false;
 		}
 
@@ -203,42 +203,42 @@ bool CProtocols::initLocked(void)
 				localport = uint16_t(g_Configure.GetUnsigned(ck.localport));
 			auto cli = std::unique_ptr<CMMDVMClientProtocol>(new CMMDVMClientProtocol(n));
 			m_Protocols.emplace_back(std::move(cli));
-			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::mmdvmclient, localport, DMR_IPV4, false))
+			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::mmdvmclient, localport, true, true))
 				return false;
 		}
 
 		if (g_Configure.Contains(g_Keys.openbridge.enable) && g_Configure.GetBoolean(g_Keys.openbridge.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<COpenBridgeProtocol>(new COpenBridgeProtocol));
-			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::openbridge, uint16_t(g_Configure.GetUnsigned(g_Keys.openbridge.localport)), DMR_IPV4, false))
+			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::openbridge, uint16_t(g_Configure.GetUnsigned(g_Keys.openbridge.localport)), true, true))
 				return false;
 		}
 
 		if (g_Configure.Contains(g_Keys.dcsclient.enable) && g_Configure.GetBoolean(g_Keys.dcsclient.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CDcsClientProtocol>(new CDcsClientProtocol));
-			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::dcsclient, uint16_t(0), DSTAR_IPV4, false))
+			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::dcsclient, uint16_t(0), true, true))
 				return false;
 		}
 
 		if (g_Configure.Contains(g_Keys.ysfclient.enable) && g_Configure.GetBoolean(g_Keys.ysfclient.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CYsfClientProtocol>(new CYsfClientProtocol));
-			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::ysfclient, uint16_t(0), YSF_IPV4, false))
+			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::ysfclient, uint16_t(0), true, true))
 				return false;
 		}
 
 		if (g_Configure.Contains(g_Keys.dextraclient.enable) && g_Configure.GetBoolean(g_Keys.dextraclient.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CDExtraClientProtocol>(new CDExtraClientProtocol));
-			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::dextraclient, uint16_t(0), DSTAR_IPV4, false))
+			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::dextraclient, uint16_t(0), true, true))
 				return false;
 		}
 
 		if (g_Configure.Contains(g_Keys.dplusclient.enable) && g_Configure.GetBoolean(g_Keys.dplusclient.enable))
 		{
 			m_Protocols.emplace_back(std::unique_ptr<CDPlusClientProtocol>(new CDPlusClientProtocol));
-			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::dplusclient, uint16_t(0), DSTAR_IPV4, false))
+			if (! m_Protocols.back()->Initialize(nullptr, EProtocol::dplusclient, uint16_t(0), true, true))
 				return false;
 		}
 

@@ -148,7 +148,7 @@ bool CMMDVMClientProtocol::IsSourceClientBlocked(const CClient &client) const
 void CMMDVMClientProtocol::ResolveMaster(void)
 {
 	// (a CIp built from a host name never reports IsSet(), so look at the address)
-	CIp ip(m_MasterAddress.c_str(), AF_INET, SOCK_DGRAM, m_MasterPort);
+	CIp ip(CIp::Resolve(m_MasterAddress, m_MasterPort, UsesIPv6()));
 	if (ip.AddressIsZero())
 	{
 		std::cerr << m_Name << ": cannot resolve master " << m_MasterAddress << std::endl;
@@ -178,7 +178,7 @@ void CMMDVMClientProtocol::Task(void)
 	CBuffer Buffer;
 	CIp     Ip;
 
-	if (Receive4(Buffer, Ip, WaitTime()))
+	if (ReceiveDS(Buffer, Ip, WaitTime()))
 	{
 		HandleIncoming(Buffer, Ip);
 	}

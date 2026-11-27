@@ -123,7 +123,7 @@ void COpenBridgeProtocol::Task(void)
 {
 	CBuffer Buffer;
 	CIp     Ip;
-	if (Receive4(Buffer, Ip, WaitTime()))
+	if (ReceiveDS(Buffer, Ip, WaitTime()))
 		HandleOpenBridge(Buffer, Ip);
 
 	if (m_FreeDmr && !m_Stunned)

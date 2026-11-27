@@ -224,7 +224,7 @@ bool CInterlinkMap::IsCallsignListed(const std::string &callsign, const CIp &ip,
 	{
 		if ( item->second.CheckListedModules(modules) )
 		{
-			if ( ip == item->second.GetIp() )
+			if ( item->second.HasSameIp(ip) )
 			{
 				return true;
 			}

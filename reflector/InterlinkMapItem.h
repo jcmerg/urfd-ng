@@ -43,8 +43,10 @@ public:
 	void UpdateItem(const std::string &cmods, const std::string &ipv4, const std::string &ipv6, uint16_t port, const std::string &tcmods);
 #endif
 
+	static bool UsesIPv6(void);
+
 	// compare
-	bool HasSameIp(const CIp &ip);
+	bool HasSameIp(const CIp &ip) const;	// its address or, dual-stack, the other one
 	bool HasModuleListed(char) const;
 	bool CheckListedModules(const char*) const;
 
@@ -65,6 +67,7 @@ public:
 private:
 	// data
 	CIp         m_Ip;
+	CIp         m_IpAlt;	// a dual-stack peer's other address (unset else)
 	std::string m_Mods;
 	uint16_t    m_Port;
 	bool        m_UsesDHT;

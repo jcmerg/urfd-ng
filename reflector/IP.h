@@ -18,6 +18,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <iostream>
+#include <string>
 #include <cstring>
 #include <chrono>
 #include <thread>
@@ -36,6 +37,11 @@ public:
 	CIp();
 	CIp(const char *address, int family = AF_UNSPEC, int type = SOCK_DGRAM, uint16_t port = 0U);
 	CIp(const int family, const uint16_t port = 0U, const char *address = nullptr);
+
+	// a host name or address for a link we open: its IPv4 address when it has
+	// one (as before IPv6 came to the links), its IPv6 address else when we may
+	// use IPv6 (allow6). An address with nothing set when it does not resolve
+	static CIp Resolve(const std::string &host, uint16_t port, bool allow6, int type = SOCK_DGRAM);
 
 	// initializer for empty constructor
 	void Initialize(const int family, const uint16_t port = 0U, const char *address = nullptr);

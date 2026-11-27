@@ -108,6 +108,10 @@ bool CProtocol::Initialize(const char *type, const EProtocol ptype, const uint16
 					m_Socket4.Close();
 					return false;
 				}
+				// links we open leave from the address the reflector's name
+				// points to, not a SLAAC or privacy address of the host
+				if (g_Configure.GetBoolean(g_Keys.ip.ipv6fixed))
+					m_Socket6.SetDefaultSource(CIp(AF_INET6, 0, g_Configure.GetString(g_Keys.ip.ipv6address).c_str()));
 				std::cout << "Listening on " << ip6 << std::endl;
 			}
 		}
@@ -450,6 +454,11 @@ bool CProtocol::Wait(int fd4, int fd6, int time_ms, bool &ready4, bool &ready6)
 	ready4 = (i4 >= 0 && (fds[i4].revents & POLLIN));
 	ready6 = (i6 >= 0 && (fds[i6].revents & POLLIN));
 	return ready4 || ready6;
+}
+
+bool CProtocol::UsesIPv6(void)
+{
+	return g_Configure.IsString(g_Keys.ip.ipv6bind) && !g_Configure.GetString(g_Keys.ip.ipv6bind).empty();
 }
 
 bool CProtocol::Receive6(CBuffer &buf, CIp &ip, int time_ms)

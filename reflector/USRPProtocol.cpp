@@ -89,7 +89,8 @@ bool CUSRPProtocol::Initialize(const char *type, const EProtocol ptype, const ui
 	if (scs.compare("NONE"))
 	{
 		m_Callsign.SetCallsign(scs, false);
-		CIp ip(AF_INET, uint16_t(g_Configure.GetUnsigned(g_Keys.usrp.txport)), g_Configure.GetString(g_Keys.usrp.ip).c_str());
+		const std::string addr(g_Configure.GetString(g_Keys.usrp.ip));
+		CIp ip((addr.find(':') != std::string::npos) ? AF_INET6 : AF_INET, uint16_t(g_Configure.GetUnsigned(g_Keys.usrp.txport)), addr.c_str());
 		auto newclient = std::make_shared<CUSRPClient>(m_Callsign, ip);
 		newclient->SetReflectorModule(m_Module);
 		g_Reflector.GetClients()->AddClient(newclient);
@@ -132,7 +133,7 @@ bool CUSRPProtocol::Initialize(const char *type, const EProtocol ptype, const ui
 				((clientcs = ::strtok(nullptr, ";")) != nullptr) )
 			{
 				uint16_t ui = atoi(port);
-				CIp Ip(AF_INET, ui, ip);
+				CIp Ip(::strchr(ip, ':') ? AF_INET6 : AF_INET, ui, ip);
 				CCallsign cs;
 				cs.SetCallsign(clientcs, false);
 				auto newclient = std::make_shared<CUSRPClient>(cs, Ip);
@@ -164,15 +165,7 @@ void CUSRPProtocol::Task(void)
 	std::unique_ptr<CDvFramePacket>  Frame;
 
 	// handle incoming packets
-#if USRP_IPV6==true
-#if USRP_IPV4==true
 	if ( ReceiveDS(Buffer, Ip, WaitTime()) )
-#else
-	if ( Receive6(Buffer, Ip, WaitTime()) )
-#endif
-#else
-	if ( Receive4(Buffer, Ip, WaitTime()) )
-#endif
 	{
 		// crack the packet
 		if ( IsValidDvPacket(Buffer, 0, Frame) )

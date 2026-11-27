@@ -72,6 +72,21 @@ IPv4Binding = 0.0.0.0
 IPCheckInterval = 60              # check every minute
 ```
 
+### IPv6
+
+With `IPv6Binding` urfd listens on IPv6 as well: D-Star (DExtra, DPlus, DCS), DMR (MMDVM, DMRPlus, XLXPeer), YSF, NXDN, P25, M17, URF, USRP and SVXServer (TCP and UDP). G3 stays IPv4, a plugin's protocol says itself which it takes. The connectors to other systems (the DCS, DExtra, DPlus and YSF clients, MMDVMClient, OpenBridge, SvxReflector and the interlinks) take a target's IPv4 address when it has one, and IPv6 when it has only an IPv6 address or is given as one; an interlink peer with both may call over either.
+
+`IPv6Binding = ::` takes every address of the host, and urfd answers each station from the address it called, also on a host with SLAAC or privacy addresses next to the one the reflector's name points to (the same for several IPv4 addresses on `IPv4Binding = 0.0.0.0`). The links urfd opens itself leave from `IPv6External` when it is set. A single address in `IPv6Binding` takes only that one.
+
+```ini
+[IP Addresses]
+IPv4Binding = 0.0.0.0
+IPv6Binding = ::
+IPv6External = 2001:db8::10       # the AAAA record of the reflector's name
+```
+
+The transcoder's port follows `[Transcoder] BindingAddress` alone: `0.0.0.0` keeps it on IPv4, `::` takes tcd over IPv4 and IPv6.
+
 ### ID databases
 
 The DMR ID, NXDN ID and YSF TX/RX databases give callsigns, names and frequencies.
@@ -791,7 +806,7 @@ Everything the dashboard shows comes from here: clients, peers and talking stati
 # Links = 100                  # rows on the Links page
 # Peers = 100                  # rows on the Peers page
 # LinksIP = HideIP             # (default) or ShowLast1ByteOfIP ... ShowLast3ByteOfIP, ShowFullIP
-# PeersIP = HideIP             # IPv6: the last 1, 2 or 3 groups
+# PeersIP = HideIP             # IPv6: the last 1, 2 or 3 groups of the /64 prefix
 # IPMask = *                   # the character for a hidden byte
 # Admin = false                # the admin page, with [Admin] Enable
 ```

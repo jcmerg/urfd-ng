@@ -55,15 +55,7 @@ void CURFProtocol::Task(void)
 	std::unique_ptr<CDvFramePacket>  LastFrame;
 
 	// any incoming packet ?
-#if XLX_IPV6==true
-#if XLX_IPV4==true
 	if ( ReceiveDS(Buffer, Ip, WaitTime()) )
-#else
-	if ( Receive6(Buffer, Ip, WaitTime()) )
-#endif
-#else
-	if ( Receive4(Buffer, Ip, WaitTime()) )
-#endif
 	{
 		// crack the packet
 		if ( IsValidDvFramePacket(Buffer, Frame) )

@@ -25,6 +25,10 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <mutex>
+#include <string>
+#include <unordered_map>
 
 #include "IP.h"
 #include "Buffer.h"
@@ -43,7 +47,7 @@ public:
 	// open & close
 	bool Open(const CIp &Ip);
 	void Close(void);
-	int  GetSocket(void)
+	int  GetSocket(void) const
 	{
 		return m_fd;
 	}
@@ -59,8 +63,32 @@ public:
 	void Send(const char    *, const CIp &, uint16_t) const;
 	void Send(const u_int8_t *, size_t size, const CIp &) const;
 
+	// the source address for a peer that has not sent us anything yet (a link
+	// we open), when the socket listens on the wildcard address: the address
+	// the reflector's name points to. Without it the kernel picks one, on IPv6
+	// often a temporary or SLAAC address that the far side does not know
+	void SetDefaultSource(const CIp &);
+	// the source for one peer before it sent anything (the address a TCP
+	// connection to the same host leaves from)
+	void SetSourceFor(const CIp &peer, const CIp &local);
+	// the address a TCP connection to a peer of this socket should leave
+	// from, so both use the same one: the bound address, else the default
+	// source (unset: the kernel's pick)
+	CIp GetSourceAddress(void) const;
+
 protected:
+	void SendTo(const void *data, size_t size, const CIp &Ip) const;
+	void Remember(const CIp &peer, const void *local, size_t len);
+
 	// data
 	int m_fd;
 	CIp m_addr;
+	bool m_Wildcard = false;	// bound to 0.0.0.0 or ::: replies need their source set
+
+	// the local address each peer sent to, the source of our answers to it, so
+	// a client hears us from the address it called on a host with several
+	// (a fixed one, SLAAC and privacy addresses, secondary IPv4 addresses)
+	mutable std::mutex m_LocalMutex;
+	mutable std::unordered_map<std::string, std::string> m_Local;
+	mutable std::string m_DefaultLocal;
 };

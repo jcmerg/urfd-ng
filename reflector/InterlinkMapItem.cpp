@@ -30,6 +30,7 @@
 #include <arpa/inet.h>
 
 #include "Configure.h"
+#include "Global.h"
 #include "InterlinkMapItem.h"
 #include "Reflector.h"
 
@@ -61,33 +62,34 @@ CInterlinkMapItem::CInterlinkMapItem(const char *addr, const char *mods, uint16_
 {
 	m_Mods.assign(mods);
 
-	// Try DNS resolution if addr is not a raw IP address
-	struct addrinfo hints, *result = nullptr;
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_DGRAM;
+	// the name or address: IPv4 when it has one, IPv6 else (with IPv6Binding);
+	// the other family of a dual-stack peer also counts for its packets, it may
+	// call us over either
+	const bool v6 = UsesIPv6();
+	m_Ip = CIp::Resolve(addr, port, v6);
+	if (v6 && AF_INET == m_Ip.GetFamily())
+	{
+		struct addrinfo hints, *result = nullptr;
+		memset(&hints, 0, sizeof(hints));
+		hints.ai_family = AF_INET6;
+		hints.ai_socktype = SOCK_DGRAM;
+		if (0 == getaddrinfo(addr, nullptr, &hints, &result) && result)
+		{
+			char resolved[INET6_ADDRSTRLEN];
+			if (inet_ntop(AF_INET6, &((struct sockaddr_in6 *)result->ai_addr)->sin6_addr, resolved, sizeof(resolved)))
+				m_IpAlt.Initialize(AF_INET6, port, resolved);
+			freeaddrinfo(result);
+		}
+	}
+	if (m_Ip.AddressIsZero())
+		std::cerr << "Interlink: cannot resolve " << addr << std::endl;
+	else if (strcmp(addr, m_Ip.GetAddress()))
+		std::cout << "Interlink: resolved " << addr << " -> " << m_Ip << (m_IpAlt.IsSet() ? " (also IPv6)" : "") << std::endl;
+}
 
-	if (0 == getaddrinfo(addr, nullptr, &hints, &result) && result)
-	{
-		char resolved[INET6_ADDRSTRLEN];
-		if (result->ai_family == AF_INET)
-		{
-			inet_ntop(AF_INET, &((struct sockaddr_in *)result->ai_addr)->sin_addr, resolved, sizeof(resolved));
-			m_Ip.Initialize(AF_INET, port, resolved);
-		}
-		else if (result->ai_family == AF_INET6)
-		{
-			inet_ntop(AF_INET6, &((struct sockaddr_in6 *)result->ai_addr)->sin6_addr, resolved, sizeof(resolved));
-			m_Ip.Initialize(AF_INET6, port, resolved);
-		}
-		freeaddrinfo(result);
-		std::cout << "Interlink: resolved " << addr << " -> " << m_Ip << std::endl;
-	}
-	else
-	{
-		// Fallback to direct IP
-		m_Ip.Initialize(strchr(addr, ':') ? AF_INET6 : AF_INET, port, addr);
-	}
+bool CInterlinkMapItem::UsesIPv6(void)
+{
+	return g_Configure.IsString(g_Keys.ip.ipv6bind) && !g_Configure.GetString(g_Keys.ip.ipv6bind).empty();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -98,9 +100,9 @@ bool CInterlinkMapItem::HasModuleListed(char module) const
 	return m_Mods.npos != m_Mods.find(module);
 }
 
-bool CInterlinkMapItem::HasSameIp(const CIp &ip)
+bool CInterlinkMapItem::HasSameIp(const CIp &ip) const
 {
-	return ip == m_Ip;
+	return ip == m_Ip || (m_IpAlt.IsSet() && ip == m_IpAlt);
 }
 
 bool CInterlinkMapItem::CheckListedModules(const char *mods) const
@@ -161,10 +163,16 @@ void CInterlinkMapItem::UpdateIP(bool IPv6NotConfigured)
 {
 	if (m_Updated)
 	{
+		m_IpAlt.Clear();
 		if (IPv6NotConfigured || m_IPv6.empty())
 			m_Ip.Initialize(AF_INET,  m_Port, m_IPv4.c_str());
 		else
+		{
 			m_Ip.Initialize(AF_INET6, m_Port, m_IPv6.c_str());
+			// its packets may come over IPv4 as well
+			if (!m_IPv4.empty())
+				m_IpAlt.Initialize(AF_INET, m_Port, m_IPv4.c_str());
+		}
 
 		m_Updated = false;
 	}
