@@ -16,6 +16,7 @@
  *   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+#include <arpa/inet.h>
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -161,6 +162,18 @@ static bool CredBackendBuilt(const std::string &backend)
 
 std::function<bool(CConfigure &, const CIniSections &)> CConfigure::PluginHook;
 std::function<std::string(bool v6)> CConfigure::KnownExternalIp;
+
+// a global unicast IPv6 address: not ::, loopback, link-local, unique local
+// (fc00::/7) or multicast
+static bool IsPublicIPv6(const std::string &s)
+{
+	struct in6_addr a;
+	if (1 != inet_pton(AF_INET6, s.c_str(), &a))
+		return false;
+	return !IN6_IS_ADDR_UNSPECIFIED(&a) && !IN6_IS_ADDR_LOOPBACK(&a) && !IN6_IS_ADDR_LINKLOCAL(&a)
+		&& !IN6_IS_ADDR_SITELOCAL(&a) && !IN6_IS_ADDR_MULTICAST(&a) && !IN6_IS_ADDR_V4MAPPED(&a)
+		&& (a.s6_addr[0] & 0xfe) != 0xfc;
+}
 
 CConfigure::CConfigure()
 {
@@ -1193,6 +1206,15 @@ bool CConfigure::ReadData(const std::string &path)
 					std::cerr << "ERROR: the specified IPv6 address [" << v6 << "] is malformed" << std::endl;
 					rval = true;
 				}
+			}
+			else if (IsPublicIPv6(data[g_Keys.ip.ipv6bind].get<std::string>()))
+			{
+				// IPv6 has no NAT: a public address bound is the one the stations
+				// reach; the services would see the kernel's pick for the request
+				// instead, often a SLAAC or privacy address
+				data[g_Keys.ip.ipv6address] = data[g_Keys.ip.ipv6bind].get<std::string>();
+				data[g_Keys.ip.ipv6fixed] = true;
+				std::cout << "External IPv6 address " << data[g_Keys.ip.ipv6address].get<std::string>() << " (the IPv6 binding)" << std::endl;
 			}
 			else
 			{
