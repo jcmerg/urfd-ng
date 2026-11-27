@@ -62,7 +62,7 @@ Port = 20001
 
 ### External address
 
-Clients and directories need the address urfd is reached at on the internet, which behind NAT is not the bound one. `IPv4External` / `IPv6External` set it by hand. Without them urfd asks the services in `IPCheckUrl` (by default icanhazip.com, ifconfig.me, ipify.org and ident.me; the first well-formed answer wins), at start and every `IPCheckInterval` seconds (default 300, at least 30, 0 = only at start). A changed address, e.g. after a switch to a fallback line, counts when a second check 10 s later confirms it; it is logged, goes to the XLX directory at once and into the DHT, and G3 and the plugins tell it to their clients. A check without answer changes nothing. When no service answers at the start (e.g. no DNS yet right after a boot), urfd starts with a warning and asks every 10 s until one does.
+Clients and directories need the address urfd is reached at on the internet, which behind NAT is not the bound one. `IPv4External` / `IPv6External` set it by hand; a public IPv6 address in `IPv6Binding` is taken as `IPv6External` (IPv6 has no NAT). Without them urfd asks the services in `IPCheckUrl` (by default icanhazip.com, ifconfig.me, ipify.org and ident.me; the first well-formed answer wins), at start and every `IPCheckInterval` seconds (default 300, at least 30, 0 = only at start). A changed address, e.g. after a switch to a fallback line, counts when a second check 10 s later confirms it; it is logged, goes to the XLX directory at once and into the DHT, and G3 and the plugins tell it to their clients. A check without answer changes nothing. When no service answers at the start (e.g. no DNS yet right after a boot), urfd starts with a warning and asks every 10 s until one does.
 
 ```ini
 [IP Addresses]
@@ -76,7 +76,7 @@ IPCheckInterval = 60              # check every minute
 
 With `IPv6Binding` urfd listens on IPv6 as well: D-Star (DExtra, DPlus, DCS), DMR (MMDVM, DMRPlus, XLXPeer), YSF, NXDN, P25, M17, URF, USRP and SVXServer (TCP and UDP). G3 stays IPv4, a plugin's protocol says itself which it takes. The connectors to other systems (the DCS, DExtra, DPlus and YSF clients, MMDVMClient, OpenBridge, SvxReflector and the interlinks) take a target's IPv4 address when it has one, and IPv6 when it has only an IPv6 address or is given as one; an interlink peer with both may call over either.
 
-`IPv6Binding = ::` takes every address of the host, and urfd answers each station from the address it called, also on a host with SLAAC or privacy addresses next to the one the reflector's name points to (the same for several IPv4 addresses on `IPv4Binding = 0.0.0.0`). The links urfd opens itself leave from `IPv6External` when it is set. A single address in `IPv6Binding` takes only that one.
+`IPv6Binding = ::` takes every address of the host, and urfd answers each station from the address it called, also on a host with SLAAC or privacy addresses next to the one the reflector's name points to (the same for several IPv4 addresses on `IPv4Binding = 0.0.0.0`). The links urfd opens itself leave from `IPv6External` when it is set. A single address in `IPv6Binding` takes only that one, and a public one is the external address as well. Detected by `IPCheckUrl`, the IPv6 address is the one the kernel picks for the request, on a host with SLAAC or privacy addresses often not the one the name points to: with `::` set `IPv6External`.
 
 ```ini
 [IP Addresses]
