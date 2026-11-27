@@ -42,30 +42,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////
 // defines
 
-//// Module configuration
-#define DSTAR_IPV4 true
-#define DMR_IPV4 true
-#define YSF_IPV4 true
-#define XLX_IPV4 true
-#define M17_IPV4 true
-#define P25_IPV4 true
-#define NXDN_IPV4 true
-#define USRP_IPV4 true
-#define SVX_IPV4 true
-#define URF_IPV4 true
-
-
-#define DSTAR_IPV6 true	// QnetGateway can use IPv6
-#define DMR_IPV6 false
-#define YSF_IPV6 false
-#define XLX_IPV6 false
-#define M17_IPV6 true
-#define P25_IPV6 false
-#define NXDN_IPV6 false
-#define USRP_IPV6 false
-#define SVX_IPV6 false
-#define URF_IPV6 true
-
 // protocols ---------------------------------------------------
 
 enum class EProtocol { any, none, dextra, dplus, dcs, g3, xlxpeer, urf, dmrplus, dmrmmdvm, nxdn, p25, usrp, ysf, m17, mmdvmclient, svxreflector, svx, dcsclient, ysfclient, dextraclient, dplusclient, openbridge, plugin };

@@ -141,7 +141,8 @@ protected:
 
 	// TCP server
 	bool TcpListen(void);
-	bool TcpAccept(void);	// false: none waiting
+	int  TcpListenOn(int family, const std::string &bindAddr);	// the listener, -1 on failure
+	bool TcpAccept(int listenFd, bool &stuck);	// false: none waiting
 	bool TcpSendFrame(SSvxPeer &peer, const std::vector<uint8_t> &msg);
 	void TcpReceiveFromPeer(uint32_t clientId);
 	void TcpBroadcast(const std::vector<uint8_t> &msg, uint32_t exceptClientId = 0);
@@ -187,8 +188,9 @@ protected:
 	bool IniAddUser(const std::string &callsign, const std::string &password);
 	bool IniRemoveUser(const std::string &callsign);
 
-	// TCP listen socket
+	// TCP listen sockets, IPv4 and (with IPv6Binding) IPv6
 	int m_TcpListenFd;
+	int m_TcpListenFd6 = -1;
 
 	// peers indexed by clientId
 	std::unordered_map<uint32_t, SSvxPeer> m_Peers;
@@ -197,6 +199,7 @@ protected:
 	std::vector<struct pollfd> m_PollFds;
 	std::vector<uint32_t> m_PollIds;
 	bool m_AcceptStuck = false;	// accept failed and the connection stays waiting: the listener not waited for
+	bool m_AcceptStuck6 = false;	// the same for the IPv6 listener
 
 	// the talker of each TG: a peer's clientId, or SVXS_URFD_TALKER for urfd audio
 	std::unordered_map<uint32_t, uint32_t> m_TgTalker;

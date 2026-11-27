@@ -106,15 +106,7 @@ void CYsfProtocol::Task(void)
 	}
 
 	// handle incoming packets
-#if YSF_IPV6==true
-#if YSF_IPV4==true
 	if ( ReceiveDS(Buffer, Ip, WaitTime()) )
-#else
-	if ( Receive6(Buffer, Ip, WaitTime()) )
-#endif
-#else
-	if ( Receive4(Buffer, Ip, WaitTime()) )
-#endif
 	{
 		// crack the packet
 		// WiresX commands must be checked before voice packets (both are YSFD/155 bytes)

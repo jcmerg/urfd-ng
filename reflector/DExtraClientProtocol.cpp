@@ -53,7 +53,7 @@ bool CDExtraClientProtocol::Initialize(const char *type, const EProtocol ptype, 
 					SDExtraClientMapping mapping;
 					mapping.host = host;
 					mapping.port = p;
-					mapping.ip = CIp(host.c_str(), AF_INET, SOCK_DGRAM, p);
+					mapping.ip = CIp::Resolve(host, p, UsesIPv6());
 					mapping.remoteModule = remoteMod;
 					mapping.localModule = localMod;
 					m_Mappings.push_back(mapping);
@@ -83,7 +83,7 @@ void CDExtraClientProtocol::Task(void)
 	CBuffer Buffer;
 	CIp     Ip;
 
-	if (Receive4(Buffer, Ip, WaitTime()))
+	if (ReceiveDS(Buffer, Ip, WaitTime()))
 		HandleIncoming(Buffer, Ip);
 
 	if (m_ReconnectRequested.exchange(false))
@@ -149,7 +149,7 @@ void CDExtraClientProtocol::HandleConnections(void)
 			// less and less often (LinkRetry.h)
 			if (m.keepaliveTimer.time() > LinkRetrySeconds(m.tries))
 			{
-				if (ResolveLink(m.ip, m.host, m.port, m.unresolved, "DExtraClient"))
+				if (ResolveLink(m.ip, m.host, m.port, m.unresolved, "DExtraClient", UsesIPv6()))
 					SendConnect(m);
 				m.keepaliveTimer.start();
 				m.tries++;
@@ -356,7 +356,7 @@ bool CDExtraClientProtocol::AddMapping(const std::string &host, uint16_t port, c
 	SDExtraClientMapping mapping;
 	mapping.host = host;
 	mapping.port = port;
-	mapping.ip = CIp(host.c_str(), AF_INET, SOCK_DGRAM, port);
+	mapping.ip = CIp::Resolve(host, port, UsesIPv6());
 	mapping.remoteModule = remoteMod;
 	mapping.localModule = localMod;
 	mapping.keepaliveTimer.start();

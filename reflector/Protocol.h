@@ -195,6 +195,11 @@ protected:
 	// waits for any of fds (POLLIN and the like, their revents set) or the queue,
 	// at most time_ms; true when one of fds is ready
 	bool WaitFor(std::vector<struct pollfd> &fds, int time_ms);
+	// an IPv6 socket is open (IPv6Binding set): links may go to IPv6 hosts
+	bool HasSocket6(void) const { return m_Socket6.GetSocket() >= 0; }
+	// IPv6Binding is set: the protocols open an IPv6 socket (also before
+	// Initialize, while a client reads its links)
+	static bool UsesIPv6(void);
 	bool Receive6(CBuffer &buf, CIp &Ip, int time_ms);
 	bool Receive4(CBuffer &buf, CIp &Ip, int time_ms);
 	bool ReceiveDS(CBuffer &buf, CIp &Ip, int time_ms);

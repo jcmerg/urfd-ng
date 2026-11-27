@@ -68,7 +68,7 @@ bool CYsfClientProtocol::Initialize(const char *type, const EProtocol ptype, con
 					SYsfClientMapping mapping;
 					mapping.host = host;
 					mapping.port = p;
-					mapping.ip = CIp(host.c_str(), AF_INET, SOCK_DGRAM, p);
+					mapping.ip = CIp::Resolve(host, p, UsesIPv6());
 					mapping.localModule = localMod;
 					mapping.dgid = dgid;
 					mapping.connected = false;
@@ -102,7 +102,7 @@ void CYsfClientProtocol::Task(void)
 	CBuffer Buffer;
 	CIp     Ip;
 
-	if (Receive4(Buffer, Ip, WaitTime()))
+	if (ReceiveDS(Buffer, Ip, WaitTime()))
 	{
 		HandleIncoming(Buffer, Ip);
 	}
@@ -171,7 +171,7 @@ void CYsfClientProtocol::HandleConnections(void)
 			// try to connect (send poll — YSF has no separate connect packet)
 			if (m.pollTimer.time() > YSFCLI_RECONNECT_PERIOD)
 			{
-				if (ResolveLink(m.ip, m.host, m.port, m.unresolved, "YSFClient"))
+				if (ResolveLink(m.ip, m.host, m.port, m.unresolved, "YSFClient", UsesIPv6()))
 					SendPoll(m);
 				m.pollTimer.start();
 			}
@@ -413,7 +413,7 @@ bool CYsfClientProtocol::AddMapping(const std::string &host, uint16_t port, char
 	SYsfClientMapping mapping;
 	mapping.host = host;
 	mapping.port = port;
-	mapping.ip = CIp(host.c_str(), AF_INET, SOCK_DGRAM, port);
+	mapping.ip = CIp::Resolve(host, port, UsesIPv6());
 	mapping.localModule = localMod;
 	mapping.dgid = dgid;
 	mapping.connected = false;

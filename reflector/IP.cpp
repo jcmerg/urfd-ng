@@ -46,6 +46,43 @@ CIp::CIp(const char *address, int family, int type, uint16_t port) : is_set(true
 	}
 	SetPort(port);
 }
+CIp CIp::Resolve(const std::string &host, uint16_t port, bool allow6, int type)
+{
+	// unresolved: an IPv4 address of zeros, not set (as a name that is not an
+	// address always gave): a send to it fails quietly, a check of
+	// AddressIsZero() or IsSet() sees it
+	CIp ip;
+	ip.addr.ss_family = AF_INET;
+	ip.SetPort(port);
+	struct addrinfo hints, *result = nullptr;
+	bzero(&hints, sizeof(struct addrinfo));
+	hints.ai_family = allow6 ? AF_UNSPEC : AF_INET;
+	hints.ai_socktype = type;
+	if (host.empty() || 0 != getaddrinfo(host.c_str(), nullptr, &hints, &result))
+		return ip;
+	const struct addrinfo *pick = nullptr;
+	for (auto *r = result; r; r = r->ai_next)
+	{
+		if (AF_INET == r->ai_family)
+		{
+			pick = r;
+			break;
+		}
+		if (AF_INET6 == r->ai_family && !pick)
+			pick = r;
+	}
+	if (pick && pick->ai_addrlen <= sizeof(ip.addr))
+	{
+		memset(&ip.addr, 0, sizeof(ip.addr));
+		memcpy(&ip.addr, pick->ai_addr, pick->ai_addrlen);
+		ip.addr.ss_family = pick->ai_family;
+		ip.SetPort(port);
+		ip.is_set = true;
+	}
+	freeaddrinfo(result);
+	return ip;
+}
+
 CIp::CIp(const int family, const uint16_t port, const char *address) : is_set(true)
 {
 	Initialize(family, port, address);

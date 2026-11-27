@@ -150,15 +150,7 @@ void CDmrmmdvmProtocol::Task(void)
 	std::array<std::unique_ptr<CDvFramePacket>, 3> Frames;
 
 	// handle incoming packets
-#if DMR_IPV6==true
-#if DMR_IPV4==true
 	if ( ReceiveDS(Buffer, Ip, WaitTime()) )
-#else
-	if ( Receive6(Buffer, Ip, WaitTime()) )
-#endif
-#else
-	if ( Receive4(Buffer, Ip, WaitTime()) )
-#endif
 	{
 		//Buffer.DebugDump(g_Reflector.m_DebugFile);
 		RefreshOwnCall(Buffer, Ip);

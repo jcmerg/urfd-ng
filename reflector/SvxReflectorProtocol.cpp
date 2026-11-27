@@ -203,38 +203,33 @@ void CSvxReflectorProtocol::RemoveOrphanClients(const std::set<char> &modules)
 
 bool CSvxReflectorProtocol::TcpConnect(void)
 {
-	// DNS resolve
-	struct addrinfo hints{}, *res;
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_STREAM;
-	std::string portStr = std::to_string(g_Configure.GetUnsigned(g_Keys.svx.port));
-	int err = getaddrinfo(m_Host.c_str(), portStr.c_str(), &hints, &res);
-	if (err != 0)
+	// DNS resolve: IPv4 when the server has it, IPv6 else (with IPv6Binding)
+	const uint16_t svxPort = (uint16_t)g_Configure.GetUnsigned(g_Keys.svx.port);
+	CIp server(CIp::Resolve(m_Host, svxPort, UsesIPv6(), SOCK_STREAM));
+	if (server.AddressIsZero())
 	{
-		std::cerr << "SvxReflector: DNS resolution failed for " << m_Host << ": " << gai_strerror(err) << std::endl;
+		std::cerr << "SvxReflector: DNS resolution failed for " << m_Host << std::endl;
 		return false;
 	}
 
-	m_TcpFd = socket(res->ai_family, SOCK_STREAM, 0);
+	m_TcpFd = socket(server.GetFamily(), SOCK_STREAM, 0);
 	if (m_TcpFd < 0)
-	{
-		freeaddrinfo(res);
 		return false;
-	}
 
-	// Save server IP for UDP sends (resolve hostname to IP string)
-	char ipstr[INET_ADDRSTRLEN];
-	struct sockaddr_in *sa = (struct sockaddr_in *)res->ai_addr;
-	inet_ntop(AF_INET, &sa->sin_addr, ipstr, sizeof(ipstr));
-	uint16_t udpPort = (uint16_t)g_Configure.GetUnsigned(g_Keys.svx.port);
-	m_ServerIp = CIp(AF_INET, udpPort, ipstr);
+	// TCP from the address UDP leaves from (a fixed binding, else IPv6External):
+	// the reflector takes audio only from the node's TCP address
+	const CUdpSocket &udp = (AF_INET6 == server.GetFamily()) ? m_Socket6 : m_Socket4;
+	CIp src(udp.GetSourceAddress());
+	if (src.IsSet() && !src.AddressIsZero() && 0 != bind(m_TcpFd, src.GetCPointer(), src.GetSize()))
+		std::cerr << "SvxReflector: cannot connect from " << src << ": " << strerror(errno) << ", the system picks the address" << std::endl;
+
+	// the server's address for UDP, on the same port
+	m_ServerIp = server;
 
 	// non-blocking connect with timeout; the socket stays non-blocking, reads
 	// collect whatever arrived and sends wait for room (SvxTcpSendFrame)
 	fcntl(m_TcpFd, F_SETFL, O_NONBLOCK);
-	int ret = connect(m_TcpFd, res->ai_addr, res->ai_addrlen);
-
-	freeaddrinfo(res);
+	int ret = connect(m_TcpFd, server.GetCPointer(), server.GetSize());
 
 	if (ret < 0 && errno != EINPROGRESS)
 	{
@@ -264,8 +259,16 @@ bool CSvxReflectorProtocol::TcpConnect(void)
 		return false;
 	}
 
+	// UDP from the address the TCP connection left from: the reflector takes
+	// audio only from the node's own address (the kernel's pick for TCP may be
+	// another than the default source of the UDP socket)
+	CIp local;
+	socklen_t llen = sizeof(struct sockaddr_storage);
+	if (0 == getsockname(m_TcpFd, local.GetPointer(), &llen))
+		((AF_INET6 == server.GetFamily()) ? m_Socket6 : m_Socket4).SetSourceFor(m_ServerIp, local);
+
 	m_TcpRecvBuf.clear();
-	std::cout << "SvxReflector: TCP connected to " << m_Host << ":" << portStr << std::endl;
+	std::cout << "SvxReflector: TCP connected to " << m_Host << ":" << svxPort << (AF_INET6 == server.GetFamily() ? " (IPv6)" : "") << std::endl;
 	return true;
 }
 
@@ -663,7 +666,8 @@ void CSvxReflectorProtocol::Task(void)
 			// packets; before the login only TCP counts, UDP is read and dropped
 			{
 				bool udp, tcp;
-				Wait(m_Socket4.GetSocket(), m_TcpFd, WaitTime(), udp, tcp);
+				// (the second descriptor is the server's TCP connection)
+				Wait((AF_INET6 == m_ServerIp.GetFamily()) ? m_Socket6.GetSocket() : m_Socket4.GetSocket(), m_TcpFd, WaitTime(), udp, tcp);
 				// the reflector sends the talker start over TCP before the first
 				// audio over UDP: what arrived over TCP goes first, also when it
 				// came after the wait, or the audio opened a stream of its own
@@ -672,7 +676,7 @@ void CSvxReflectorProtocol::Task(void)
 					break;
 				CBuffer buffer;
 				CIp ip;
-				while (Receive4(buffer, ip, 0))
+				while (ReceiveDS(buffer, ip, 0))
 				{
 					// only the reflector's own packets, from its address
 					CIp from(ip);

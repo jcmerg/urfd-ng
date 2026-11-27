@@ -10,7 +10,8 @@
 #include "ThreadName.h"
 
 // an IP shown as far as the mode allows, empty when it is hidden: the last
-// 1, 2 or 3 bytes of an IPv4 address, the last 1, 2 or 3 groups of an IPv6 one
+// 1, 2 or 3 bytes of an IPv4 address, the last 1, 2 or 3 groups of the /64
+// prefix of an IPv6 one
 static std::string MaskIP(const std::string &ip, const std::string &mode, const std::string &mc)
 {
 	if (mode == "ShowFullIP")
@@ -30,16 +31,19 @@ static std::string MaskIP(const std::string &ip, const std::string &mode, const 
 				return "";
 			return MaskIP(v4, mode, mc);
 		}
+		// the end of the network part (the /64 prefix, the connection, as the
+		// last bytes of an IPv4 address are), the interface part always hidden:
+		// with SLAAC it may be made from the MAC address and name the device
 		std::ostringstream out;
 		out << std::hex;
 		for (int i = 0; i < 8; i++)
 		{
 			if (i)
 				out << ':';
-			if (i < 8 - keep)
-				out << mc;
-			else
+			if (i >= 4 - keep && i < 4)
 				out << ((unsigned(b[2 * i]) << 8) | b[2 * i + 1]);
+			else
+				out << mc;
 		}
 		return out.str();
 	}

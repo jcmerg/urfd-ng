@@ -53,7 +53,7 @@ bool CDPlusClientProtocol::Initialize(const char *type, const EProtocol ptype, c
 					SDPlusClientMapping mapping;
 					mapping.host = host;
 					mapping.port = p;
-					mapping.ip = CIp(host.c_str(), AF_INET, SOCK_DGRAM, p);
+					mapping.ip = CIp::Resolve(host, p, UsesIPv6());
 					mapping.remoteModule = remoteMod;
 					mapping.localModule = localMod;
 					m_Mappings.push_back(mapping);
@@ -83,7 +83,7 @@ void CDPlusClientProtocol::Task(void)
 	CBuffer Buffer;
 	CIp     Ip;
 
-	if (Receive4(Buffer, Ip, WaitTime()))
+	if (ReceiveDS(Buffer, Ip, WaitTime()))
 		HandleIncoming(Buffer, Ip);
 
 	if (m_ReconnectRequested.exchange(false))
@@ -134,7 +134,7 @@ void CDPlusClientProtocol::HandleConnections(void)
 			if (m.stateTimer.time() > LinkRetrySeconds(m.tries))
 			{
 				m.tries++;
-				if (!ResolveLink(m.ip, m.host, m.port, m.unresolved, "DPlusClient"))
+				if (!ResolveLink(m.ip, m.host, m.port, m.unresolved, "DPlusClient", UsesIPv6()))
 				{
 					m.stateTimer.start();
 					break;
@@ -430,7 +430,7 @@ bool CDPlusClientProtocol::AddMapping(const std::string &host, uint16_t port, ch
 	SDPlusClientMapping mapping;
 	mapping.host = host;
 	mapping.port = port;
-	mapping.ip = CIp(host.c_str(), AF_INET, SOCK_DGRAM, port);
+	mapping.ip = CIp::Resolve(host, port, UsesIPv6());
 	mapping.remoteModule = remoteMod;
 	mapping.localModule = localMod;
 	mapping.stateTimer.start();

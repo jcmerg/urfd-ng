@@ -163,64 +163,84 @@ std::vector<std::string> CSvxProtocol::GetConnectedNodeList(void) const
 
 bool CSvxProtocol::TcpListen(void)
 {
-	m_TcpListenFd = socket(AF_INET, SOCK_STREAM, 0);
+	m_TcpListenFd = TcpListenOn(AF_INET, "");
 	if (m_TcpListenFd < 0)
-	{
-		std::cerr << "SVXServer: socket() failed: " << strerror(errno) << std::endl;
 		return false;
-	}
-
-	int optval = 1;
-	setsockopt(m_TcpListenFd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-
-	struct sockaddr_in addr{};
-	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = INADDR_ANY;
-	addr.sin_port = htons(m_Port);
-
-	if (bind(m_TcpListenFd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+	if (UsesIPv6())
 	{
-		std::cerr << "SVXServer: bind() port " << m_Port << " failed: " << strerror(errno) << std::endl;
-		close(m_TcpListenFd);
-		m_TcpListenFd = -1;
-		return false;
+		m_TcpListenFd6 = TcpListenOn(AF_INET6, g_Configure.GetString(g_Keys.ip.ipv6bind));
+		if (m_TcpListenFd6 < 0)
+		{
+			close(m_TcpListenFd);
+			m_TcpListenFd = -1;
+			return false;
+		}
 	}
-
-	if (listen(m_TcpListenFd, 5) < 0)
-	{
-		std::cerr << "SVXServer: listen() failed: " << strerror(errno) << std::endl;
-		close(m_TcpListenFd);
-		m_TcpListenFd = -1;
-		return false;
-	}
-
-	// non-blocking for accept in Task() loop
-	fcntl(m_TcpListenFd, F_SETFL, O_NONBLOCK);
-
-	std::cout << "SVXServer: TCP listening on port " << m_Port << std::endl;
+	std::cout << "SVXServer: TCP listening on port " << m_Port << (m_TcpListenFd6 >= 0 ? " (IPv4 and IPv6)" : "") << std::endl;
 	return true;
 }
 
-bool CSvxProtocol::TcpAccept(void)
+// IPv4 on all addresses, IPv6 on the IPv6 binding
+int CSvxProtocol::TcpListenOn(int family, const std::string &bindAddr)
 {
-	struct pollfd pfd = { m_TcpListenFd, POLLIN, 0 };
+	int fd = socket(family, SOCK_STREAM, 0);
+	if (fd < 0)
+	{
+		std::cerr << "SVXServer: socket() failed: " << strerror(errno) << std::endl;
+		return -1;
+	}
+
+	int optval = 1;
+	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+	if (AF_INET6 == family)
+		setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &optval, sizeof(optval));
+
+	CIp addr(family, m_Port, (AF_INET6 == family) ? bindAddr.c_str() : "0.0.0.0");
+	if (!addr.IsSet() || bind(fd, addr.GetCPointer(), addr.GetSize()) < 0)
+	{
+		std::cerr << "SVXServer: bind() " << addr << " failed: " << strerror(errno) << std::endl;
+		close(fd);
+		return -1;
+	}
+
+	if (listen(fd, 5) < 0)
+	{
+		std::cerr << "SVXServer: listen() failed: " << strerror(errno) << std::endl;
+		close(fd);
+		return -1;
+	}
+
+	// non-blocking for accept in Task() loop
+	fcntl(fd, F_SETFL, O_NONBLOCK);
+	return fd;
+}
+
+bool CSvxProtocol::TcpAccept(int listenFd, bool &stuck)
+{
+	if (listenFd < 0)
+		return false;
+	struct pollfd pfd = { listenFd, POLLIN, 0 };
 	if (poll(&pfd, 1, 0) <= 0)
 	{
-		m_AcceptStuck = false;	// nothing waiting
+		stuck = false;	// nothing waiting
 		return false;
 	}
 
-	struct sockaddr_in clientAddr{};
+	struct sockaddr_storage clientAddr{};
 	socklen_t addrLen = sizeof(clientAddr);
-	int fd = accept(m_TcpListenFd, (struct sockaddr *)&clientAddr, &addrLen);
+	int fd = accept(listenFd, (struct sockaddr *)&clientAddr, &addrLen);
 	// failed other than for an empty backlog: the connection may still wait there
-	m_AcceptStuck = (fd < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR);
-	if (m_AcceptStuck && RejectLog("SVXServer: accept failed", "listener"))
+	stuck = (fd < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR);
+	if (stuck && RejectLog("SVXServer: accept failed", "listener"))
 		std::cerr << "SVXServer: accept failed, nodes cannot connect: " << strerror(errno) << std::endl;
 	if (fd < 0) return false;
 
-	char ipstr[INET_ADDRSTRLEN];
-	inet_ntop(AF_INET, &clientAddr.sin_addr, ipstr, sizeof(ipstr));
+	const int family = clientAddr.ss_family;
+	char ipstr[INET6_ADDRSTRLEN] = "";
+	if (AF_INET6 == family)
+		inet_ntop(AF_INET6, &((struct sockaddr_in6 *)&clientAddr)->sin6_addr, ipstr, sizeof(ipstr));
+	else
+		inet_ntop(AF_INET, &((struct sockaddr_in *)&clientAddr)->sin_addr, ipstr, sizeof(ipstr));
 
 	// only a few connections may be waiting for their login at a time
 	size_t pending = 0;
@@ -253,7 +273,7 @@ bool CSvxProtocol::TcpAccept(void)
 
 	SSvxPeer peer;
 	peer.tcpFd = fd;
-	peer.tcpAddr = CIp(AF_INET, 0, ipstr);
+	peer.tcpAddr = CIp(family, 0, ipstr);
 	peer.connectTimer.start();
 	peer.clientId = clientId;
 	peer.authState = SSvxPeer::EAuthState::expect_proto_ver;
@@ -1269,6 +1289,9 @@ bool CSvxProtocol::Initialize(const char *type, const EProtocol ptype,
 	{
 		close(m_TcpListenFd);
 		m_TcpListenFd = -1;
+		if (m_TcpListenFd6 >= 0)
+			close(m_TcpListenFd6);
+		m_TcpListenFd6 = -1;
 		return false;
 	}
 
@@ -1292,6 +1315,11 @@ void CSvxProtocol::Close(void)
 	{
 		close(m_TcpListenFd);
 		m_TcpListenFd = -1;
+	}
+	if (m_TcpListenFd6 >= 0)
+	{
+		close(m_TcpListenFd6);
+		m_TcpListenFd6 = -1;
 	}
 
 	CProtocol::Close();
@@ -1318,12 +1346,17 @@ void CSvxProtocol::Task(void)
 	}
 	if (!m_AcceptStuck)
 		m_PollFds.push_back({m_TcpListenFd, POLLIN, 0});
+	if (!m_AcceptStuck6 && m_TcpListenFd6 >= 0)
+		m_PollFds.push_back({m_TcpListenFd6, POLLIN, 0});
 	m_PollFds.push_back({m_Socket4.GetSocket(), POLLIN, 0});
+	if (m_Socket6.GetSocket() >= 0)
+		m_PollFds.push_back({m_Socket6.GetSocket(), POLLIN, 0});
 	WaitFor(m_PollFds, WaitTime());
 
 	// 2. Accept new TCP connections, every pass (also a listener left out of the
 	// wait); several a pass, for nodes that all come back at once after a restart
-	for (int i = 0; i < 16 && TcpAccept(); i++) {}
+	for (int i = 0; i < 16 && TcpAccept(m_TcpListenFd, m_AcceptStuck); i++) {}
+	for (int i = 0; i < 16 && TcpAccept(m_TcpListenFd6, m_AcceptStuck6); i++) {}
 
 	// 3. Receive TCP data from all peers, looked at again right before their UDP
 	// (also what came after the wait): a talker start comes over TCP before its audio
@@ -1339,7 +1372,7 @@ void CSvxProtocol::Task(void)
 	{
 		CBuffer buffer;
 		CIp ip;
-		while (Receive4(buffer, ip, 0))
+		while (ReceiveDS(buffer, ip, 0))
 			OnUdpPacket(buffer, ip);
 	}
 

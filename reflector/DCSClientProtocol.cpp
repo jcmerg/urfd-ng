@@ -57,7 +57,7 @@ bool CDcsClientProtocol::Initialize(const char *type, const EProtocol ptype, con
 					SDcsClientMapping mapping;
 					mapping.host = host;
 					mapping.port = p;
-					mapping.ip = CIp(host.c_str(), AF_INET, SOCK_DGRAM, p);
+					mapping.ip = CIp::Resolve(host, p, UsesIPv6());
 					mapping.remoteModule = remoteMod;
 					mapping.localModule = localMod;
 					mapping.connected = false;
@@ -89,7 +89,7 @@ void CDcsClientProtocol::Task(void)
 	CIp     Ip;
 
 	// receive packets
-	if (Receive4(Buffer, Ip, WaitTime()))
+	if (ReceiveDS(Buffer, Ip, WaitTime()))
 	{
 		HandleIncoming(Buffer, Ip);
 	}
@@ -167,7 +167,7 @@ void CDcsClientProtocol::HandleConnections(void)
 			// try to connect, less and less often (LinkRetry.h)
 			if (m.reconnectTimer.time() > LinkRetrySeconds(m.tries))
 			{
-				if (ResolveLink(m.ip, m.host, m.port, m.unresolved, "DCSClient"))
+				if (ResolveLink(m.ip, m.host, m.port, m.unresolved, "DCSClient", UsesIPv6()))
 					SendConnect(m);
 				m.reconnectTimer.start();
 				m.tries++;
@@ -435,7 +435,7 @@ bool CDcsClientProtocol::AddMapping(const std::string &host, uint16_t port, char
 	SDcsClientMapping mapping;
 	mapping.host = host;
 	mapping.port = port;
-	mapping.ip = CIp(host.c_str(), AF_INET, SOCK_DGRAM, port);
+	mapping.ip = CIp::Resolve(host, port, UsesIPv6());
 	mapping.remoteModule = remoteMod;
 	mapping.localModule = localMod;
 	mapping.connected = false;

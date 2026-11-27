@@ -67,15 +67,7 @@ void CM17Protocol::Task(void)
 	std::unique_ptr<CDvFramePacket>  Frame;
 
 	// handle incoming packets
-#if M17_IPV6==true
-#if M17_IPV4==true
 	if ( ReceiveDS(Buffer, Ip, WaitTime()) )
-#else
-	if ( Receive6(Buffer, Ip, WaitTime()) )
-#endif
-#else
-	if ( Receive4(Buffer, Ip, WaitTime()) )
-#endif
 	{
 		// data from an interlinked mrefd has one more byte, telling the module
 		const char PeerModule = StripPeerModule(Buffer, Ip);
