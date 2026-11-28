@@ -88,7 +88,22 @@ bool CReflector::Start(void)
 #ifndef NO_DHT
 	// start the dht instance
 	refhash = dht::InfoHash::get(cs);
-	node.run(17171, dht::crypto::generateIdentity(cs), true, 59973);
+	{
+		dht::DhtRunner::Config config;
+		config.dht_config.node_config.network = 59973;
+		config.dht_config.id = dht::crypto::generateIdentity(cs);
+		config.threaded = true;
+		// on IPv6 the external address when it is fixed: the DHT socket is
+		// OpenDHT's own, the answers from the called address (CUdpSocket) do
+		// not reach it, and on :: its packets would leave from the kernel's
+		// pick, often a SLAAC or privacy address the other nodes then keep
+		const bool v6fixed = g_Configure.GetBoolean(g_Keys.ip.ipv6fixed) && !g_Configure.GetString(g_Keys.ip.ipv6bind).empty()
+			&& !g_Configure.GetString(g_Keys.ip.ipv6address).empty();
+		const std::string bind6 = v6fixed ? g_Configure.GetString(g_Keys.ip.ipv6address) : std::string("::");
+		node.run("0.0.0.0", bind6.c_str(), "17171", config);
+		if (v6fixed)
+			std::cout << "DHT on IPv6 at [" << bind6 << "]:17171" << std::endl;
+	}
 	node.bootstrap(g_Configure.GetString(g_Keys.names.bootstrap), "17171");
 #endif
 
