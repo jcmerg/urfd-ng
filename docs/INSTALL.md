@@ -89,6 +89,7 @@ Forward these ports from your router to the machine, or open them in the firewal
 | 41000/udp | P25 | P25 |
 | 41400/udp | NXDN | NXDN |
 | 10017/udp | URF | Interlinks with other URF reflectors |
+| 17171/udp | DHT | The reflector's entry in the DHT and URF interlinks found through it |
 | 10100/tcp | Transcoder | Only if tcd runs on another machine, and only from that machine |
 
 ### 4. Test it

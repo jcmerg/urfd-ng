@@ -556,7 +556,7 @@ EOF
 
  Open these ports in your router / firewall (UDP unless noted):
    8363/tcp dashboard, 17000 M17, 42000 YSF, 8880 DMR+, 20001 DPlus,
-   30001 DExtra, 30051 DCS, 41000 P25, 41400 NXDN, 10017 URF
+   30001 DExtra, 30051 DCS, 41000 P25, 41400 NXDN, 10017 URF, 17171 DHT
    (62030 for DMR hotspots once you enable [MMDVM] in urfd.ini,
    62035 for a DMR network's server once you enable [OpenBridge])
 EOF
