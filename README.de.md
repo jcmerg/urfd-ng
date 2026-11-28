@@ -180,6 +180,7 @@ Offene Ports finden Internet-Scanner binnen Stunden. urfd weist sie ab und proto
 | 10100 | TCP | Transcoder | tcd, nur wenn er auf einem anderen Rechner läuft | `[Transcoder] Port` |
 | 12345, 12346 | UDP | G3 | Icom Terminal- und Access-Point-Modus | fest |
 | 17000 | UDP | M17 | M17-Clients und mrefd-Kopplung | `[M17] Port` |
+| 17171 | UDP | DHT | der Eintrag des Reflektors in der DHT, darüber gefundene URF-Interlinks | fest |
 | 20001 | UDP | DPlus | D-Star DPlus | `[DPlus] Port` |
 | 30001 | UDP | DExtra | D-Star DExtra | `[DExtra] Port` |
 | 30051 | UDP | DCS | D-Star DCS | `[DCS] Port` |
@@ -190,6 +191,8 @@ Offene Ports finden Internet-Scanner binnen Stunden. urfd weist sie ab und proto
 | 42000 | UDP | YSF | YSF und Wires-X | `[YSF] Port` |
 | 62030 | UDP | MMDVM | DMR-Hotspots und -Repeater | `[MMDVM] Port` |
 | 62035 | UDP | OpenBridge | der Server des DMR-Netzes der Verbindung | `[OpenBridge] LocalPort` |
+
+Mit `IPv6Binding` dieselben Ports auch über IPv6 (die IPv6-Firewall kennt keine Portweiterleitung: sie zur Adresse des Reflektors freigeben).
 
 Nur lokal, nicht öffnen: der Admin-Socket (`[Admin] Port`, 10101) und der WebSocket (`[WebSocket] Port`, 10102, erreichbar über `/ws` des Dashboards).
 

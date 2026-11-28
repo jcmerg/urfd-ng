@@ -89,6 +89,7 @@ Leite diese Ports in deinem Router auf den Rechner weiter, oder gib sie in der F
 | 41000/udp | P25 | P25 |
 | 41400/udp | NXDN | NXDN |
 | 10017/udp | URF | Kopplung mit anderen URF-Reflektoren |
+| 17171/udp | DHT | Der Eintrag des Reflektors in der DHT und darüber gefundene URF-Interlinks |
 | 10100/tcp | Transcoder | Nur wenn tcd auf einem anderen Rechner läuft, und nur von diesem Rechner aus |
 
 ### 4. Ausprobieren
